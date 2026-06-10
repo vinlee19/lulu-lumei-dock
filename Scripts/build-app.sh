@@ -20,6 +20,11 @@ APP_BUNDLE="$BUILD/eureka_eureka.bundle"
 [ -d "$APP_BUNDLE" ] || { echo "✗ 未找到 $APP_BUNDLE"; exit 1; }
 cp -R "$APP_BUNDLE" "$APP/Contents/Resources/"
 
+# 应用图标（Scripts/make-icns.sh 生成并提交在仓库里）
+if [ -f Sources/EurekaApp/Resources/AppIcon.icns ]; then
+  cp Sources/EurekaApp/Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
+
 sed -e "s/__VERSION__/$VERSION/g" Scripts/Info.plist.template > "$APP/Contents/Info.plist"
 
 # 由内向外 ad-hoc 签名（本机自用，无需公证）

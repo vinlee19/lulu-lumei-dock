@@ -42,6 +42,11 @@ enum EurekaCLI {
             MainActor.assumeIsolated {
                 PreviewRenderer.renderAll(to: dir)
             }
+        case "--render-icon":
+            let path = args.count > 1 ? args[1] : "/tmp/eureka-icon-1024.png"
+            MainActor.assumeIsolated {
+                IconRenderer.render(to: path)
+            }
         case "--help", "-h":
             printUsage()
         default:

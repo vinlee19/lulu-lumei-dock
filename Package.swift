@@ -24,7 +24,10 @@ let package = Package(
             name: "eureka",
             dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall"],
             path: "Sources/EurekaApp",
-            resources: [.copy("Resources/pricing.json")]
+            resources: [
+                .copy("Resources/pricing.json"),
+                .copy("Resources/AppIcon.icns"),
+            ]
         ),
         // hooks/notify 调用的轻量转发 CLI：静默、永远 exit 0
         .executableTarget(name: "eureka-relay", path: "Sources/eureka-relay"),
