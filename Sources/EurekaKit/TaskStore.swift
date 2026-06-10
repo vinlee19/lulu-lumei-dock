@@ -10,8 +10,11 @@ public enum TaskStoreEffect: Equatable, Sendable {
     case activeTasksChanged
 }
 
-/// 任务状态机：事件进、状态表出。纯逻辑，无 IO，调用方负责线程约束（app 内主线程）。
+/// 会话状态机：事件进、状态表出。纯逻辑，无 IO，调用方负责线程约束（app 内主线程）。
 /// key = source:sessionId。
+///
+/// 生命周期：sessionStarted/心跳发现 → idle/running ↔ waiting → (turn 完成) idle
+/// （Claude 会话开着可反复跑 turn；Codex 完成即移除）→ sessionEnded/超时 → 移除。
 public final class TaskStore {
     public private(set) var activeTasks: [String: AgentTask] = [:]
 
@@ -25,10 +28,16 @@ public final class TaskStore {
         switch event.kind {
         case .taskStarted(let title):
             if var task = activeTasks[key] {
-                // 同会话再次提交（追加引导/等待输入后回复）：保留原始开始时间，恢复 running
+                // 同会话再次提交（追加引导/等待输入后回复/空闲后新 turn）
                 task.lastActivityAt = event.timestamp
                 if task.title == nil { task.title = title }
-                if case .waiting = task.phase { task.phase = .running }
+                if case .idle = task.phase {
+                    // 空闲后开新 turn：计时从现在起，新 prompt 即新任务名
+                    task.startedAt = event.timestamp
+                    task.currentActivity = nil
+                    if let title { task.title = title }
+                }
+                if case .running = task.phase {} else { task.phase = .running }
                 activeTasks[key] = task
                 return [.activeTasksChanged]
             }
@@ -43,17 +52,31 @@ public final class TaskStore {
             return [.activeTasksChanged]
 
         case .taskFinished(let outcome, let title, let detail):
-            let existing = activeTasks.removeValue(forKey: key)
+            let existing = activeTasks[key]
+            let wasActive = existing.map { task in
+                if case .idle = task.phase { return false } else { return true }
+            } ?? false
             let finished = FinishedTask(
                 source: event.source,
                 sessionId: event.sessionId,
                 title: title ?? existing?.title,
                 cwd: event.cwd ?? existing?.cwd,
-                startedAt: existing?.startedAt,
+                startedAt: wasActive ? existing?.startedAt : nil,
                 finishedAt: event.timestamp,
                 outcome: outcome,
                 detail: detail
             )
+            if event.source == .claude, var task = existing {
+                // Claude 会话还开着：turn 结束 → 转空闲，等下一个 prompt
+                task.phase = .idle
+                task.lastActivityAt = event.timestamp
+                task.currentActivity = nil
+                if task.title == nil { task.title = title }
+                activeTasks[key] = task
+            } else {
+                // Codex（exec 一次性）或未知会话：直接移除
+                activeTasks.removeValue(forKey: key)
+            }
             return [.taskFinished(finished), .activeTasksChanged]
 
         case .waiting(let reason, let message):
@@ -67,22 +90,38 @@ public final class TaskStore {
             let task = AgentTask(
                 source: event.source,
                 sessionId: event.sessionId,
-                title: message,
+                title: nil,
                 cwd: event.cwd,
                 startedAt: event.timestamp,
                 phase: .waiting(reason, since: event.timestamp)
             )
+            _ = message  // 文案不当标题（titleUpdate 会带来 ai-title）
             activeTasks[key] = task
             return [.taskWaiting(task), .activeTasksChanged]
 
         case .activity(let tool):
-            guard var task = activeTasks[key] else { return [] }
+            guard var task = activeTasks[key] else {
+                // 心跳发现未知会话（app 在 turn 中途启动）：登记为运行中
+                activeTasks[key] = AgentTask(
+                    source: event.source,
+                    sessionId: event.sessionId,
+                    title: nil,
+                    cwd: event.cwd,
+                    startedAt: event.timestamp,
+                    phase: .running,
+                    currentActivity: tool
+                )
+                return [.activeTasksChanged]
+            }
             task.lastActivityAt = event.timestamp
             var effects: [TaskStoreEffect] = []
-            if case .waiting = task.phase {
-                // 用户已处理完确认，工具继续跑了 → 恢复 running
+            switch task.phase {
+            case .waiting, .idle:
+                // 等待已处理 / 空闲会话有工具在跑 → running
                 task.phase = .running
                 effects.append(.activeTasksChanged)
+            case .running:
+                break
             }
             if let tool, tool != task.currentActivity {
                 task.currentActivity = tool
@@ -100,11 +139,31 @@ public final class TaskStore {
             activeTasks[key] = task
             return Int(percent.rounded()) == oldBucket ? [] : [.activeTasksChanged]
 
+        case .titleUpdate(let title):
+            guard var task = activeTasks[key], task.title != title else { return [] }
+            task.title = title
+            activeTasks[key] = task
+            return [.activeTasksChanged]
+
         case .sessionStarted:
-            return []
+            guard activeTasks[key] == nil else { return [] }
+            // 会话打开但还没跑任务：登记为空闲（任务列表可见）
+            activeTasks[key] = AgentTask(
+                source: event.source,
+                sessionId: event.sessionId,
+                title: nil,
+                cwd: event.cwd,
+                startedAt: event.timestamp,
+                phase: .idle
+            )
+            return [.activeTasksChanged]
 
         case .sessionEnded(let reason):
             guard let task = activeTasks.removeValue(forKey: key) else { return [] }
+            if case .idle = task.phase {
+                // 空闲会话正常关闭：不算任务中断，不出卡
+                return [.activeTasksChanged]
+            }
             // 任务还在跑会话就结束了 → 视为中断
             let finished = FinishedTask(
                 source: event.source,
@@ -120,13 +179,17 @@ public final class TaskStore {
         }
     }
 
-    /// 清理超时任务（hook 丢失兜底），返回因此结束的任务效果
+    /// 清理超时任务（hook 丢失兜底）：
+    /// 运行/等待超时 → 判中断出卡；空闲超时 → 静默移除（会话多半已被强杀）
     @discardableResult
     public func reapStaleTasks(now: Date, runningTimeout: TimeInterval) -> [TaskStoreEffect] {
         var effects: [TaskStoreEffect] = []
+        var changed = false
         for (key, task) in activeTasks
         where now.timeIntervalSince(task.lastActivityAt) > runningTimeout {
             activeTasks.removeValue(forKey: key)
+            changed = true
+            if case .idle = task.phase { continue }
             effects.append(.taskFinished(FinishedTask(
                 source: task.source,
                 sessionId: task.sessionId,
@@ -138,12 +201,21 @@ public final class TaskStore {
                 detail: "长时间无活动，已自动清理"
             )))
         }
-        if !effects.isEmpty { effects.append(.activeTasksChanged) }
+        if changed { effects.append(.activeTasksChanged) }
         return effects
     }
 
-    /// 按开始时间排序的活跃任务（含 waiting）
+    /// 运行/等待中的任务，按开始时间排序（胶囊计数、卡片）
     public var sortedActiveTasks: [AgentTask] {
-        activeTasks.values.sorted { $0.startedAt < $1.startedAt }
+        activeTasks.values
+            .filter { if case .idle = $0.phase { return false } else { return true } }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    /// 空闲会话，按最近活跃排序（任务列表"空闲"分组）
+    public var sortedIdleTasks: [AgentTask] {
+        activeTasks.values
+            .filter { if case .idle = $0.phase { return true } else { return false } }
+            .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 }

@@ -89,11 +89,66 @@ func taskStoreTests(_ t: TestRunner) {
         try expect(store.sortedActiveTasks.isEmpty)
     }
 
-    t.test("正常完成后的会话结束是无操作") {
+    t.test("Claude turn 完成 → 会话转空闲；正常关闭不出中断卡") {
         let store = TaskStore()
-        store.apply(event(.taskStarted(title: nil), at: 100))
+        store.apply(event(.taskStarted(title: "任务A"), at: 100))
         store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 150))
-        try expectEqual(store.apply(event(.sessionEnded(reason: "other"), at: 151)), [])
+        try expect(store.sortedActiveTasks.isEmpty, "完成后不算运行中")
+        try expectEqual(store.sortedIdleTasks.count, 1, "Claude 会话还开着 → 空闲")
+        try expectEqual(store.sortedIdleTasks[0].title, "任务A")
+
+        let endEffects = store.apply(event(.sessionEnded(reason: "other"), at: 200))
+        try expectEqual(endEffects, [.activeTasksChanged], "空闲会话关闭只刷 UI，不出卡")
+        try expect(store.sortedIdleTasks.isEmpty)
+    }
+
+    t.test("空闲会话再提交 prompt：计时重置、标题换新") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "第一轮"), at: 100))
+        store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 200))
+        store.apply(event(.taskStarted(title: "第二轮"), at: 300))
+        let task = store.sortedActiveTasks[0]
+        try expectEqual(task.startedAt, ts(300), "新 turn 重新计时")
+        try expectEqual(task.title, "第二轮")
+    }
+
+    t.test("Codex 完成直接移除（exec 一次性会话）") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: nil), source: .codex, at: 100))
+        store.apply(event(
+            .taskFinished(outcome: .success, title: nil, detail: nil), source: .codex, at: 150))
+        try expect(store.sortedIdleTasks.isEmpty && store.sortedActiveTasks.isEmpty)
+    }
+
+    t.test("sessionStarted 注册空闲会话；心跳发现未知会话登记为运行中") {
+        let store = TaskStore()
+        store.apply(event(.sessionStarted, session: "opened", at: 100))
+        try expectEqual(store.sortedIdleTasks.count, 1)
+        try expect(store.sortedActiveTasks.isEmpty, "空闲不算运行")
+
+        // app 在 turn 中途启动：第一个心跳就该把会话挂出来
+        let effects = store.apply(event(.activity(tool: "Bash"), session: "midturn", at: 110))
+        try expectEqual(effects, [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks.count, 1)
+        try expectEqual(store.sortedActiveTasks[0].currentActivity, "Bash")
+    }
+
+    t.test("titleUpdate 升级标题（ai-title）") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "原始 prompt 很长"), at: 100))
+        try expectEqual(
+            store.apply(event(.titleUpdate(title: "修复登录页报错"), at: 110)),
+            [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks[0].title, "修复登录页报错")
+        try expectEqual(store.apply(event(.titleUpdate(title: "修复登录页报错"), at: 120)), [])
+    }
+
+    t.test("超时清理：空闲会话静默移除不出卡") {
+        let store = TaskStore()
+        store.apply(event(.sessionStarted, session: "old-idle", at: 0))
+        let effects = store.reapStaleTasks(now: ts(20000), runningTimeout: 4 * 3600)
+        try expectEqual(effects, [.activeTasksChanged], "空闲超时不该有 taskFinished")
+        try expect(store.sortedIdleTasks.isEmpty)
     }
 
     t.test("没赶上开始的等待事件：以 waiting 登记新任务") {

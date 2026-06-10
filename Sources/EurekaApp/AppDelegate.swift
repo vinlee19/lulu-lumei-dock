@@ -72,6 +72,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handle(_ event: TaskEvent, isStale: Bool) {
+        // 积压的"存活信号"不进状态机：孤立的过期心跳/等待/会话开始
+        // 不代表现在还活着，照单全收会造出一堆幽灵会话
+        if isStale {
+            switch event.kind {
+            case .activity, .waiting, .sessionStarted, .contextUpdate, .titleUpdate:
+                return
+            case .taskStarted, .taskFinished, .sessionEnded:
+                break  // 开始/结束要进历史与配对
+            }
+        }
         applyToUI(effects: store.apply(event), isStale: isStale)
     }
 
@@ -99,7 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 break
             }
         }
-        island.viewModel.updateActiveTasks(store.sortedActiveTasks)
+        island.viewModel.updateActiveTasks(
+            store.sortedActiveTasks, idle: store.sortedIdleTasks)
         render()
     }
 

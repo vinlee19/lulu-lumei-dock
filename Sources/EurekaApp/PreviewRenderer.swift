@@ -84,7 +84,21 @@ enum PreviewRenderer {
             $0.enqueueFinished(errored)
         }
         snapshot("8-tasklist", screen: notched) {
-            $0.updateActiveTasks([running1, running2, waitingTask])
+            var idle1 = AgentTask(
+                source: .claude, sessionId: "0a1b2c3d-idle", title: "Calcite 优化器调研",
+                cwd: "/Users/me/work/calcite",
+                startedAt: now.addingTimeInterval(-7200), phase: .idle)
+            idle1.lastActivityAt = now.addingTimeInterval(-1800)
+            idle1.contextUsedPercent = 88
+            var idle2 = AgentTask(
+                source: .claude, sessionId: "9f8e7d6c-idle", title: nil,
+                cwd: "/Users/me/work/metricflow",
+                startedAt: now.addingTimeInterval(-3600), phase: .idle)
+            idle2.lastActivityAt = now.addingTimeInterval(-300)
+            var withActivity = running1
+            withActivity.currentActivity = "Bash"
+            withActivity.contextUsedPercent = 64
+            $0.updateActiveTasks([withActivity, running2, waitingTask], idle: [idle1, idle2])
             $0.islandTapped()
         }
     }

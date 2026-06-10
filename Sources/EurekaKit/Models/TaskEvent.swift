@@ -30,6 +30,8 @@ public struct TaskEvent: Equatable, Sendable {
         case activity(tool: String?)
         /// 会话上下文窗口占用更新（0-100）
         case contextUpdate(percent: Double)
+        /// 任务标题升级（如 transcript 里的 ai-title，比原始 prompt 更适合做会话名）
+        case titleUpdate(title: String)
         case sessionStarted
         case sessionEnded(reason: String?)
     }

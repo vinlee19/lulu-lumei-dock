@@ -17,6 +17,8 @@ final class IslandViewModel: ObservableObject {
 
     @Published private(set) var display: Display = .hidden
     @Published private(set) var activeTasks: [AgentTask] = []
+    /// 空闲会话（开着但没在跑 turn）：任务列表展示，胶囊计数不算
+    @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
@@ -40,8 +42,9 @@ final class IslandViewModel: ObservableObject {
         screen = info
     }
 
-    func updateActiveTasks(_ tasks: [AgentTask]) {
+    func updateActiveTasks(_ tasks: [AgentTask], idle: [AgentTask] = []) {
         activeTasks = tasks
+        idleTasks = idle
         // 与等待卡对账：任务已不在等待的撤卡
         let stillWaiting = Set(tasks.compactMap { task -> String? in
             if case .waiting = task.phase { return task.id }
@@ -119,10 +122,12 @@ final class IslandViewModel: ObservableObject {
         case .card:
             return layout.expandedCardSize
         case .taskList:
-            let rows = min(activeTasks.count, 4)
+            let activeRows = min(activeTasks.count, 4)
+            let idleRows = min(idleTasks.count, 3)
+            let idleHeader = idleRows > 0 ? 18 : 0
             return CGSize(
                 width: layout.expandedCardSize.width,
-                height: CGFloat(34 + rows * 30 + 10))
+                height: CGFloat(34 + activeRows * 30 + idleHeader + idleRows * 24 + 10))
         }
     }
 

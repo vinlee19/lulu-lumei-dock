@@ -59,7 +59,7 @@ struct IslandRootView: View {
         case .card(let card):
             ExpandedCardView(card: card, queuedCount: viewModel.queuedCount)
         case .taskList:
-            TaskListCardView(tasks: viewModel.activeTasks)
+            TaskListCardView(tasks: viewModel.activeTasks, idleTasks: viewModel.idleTasks)
         }
     }
 }
@@ -197,32 +197,42 @@ struct ExpandedCardView: View {
 
     private var title: String? {
         switch card {
-        case .finished(let task): return task.title
-        case .waiting(let task): return task.title
+        case .finished(let task): return task.title ?? task.projectName
+        case .waiting(let task): return taskDisplayName(task)
         }
     }
 
     private var subtitle: String {
         let source: AgentSource
         let project: String?
+        let sessionId: String
         switch card {
         case .finished(let task):
             source = task.source
             project = task.projectName
+            sessionId = task.sessionId
         case .waiting(let task):
             source = task.source
             project = task.projectName
+            sessionId = task.sessionId
         }
         var parts = [source.displayName]
         if let project { parts.append(project) }
+        parts.append("#\(sessionId.prefix(6))")  // 多会话同项目时靠它区分
         if queuedCount > 0 { parts.append("还有 \(queuedCount) 条通知") }
         return parts.joined(separator: " · ")
     }
 }
 
-/// 点击胶囊展开的进行中任务列表
+/// 任务标识：标题 → 项目名 → 短会话号，永远能认出是哪个会话
+func taskDisplayName(_ task: AgentTask) -> String {
+    task.title ?? task.projectName ?? "会话 \(task.sessionId.prefix(8))"
+}
+
+/// 点击胶囊展开的进行中任务列表（含空闲会话分组）
 struct TaskListCardView: View {
     let tasks: [AgentTask]
+    var idleTasks: [AgentTask] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -236,7 +246,7 @@ struct TaskListCardView: View {
             ForEach(tasks.prefix(4)) { task in
                 HStack(spacing: 8) {
                     statusIcon(task)
-                    Text(task.title ?? task.projectName ?? task.sessionId)
+                    Text(taskDisplayName(task))
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
@@ -264,6 +274,37 @@ struct TaskListCardView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.horizontal, 18)
+            }
+
+            if !idleTasks.isEmpty {
+                Text("空闲会话 \(idleTasks.count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .padding(.horizontal, 18)
+                    .padding(.top, 5)
+                ForEach(idleTasks.prefix(3)) { task in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.white.opacity(0.25))
+                            .frame(width: 6, height: 6)
+                        Text(taskDisplayName(task))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        if let context = task.contextUsedPercent, context >= 60 {
+                            Text("ctx \(Int(context.rounded()))%")
+                                .font(.system(size: 9.5).monospacedDigit())
+                                .foregroundStyle(contextColor(context).opacity(0.7))
+                        }
+                        Text(relativeFormatter.localizedString(
+                            for: task.lastActivityAt, relativeTo: Date()))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                    .padding(.horizontal, 18)
+                    .frame(height: 24)
+                }
             }
             Spacer(minLength: 0)
         }

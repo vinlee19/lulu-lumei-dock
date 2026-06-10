@@ -80,27 +80,41 @@ public final class EventPipeline {
             events[0] = enriched
         }
 
-        // Claude 心跳 → 节流估算上下文占用（Codex 的由 rollout token_count 直接提供）
-        if event.source == .claude,
-           case .activity = event.kind,
-           let transcriptPath = event.transcriptPath {
+        // Claude 心跳（节流 20s）/ 等待确认（立即，用户此刻最需要识别会话）
+        // → 读 transcript 尾部：上下文占用 + ai-title 会话名
+        if event.source == .claude, let transcriptPath = event.transcriptPath {
             let now = Date()
-            let last = lastContextEstimate[event.sessionId] ?? .distantPast
-            if now.timeIntervalSince(last) > 20 {
-                lastContextEstimate[event.sessionId] = now
+            var shouldInspect = false
+            switch event.kind {
+            case .activity:
+                if now.timeIntervalSince(lastContextEstimate[event.sessionId] ?? .distantPast) > 20 {
+                    lastContextEstimate[event.sessionId] = now
+                    shouldInspect = true
+                }
+            case .waiting:
+                shouldInspect = true
+            default:
+                break
+            }
+            if shouldInspect {
                 if lastContextEstimate.count > 64 {
                     lastContextEstimate = lastContextEstimate.filter {
                         now.timeIntervalSince($0.value) < 3600
                     }
                 }
-                if let percent = ClaudeContextEstimator.estimate(transcriptPath: transcriptPath) {
-                    events.append(TaskEvent(
-                        source: .claude,
-                        sessionId: event.sessionId,
-                        kind: .contextUpdate(percent: percent),
-                        timestamp: now,
-                        cwd: event.cwd
-                    ))
+                let info = ClaudeContextEstimator.inspect(transcriptPath: transcriptPath)
+                func extra(_ kind: TaskEvent.Kind) -> TaskEvent {
+                    TaskEvent(
+                        source: .claude, sessionId: event.sessionId,
+                        kind: kind, timestamp: now, cwd: event.cwd,
+                        transcriptPath: transcriptPath)
+                }
+                // 标题先于 waiting 事件送达，等待卡一出来就带会话名
+                if let aiTitle = info.aiTitle {
+                    events.insert(extra(.titleUpdate(title: aiTitle)), at: 0)
+                }
+                if let percent = info.contextPercent {
+                    events.append(extra(.contextUpdate(percent: percent)))
                 }
             }
         }

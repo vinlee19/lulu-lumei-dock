@@ -5,6 +5,8 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
     public enum Phase: Equatable, Sendable {
         case running
         case waiting(WaitReason, since: Date)
+        /// 会话开着但没有 turn 在跑（任务列表可见，胶囊计数不算）
+        case idle
     }
 
     public var source: AgentSource
@@ -36,7 +38,8 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
         cwd: String? = nil,
         startedAt: Date,
         lastActivityAt: Date? = nil,
-        phase: Phase = .running
+        phase: Phase = .running,
+        currentActivity: String? = nil
     ) {
         self.source = source
         self.sessionId = sessionId
@@ -45,6 +48,7 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
         self.startedAt = startedAt
         self.lastActivityAt = lastActivityAt ?? startedAt
         self.phase = phase
+        self.currentActivity = currentActivity
     }
 }
 
