@@ -14,34 +14,34 @@ struct IslandRootView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.top, IslandGeometry.contentTopInset(screen: viewModel.screen, layout: viewModel.layout))
+        .padding(.top, viewModel.topInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.38, dampingFraction: 0.8), value: viewModel.display)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isFloating)
     }
 
     private func island(size: CGSize) -> some View {
+        // 点按/拖拽由 IslandHostingView 的 AppKit 事件统一处理（拖动窗口需要 performDrag）
         UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
             .fill(Color.black)
             .frame(width: size.width, height: size.height)
             .overlay(content.clipShape(UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)))
             .shadow(color: .black.opacity(0.38), radius: 12, y: 5)
-            .contentShape(Rectangle())
-            .onTapGesture { viewModel.islandTapped() }
     }
 
-    /// 刘海屏：上沿直角与刘海融合；普通屏：四角全圆
+    /// 刘海融合：上沿直角；浮动/普通屏：四角全圆
     private var cornerRadii: RectangleCornerRadii {
-        let hasNotch = viewModel.screen.hasNotch
+        let fused = viewModel.fuseWithNotch
         switch viewModel.display {
         case .compact:
-            let bottomRadius: CGFloat = hasNotch ? 12 : 15
+            let bottomRadius: CGFloat = fused ? 12 : 15
             return RectangleCornerRadii(
-                topLeading: hasNotch ? 0 : 15, bottomLeading: bottomRadius,
-                bottomTrailing: bottomRadius, topTrailing: hasNotch ? 0 : 15)
+                topLeading: fused ? 0 : 15, bottomLeading: bottomRadius,
+                bottomTrailing: bottomRadius, topTrailing: fused ? 0 : 15)
         default:
             return RectangleCornerRadii(
-                topLeading: hasNotch ? 0 : 18, bottomLeading: 22,
-                bottomTrailing: 22, topTrailing: hasNotch ? 0 : 18)
+                topLeading: fused ? 0 : 18, bottomLeading: 22,
+                bottomTrailing: 22, topTrailing: fused ? 0 : 18)
         }
     }
 
@@ -54,7 +54,7 @@ struct IslandRootView: View {
             CompactPillView(
                 tasks: viewModel.activeTasks,
                 hasWaiting: viewModel.hasWaiting,
-                centerGap: IslandGeometry.pillCenterGap(screen: viewModel.screen)
+                centerGap: viewModel.pillCenterGap
             )
         case .card(let card):
             ExpandedCardView(card: card, queuedCount: viewModel.queuedCount)

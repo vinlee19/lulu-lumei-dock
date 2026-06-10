@@ -40,6 +40,17 @@ struct SettingsView: View {
                     }
                 }
 
+                section("灵动岛位置") {
+                    Text("按住岛拖拽可移到任意位置（含外接屏）；拖回刘海附近会自动吸附复位。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Button("恢复默认位置（刘海居中）") {
+                        NotificationCenter.default.post(
+                            name: .eurekaResetIslandPosition, object: nil)
+                    }
+                    .controlSize(.small)
+                }
+
                 section("启动") {
                     Toggle("登录时自动启动", isOn: Binding(
                         get: { settings.launchAtLogin },

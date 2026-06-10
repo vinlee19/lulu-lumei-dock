@@ -20,6 +20,8 @@ final class IslandViewModel: ObservableObject {
     @Published private(set) var queuedCount = 0
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
+    /// 用户把岛拖到了自定义位置：脱离刘海融合，渲染为四角全圆的悬浮样式
+    @Published var isFloating = false
 
     let layout = IslandGeometry.Layout.standard
     /// 完成/出错卡自动收起秒数（等待卡不自动收）
@@ -87,12 +89,33 @@ final class IslandViewModel: ObservableObject {
 
     // MARK: - 投影
 
+    /// 内容距 panel 顶部留白：浮动模式贴 panel 顶（panel 在哪由用户决定）
+    var topInset: CGFloat {
+        isFloating ? 0 : IslandGeometry.contentTopInset(screen: screen, layout: layout)
+    }
+
+    /// 胶囊中部为物理刘海留的空隙（浮动模式无意义）
+    var pillCenterGap: CGFloat {
+        isFloating ? 0 : IslandGeometry.pillCenterGap(screen: screen)
+    }
+
+    /// 是否与刘海融合渲染（上沿直角）；浮动/无刘海 → 四角全圆
+    var fuseWithNotch: Bool {
+        !isFloating && screen.hasNotch
+    }
+
+    private var pillSize: CGSize {
+        isFloating
+            ? layout.compactPillNoNotchSize
+            : IslandGeometry.pillSize(screen: screen, layout: layout)
+    }
+
     var contentSize: CGSize {
         switch display {
         case .hidden:
             return .zero
         case .compact:
-            return IslandGeometry.pillSize(screen: screen, layout: layout)
+            return pillSize
         case .card:
             return layout.expandedCardSize
         case .taskList:
@@ -105,7 +128,8 @@ final class IslandViewModel: ObservableObject {
 
     /// panel 坐标系中的可交互区域（hitTest 穿透 + hover 跟踪）
     var interactiveRect: CGRect {
-        IslandGeometry.interactiveRect(contentSize: contentSize, screen: screen, layout: layout)
+        IslandGeometry.interactiveRect(
+            contentSize: contentSize, topInset: topInset, layout: layout)
     }
 
     var hasWaiting: Bool {

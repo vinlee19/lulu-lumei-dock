@@ -10,8 +10,12 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     /// 当前可交互区域（panel 坐标系，原点左下），由控制器注入
     var interactiveRectProvider: @MainActor () -> NSRect = { .zero }
     var onHoverChange: @MainActor (Bool) -> Void = { _ in }
+    /// 岛内点按（非拖拽的 mouseUp）
+    var onIslandTap: @MainActor () -> Void = {}
 
     private var trackingArea: NSTrackingArea?
+    private var mouseDownLocation: NSPoint?
+    private var didDrag = false
 
     /// 注入的矩形是原点左下；NSHostingView 是 flipped（原点左上），
     /// 视图内判断必须翻转，否则命中区落到 panel 底部空白区（点击全部穿透）
@@ -31,6 +35,32 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // MARK: - 点按 vs 拖拽（岛内容无独立控件，鼠标事件由本视图全权处理）
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownLocation = event.locationInWindow
+        didDrag = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = mouseDownLocation, !didDrag else { return }
+        let dx = event.locationInWindow.x - start.x
+        let dy = event.locationInWindow.y - start.y
+        if dx * dx + dy * dy > 16 {
+            didDrag = true
+            // 交给窗口服务器拖动整个 panel（位置持久化在控制器的 didMove 观察里）
+            window?.performDrag(with: event)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !didDrag && mouseDownLocation != nil {
+            onIslandTap()
+        }
+        mouseDownLocation = nil
+        didDrag = false
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

@@ -99,8 +99,18 @@ public enum IslandGeometry {
     public static func interactiveRect(
         contentSize: CGSize, screen: ScreenInfo, layout: Layout = .standard
     ) -> CGRect {
+        interactiveRect(
+            contentSize: contentSize,
+            topInset: contentTopInset(screen: screen, layout: layout),
+            layout: layout
+        )
+    }
+
+    /// 显式 topInset 版本（自定义位置的浮动模式 topInset = 0）
+    public static func interactiveRect(
+        contentSize: CGSize, topInset: CGFloat, layout: Layout = .standard
+    ) -> CGRect {
         guard contentSize != .zero else { return .zero }
-        let topInset = contentTopInset(screen: screen, layout: layout)
         return CGRect(
             x: (layout.panelSize.width - contentSize.width) / 2,
             y: layout.panelSize.height - topInset - contentSize.height,
