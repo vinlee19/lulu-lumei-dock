@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "comment": "每百万 token 的 USD 价格。match 为模型名前缀（家族匹配）。M5 校对正式价格；未匹配模型只显示 token 不算钱。",
+  "models": []
+}

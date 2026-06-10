@@ -1,0 +1,5 @@
+model = "gpt-5.5"
+notify = ["terminal-notifier", "-title", "Codex"]
+
+[mcp_servers.notion]
+enabled = true

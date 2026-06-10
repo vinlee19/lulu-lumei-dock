@@ -1,0 +1,7 @@
+{
+  "session_id": "fixture-session-1",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-work-demo/fixture-session-1.jsonl",
+  "cwd": "/Users/me/work/demo",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}

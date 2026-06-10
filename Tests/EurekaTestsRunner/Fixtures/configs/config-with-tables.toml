@@ -1,0 +1,14 @@
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+personality = "pragmatic"
+
+[mcp_servers.notion]
+enabled = true
+command = "npx"
+args = ["-y", "@notionhq/notion-mcp-server"]
+
+[mcp_servers.node_repl]
+command = "/Applications/Codex.app/Contents/Resources/node_repl"
+
+[apps.example]
+key = "value"

@@ -1,0 +1,8 @@
+{
+  "type": "agent-turn-complete",
+  "thread-id": "fixture-codex-1",
+  "turn-id": "turn-001",
+  "cwd": "/Users/me/work/demo",
+  "input-messages": ["跑一下集成测试并修复失败用例"],
+  "last-assistant-message": "集成测试全部通过，修复了 2 个失败用例。"
+}

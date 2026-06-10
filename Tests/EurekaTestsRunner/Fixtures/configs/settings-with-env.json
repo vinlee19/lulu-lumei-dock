@@ -1,0 +1,13 @@
+{
+  "model": "claude-fable-5",
+  "effortLevel": "xhigh",
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel.example.invalid:4318"
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true
+  }
+}
