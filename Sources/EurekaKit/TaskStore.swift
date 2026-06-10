@@ -180,13 +180,17 @@ public final class TaskStore {
     }
 
     /// 清理超时任务（hook 丢失兜底）：
-    /// 运行/等待超时 → 判中断出卡；空闲超时 → 静默移除（会话多半已被强杀）
+    /// 运行/等待超时 → 判中断出卡；空闲超时（更短，可能没收到 SessionEnd）→ 静默移除
     @discardableResult
-    public func reapStaleTasks(now: Date, runningTimeout: TimeInterval) -> [TaskStoreEffect] {
+    public func reapStaleTasks(
+        now: Date, runningTimeout: TimeInterval, idleTimeout: TimeInterval = 3600
+    ) -> [TaskStoreEffect] {
         var effects: [TaskStoreEffect] = []
         var changed = false
-        for (key, task) in activeTasks
-        where now.timeIntervalSince(task.lastActivityAt) > runningTimeout {
+        for (key, task) in activeTasks {
+            let timeout: TimeInterval
+            if case .idle = task.phase { timeout = idleTimeout } else { timeout = runningTimeout }
+            guard now.timeIntervalSince(task.lastActivityAt) > timeout else { continue }
             activeTasks.removeValue(forKey: key)
             changed = true
             if case .idle = task.phase { continue }

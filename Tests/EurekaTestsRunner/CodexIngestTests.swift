@@ -203,6 +203,68 @@ func contextEstimatorTests(_ t: TestRunner) {
     }
 }
 
+func sessionBootstrapTests(_ t: TestRunner) {
+    t.suite("ClaudeSessionBootstrap")
+    let mtime = Date()
+
+    t.test("最后 prompt 之后无结束标记 → 重建为运行中（含标题/上下文）") {
+        let events = ClaudeSessionBootstrap.inspectSession(
+            fileURL: try fixtureURL("claude-transcript-running.jsonl"), mtime: mtime)
+        guard case .taskStarted(let title) = events.first?.kind else {
+            throw ExpectationError(description: "应为 taskStarted: \(events)")
+        }
+        try expectEqual(title, "重构数据管道的增量加载逻辑")
+        try expectEqual(events.first?.sessionId, "fixture-running-1")
+        // startedAt 用真实 prompt 时间（10:00:00Z），计时准确
+        try expectEqual(
+            events.first?.timestamp,
+            ISO8601DateFormatter().date(from: "2026-06-09T10:00:00Z"))
+        // tool_result（content 为数组的 user 行）不算新 prompt
+        let kinds = events.map(\.kind)
+        try expect(kinds.contains(.titleUpdate(title: "重构数据管道增量加载")), "ai-title 应跟上")
+        try expect(kinds.contains { if case .contextUpdate = $0 { return true } else { return false } })
+    }
+
+    t.test("turn_duration 在 prompt 之后 → 重建为空闲") {
+        let events = ClaudeSessionBootstrap.inspectSession(
+            fileURL: try fixtureURL("claude-transcript-usage-dups.jsonl"), mtime: mtime)
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "应为 sessionStarted（空闲）: \(events)")
+        }
+    }
+
+    t.test("API 错误行视为 turn 结束 → 空闲而非幽灵运行") {
+        let events = ClaudeSessionBootstrap.inspectSession(
+            fileURL: try fixtureURL("claude-transcript-api-error.jsonl"), mtime: mtime)
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "错误终止的 turn 不该判运行: \(events)")
+        }
+    }
+
+    t.test("超长 turn 中段：尾窗只有执行痕迹（无 prompt 无结束标记）→ 判运行") {
+        // 模拟巨型 turn 的尾窗：只有 assistant + tool_result，prompt 早已滚出
+        let lines = """
+        {"type":"assistant","isSidechain":false,"uuid":"u-m1","timestamp":"2026-06-09T12:30:00.000Z","message":{"id":"msg_M1","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":4000,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":170000,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0}}},"sessionId":"fixture-midturn-1","cwd":"/Users/me/work/big"}
+        {"type":"user","isMeta":false,"uuid":"u-m2","timestamp":"2026-06-09T12:30:05.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"sessionId":"fixture-midturn-1","cwd":"/Users/me/work/big"}
+
+        """
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("midturn-\(UUID().uuidString).jsonl")
+        try Data(lines.utf8).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let events = ClaudeSessionBootstrap.inspectSession(fileURL: tmp, mtime: mtime)
+        guard case .taskStarted = events.first?.kind else {
+            throw ExpectationError(description: "应判运行中: \(events)")
+        }
+        // startedAt 用尾窗最早时间戳兜底（至少不低估时长）
+        try expectEqual(
+            events.first?.timestamp,
+            ISO8601DateFormatter().date(from: "2026-06-09T12:30:00Z"))
+        try expectEqual(events.first?.sessionId, "fixture-midturn-1")
+    }
+}
+
 func errorSnifferTests(_ t: TestRunner) {
     t.suite("ClaudeErrorSniffer")
 

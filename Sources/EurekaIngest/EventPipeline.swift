@@ -15,12 +15,16 @@ public final class EventPipeline {
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
 
+    private let claudeProjectsRoot: URL
+
     public init(
         spoolRoot: URL,
         codexSessionsRoot: URL = CodexRolloutTailer.defaultSessionsRoot(),
+        claudeProjectsRoot: URL = ClaudeSessionBootstrap.defaultProjectsRoot(),
         handler: @escaping Handler
     ) {
         self.handler = handler
+        self.claudeProjectsRoot = claudeProjectsRoot
         spool = SpoolConsumer(root: spoolRoot) { [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
@@ -38,6 +42,14 @@ public final class EventPipeline {
     public func start() {
         spool?.start()
         tailer?.start()
+        // 重建 Claude 会话现场：app 启动前已在跑/近期活跃的会话立刻可见
+        // （事件合成自当前文件状态，不是积压 → isStale=false）
+        queue.async { [weak self] in
+            guard let self else { return }
+            for event in ClaudeSessionBootstrap.discover(projectsRoot: self.claudeProjectsRoot) {
+                self.handler(event, false)
+            }
+        }
     }
 
     public func stop() {
