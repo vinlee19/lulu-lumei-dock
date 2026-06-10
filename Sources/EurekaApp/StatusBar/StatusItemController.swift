@@ -8,15 +8,18 @@ final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
     private let usageService: UsageService
+    private let limitsService: RateLimitsService
 
-    init(usageService: UsageService) {
+    init(usageService: UsageService, limitsService: RateLimitsService) {
         self.usageService = usageService
+        self.limitsService = limitsService
         super.init()
 
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 360, height: 440)
         popover.contentViewController = NSHostingController(
-            rootView: PopoverRootView(usageService: usageService))
+            rootView: PopoverRootView(
+                usageService: usageService, limitsService: limitsService))
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "✦"
@@ -54,6 +57,7 @@ final class StatusItemController: NSObject {
                 popover.performClose(nil)
             } else {
                 usageService.refreshNow()
+                limitsService.refresh()
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
                 popover.contentViewController?.view.window?.makeKey()
             }

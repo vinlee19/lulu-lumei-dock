@@ -18,5 +18,6 @@ claudeScannerTests(t)
 codexScannerTests(t)
 pricingTests(t)
 aggregatorTests(t)
+rateLimitTests(t)
 
 t.finish()

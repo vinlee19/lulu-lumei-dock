@@ -4,11 +4,13 @@ import SwiftUI
 
 struct PopoverRootView: View {
     @ObservedObject var usageService: UsageService
+    @ObservedObject var limitsService: RateLimitsService
     @State private var tab = Tab.history
 
     enum Tab: String, CaseIterable {
         case history = "历史"
         case usage = "用量"
+        case limits = "限额"
     }
 
     var body: some View {
@@ -27,6 +29,8 @@ struct PopoverRootView: View {
                 HistoryView(tasks: usageService.recentHistory)
             case .usage:
                 UsagePanelView(summary: usageService.summary, error: usageService.lastError)
+            case .limits:
+                LimitsPanelView(service: limitsService)
             }
         }
         .frame(width: 360, height: 440)

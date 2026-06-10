@@ -7,16 +7,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusItemController?
     private let store = TaskStore()
     private let usageService = UsageService()
+    private let limitsService = RateLimitsService()
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusController = StatusItemController(usageService: usageService)
+        statusController = StatusItemController(
+            usageService: usageService, limitsService: limitsService)
         let island = IslandPanelController()
         island.start()
         islandController = island
         usageService.start()
+        limitsService.start()
 
         // 管道在自己的队列回调；main.async 保证 FIFO 顺序后接回 MainActor
         let pipeline = EventPipeline(spoolRoot: SpoolPaths.root()) { [weak self] event, isStale in

@@ -35,6 +35,8 @@ enum EurekaCLI {
             printStatus()
         case "--usage-snapshot":
             usageSnapshot()
+        case "--limits-snapshot":
+            limitsSnapshot(includeClaude: args.contains("--claude"))
         case "--render-previews":
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-previews"
             MainActor.assumeIsolated {
@@ -164,6 +166,43 @@ enum EurekaCLI {
             print("{\"error\": \"\(error)\"}")
             exit(1)
         }
+    }
+
+    /// 限额快照（默认只读本地 Codex；--claude 同时测非官方接口）
+    private static func limitsSnapshot(includeClaude: Bool) {
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            func describe(_ snapshot: RateLimitSnapshot?) -> String {
+                guard let snapshot else { return "（无数据 → UI 隐藏）" }
+                var parts: [String] = []
+                if let plan = snapshot.planType { parts.append("plan=\(plan)") }
+                if let primary = snapshot.primary {
+                    parts.append(String(format: "5h=%.1f%%", primary.usedPercent))
+                    if let resets = primary.resetsAt {
+                        parts.append("5h重置=\(resets)")
+                    }
+                }
+                if let secondary = snapshot.secondary {
+                    parts.append(String(format: "周=%.1f%%", secondary.usedPercent))
+                }
+                if snapshot.isStale { parts.append("（截至 \(snapshot.asOf)）") }
+                return parts.joined(separator: " ")
+            }
+
+            let codex = await CodexRateLimitProvider(
+                sessionsRoot: CodexRolloutTailer.defaultSessionsRoot()).snapshot()
+            print("Codex: \(describe(codex))")
+            if includeClaude {
+                let provider = ClaudeOAuthUsageProvider()
+                let claude = await provider.snapshot()
+                print("Claude: \(describe(claude))")
+                if let failure = provider.lastFailure {
+                    print("Claude 提示: \(failure)")
+                }
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
     }
 
     private static func printUsage() {
