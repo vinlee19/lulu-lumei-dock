@@ -1,4 +1,5 @@
 import AppKit
+import EurekaKit
 import SwiftUI
 
 /// 承载灵动岛 SwiftUI 内容的 NSHostingView：
@@ -6,15 +7,24 @@ import SwiftUI
 /// - 不激活 app 也响应首次点击
 /// - 用 NSTrackingArea 自管 hover（onHover 在 nonactivating panel 上不可靠）
 final class IslandHostingView<Content: View>: NSHostingView<Content> {
-    /// 当前可交互区域（panel/view 坐标系，原点左下），由控制器注入
+    /// 当前可交互区域（panel 坐标系，原点左下），由控制器注入
     var interactiveRectProvider: @MainActor () -> NSRect = { .zero }
     var onHoverChange: @MainActor (Bool) -> Void = { _ in }
 
     private var trackingArea: NSTrackingArea?
 
+    /// 注入的矩形是原点左下；NSHostingView 是 flipped（原点左上），
+    /// 视图内判断必须翻转，否则命中区落到 panel 底部空白区（点击全部穿透）
+    private var interactiveRectInView: NSRect {
+        let rect = interactiveRectProvider()
+        return isFlipped
+            ? IslandGeometry.flippedRect(rect, containerHeight: bounds.height)
+            : rect
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         // 点不在岛的可视范围内 → 穿透给下层窗口
-        guard interactiveRectProvider().contains(convert(point, from: superview)) else {
+        guard interactiveRectInView.contains(convert(point, from: superview)) else {
             return nil
         }
         return super.hitTest(point)
@@ -57,7 +67,7 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
 
     private func updateHover(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let inside = interactiveRectProvider().contains(point)
+        let inside = interactiveRectInView.contains(point)
         if inside != insideInteractive {
             insideInteractive = inside
             onHoverChange(inside)

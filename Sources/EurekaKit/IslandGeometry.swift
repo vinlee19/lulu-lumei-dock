@@ -108,4 +108,16 @@ public enum IslandGeometry {
             height: contentSize.height
         )
     }
+
+    /// 原点左下 ↔ 原点左上 的矩形翻转（NSHostingView.isFlipped == true，
+    /// 视图内命中判断必须用翻转后的矩形）
+    public static func flippedRect(_ rect: CGRect, containerHeight: CGFloat) -> CGRect {
+        guard rect != .zero else { return .zero }
+        return CGRect(
+            x: rect.minX,
+            y: containerHeight - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
 }

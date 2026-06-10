@@ -63,6 +63,26 @@ func geometryTests(_ t: TestRunner) {
             .zero)
     }
 
+    t.test("flippedRect：左下原点 ↔ 左上原点（NSHostingView 命中判断回归）") {
+        let layout = IslandGeometry.Layout.standard
+        // 刘海屏 compact 胶囊：左下坐标贴 panel 顶（maxY = panelHeight）
+        let bottomLeft = IslandGeometry.interactiveRect(
+            contentSize: CGSize(width: 328, height: 32), screen: notched, layout: layout)
+        let flipped = IslandGeometry.flippedRect(
+            bottomLeft, containerHeight: layout.panelSize.height)
+        // 翻转后应贴视图顶部（flipped 坐标 minY = 0），即用户实际看到/点击的位置
+        try expectEqual(flipped.minY, 0)
+        try expectEqual(flipped.height, 32)
+        try expectEqual(flipped.midX, layout.panelSize.width / 2)
+        // 无刘海：翻转后 minY = 菜单栏让位
+        let plain = IslandGeometry.interactiveRect(
+            contentSize: CGSize(width: 184, height: 30), screen: external4K, layout: layout)
+        let plainFlipped = IslandGeometry.flippedRect(
+            plain, containerHeight: layout.panelSize.height)
+        try expectEqual(plainFlipped.minY, 29)
+        try expectEqual(IslandGeometry.flippedRect(.zero, containerHeight: 190), .zero)
+    }
+
     t.test("未知刘海宽度时用默认值兜底") {
         var screen = notched
         screen.notchWidth = nil
