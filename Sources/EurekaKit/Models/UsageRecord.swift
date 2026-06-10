@@ -4,6 +4,8 @@ import Foundation
 public struct UsageRecord: Equatable, Sendable {
     public var source: AgentSource
     public var model: String
+    /// 项目名（cwd 末段），按项目统计用
+    public var project: String?
     public var timestamp: Date
     public var inputTokens: Int
     public var outputTokens: Int
@@ -17,6 +19,7 @@ public struct UsageRecord: Equatable, Sendable {
     public init(
         source: AgentSource,
         model: String,
+        project: String? = nil,
         timestamp: Date,
         inputTokens: Int,
         outputTokens: Int,
@@ -26,6 +29,7 @@ public struct UsageRecord: Equatable, Sendable {
     ) {
         self.source = source
         self.model = model
+        self.project = project
         self.timestamp = timestamp
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens

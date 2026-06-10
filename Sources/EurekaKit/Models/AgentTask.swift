@@ -14,6 +14,10 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
     public var startedAt: Date
     public var lastActivityAt: Date
     public var phase: Phase
+    /// 最近执行的工具名（PostToolUse 心跳带来，"正在干什么"）
+    public var currentActivity: String?
+    /// 上下文窗口占用百分比（0-100），nil = 未知
+    public var contextUsedPercent: Double?
 
     public var id: String { Self.key(source: source, sessionId: sessionId) }
 

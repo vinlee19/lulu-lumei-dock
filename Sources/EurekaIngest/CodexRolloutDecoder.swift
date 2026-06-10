@@ -115,15 +115,23 @@ public enum CodexRolloutDecoder {
 
         case "token_count":
             var results: [Decoded] = []
-            if let info = payload["info"] as? [String: Any],
-               let totals = info["total_token_usage"] as? [String: Any] {
-                results.append(.tokenUsage(CodexTokenTotals(
-                    timestamp: timestamp,
-                    inputTokens: totals["input_tokens"] as? Int ?? 0,
-                    cachedInputTokens: totals["cached_input_tokens"] as? Int ?? 0,
-                    outputTokens: totals["output_tokens"] as? Int ?? 0,
-                    reasoningOutputTokens: totals["reasoning_output_tokens"] as? Int ?? 0
-                )))
+            if let info = payload["info"] as? [String: Any] {
+                if let totals = info["total_token_usage"] as? [String: Any] {
+                    results.append(.tokenUsage(CodexTokenTotals(
+                        timestamp: timestamp,
+                        inputTokens: totals["input_tokens"] as? Int ?? 0,
+                        cachedInputTokens: totals["cached_input_tokens"] as? Int ?? 0,
+                        outputTokens: totals["output_tokens"] as? Int ?? 0,
+                        reasoningOutputTokens: totals["reasoning_output_tokens"] as? Int ?? 0
+                    )))
+                }
+                // 上下文占用：最近一次请求的 token 总量 ≈ 当前会话上下文大小
+                if let last = info["last_token_usage"] as? [String: Any],
+                   let lastTotal = last["total_tokens"] as? Int,
+                   let window = info["model_context_window"] as? Int, window > 0 {
+                    results.append(task(.contextUpdate(
+                        percent: Double(lastTotal) / Double(window) * 100)))
+                }
             }
             if let limits = payload["rate_limits"] as? [String: Any] {
                 results.append(.rateLimits(rateLimitSnapshot(limits, asOf: timestamp)))

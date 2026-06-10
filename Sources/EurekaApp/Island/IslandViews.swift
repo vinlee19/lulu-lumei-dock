@@ -241,6 +241,17 @@ struct TaskListCardView: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
                     Spacer(minLength: 8)
+                    if let activity = task.currentActivity {
+                        Text(activity)
+                            .font(.system(size: 9.5).monospaced())
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                    }
+                    if let context = task.contextUsedPercent, context >= 60 {
+                        Text("ctx \(Int(context.rounded()))%")
+                            .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+                            .foregroundStyle(contextColor(context))
+                    }
                     Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.white.opacity(0.5))
@@ -266,6 +277,14 @@ struct TaskListCardView: View {
                 .foregroundStyle(.orange)
         } else {
             Circle().fill(Color.cyan).frame(width: 6, height: 6)
+        }
+    }
+
+    private func contextColor(_ percent: Double) -> Color {
+        switch percent {
+        case ..<80: return .white.opacity(0.45)
+        case ..<90: return .orange
+        default: return .red
         }
     }
 }

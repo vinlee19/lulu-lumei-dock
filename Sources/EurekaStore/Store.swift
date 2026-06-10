@@ -86,11 +86,12 @@ public final class UsageRepo {
     public func insertReturningId(_ record: UsageRecord) throws -> Int64 {
         try db.run("""
         INSERT INTO usage_records
-            (source, model, ts, input_tokens, output_tokens,
+            (source, model, project, ts, input_tokens, output_tokens,
              cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens)
-        VALUES (?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?)
         """, [
             .text(record.source.rawValue), .text(record.model),
+            .string(record.project),
             .real(record.timestamp.timeIntervalSince1970),
             .int(Int64(record.inputTokens)), .int(Int64(record.outputTokens)),
             .int(Int64(record.cacheCreationTokens)),
@@ -105,6 +106,60 @@ public final class UsageRepo {
         try db.run(
             "UPDATE usage_records SET output_tokens = ? WHERE id = ?",
             [.int(Int64(outputTokens)), .int(recordId)])
+    }
+
+    /// 时间区间内按 (project, source, model) 聚合（按项目统计/费用折算用）
+    public func totalsByProject(from: Date, to: Date) throws -> [(project: String?, totals: UsageTotals)] {
+        try db.query("""
+        SELECT project, source, model,
+               SUM(input_tokens), SUM(output_tokens),
+               SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
+               SUM(cache_read_tokens), COUNT(*)
+        FROM usage_records
+        WHERE ts >= ? AND ts < ?
+        GROUP BY project, source, model
+        """, [.real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970)]) { row in
+            (row.text(0), UsageTotals(
+                source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,
+                model: row.text(2) ?? "?",
+                inputTokens: Int(row.int(3)),
+                outputTokens: Int(row.int(4)),
+                cacheCreationTokens: Int(row.int(5)),
+                cacheCreation1hTokens: Int(row.int(6)),
+                cacheReadTokens: Int(row.int(7)),
+                requestCount: Int(row.int(8))
+            ))
+        }
+    }
+
+    /// 近 N 天按日导出（CSV 用），本地时区日界
+    public func dailyRows(from: Date, to: Date) throws -> [DailyUsageRow] {
+        try db.query("""
+        SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS day,
+               source, model, COALESCE(project, ''),
+               SUM(input_tokens), SUM(output_tokens),
+               SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
+               SUM(cache_read_tokens), COUNT(*)
+        FROM usage_records
+        WHERE ts >= ? AND ts < ?
+        GROUP BY day, source, model, project
+        ORDER BY day, source, model
+        """, [.real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970)]) { row in
+            DailyUsageRow(
+                day: row.text(0) ?? "",
+                project: row.text(3) ?? "",
+                totals: UsageTotals(
+                    source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,
+                    model: row.text(2) ?? "?",
+                    inputTokens: Int(row.int(4)),
+                    outputTokens: Int(row.int(5)),
+                    cacheCreationTokens: Int(row.int(6)),
+                    cacheCreation1hTokens: Int(row.int(7)),
+                    cacheReadTokens: Int(row.int(8)),
+                    requestCount: Int(row.int(9))
+                )
+            )
+        }
     }
 
     /// 时间区间内按 (source, model) 聚合
@@ -129,6 +184,19 @@ public final class UsageRepo {
                 requestCount: Int(row.int(7))
             )
         }
+    }
+}
+
+/// CSV 导出行（按日 × 来源 × 模型 × 项目）
+public struct DailyUsageRow: Equatable, Sendable {
+    public var day: String
+    public var project: String
+    public var totals: UsageTotals
+
+    public init(day: String, project: String, totals: UsageTotals) {
+        self.day = day
+        self.project = project
+        self.totals = totals
     }
 }
 

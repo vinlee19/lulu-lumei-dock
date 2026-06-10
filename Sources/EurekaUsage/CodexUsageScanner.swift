@@ -24,6 +24,7 @@ public final class CodexUsageScanner {
         var prevCached = 0
         var prevOutput = 0
         var model: String?
+        var project: String?
     }
 
     public init(sessionsRoot: URL, store: EurekaStore) {
@@ -87,9 +88,18 @@ public final class CodexUsageScanner {
             else { continue }
             let payload = root["payload"] as? [String: Any] ?? [:]
 
+            if type == "session_meta" {
+                if let cwd = payload["cwd"] as? String {
+                    extra.project = URL(fileURLWithPath: cwd).lastPathComponent
+                }
+                continue
+            }
             if type == "turn_context" {
                 if let model = payload["model"] as? String {
                     extra.model = model
+                }
+                if let cwd = payload["cwd"] as? String {
+                    extra.project = URL(fileURLWithPath: cwd).lastPathComponent
                 }
                 continue
             }
@@ -124,6 +134,7 @@ public final class CodexUsageScanner {
             records.append(UsageRecord(
                 source: .codex,
                 model: extra.model ?? "gpt-5.5",
+                project: extra.project,
                 timestamp: timestamp,
                 // OpenAI 口径：cached 是 input 的子集 → 拆开记
                 inputTokens: max(0, deltaInput - deltaCached),

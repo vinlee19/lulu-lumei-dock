@@ -131,7 +131,12 @@ func codexRolloutTests(_ t: TestRunner) {
         guard case .taskStarted(title: "跑一下集成测试并修复失败用例") = kinds[0] else {
             throw ExpectationError(description: "user_message 应补标题: \(kinds[0])")
         }
-        guard case .taskFinished(outcome: .success, _, let detail) = kinds[1] else {
+        // token_count 应产出上下文占用：19629 / 258400 ≈ 7.6%
+        guard case .contextUpdate(let percent) = kinds[1] else {
+            throw ExpectationError(description: "应有 contextUpdate: \(kinds)")
+        }
+        try expect(abs(percent - 7.596) < 0.01, "context \(percent)")
+        guard case .taskFinished(outcome: .success, _, let detail) = kinds[2] else {
             throw ExpectationError(description: "应有 task_complete: \(kinds)")
         }
         try expect(detail?.contains("集成测试全部通过") == true)
@@ -176,6 +181,25 @@ func codexRolloutTests(_ t: TestRunner) {
         guard case .taskStarted = events[0].0.kind else {
             throw ExpectationError(description: "补全后应产出 task_started")
         }
+    }
+}
+
+func contextEstimatorTests(_ t: TestRunner) {
+    t.suite("ClaudeContextEstimator")
+
+    t.test("取最近主链 assistant 的输入侧 token 估算占用") {
+        let percent = ClaudeContextEstimator.estimate(
+            transcriptPath: try fixtureURL("claude-transcript-usage-dups.jsonl").path)
+        // 最后主链 assistant = msg_01BBB：3400 + 8000 cache_read = 11400 / 200000 = 5.7%
+        // （末尾的 sidechain haiku 行应被跳过）
+        try expect(percent != nil)
+        try expect(abs(percent! - 5.7) < 0.01, "got \(percent!)")
+    }
+
+    t.test("synthetic 错误行（usage 全零）不参与估算") {
+        let percent = ClaudeContextEstimator.estimate(
+            transcriptPath: try fixtureURL("claude-transcript-api-error.jsonl").path)
+        try expect(percent == nil, "全零行应跳过：\(String(describing: percent))")
     }
 }
 

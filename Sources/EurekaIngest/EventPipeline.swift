@@ -45,35 +45,65 @@ public final class EventPipeline {
         tailer?.stop()
     }
 
+    /// Claude 上下文估算的节流（每会话最多 20s 一次，读文件尾有成本）
+    private var lastContextEstimate: [String: Date] = [:]
+
     private func ingest(_ event: TaskEvent, isStale: Bool) {
         queue.async { [weak self] in
             guard let self else { return }
             guard !self.dedup.isDuplicate(event) else { return }
-            self.handler(self.enrich(event), isStale)
+            for enriched in self.enrich(event) {
+                self.handler(enriched, isStale)
+            }
         }
     }
 
-    /// Claude 任务"成功"完成时嗅探 transcript 尾部：
-    /// API 错误 → 升级为出错；ai-title → 升级标题
-    private func enrich(_ event: TaskEvent) -> TaskEvent {
-        guard
-            event.source == .claude,
-            case .taskFinished(outcome: .success, let title, let detail) = event.kind,
-            let transcriptPath = event.transcriptPath
-        else { return event }
+    private func enrich(_ event: TaskEvent) -> [TaskEvent] {
+        var events = [event]
 
-        let findings = ClaudeErrorSniffer.sniff(transcriptPath: transcriptPath)
-        var enriched = event
-        let newTitle = findings.aiTitle ?? title
-        if findings.isError {
-            enriched.kind = .taskFinished(
-                outcome: .error,
-                title: newTitle,
-                detail: findings.errorDetail ?? detail
-            )
-        } else if newTitle != title {
-            enriched.kind = .taskFinished(outcome: .success, title: newTitle, detail: detail)
+        // Claude"成功"完成 → 嗅探尾部：API 错误升级为出错；ai-title 升级标题
+        if event.source == .claude,
+           case .taskFinished(outcome: .success, let title, let detail) = event.kind,
+           let transcriptPath = event.transcriptPath {
+            let findings = ClaudeErrorSniffer.sniff(transcriptPath: transcriptPath)
+            var enriched = event
+            let newTitle = findings.aiTitle ?? title
+            if findings.isError {
+                enriched.kind = .taskFinished(
+                    outcome: .error,
+                    title: newTitle,
+                    detail: findings.errorDetail ?? detail
+                )
+            } else if newTitle != title {
+                enriched.kind = .taskFinished(outcome: .success, title: newTitle, detail: detail)
+            }
+            events[0] = enriched
         }
-        return enriched
+
+        // Claude 心跳 → 节流估算上下文占用（Codex 的由 rollout token_count 直接提供）
+        if event.source == .claude,
+           case .activity = event.kind,
+           let transcriptPath = event.transcriptPath {
+            let now = Date()
+            let last = lastContextEstimate[event.sessionId] ?? .distantPast
+            if now.timeIntervalSince(last) > 20 {
+                lastContextEstimate[event.sessionId] = now
+                if lastContextEstimate.count > 64 {
+                    lastContextEstimate = lastContextEstimate.filter {
+                        now.timeIntervalSince($0.value) < 3600
+                    }
+                }
+                if let percent = ClaudeContextEstimator.estimate(transcriptPath: transcriptPath) {
+                    events.append(TaskEvent(
+                        source: .claude,
+                        sessionId: event.sessionId,
+                        kind: .contextUpdate(percent: percent),
+                        timestamp: now,
+                        cwd: event.cwd
+                    ))
+                }
+            }
+        }
+        return events
     }
 }

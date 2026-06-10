@@ -26,8 +26,10 @@ public struct TaskEvent: Equatable, Sendable {
         case taskStarted(title: String?)
         case taskFinished(outcome: TaskOutcome, title: String?, detail: String?)
         case waiting(reason: WaitReason, message: String?)
-        /// PostToolUse 心跳：waiting 复位为 running、刷新活跃时间
-        case activity
+        /// PostToolUse 心跳：waiting 复位为 running、刷新活跃时间；tool = 刚执行的工具名
+        case activity(tool: String?)
+        /// 会话上下文窗口占用更新（0-100）
+        case contextUpdate(percent: Double)
         case sessionStarted
         case sessionEnded(reason: String?)
     }

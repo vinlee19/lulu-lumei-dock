@@ -27,13 +27,33 @@ public struct UsageSummary: Equatable, Sendable {
         }
     }
 
+    public struct ProjectLine: Equatable, Sendable {
+        public var name: String
+        public var totalTokens: Int
+        public var costUSD: Double?
+
+        public init(name: String, totalTokens: Int, costUSD: Double?) {
+            self.name = name
+            self.totalTokens = totalTokens
+            self.costUSD = costUSD
+        }
+    }
+
     public var today: [SourceSummary]
     public var thisWeek: [SourceSummary]
+    public var todayProjects: [ProjectLine]
+    public var weekProjects: [ProjectLine]
     public var generatedAt: Date
 
-    public init(today: [SourceSummary], thisWeek: [SourceSummary], generatedAt: Date) {
+    public init(
+        today: [SourceSummary], thisWeek: [SourceSummary],
+        todayProjects: [ProjectLine] = [], weekProjects: [ProjectLine] = [],
+        generatedAt: Date
+    ) {
         self.today = today
         self.thisWeek = thisWeek
+        self.todayProjects = todayProjects
+        self.weekProjects = weekProjects
         self.generatedAt = generatedAt
     }
 }
@@ -55,15 +75,36 @@ public enum UsageAggregator {
         store: EurekaStore, pricing: PricingTable, now: Date = Date(),
         calendar: Calendar = .current
     ) throws -> UsageSummary {
-        let todayTotals = try store.usage.totalsByModel(
-            from: dayStart(of: now, calendar: calendar), to: now)
-        let weekTotals = try store.usage.totalsByModel(
-            from: weekStart(of: now, calendar: calendar), to: now)
+        let todayFrom = dayStart(of: now, calendar: calendar)
+        let weekFrom = weekStart(of: now, calendar: calendar)
         return UsageSummary(
-            today: fold(todayTotals, pricing: pricing),
-            thisWeek: fold(weekTotals, pricing: pricing),
+            today: fold(try store.usage.totalsByModel(from: todayFrom, to: now), pricing: pricing),
+            thisWeek: fold(try store.usage.totalsByModel(from: weekFrom, to: now), pricing: pricing),
+            todayProjects: foldProjects(
+                try store.usage.totalsByProject(from: todayFrom, to: now), pricing: pricing),
+            weekProjects: foldProjects(
+                try store.usage.totalsByProject(from: weekFrom, to: now), pricing: pricing),
             generatedAt: now
         )
+    }
+
+    /// 按项目折叠（同项目跨来源/模型合并；费用按各模型分别计价后求和）
+    static func foldProjects(
+        _ rows: [(project: String?, totals: UsageTotals)], pricing: PricingTable
+    ) -> [UsageSummary.ProjectLine] {
+        var byProject: [String: UsageSummary.ProjectLine] = [:]
+        for (project, totals) in rows {
+            let name = project ?? "（未知项目）"
+            var line = byProject[name]
+                ?? UsageSummary.ProjectLine(name: name, totalTokens: 0, costUSD: nil)
+            line.totalTokens += totals.inputTokens + totals.outputTokens
+                + totals.cacheReadTokens + totals.cacheCreationTokens
+            if let cost = pricing.cost(of: totals) {
+                line.costUSD = (line.costUSD ?? 0) + cost
+            }
+            byProject[name] = line
+        }
+        return byProject.values.sorted { $0.totalTokens > $1.totalTokens }
     }
 
     /// 按来源折叠 (source, model) 聚合行

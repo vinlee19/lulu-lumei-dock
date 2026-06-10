@@ -37,7 +37,7 @@ struct PopoverRootView: View {
             case .history:
                 HistoryView(tasks: usageService.recentHistory)
             case .usage:
-                UsagePanelView(summary: usageService.summary, error: usageService.lastError)
+                UsagePanelView(usageService: usageService)
             case .limits:
                 LimitsPanelView(service: limitsService)
             case .settings:

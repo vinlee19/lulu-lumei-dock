@@ -1,13 +1,18 @@
 import Foundation
 
 enum Schema {
-    static let version: Int64 = 2
+    static let version: Int64 = 3
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
         if current < version {
-            // 尚未发布，扫描状态表直接重建（强制全量重扫，数据无损：usage 由去重键保护）
-            try db.execute("DROP TABLE IF EXISTS dedup_keys; DROP TABLE IF EXISTS scan_files;")
+            // 用量三表全部可由本地 transcript/rollout 重扫派生 → 结构变更直接重建，
+            // 下轮扫描自动恢复（task_history 不动）
+            try db.execute("""
+            DROP TABLE IF EXISTS dedup_keys;
+            DROP TABLE IF EXISTS scan_files;
+            DROP TABLE IF EXISTS usage_records;
+            """)
         }
         try db.execute("""
         CREATE TABLE IF NOT EXISTS task_history (
@@ -28,6 +33,7 @@ enum Schema {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source TEXT NOT NULL,
             model TEXT NOT NULL,
+            project TEXT,
             ts REAL NOT NULL,
             input_tokens INTEGER NOT NULL DEFAULT 0,
             output_tokens INTEGER NOT NULL DEFAULT 0,

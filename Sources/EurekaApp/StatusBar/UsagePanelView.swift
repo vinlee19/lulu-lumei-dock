@@ -2,22 +2,36 @@ import EurekaKit
 import EurekaUsage
 import SwiftUI
 
-/// 用量面板：今日 / 本周，按来源分列，含估算费用与模型明细
+/// 用量面板：今日 / 本周，按来源分列 + 按项目排行，含估算费用与模型明细
 struct UsagePanelView: View {
-    let summary: UsageSummary?
-    let error: String?
+    @ObservedObject var usageService: UsageService
+
+    private var summary: UsageSummary? { usageService.summary }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let error {
+                if let error = usageService.lastError {
                     Text(error)
                         .font(.system(size: 11))
                         .foregroundStyle(.red)
                 }
                 if let summary {
                     UsageSection(title: "今日", sources: summary.today)
+                    ProjectSection(title: "今日 · 按项目", projects: summary.todayProjects)
                     UsageSection(title: "本周（周一起）", sources: summary.thisWeek)
+                    ProjectSection(title: "本周 · 按项目", projects: summary.weekProjects)
+
+                    HStack {
+                        Button("导出近 30 天 CSV") { usageService.exportCSV() }
+                            .controlSize(.small)
+                        if let message = usageService.exportMessage {
+                            Text(message)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     Text("费用为本地估算（按公开价目），与账单可能有出入；价格表可在 ~/Library/Application Support/Eureka/pricing.json 覆盖。")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -28,6 +42,45 @@ struct UsagePanelView: View {
                 }
             }
             .padding(12)
+        }
+    }
+}
+
+private struct ProjectSection: View {
+    let title: String
+    let projects: [UsageSummary.ProjectLine]
+
+    var body: some View {
+        if !projects.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(projects.prefix(6), id: \.name) { line in
+                        HStack {
+                            Text(line.name)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(formatTokens(line.totalTokens))
+                                .font(.system(size: 10.5).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text(line.costUSD.map(formatCost) ?? "—")
+                                .font(.system(size: 10.5).monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 56, alignment: .trailing)
+                        }
+                    }
+                    if projects.count > 6 {
+                        Text("…等 \(projects.count) 个项目")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.045)))
+            }
         }
     }
 }

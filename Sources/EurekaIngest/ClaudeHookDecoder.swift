@@ -25,7 +25,7 @@ public enum ClaudeHookDecoder {
             ) else { return nil }  // auth_success / elicitation 等不构成等待
             kind = .waiting(reason: reason, message: message)
         case "PostToolUse":
-            kind = .activity
+            kind = .activity(tool: payload["tool_name"] as? String)
         case "SessionStart":
             kind = .sessionStarted
         case "SessionEnd":

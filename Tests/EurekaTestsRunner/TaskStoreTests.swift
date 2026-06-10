@@ -53,7 +53,7 @@ func taskStoreTests(_ t: TestRunner) {
             throw ExpectationError(description: "应处于 waiting(permission)")
         }
 
-        let activityEffects = store.apply(event(.activity, at: 130))
+        let activityEffects = store.apply(event(.activity(tool: nil), at: 130))
         try expectEqual(activityEffects, [.activeTasksChanged])
         guard case .running = store.sortedActiveTasks[0].phase else {
             throw ExpectationError(description: "心跳后应恢复 running")
@@ -63,7 +63,7 @@ func taskStoreTests(_ t: TestRunner) {
     t.test("纯心跳只刷新活跃时间，不产生 UI 效果") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: nil), at: 100))
-        try expectEqual(store.apply(event(.activity, at: 110)), [])
+        try expectEqual(store.apply(event(.activity(tool: nil), at: 110)), [])
         try expectEqual(store.sortedActiveTasks[0].lastActivityAt, ts(110))
     }
 
@@ -116,11 +116,37 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.sortedActiveTasks[1].id, "codex:s1")
     }
 
+    t.test("心跳带工具名：更新当前活动并刷 UI；同名不重复刷") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: nil), at: 100))
+        try expectEqual(
+            store.apply(event(.activity(tool: "Bash"), at: 110)), [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks[0].currentActivity, "Bash")
+        try expectEqual(store.apply(event(.activity(tool: "Bash"), at: 120)), [])
+        try expectEqual(
+            store.apply(event(.activity(tool: "Edit"), at: 130)), [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks[0].currentActivity, "Edit")
+    }
+
+    t.test("上下文占用更新：整数桶变化才刷 UI") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: nil), at: 100))
+        try expectEqual(
+            store.apply(event(.contextUpdate(percent: 41.2), at: 110)), [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks[0].contextUsedPercent, 41.2)
+        try expectEqual(store.apply(event(.contextUpdate(percent: 41.4), at: 111)), [])
+        try expectEqual(
+            store.apply(event(.contextUpdate(percent: 87.0), at: 120)), [.activeTasksChanged])
+        // 没有对应任务的上下文更新是无操作
+        try expectEqual(
+            store.apply(event(.contextUpdate(percent: 50), session: "ghost", at: 130)), [])
+    }
+
     t.test("超时清理：只清理无活动的任务") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "老任务"), session: "old", at: 0))
         store.apply(event(.taskStarted(title: "新任务"), session: "new", at: 0))
-        store.apply(event(.activity, session: "new", at: 14000))
+        store.apply(event(.activity(tool: nil), session: "new", at: 14000))
 
         let effects = store.reapStaleTasks(now: ts(14500), runningTimeout: 4 * 3600)
         let finished = try finishedTask(in: effects)

@@ -67,10 +67,10 @@ func decoderTests(_ t: TestRunner) {
         }
     }
 
-    t.test("PostToolUse → activity；SessionEnd → sessionEnded(reason)") {
+    t.test("PostToolUse → activity(tool)；SessionEnd → sessionEnded(reason)") {
         let activity = ClaudeHookDecoder.decode(
             payload: try loadPayload("hook-payloads/post-tool-use.json"), receivedAt: now)
-        try expectEqual(activity!.kind, .activity)
+        try expectEqual(activity!.kind, .activity(tool: "Bash"))
 
         let end = ClaudeHookDecoder.decode(
             payload: try loadPayload("hook-payloads/session-end.json"), receivedAt: now)

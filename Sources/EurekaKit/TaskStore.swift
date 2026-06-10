@@ -75,7 +75,7 @@ public final class TaskStore {
             activeTasks[key] = task
             return [.taskWaiting(task), .activeTasksChanged]
 
-        case .activity:
+        case .activity(let tool):
             guard var task = activeTasks[key] else { return [] }
             task.lastActivityAt = event.timestamp
             var effects: [TaskStoreEffect] = []
@@ -84,8 +84,21 @@ public final class TaskStore {
                 task.phase = .running
                 effects.append(.activeTasksChanged)
             }
+            if let tool, tool != task.currentActivity {
+                task.currentActivity = tool
+                if effects.isEmpty { effects.append(.activeTasksChanged) }
+            }
             activeTasks[key] = task
             return effects
+
+        case .contextUpdate(let percent):
+            guard var task = activeTasks[key] else { return [] }
+            // 整数桶变化才刷 UI，避免高频小数抖动
+            let oldBucket = task.contextUsedPercent.map { Int($0.rounded()) }
+            task.contextUsedPercent = percent
+            task.lastActivityAt = event.timestamp
+            activeTasks[key] = task
+            return Int(percent.rounded()) == oldBucket ? [] : [.activeTasksChanged]
 
         case .sessionStarted:
             return []

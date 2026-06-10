@@ -11,6 +11,7 @@ final class UsageService: ObservableObject {
     @Published private(set) var summary: UsageSummary?
     @Published private(set) var recentHistory: [FinishedTask] = []
     @Published private(set) var lastError: String?
+    @Published private(set) var exportMessage: String?
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.usage", qos: .utility)
     private var timer: DispatchSourceTimer?
@@ -59,6 +60,41 @@ final class UsageService: ObservableObject {
     /// popover 打开时主动刷一次
     func refreshNow() {
         queue.async { [weak self] in self?.scanAndPublish() }
+    }
+
+    /// 导出近 30 天用量 CSV 到 ~/Downloads 并在 Finder 中显示
+    func exportCSV() {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            do {
+                let now = Date()
+                let rows = try store.usage.dailyRows(
+                    from: now.addingTimeInterval(-30 * 86400), to: now)
+                var csv = "date,source,model,project,input_tokens,output_tokens,"
+                    + "cache_write_tokens,cache_read_tokens,requests,est_cost_usd\n"
+                for row in rows {
+                    let cost = self.pricing.cost(of: row.totals)
+                        .map { String(format: "%.4f", $0) } ?? ""
+                    let project = row.project.replacingOccurrences(of: ",", with: "_")
+                    csv += "\(row.day),\(row.totals.source.rawValue),\(row.totals.model),"
+                        + "\(project),\(row.totals.inputTokens),\(row.totals.outputTokens),"
+                        + "\(row.totals.cacheCreationTokens),\(row.totals.cacheReadTokens),"
+                        + "\(row.totals.requestCount),\(cost)\n"
+                }
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyyMMdd"
+                let url = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(
+                        "Downloads/eureka-usage-\(formatter.string(from: now)).csv")
+                try Data(csv.utf8).write(to: url)
+                self.publish { $0.exportMessage = "已导出 \(url.lastPathComponent)" }
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            } catch {
+                self.publish { $0.exportMessage = "导出失败: \(error)" }
+            }
+        }
     }
 
     // MARK: - queue 内部

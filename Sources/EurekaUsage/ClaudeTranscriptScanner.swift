@@ -141,10 +141,14 @@ public final class ClaudeTranscriptScanner {
         let timestamp = (root["timestamp"] as? String).flatMap {
             isoFormatter.date(from: $0)
         } ?? Date()
+        let project = (root["cwd"] as? String).map {
+            URL(fileURLWithPath: $0).lastPathComponent
+        }
 
         return (key, UsageRecord(
             source: .claude,
             model: model,
+            project: project,
             timestamp: timestamp,
             inputTokens: input,
             outputTokens: output,
