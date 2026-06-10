@@ -1,14 +1,86 @@
 import AppKit
+import EurekaIngest
 import EurekaKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
+    private let store = TaskStore()
+    private var consumer: SpoolConsumer?
+    private var reapTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setUpStatusItem()
+
+        let consumer = SpoolConsumer(root: SpoolPaths.root()) { [weak self] event, isStale in
+            DispatchQueue.main.async { self?.handle(event, isStale: isStale) }
+        }
+        consumer.start()
+        self.consumer = consumer
+
+        // hook 丢失兜底：定期清理长时间无活动的"幽灵"任务
+        reapTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if !self.store.reapStaleTasks(now: Date(), runningTimeout: 4 * 3600).isEmpty {
+                self.render()
+            }
+        }
+
+        render()
+        logLine("启动完成 spool=\(SpoolPaths.root().path)")
+    }
+
+    private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "✦"
         item.button?.toolTip = "Eureka"
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(
+            title: "退出 Eureka",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
+        item.menu = menu
         statusItem = item
-        // M1：启动 SpoolConsumer → TaskStore → 状态栏计数
+    }
+
+    private func handle(_ event: TaskEvent, isStale: Bool) {
+        let effects = store.apply(event)
+        for effect in effects {
+            switch effect {
+            case .taskFinished(let task):
+                let duration = task.duration.map { String(format: "%.0f秒", $0) } ?? "未知耗时"
+                logLine("完成 \(task.id) [\(task.outcome.rawValue)] \(duration) \(task.title ?? "")\(isStale ? " (积压)" : "")")
+                // M3：灵动岛完成卡片（stale 事件不弹）；M5：写入历史
+            case .taskWaiting(let task):
+                logLine("等待 \(task.id) \(task.title ?? "")")
+            case .activeTasksChanged:
+                break
+            }
+        }
+        render()
+    }
+
+    private func render() {
+        let tasks = store.sortedActiveTasks
+        let waitingCount = tasks.filter {
+            if case .waiting = $0.phase { return true } else { return false }
+        }.count
+
+        let title: String
+        if tasks.isEmpty {
+            title = "✦"
+        } else if waitingCount > 0 {
+            title = "⏳\(tasks.count)"
+        } else {
+            title = "▶\(tasks.count)"
+        }
+        statusItem?.button?.title = title
+        logLine("active=\(tasks.count) waiting=\(waitingCount)")
+    }
+
+    /// 开发模式可观测性：stdout 单行日志，e2e 脚本据此断言（.app 包内运行时无害）
+    private func logLine(_ message: String) {
+        print("[eureka] \(message)")
+        fflush(stdout)
     }
 }
