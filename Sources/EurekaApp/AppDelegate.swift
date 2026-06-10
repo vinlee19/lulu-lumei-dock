@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import EurekaIngest
 import EurekaKit
 
@@ -8,18 +9,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = TaskStore()
     private let usageService = UsageService()
     private let limitsService = RateLimitsService()
+    private let settings = AppSettings()
+    private let installer = InstallerService()
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
+    private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 每次启动把随包 relay 同步到稳定路径（升级 app 后 hooks 不断链）
+        RelaySyncer.sync()
+
         statusController = StatusItemController(
-            usageService: usageService, limitsService: limitsService)
+            usageService: usageService, limitsService: limitsService,
+            settings: settings, installer: installer)
         let island = IslandPanelController()
         island.start()
         islandController = island
         usageService.start()
         limitsService.start()
+
+        // 设置 → 灵动岛行为
+        island.viewModel.autoDismissSeconds = settings.autoDismissSeconds
+        settings.$autoDismissSeconds
+            .sink { [weak island] seconds in island?.viewModel.autoDismissSeconds = seconds }
+            .store(in: &cancellables)
+
+        // 首次启动：引导到设置页一键安装
+        if !UserDefaults.standard.bool(forKey: "didOnboard") {
+            UserDefaults.standard.set(true, forKey: "didOnboard")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                MainActor.assumeIsolated { [weak self] in
+                    self?.statusController?.showPopover(tab: .settings)
+                }
+            }
+        }
 
         // 管道在自己的队列回调；main.async 保证 FIFO 顺序后接回 MainActor
         let pipeline = EventPipeline(spoolRoot: SpoolPaths.root()) { [weak self] event, isStale in
@@ -60,12 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let duration = task.duration.map { String(format: "%.0f秒", $0) } ?? "未知耗时"
                 logLine("完成 \(task.id) [\(task.outcome.rawValue)] \(duration) \(task.title ?? "")\(isStale ? " (积压)" : "")")
                 usageService.recordFinished(task)
-                if !isStale {
+                let wantCard = task.outcome == .success
+                    ? settings.notifyCompletion
+                    : settings.notifyError
+                if !isStale && wantCard {
                     island.viewModel.enqueueFinished(task)
                 }
             case .taskWaiting(let task):
                 logLine("等待 \(task.id) \(task.title ?? "")")
-                if !isStale {
+                if !isStale && settings.notifyWaiting {
                     island.viewModel.enqueueWaiting(task)
                 }
             case .activeTasksChanged:

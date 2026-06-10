@@ -9,8 +9,14 @@ final class StatusItemController: NSObject {
     private let popover = NSPopover()
     private let usageService: UsageService
     private let limitsService: RateLimitsService
+    private let navigation = PopoverNavigation()
 
-    init(usageService: UsageService, limitsService: RateLimitsService) {
+    init(
+        usageService: UsageService,
+        limitsService: RateLimitsService,
+        settings: AppSettings,
+        installer: InstallerService
+    ) {
         self.usageService = usageService
         self.limitsService = limitsService
         super.init()
@@ -19,7 +25,11 @@ final class StatusItemController: NSObject {
         popover.contentSize = NSSize(width: 360, height: 440)
         popover.contentViewController = NSHostingController(
             rootView: PopoverRootView(
-                usageService: usageService, limitsService: limitsService))
+                usageService: usageService,
+                limitsService: limitsService,
+                settings: settings,
+                installer: installer,
+                navigation: navigation))
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "✦"
@@ -44,6 +54,15 @@ final class StatusItemController: NSObject {
             title = "▶\(tasks.count)"
         }
         statusItem?.button?.title = title
+    }
+
+    /// 程序化打开 popover（首启引导直达设置页）
+    func showPopover(tab: PopoverRootView.Tab) {
+        navigation.tab = tab
+        guard let button = statusItem?.button, !popover.isShown else { return }
+        usageService.refreshNow()
+        limitsService.refresh()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     @objc private func statusItemClicked() {
