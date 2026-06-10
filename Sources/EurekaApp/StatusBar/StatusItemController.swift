@@ -1,0 +1,75 @@
+import AppKit
+import EurekaKit
+import SwiftUI
+
+/// 菜单栏：左键开 popover（历史/用量），右键菜单（退出）
+@MainActor
+final class StatusItemController: NSObject {
+    private var statusItem: NSStatusItem?
+    private let popover = NSPopover()
+    private let usageService: UsageService
+
+    init(usageService: UsageService) {
+        self.usageService = usageService
+        super.init()
+
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 360, height: 440)
+        popover.contentViewController = NSHostingController(
+            rootView: PopoverRootView(usageService: usageService))
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.title = "✦"
+        item.button?.toolTip = "Eureka"
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem = item
+    }
+
+    /// 状态栏文字随活跃任务变化
+    func update(tasks: [AgentTask]) {
+        let waiting = tasks.contains {
+            if case .waiting = $0.phase { return true } else { return false }
+        }
+        let title: String
+        if tasks.isEmpty {
+            title = "✦"
+        } else if waiting {
+            title = "⏳\(tasks.count)"
+        } else {
+            title = "▶\(tasks.count)"
+        }
+        statusItem?.button?.title = title
+    }
+
+    @objc private func statusItemClicked() {
+        MainActor.assumeIsolated {
+            guard let button = statusItem?.button else { return }
+            if NSApp.currentEvent?.type == .rightMouseUp {
+                showMenu()
+                return
+            }
+            if popover.isShown {
+                popover.performClose(nil)
+            } else {
+                usageService.refreshNow()
+                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                popover.contentViewController?.view.window?.makeKey()
+            }
+        }
+    }
+
+    private func showMenu() {
+        guard let item = statusItem else { return }
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(
+            title: "退出 Eureka",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil  // 用完即拆，避免左键也弹菜单
+    }
+}

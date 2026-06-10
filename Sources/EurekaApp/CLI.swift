@@ -1,4 +1,8 @@
+import EurekaIngest
 import EurekaInstall
+import EurekaKit
+import EurekaStore
+import EurekaUsage
 import Foundation
 
 /// 命令行模式（不起 GUI）：hooks 安装/卸载/状态。
@@ -29,6 +33,8 @@ enum EurekaCLI {
             uninstallCodexNotify()
         case "--hooks-status":
             printStatus()
+        case "--usage-snapshot":
+            usageSnapshot()
         case "--render-previews":
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-previews"
             MainActor.assumeIsolated {
@@ -120,6 +126,44 @@ enum EurekaCLI {
         print("Claude hooks: \(claude.rawValue)")
         print("Codex notify: \(codex.rawValue)")
         print("relay 稳定路径: \(RelaySyncer.stableRelayURL.path)")
+    }
+
+    /// 一次性全量扫描并输出今日/本周聚合（ccusage 对拍脚本用）
+    private static func usageSnapshot() {
+        do {
+            let store = try EurekaStore(path: EurekaStore.defaultURL())
+            let claude = ClaudeTranscriptScanner(
+                projectsRoot: ClaudeTranscriptScanner.defaultProjectsRoot(), store: store)
+            let codex = CodexUsageScanner(
+                sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(), store: store)
+            let newClaude = try claude.scanOnce()
+            let newCodex = try codex.scanOnce()
+            FileHandle.standardError.write(Data(
+                "扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条\n".utf8))
+
+            let now = Date()
+            let today = try store.usage.totalsByModel(
+                from: UsageAggregator.dayStart(of: now), to: now)
+            var output: [[String: Any]] = []
+            for row in today {
+                output.append([
+                    "source": row.source.rawValue,
+                    "model": row.model,
+                    "inputTokens": row.inputTokens,
+                    "outputTokens": row.outputTokens,
+                    "cacheCreationTokens": row.cacheCreationTokens,
+                    "cacheReadTokens": row.cacheReadTokens,
+                    "requests": row.requestCount,
+                ])
+            }
+            let json = try JSONSerialization.data(
+                withJSONObject: ["today": output],
+                options: [.prettyPrinted, .sortedKeys])
+            print(String(decoding: json, as: UTF8.self))
+        } catch {
+            print("{\"error\": \"\(error)\"}")
+            exit(1)
+        }
     }
 
     private static func printUsage() {

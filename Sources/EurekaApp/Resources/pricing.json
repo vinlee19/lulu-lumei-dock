@@ -1,5 +1,17 @@
 {
-  "version": 1,
-  "comment": "每百万 token 的 USD 价格。match 为模型名前缀（家族匹配）。M5 校对正式价格；未匹配模型只显示 token 不算钱。",
-  "models": []
+  "version": 2,
+  "comment": "USD / 百万 token。match 为模型名前缀，最长前缀优先；unknown=true 表示明确未定价（只显示 token，不算钱，并阻断更短前缀回退）。可放置同结构文件到 ~/Library/Application Support/Eureka/pricing.json 整表覆盖。",
+  "models": [
+    { "match": "claude-fable", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
+    { "match": "claude-opus-4-5", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
+    { "match": "claude-opus-4-7", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
+    { "match": "claude-opus-4-8", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
+    { "match": "claude-opus", "inputPerM": 15, "outputPerM": 75, "cacheReadPerM": 1.5, "cacheWrite5mPerM": 18.75, "cacheWrite1hPerM": 30 },
+    { "match": "claude-sonnet", "inputPerM": 3, "outputPerM": 15, "cacheReadPerM": 0.3, "cacheWrite5mPerM": 3.75, "cacheWrite1hPerM": 6 },
+    { "match": "claude-haiku-3", "inputPerM": 0.8, "outputPerM": 4 },
+    { "match": "claude-haiku", "inputPerM": 1, "outputPerM": 5, "cacheReadPerM": 0.1, "cacheWrite5mPerM": 1.25, "cacheWrite1hPerM": 2 },
+    { "match": "gpt-5.5", "unknown": true },
+    { "match": "gpt-5-mini", "inputPerM": 0.25, "outputPerM": 2, "cacheReadPerM": 0.025 },
+    { "match": "gpt-5", "inputPerM": 1.25, "outputPerM": 10, "cacheReadPerM": 0.125 }
+  ]
 }
