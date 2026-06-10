@@ -8,5 +8,7 @@ taskStoreTests(t)
 decoderTests(t)
 spoolConsumerTests(t)
 installerTests(t)
+geometryTests(t)
+cardQueueTests(t)
 
 t.finish()

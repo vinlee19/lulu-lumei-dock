@@ -20,6 +20,11 @@ enum EurekaCLI {
             uninstallClaudeHooks()
         case "--hooks-status":
             printStatus()
+        case "--render-previews":
+            let dir = args.count > 1 ? args[1] : "/tmp/eureka-previews"
+            MainActor.assumeIsolated {
+                PreviewRenderer.renderAll(to: dir)
+            }
         case "--help", "-h":
             printUsage()
         default:

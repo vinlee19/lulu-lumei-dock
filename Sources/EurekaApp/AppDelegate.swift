@@ -2,26 +2,39 @@ import AppKit
 import EurekaIngest
 import EurekaKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let store = TaskStore()
     private var consumer: SpoolConsumer?
     private var reapTimer: Timer?
+    private var islandController: IslandPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setUpStatusItem()
+        let island = IslandPanelController()
+        island.start()
+        islandController = island
 
+        // SpoolConsumer 在自己的队列回调；main.async 保证 FIFO 顺序后接回 MainActor
         let consumer = SpoolConsumer(root: SpoolPaths.root()) { [weak self] event, isStale in
-            DispatchQueue.main.async { self?.handle(event, isStale: isStale) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.handle(event, isStale: isStale)
+                }
+            }
         }
         consumer.start()
         self.consumer = consumer
 
         // hook 丢失兜底：定期清理长时间无活动的"幽灵"任务
         reapTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            if !self.store.reapStaleTasks(now: Date(), runningTimeout: 4 * 3600).isEmpty {
-                self.render()
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let effects = self.store.reapStaleTasks(now: Date(), runningTimeout: 4 * 3600)
+                if !effects.isEmpty {
+                    self.applyToUI(effects: effects, isStale: true)
+                }
             }
         }
 
@@ -44,19 +57,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handle(_ event: TaskEvent, isStale: Bool) {
-        let effects = store.apply(event)
+        applyToUI(effects: store.apply(event), isStale: isStale)
+    }
+
+    /// 把状态机副作用投影到 UI（积压/过期事件只记录，不弹岛）
+    private func applyToUI(effects: [TaskStoreEffect], isStale: Bool) {
+        guard let island = islandController else { return }
         for effect in effects {
             switch effect {
             case .taskFinished(let task):
                 let duration = task.duration.map { String(format: "%.0f秒", $0) } ?? "未知耗时"
                 logLine("完成 \(task.id) [\(task.outcome.rawValue)] \(duration) \(task.title ?? "")\(isStale ? " (积压)" : "")")
-                // M3：灵动岛完成卡片（stale 事件不弹）；M5：写入历史
+                if !isStale {
+                    island.viewModel.enqueueFinished(task)
+                }
+                // M5：写入历史
             case .taskWaiting(let task):
                 logLine("等待 \(task.id) \(task.title ?? "")")
+                if !isStale {
+                    island.viewModel.enqueueWaiting(task)
+                }
             case .activeTasksChanged:
                 break
             }
         }
+        island.viewModel.updateActiveTasks(store.sortedActiveTasks)
         render()
     }
 
