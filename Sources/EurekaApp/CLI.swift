@@ -9,6 +9,11 @@ enum EurekaCLI {
             .appendingPathComponent(".claude/settings.json")
     }
 
+    static var codexConfigURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/config.toml")
+    }
+
     /// 返回 true 表示已按 CLI 处理，调用方应直接退出
     static func runIfNeeded() -> Bool {
         let args = Array(CommandLine.arguments.dropFirst())
@@ -18,6 +23,10 @@ enum EurekaCLI {
             installClaudeHooks()
         case "--uninstall-claude-hooks":
             uninstallClaudeHooks()
+        case "--install-codex-notify":
+            installCodexNotify()
+        case "--uninstall-codex-notify":
+            uninstallCodexNotify()
         case "--hooks-status":
             printStatus()
         case "--render-previews":
@@ -71,9 +80,45 @@ enum EurekaCLI {
         }
     }
 
+    private static func installCodexNotify() {
+        guard let relay = RelaySyncer.sync() else {
+            print("错误：找不到 eureka-relay 二进制（应与本程序同目录）")
+            exit(1)
+        }
+        let url = codexConfigURL
+        do {
+            let original = ConfigFile.read(url)
+            let updated = try CodexNotifyInstaller.install(into: original, relayPath: relay.path)
+            try ConfigFile.backupThenWrite(path: url, newContent: updated)
+            print("✓ Codex notify 已安装到 \(url.path)")
+        } catch {
+            print("安装失败: \(error)")
+            exit(1)
+        }
+    }
+
+    private static func uninstallCodexNotify() {
+        let url = codexConfigURL
+        let original = ConfigFile.read(url)
+        guard !original.isEmpty else {
+            print("config.toml 不存在，无需卸载")
+            return
+        }
+        do {
+            let updated = CodexNotifyInstaller.uninstall(from: original)
+            try ConfigFile.backupThenWrite(path: url, newContent: updated)
+            print("✓ Codex notify 已卸载")
+        } catch {
+            print("卸载失败: \(error)")
+            exit(1)
+        }
+    }
+
     private static func printStatus() {
         let claude = ClaudeHooksInstaller.status(of: ConfigFile.read(claudeSettingsURL))
+        let codex = CodexNotifyInstaller.status(of: ConfigFile.read(codexConfigURL))
         print("Claude hooks: \(claude.rawValue)")
+        print("Codex notify: \(codex.rawValue)")
         print("relay 稳定路径: \(RelaySyncer.stableRelayURL.path)")
     }
 
@@ -83,7 +128,10 @@ enum EurekaCLI {
           （无参数）                 启动菜单栏应用
           --install-claude-hooks    安装 Claude Code hooks（写前备份）
           --uninstall-claude-hooks  卸载 Claude Code hooks
+          --install-codex-notify    安装 Codex notify（写前备份）
+          --uninstall-codex-notify  卸载 Codex notify
           --hooks-status            查看安装状态
+          --render-previews [目录]   离屏渲染灵动岛各形态 PNG
         """)
     }
 }

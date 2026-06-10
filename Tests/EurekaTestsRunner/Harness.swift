@@ -63,6 +63,19 @@ func expectEqual<T: Equatable>(
     }
 }
 
+func expectEqual<T: Equatable>(
+    _ actual: T,
+    _ expected: T,
+    _ message: @autoclosure () -> String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) throws {
+    if actual != expected {
+        throw ExpectationError(
+            description: "\(message()): got \(actual), expected \(expected) at \(file):\(line)")
+    }
+}
+
 /// 取 fixture 文件 URL（Fixtures 以 .copy 资源打进 Bundle.module）
 func fixtureURL(_ relativePath: String) throws -> URL {
     guard let base = Bundle.module.url(forResource: "Fixtures", withExtension: nil) else {

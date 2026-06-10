@@ -6,7 +6,7 @@ import EurekaKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let store = TaskStore()
-    private var consumer: SpoolConsumer?
+    private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
 
@@ -16,16 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         island.start()
         islandController = island
 
-        // SpoolConsumer 在自己的队列回调；main.async 保证 FIFO 顺序后接回 MainActor
-        let consumer = SpoolConsumer(root: SpoolPaths.root()) { [weak self] event, isStale in
+        // 管道在自己的队列回调；main.async 保证 FIFO 顺序后接回 MainActor
+        let pipeline = EventPipeline(spoolRoot: SpoolPaths.root()) { [weak self] event, isStale in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self?.handle(event, isStale: isStale)
                 }
             }
         }
-        consumer.start()
-        self.consumer = consumer
+        pipeline.start()
+        self.pipeline = pipeline
 
         // hook 丢失兜底：定期清理长时间无活动的"幽灵"任务
         reapTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
