@@ -13,7 +13,10 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
     public var sessionId: String
     public var title: String?
     public var cwd: String?
+    /// 当前 turn 的开始时间（耗时计时基准，空闲后新 turn 会重置）
     public var startedAt: Date
+    /// 会话最初创建的时间（跨 turn/resume 不变；"开始时间"模式显示它）
+    public var sessionStartedAt: Date?
     public var lastActivityAt: Date
     public var phase: Phase
     /// 最近执行的工具名（PostToolUse 心跳带来，"正在干什么"）
@@ -37,6 +40,7 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
         title: String? = nil,
         cwd: String? = nil,
         startedAt: Date,
+        sessionStartedAt: Date? = nil,
         lastActivityAt: Date? = nil,
         phase: Phase = .running,
         currentActivity: String? = nil
@@ -46,6 +50,7 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
         self.title = title
         self.cwd = cwd
         self.startedAt = startedAt
+        self.sessionStartedAt = sessionStartedAt
         self.lastActivityAt = lastActivityAt ?? startedAt
         self.phase = phase
         self.currentActivity = currentActivity

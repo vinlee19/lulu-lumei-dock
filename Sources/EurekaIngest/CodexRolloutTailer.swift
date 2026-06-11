@@ -32,6 +32,7 @@ public final class CodexRolloutTailer {
     private struct FileContext {
         var sessionId: String
         var cwd: String?
+        var sessionStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
 
@@ -135,20 +136,23 @@ public final class CodexRolloutTailer {
             let lineEnd = complete[cursor...].firstIndex(of: UInt8(ascii: "\n")) ?? complete.endIndex
             let line = complete[cursor..<lineEnd]
             if !line.isEmpty {
-                deliver(decoded: CodexRolloutDecoder.decode(
-                    line: Data(line), sessionId: context.sessionId, cwd: context.cwd))
+                deliver(
+                    decoded: CodexRolloutDecoder.decode(
+                        line: Data(line), sessionId: context.sessionId, cwd: context.cwd),
+                    context: context)
             }
             cursor = complete.index(after: lineEnd)
         }
         return complete.count
     }
 
-    private func deliver(decoded: [CodexRolloutDecoder.Decoded]) {
+    private func deliver(decoded: [CodexRolloutDecoder.Decoded], context: FileContext) {
         for item in decoded {
             switch item {
             case .sessionMeta:
                 break  // context 已在发现文件时建立
-            case .event(let event):
+            case .event(var event):
+                event.sessionStartedAt = context.sessionStartedAt
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
                 handler(event, isStale)
             case .rateLimits(let snapshot):
@@ -209,7 +213,8 @@ public final class CodexRolloutTailer {
                 kind: .taskStarted(title: lastTitle),
                 timestamp: last.timestamp,
                 cwd: last.cwd,
-                turnId: last.turnId
+                turnId: last.turnId,
+                sessionStartedAt: ctx.sessionStartedAt
             ), false)
         }
     }
@@ -218,7 +223,7 @@ public final class CodexRolloutTailer {
         let path = url.path
         if let cached = contexts[path] { return cached }
 
-        var ctx = FileContext(sessionId: sessionIdFromFilename(url), cwd: nil)
+        var ctx = FileContext(sessionId: sessionIdFromFilename(url), cwd: nil, sessionStartedAt: nil)
         // 首行应是 session_meta
         if let handle = FileHandle(forReadingAtPath: path),
            let head = try? handle.read(upToCount: 16384) {
@@ -227,8 +232,8 @@ public final class CodexRolloutTailer {
                 let decoded = CodexRolloutDecoder.decode(
                     line: head[head.startIndex..<newline],
                     sessionId: ctx.sessionId, cwd: nil)
-                for case .sessionMeta(let id, let cwd) in decoded {
-                    ctx = FileContext(sessionId: id, cwd: cwd)
+                for case .sessionMeta(let id, let cwd, let startedAt) in decoded {
+                    ctx = FileContext(sessionId: id, cwd: cwd, sessionStartedAt: startedAt)
                 }
             }
         }

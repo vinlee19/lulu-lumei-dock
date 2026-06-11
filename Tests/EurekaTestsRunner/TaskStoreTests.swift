@@ -154,6 +154,29 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.apply(event(.titleUpdate(title: "修复登录页报错"), at: 120)), [])
     }
 
+    t.test("会话首启时间：任意事件补设一次，turn 重置不影响它") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "第一轮"), at: 1000))
+        // 心跳带来首启时间（管道从文件头读到的）
+        var heartbeat = event(.activity(tool: "Bash"), at: 1010)
+        heartbeat.sessionStartedAt = ts(500)
+        store.apply(heartbeat)
+        try expectEqual(store.sortedActiveTasks[0].sessionStartedAt, ts(500))
+
+        // turn 结束→空闲→新 turn：startedAt 重置，sessionStartedAt 不变
+        store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 1100))
+        store.apply(event(.taskStarted(title: "第二轮"), at: 2000))
+        let task = store.sortedActiveTasks[0]
+        try expectEqual(task.startedAt, ts(2000))
+        try expectEqual(task.sessionStartedAt, ts(500), "会话首启时间跨 turn 保持")
+
+        // 后续更小的值不覆盖（只设一次）
+        var later = event(.activity(tool: nil), at: 2010)
+        later.sessionStartedAt = ts(999)
+        store.apply(later)
+        try expectEqual(store.sortedActiveTasks[0].sessionStartedAt, ts(500))
+    }
+
     t.test("超时清理：空闲会话静默移除不出卡") {
         let store = TaskStore()
         store.apply(event(.sessionStarted, session: "old-idle", at: 0))

@@ -6,7 +6,7 @@ import EurekaKit
 /// 外部 notify 只有 agent-turn-complete（仅作低延迟冗余）。
 public enum CodexRolloutDecoder {
     public enum Decoded {
-        case sessionMeta(id: String, cwd: String?)
+        case sessionMeta(id: String, cwd: String?, startedAt: Date?)
         case event(TaskEvent)
         case rateLimits(RateLimitSnapshot)
         case tokenUsage(CodexTokenTotals)
@@ -48,7 +48,10 @@ public enum CodexRolloutDecoder {
         switch type {
         case "session_meta":
             guard let id = payload["id"] as? String else { return [] }
-            return [.sessionMeta(id: id, cwd: payload["cwd"] as? String)]
+            return [.sessionMeta(
+                id: id,
+                cwd: payload["cwd"] as? String,
+                startedAt: parseDate(payload["timestamp"] as? String))]
 
         case "event_msg":
             return decodeEventMessage(

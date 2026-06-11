@@ -24,7 +24,17 @@ public final class TaskStore {
     @discardableResult
     public func apply(_ event: TaskEvent) -> [TaskStoreEffect] {
         let key = AgentTask.key(source: event.source, sessionId: event.sessionId)
+        let effects = applyKind(event, key: key)
+        // 任何事件带来的"会话首启时间"都补到任务上（只设一次）
+        if let sessionStart = event.sessionStartedAt,
+           var task = activeTasks[key], task.sessionStartedAt == nil {
+            task.sessionStartedAt = sessionStart
+            activeTasks[key] = task
+        }
+        return effects
+    }
 
+    private func applyKind(_ event: TaskEvent, key: String) -> [TaskStoreEffect] {
         switch event.kind {
         case .taskStarted(let title):
             if var task = activeTasks[key] {

@@ -103,7 +103,8 @@ struct CompactPillView: View {
             Group {
                 if let earliest = tasks.first {
                     if showStartTime {
-                        Text(formatStartTime(earliest.startedAt))
+                        // 会话最初创建的时间（跨 turn/resume），缺数据退当前 turn 开始
+                        Text(formatStartTime(earliest.sessionStartedAt ?? earliest.startedAt))
                             .font(.system(size: 11, weight: .medium).monospacedDigit())
                             .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
                     } else {
@@ -298,7 +299,7 @@ struct TaskListCardView: View {
                             .foregroundStyle(contextColor(context))
                     }
                     if showStartTime {
-                        Text(formatStartTime(task.startedAt))
+                        Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(.white.opacity(0.5))
                     } else {

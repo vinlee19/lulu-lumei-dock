@@ -61,6 +61,8 @@ public final class EventPipeline {
 
     /// Claude 上下文估算的节流（每会话最多 20s 一次，读文件尾有成本）
     private var lastContextEstimate: [String: Date] = [:]
+    /// 会话首启时间缓存（每会话只读一次文件头）
+    private var sessionFirstAt: [String: Date] = [:]
 
     private func ingest(_ event: TaskEvent, isStale: Bool) {
         queue.async { [weak self] in
@@ -74,6 +76,24 @@ public final class EventPipeline {
 
     private func enrich(_ event: TaskEvent) -> [TaskEvent] {
         var events = [event]
+
+        // 会话首启时间：所有带 transcript 的 Claude 事件统一补上（头读一次，缓存）
+        if event.source == .claude, event.sessionStartedAt == nil,
+           let transcriptPath = event.transcriptPath {
+            let firstAt: Date?
+            if let cached = sessionFirstAt[event.sessionId] {
+                firstAt = cached
+            } else {
+                firstAt = ClaudeSessionFirstTimestamp.read(transcriptPath: transcriptPath)
+                if let firstAt { sessionFirstAt[event.sessionId] = firstAt }
+                if sessionFirstAt.count > 128 {
+                    sessionFirstAt.removeAll()  // 简单防膨胀，重读成本极低
+                }
+            }
+            if let firstAt {
+                events[0].sessionStartedAt = firstAt
+            }
+        }
 
         // Claude"成功"完成 → 嗅探尾部：API 错误升级为出错；ai-title 升级标题
         if event.source == .claude,

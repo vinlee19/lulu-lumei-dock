@@ -44,6 +44,8 @@ public struct TaskEvent: Equatable, Sendable {
     public var transcriptPath: String?
     /// Codex turn id（notify 与 rollout 事件去重用）
     public var turnId: String?
+    /// 会话最初创建的时间（transcript 首行时间戳 / session_meta，跨 resume 保持）
+    public var sessionStartedAt: Date?
 
     public init(
         source: AgentSource,
@@ -52,7 +54,8 @@ public struct TaskEvent: Equatable, Sendable {
         timestamp: Date,
         cwd: String? = nil,
         transcriptPath: String? = nil,
-        turnId: String? = nil
+        turnId: String? = nil,
+        sessionStartedAt: Date? = nil
     ) {
         self.source = source
         self.sessionId = sessionId
@@ -61,5 +64,6 @@ public struct TaskEvent: Equatable, Sendable {
         self.cwd = cwd
         self.transcriptPath = transcriptPath
         self.turnId = turnId
+        self.sessionStartedAt = sessionStartedAt
     }
 }
