@@ -24,6 +24,10 @@ final class IslandViewModel: ObservableObject {
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
     /// 用户把岛拖到了自定义位置：脱离刘海融合，渲染为四角全圆的悬浮样式
     @Published var isFloating = false
+    /// 时间显示模式：false=已持续时长（计时器），true=开始的日期时间
+    @Published var showStartTime: Bool = UserDefaults.standard.bool(forKey: "islandShowStartTime") {
+        didSet { UserDefaults.standard.set(showStartTime, forKey: "islandShowStartTime") }
+    }
 
     let layout = IslandGeometry.Layout.standard
     /// 完成/出错卡自动收起秒数（等待卡不自动收）

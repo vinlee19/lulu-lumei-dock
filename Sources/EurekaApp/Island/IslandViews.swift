@@ -21,12 +21,15 @@ struct IslandRootView: View {
     }
 
     private func island(size: CGSize) -> some View {
-        // 点按/拖拽由 IslandHostingView 的 AppKit 事件统一处理（拖动窗口需要 performDrag）
+        // 拖拽在 IslandHostingView（performDrag）；点按回到 SwiftUI——
+        // 内部按钮优先消费，背景 tap 才走 islandTapped
         UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
             .fill(Color.black)
             .frame(width: size.width, height: size.height)
             .overlay(content.clipShape(UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)))
             .shadow(color: .black.opacity(0.38), radius: 12, y: 5)
+            .contentShape(Rectangle())
+            .onTapGesture { viewModel.islandTapped() }
     }
 
     /// 刘海融合：上沿直角；浮动/普通屏：四角全圆
@@ -54,21 +57,28 @@ struct IslandRootView: View {
             CompactPillView(
                 tasks: viewModel.activeTasks,
                 hasWaiting: viewModel.hasWaiting,
-                centerGap: viewModel.pillCenterGap
+                centerGap: viewModel.pillCenterGap,
+                showStartTime: viewModel.showStartTime
             )
         case .card(let card):
             ExpandedCardView(card: card, queuedCount: viewModel.queuedCount)
         case .taskList:
-            TaskListCardView(tasks: viewModel.activeTasks, idleTasks: viewModel.idleTasks)
+            TaskListCardView(
+                tasks: viewModel.activeTasks,
+                idleTasks: viewModel.idleTasks,
+                showStartTime: viewModel.showStartTime,
+                onToggleTimeMode: { viewModel.showStartTime.toggle() }
+            )
         }
     }
 }
 
-/// compact 胶囊：左翼状态 + 数量，右翼最早任务计时；中部为物理刘海留空
+/// compact 胶囊：左翼状态 + 数量，右翼最早任务计时/开始时间；中部为物理刘海留空
 struct CompactPillView: View {
     let tasks: [AgentTask]
     let hasWaiting: Bool
     let centerGap: CGFloat
+    var showStartTime = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -92,9 +102,15 @@ struct CompactPillView: View {
 
             Group {
                 if let earliest = tasks.first {
-                    Text(timerInterval: earliest.startedAt...Date.distantFuture, countsDown: false)
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
-                        .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
+                    if showStartTime {
+                        Text(formatStartTime(earliest.startedAt))
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
+                    } else {
+                        Text(timerInterval: earliest.startedAt...Date.distantFuture, countsDown: false)
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -233,15 +249,34 @@ func taskDisplayName(_ task: AgentTask) -> String {
 struct TaskListCardView: View {
     let tasks: [AgentTask]
     var idleTasks: [AgentTask] = []
+    var showStartTime = false
+    var onToggleTimeMode: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("进行中 \(tasks.count) 个任务")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
-                .padding(.horizontal, 18)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
+            HStack {
+                Text("进行中 \(tasks.count) 个任务")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                Spacer()
+                // 切换右侧时间显示：已持续时长 ↔ 开始时间
+                Button(action: onToggleTimeMode) {
+                    HStack(spacing: 3) {
+                        Image(systemName: showStartTime ? "calendar.badge.clock" : "stopwatch")
+                            .font(.system(size: 9))
+                        Text(showStartTime ? "开始时间" : "耗时")
+                            .font(.system(size: 9.5))
+                    }
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.white.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
 
             ForEach(tasks.prefix(4)) { task in
                 HStack(spacing: 8) {
@@ -262,9 +297,15 @@ struct TaskListCardView: View {
                             .font(.system(size: 9.5, weight: .medium).monospacedDigit())
                             .foregroundStyle(contextColor(context))
                     }
-                    Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.5))
+                    if showStartTime {
+                        Text(formatStartTime(task.startedAt))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.5))
+                    } else {
+                        Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
                 }
                 .padding(.horizontal, 18)
                 .frame(height: 30)
@@ -328,6 +369,25 @@ struct TaskListCardView: View {
         default: return .red
         }
     }
+}
+
+private let startTimeTodayFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    return formatter
+}()
+
+private let startTimeFullFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "M/d HH:mm"
+    return formatter
+}()
+
+/// 任务开始的日期时间：今天只显时刻，跨天带日期
+func formatStartTime(_ date: Date) -> String {
+    Calendar.current.isDateInToday(date)
+        ? startTimeTodayFormatter.string(from: date)
+        : startTimeFullFormatter.string(from: date)
 }
 
 func formatDuration(_ seconds: TimeInterval) -> String {

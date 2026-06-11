@@ -10,8 +10,6 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     /// 当前可交互区域（panel 坐标系，原点左下），由控制器注入
     var interactiveRectProvider: @MainActor () -> NSRect = { .zero }
     var onHoverChange: @MainActor (Bool) -> Void = { _ in }
-    /// 岛内点按（非拖拽的 mouseUp）
-    var onIslandTap: @MainActor () -> Void = {}
 
     private var trackingArea: NSTrackingArea?
     private var mouseDownLocation: NSPoint?
@@ -36,14 +34,16 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    // MARK: - 点按 vs 拖拽（岛内容无独立控件，鼠标事件由本视图全权处理）
+    // MARK: - 拖拽检测（点按交给 SwiftUI：岛内按钮与背景 tap 自然共存）
 
     override func mouseDown(with event: NSEvent) {
         mouseDownLocation = event.locationInWindow
         didDrag = false
+        super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        defer { super.mouseDragged(with: event) }
         guard let start = mouseDownLocation, !didDrag else { return }
         let dx = event.locationInWindow.x - start.x
         let dy = event.locationInWindow.y - start.y
@@ -51,7 +51,8 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
             didDrag = true
             // 交给窗口服务器拖动整个 panel（位置持久化在控制器的 didMove 观察里）。
             // performDrag 会吞掉后续 mouseUp/mouseExited——必须手动复位 hover，
-            // 否则自动收起被永久暂停，岛停在旧内容上（曾导致整夜不更新）
+            // 否则自动收起被永久暂停，岛停在旧内容上（曾导致整夜不更新）。
+            // 它同时吞掉 mouseUp → SwiftUI 的 tap 手势不会在拖拽后误触发。
             if insideInteractive {
                 insideInteractive = false
                 onHoverChange(false)
@@ -61,11 +62,9 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !didDrag && mouseDownLocation != nil {
-            onIslandTap()
-        }
         mouseDownLocation = nil
         didDrag = false
+        super.mouseUp(with: event)
     }
 
     override func updateTrackingAreas() {

@@ -60,9 +60,6 @@ final class IslandPanelController {
         hostingView.onHoverChange = { [weak viewModel] hovering in
             viewModel?.setHovering(hovering)
         }
-        hostingView.onIslandTap = { [weak viewModel] in
-            viewModel?.islandTapped()
-        }
         viewModel.onDisplayChange = { [weak self] display in
             self?.displayChanged(display)
         }
