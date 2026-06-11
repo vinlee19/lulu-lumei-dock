@@ -11,6 +11,7 @@ public final class EventPipeline {
     private let handler: Handler
     private var spool: SpoolConsumer?
     private var tailer: CodexRolloutTailer?
+    private var claudeWatcher: ClaudeTranscriptWatcher?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -42,19 +43,20 @@ public final class EventPipeline {
     public func start() {
         spool?.start()
         tailer?.start()
-        // 重建 Claude 会话现场：app 启动前已在跑/近期活跃的会话立刻可见
-        // （事件合成自当前文件状态，不是积压 → isStale=false）
-        queue.async { [weak self] in
-            guard let self else { return }
-            for event in ClaudeSessionBootstrap.discover(projectsRoot: self.claudeProjectsRoot) {
-                self.handler(event, false)
-            }
+        // Claude transcript 常驻监视（含启动首扫现场重建）：
+        // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
         }
+        watcher.start()
+        claudeWatcher = watcher
     }
 
     public func stop() {
         spool?.stop()
         tailer?.stop()
+        claudeWatcher?.stop()
     }
 
     /// Claude 上下文估算的节流（每会话最多 20s 一次，读文件尾有成本）

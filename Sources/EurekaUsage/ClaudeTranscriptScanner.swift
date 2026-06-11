@@ -19,6 +19,7 @@ public final class ClaudeTranscriptScanner {
 
     private let projectsRoot: URL
     private let store: EurekaStore
+    private let projectResolver = ProjectResolver()
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -65,7 +66,9 @@ public final class ClaudeTranscriptScanner {
         var merged: [String: UsageRecord] = [:]
         var order: [String] = []
         for line in chunk.lines {
-            guard let (key, record) = Self.parseAssistantLine(line) else { continue }
+            guard var (key, record) = Self.parseAssistantLine(line) else { continue }
+            // 项目名按仓库根归组（子目录/子模块的会话归到仓库名下）
+            record.project = projectResolver.projectName(forCwd: record.project) ?? record.project
             if let prior = merged[key] {
                 if record.outputTokens > prior.outputTokens {
                     merged[key] = record
@@ -141,14 +144,12 @@ public final class ClaudeTranscriptScanner {
         let timestamp = (root["timestamp"] as? String).flatMap {
             isoFormatter.date(from: $0)
         } ?? Date()
-        let project = (root["cwd"] as? String).map {
-            URL(fileURLWithPath: $0).lastPathComponent
-        }
 
         return (key, UsageRecord(
             source: .claude,
             model: model,
-            project: project,
+            // 暂存原始 cwd，scanFile 经 ProjectResolver 归组为仓库名
+            project: root["cwd"] as? String,
             timestamp: timestamp,
             inputTokens: input,
             outputTokens: output,

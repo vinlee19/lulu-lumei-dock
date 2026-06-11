@@ -9,6 +9,7 @@ import EurekaStore
 public final class CodexUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
+    private let projectResolver = ProjectResolver()
     /// 回看天数：与去重键剪枝窗口一致
     private let lookbackDays = 8
 
@@ -90,7 +91,7 @@ public final class CodexUsageScanner {
 
             if type == "session_meta" {
                 if let cwd = payload["cwd"] as? String {
-                    extra.project = URL(fileURLWithPath: cwd).lastPathComponent
+                    extra.project = projectResolver.projectName(forCwd: cwd)
                 }
                 continue
             }
@@ -99,7 +100,7 @@ public final class CodexUsageScanner {
                     extra.model = model
                 }
                 if let cwd = payload["cwd"] as? String {
-                    extra.project = URL(fileURLWithPath: cwd).lastPathComponent
+                    extra.project = projectResolver.projectName(forCwd: cwd)
                 }
                 continue
             }

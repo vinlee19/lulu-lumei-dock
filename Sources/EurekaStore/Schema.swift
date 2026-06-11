@@ -1,7 +1,8 @@
 import Foundation
 
 enum Schema {
-    static let version: Int64 = 3
+    /// v4：项目名按仓库根归组（ProjectResolver），派生表重建全量重扫
+    static let version: Int64 = 4
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0

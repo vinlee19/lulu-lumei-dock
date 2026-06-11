@@ -82,12 +82,17 @@ final class IslandViewModel: ObservableObject {
 
     func setHovering(_ value: Bool) {
         hovering = value
-        switch display {
-        case .card(.finished), .taskList:
-            value ? cancelAutoDismiss() : scheduleAutoDismiss()
-        default:
-            break
+        if !value {
+            hoverExtensions = 0
+            // 真正移开后正常计时收起
+            switch display {
+            case .card(.finished), .taskList:
+                scheduleAutoDismiss()
+            default:
+                break
+            }
         }
+        // 悬停中不取消定时器：靠续期机制暂停（防 mouseExited 丢失永久卡死）
     }
 
     // MARK: - 投影
@@ -147,12 +152,16 @@ final class IslandViewModel: ObservableObject {
     // MARK: - 内部
 
     private func refresh(collapseTaskList: Bool = false) {
-        if case .taskList = display, !collapseTaskList {
-            // 任务列表展开期间不被状态刷新打断（除非有新卡）
-            if queue.current == nil {
-                queuedCount = queue.pendingCount
-                return
+        if case .taskList = display, !collapseTaskList,
+           queue.current == nil,
+           !(activeTasks.isEmpty && idleTasks.isEmpty) {
+            // 任务列表展开期间不被状态刷新打断（除非有新卡/列表已空）
+            queuedCount = queue.pendingCount
+            if dismissTimer == nil {
+                // 自愈：任何状态变化都确保收起定时器在走（防 hover 卡死）
+                scheduleAutoDismiss()
             }
+            return
         }
         if let card = queue.current {
             setDisplay(.card(card))
@@ -178,15 +187,27 @@ final class IslandViewModel: ObservableObject {
         onDisplayChange?(new)
     }
 
+    /// 悬停时收起被"续期"而非取消：mouseExited 可能被 performDrag 等吞掉导致
+    /// hover 永久卡住——续期 + 硬上限保证岛绝不会停在旧内容上（曾导致整夜不更新）。
+    private var hoverExtensions = 0
+    private let maxHoverExtensions = 5
+
     private func scheduleAutoDismiss() {
         cancelAutoDismiss()
-        guard !hovering else { return }
         dismissTimer = Timer.scheduledTimer(
             withTimeInterval: autoDismissSeconds, repeats: false
         ) { [weak self] _ in
             // Timer 回调在主 runloop
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.dismissTimer = nil
+                if self.hovering && self.hoverExtensions < self.maxHoverExtensions {
+                    // 用户在看：续期；超上限视为 hover 状态卡死，强制收起
+                    self.hoverExtensions += 1
+                    self.scheduleAutoDismiss()
+                    return
+                }
+                self.hoverExtensions = 0
                 switch self.display {
                 case .card: self.advanceCard()
                 case .taskList: self.refresh(collapseTaskList: true)

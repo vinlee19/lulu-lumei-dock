@@ -53,15 +53,19 @@ public final class TaskStore {
 
         case .taskFinished(let outcome, let title, let detail):
             let existing = activeTasks[key]
-            let wasActive = existing.map { task in
-                if case .idle = task.phase { return false } else { return true }
-            } ?? false
+            if var task = existing, case .idle = task.phase {
+                // 已收尾会话的重复完成信号（hooks 与 transcript 监视双源）：
+                // 刷新活性即可，绝不重复出卡/写历史
+                task.lastActivityAt = event.timestamp
+                activeTasks[key] = task
+                return []
+            }
             let finished = FinishedTask(
                 source: event.source,
                 sessionId: event.sessionId,
                 title: title ?? existing?.title,
                 cwd: event.cwd ?? existing?.cwd,
-                startedAt: wasActive ? existing?.startedAt : nil,
+                startedAt: existing?.startedAt,
                 finishedAt: event.timestamp,
                 outcome: outcome,
                 detail: detail

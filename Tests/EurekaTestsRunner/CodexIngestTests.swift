@@ -265,6 +265,82 @@ func sessionBootstrapTests(_ t: TestRunner) {
     }
 }
 
+func transcriptWatcherTests(_ t: TestRunner) {
+    t.suite("ClaudeTranscriptWatcher")
+
+    t.test("无 hooks 会话全生命周期：发现运行 → 收尾完成（只一次）") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-watch-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-pipeline")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("s1.jsonl")
+        try FileManager.default.copyItem(
+            at: fixtureURL("claude-transcript-running.jsonl"), to: file)
+        // copyItem 保留源 mtime（可能很旧）→ 刷成现在，落进活跃窗
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: file.path)
+
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root) { event, _ in
+            events.append(event)
+        }
+
+        watcher.scanOnce()
+        guard case .taskStarted(let title) = events.first?.kind else {
+            throw ExpectationError(description: "首扫应发现运行中: \(events)")
+        }
+        try expectEqual(title, "重构数据管道的增量加载逻辑")
+
+        // 追加 turn 结束标记（mtime 强制前移，文件系统秒级粒度防 flake）
+        events.removeAll()
+        let endLine = """
+        {"type":"system","subtype":"turn_duration","durationMs":30000,"timestamp":"2026-06-09T10:00:30.000Z","uuid":"u-2009","sessionId":"fixture-running-1","cwd":"/Users/me/work/pipeline"}
+
+        """
+        let handle = try FileHandle(forWritingTo: file)
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: Data(endLine.utf8))
+        try handle.close()
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: file.path)
+
+        watcher.scanOnce()
+        let finishes = events.filter {
+            if case .taskFinished = $0.kind { return true } else { return false }
+        }
+        try expectEqual(finishes.count, 1, "收尾应产出恰好一次完成: \(events)")
+
+        // 无新写入：不再产出
+        events.removeAll()
+        watcher.scanOnce()
+        try expect(events.isEmpty, "无变化不该有事件: \(events)")
+    }
+
+    t.test("空闲会话首见登记 sessionStarted") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-watch-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let idleFile = dir.appendingPathComponent("s2.jsonl")
+        try FileManager.default.copyItem(
+            at: fixtureURL("claude-transcript-usage-dups.jsonl"), to: idleFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: idleFile.path)
+
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root) { event, _ in
+            events.append(event)
+        }
+        watcher.scanOnce()
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "应登记空闲: \(events)")
+        }
+        try expect(events.contains {
+            $0.kind == .titleUpdate(title: "修复登录页 Safari 兼容性报错")
+        }, "ai-title 应跟上")
+    }
+}
+
 func errorSnifferTests(_ t: TestRunner) {
     t.suite("ClaudeErrorSniffer")
 

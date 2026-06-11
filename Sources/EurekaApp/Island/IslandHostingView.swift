@@ -49,7 +49,13 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
         let dy = event.locationInWindow.y - start.y
         if dx * dx + dy * dy > 16 {
             didDrag = true
-            // 交给窗口服务器拖动整个 panel（位置持久化在控制器的 didMove 观察里）
+            // 交给窗口服务器拖动整个 panel（位置持久化在控制器的 didMove 观察里）。
+            // performDrag 会吞掉后续 mouseUp/mouseExited——必须手动复位 hover，
+            // 否则自动收起被永久暂停，岛停在旧内容上（曾导致整夜不更新）
+            if insideInteractive {
+                insideInteractive = false
+                onHoverChange(false)
+            }
             window?.performDrag(with: event)
         }
     }

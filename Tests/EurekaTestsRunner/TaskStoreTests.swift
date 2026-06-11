@@ -102,6 +102,17 @@ func taskStoreTests(_ t: TestRunner) {
         try expect(store.sortedIdleTasks.isEmpty)
     }
 
+    t.test("双源完成去重：空闲会话再收到完成信号不出卡") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "任务"), at: 100))
+        store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 150))
+        // transcript 监视器随后也报完成（双源）→ 抑制
+        try expectEqual(
+            store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 155)),
+            [])
+        try expectEqual(store.sortedIdleTasks.count, 1, "会话仍是空闲，不被移除")
+    }
+
     t.test("空闲会话再提交 prompt：计时重置、标题换新") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "第一轮"), at: 100))

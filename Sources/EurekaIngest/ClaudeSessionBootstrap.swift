@@ -43,20 +43,62 @@ public enum ClaudeSessionBootstrap {
         return events
     }
 
+    /// 会话现场快照（尾窗分类结果）
+    public struct Snapshot: Equatable {
+        public var sessionId: String
+        public var cwd: String?
+        public var running: Bool
+        public var promptAt: Date?
+        public var promptText: String?
+        public var turnEndAt: Date?
+        public var aiTitle: String?
+        public var contextPercent: Double?
+        public var earliestAt: Date?
+    }
+
     /// 单个 transcript 的现场判定（公开供测试）。
-    /// 尾窗要够大：长 turn 期间真实 prompt 可能在数百 KB 之外。
     public static func inspectSession(
         fileURL: URL, mtime: Date, tailBytes: Int = 262144
     ) -> [TaskEvent] {
+        guard let snapshot = classify(fileURL: fileURL, tailBytes: tailBytes) else { return [] }
+
+        func event(_ kind: TaskEvent.Kind, at date: Date) -> TaskEvent {
+            TaskEvent(
+                source: .claude, sessionId: snapshot.sessionId, kind: kind,
+                timestamp: date, cwd: snapshot.cwd, transcriptPath: fileURL.path)
+        }
+
+        var events: [TaskEvent] = []
+        if snapshot.running {
+            let title = snapshot.promptText.flatMap { summarizeTitle($0) }
+            // 开始时间：prompt 时间 → 尾窗最早时间（至少不低估时长）→ mtime
+            events.append(event(
+                .taskStarted(title: title),
+                at: snapshot.promptAt ?? snapshot.earliestAt ?? mtime))
+        } else {
+            events.append(event(.sessionStarted, at: mtime))
+        }
+        if let aiTitle = snapshot.aiTitle {
+            events.append(event(.titleUpdate(title: aiTitle), at: mtime))
+        }
+        if let percent = snapshot.contextPercent {
+            events.append(event(.contextUpdate(percent: percent), at: mtime))
+        }
+        return events
+    }
+
+    /// 尾窗分类：turn 是否在飞行中。
+    /// 尾窗要够大：长 turn 期间真实 prompt 可能在数百 KB 之外。
+    public static func classify(fileURL: URL, tailBytes: Int = 262144) -> Snapshot? {
         guard
             let handle = FileHandle(forReadingAtPath: fileURL.path),
             let size = try? handle.seekToEnd(), size > 0
-        else { return [] }
+        else { return nil }
         defer { try? handle.close() }
         let length = min(size, UInt64(tailBytes))
         guard (try? handle.seek(toOffset: size - length)) != nil,
               let data = try? handle.readToEnd()
-        else { return [] }
+        else { return nil }
 
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -132,7 +174,7 @@ public enum ClaudeSessionBootstrap {
             }
         }
 
-        guard let sessionId else { return [] }
+        guard let sessionId else { return nil }
         let running: Bool
         if let promptAt = lastPromptAt {
             // prompt 可见：之后没有结束标记 → 在飞行中
@@ -145,27 +187,16 @@ public enum ClaudeSessionBootstrap {
             running = hasMainChainActivity
         }
 
-        func event(_ kind: TaskEvent.Kind, at date: Date) -> TaskEvent {
-            TaskEvent(
-                source: .claude, sessionId: sessionId, kind: kind,
-                timestamp: date, cwd: cwd, transcriptPath: fileURL.path)
-        }
-
-        var events: [TaskEvent] = []
-        if running {
-            let title = lastPromptText.flatMap { summarizeTitle($0) }
-            // 开始时间：prompt 时间 → 尾窗最早时间（至少不低估时长）→ mtime
-            events.append(event(
-                .taskStarted(title: title), at: lastPromptAt ?? earliestAt ?? mtime))
-        } else {
-            events.append(event(.sessionStarted, at: mtime))
-        }
-        if let aiTitle {
-            events.append(event(.titleUpdate(title: aiTitle), at: mtime))
-        }
-        if let contextPercent {
-            events.append(event(.contextUpdate(percent: contextPercent), at: mtime))
-        }
-        return events
+        return Snapshot(
+            sessionId: sessionId,
+            cwd: cwd,
+            running: running,
+            promptAt: lastPromptAt,
+            promptText: lastPromptText,
+            turnEndAt: lastTurnEndAt,
+            aiTitle: aiTitle,
+            contextPercent: contextPercent,
+            earliestAt: earliestAt
+        )
     }
 }
