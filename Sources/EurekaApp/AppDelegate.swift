@@ -37,6 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$autoDismissSeconds
             .sink { [weak island] seconds in island?.viewModel.autoDismissSeconds = seconds }
             .store(in: &cancellables)
+        island.viewModel.showStartTime = settings.showStartTime
+        settings.$showStartTime
+            .sink { [weak island] value in island?.viewModel.showStartTime = value }
+            .store(in: &cancellables)
+        island.viewModel.onToggleTimeMode = { [weak settings] in
+            settings?.showStartTime.toggle()
+        }
 
         // 首次启动：引导到设置页一键安装
         if !UserDefaults.standard.bool(forKey: "didOnboard") {

@@ -31,6 +31,8 @@ final class IslandPanelController {
             defer: false
         )
         panel.isFloatingPanel = true
+        // 非激活面板里的控件需要它才能正常响应点击
+        panel.becomesKeyOnlyIfNeeded = true
         // 比状态栏高一级：刘海屏上要盖住菜单栏区域才能与刘海融合
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.collectionBehavior = [

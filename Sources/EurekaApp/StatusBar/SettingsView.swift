@@ -38,6 +38,7 @@ struct SettingsView: View {
                             .font(.system(size: 11).monospacedDigit())
                             .frame(width: 36, alignment: .trailing)
                     }
+                    Toggle("显示任务开始时间（而非已持续时长）", isOn: $settings.showStartTime)
                 }
 
                 section("灵动岛位置") {

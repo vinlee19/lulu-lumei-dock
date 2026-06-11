@@ -67,7 +67,7 @@ struct IslandRootView: View {
                 tasks: viewModel.activeTasks,
                 idleTasks: viewModel.idleTasks,
                 showStartTime: viewModel.showStartTime,
-                onToggleTimeMode: { viewModel.showStartTime.toggle() }
+                onToggleTimeMode: { viewModel.onToggleTimeMode?() }
             )
         }
     }

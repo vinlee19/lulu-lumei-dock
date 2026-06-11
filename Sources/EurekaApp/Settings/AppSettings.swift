@@ -16,6 +16,10 @@ final class AppSettings: ObservableObject {
     @Published var autoDismissSeconds: Double {
         didSet { defaults.set(autoDismissSeconds, forKey: "autoDismissSeconds") }
     }
+    /// 岛上时间显示：false=已持续时长，true=开始的日期时间
+    @Published var showStartTime: Bool {
+        didSet { defaults.set(showStartTime, forKey: "islandShowStartTime") }
+    }
     @Published private(set) var launchAtLogin: Bool
     @Published private(set) var launchAtLoginHint: String?
 
@@ -26,6 +30,7 @@ final class AppSettings: ObservableObject {
         notifyWaiting = defaults.object(forKey: "notifyWaiting") as? Bool ?? true
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
         autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
+        showStartTime = defaults.bool(forKey: "islandShowStartTime")
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
