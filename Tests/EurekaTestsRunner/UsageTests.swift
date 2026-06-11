@@ -134,6 +134,31 @@ func claudeScannerTests(_ t: TestRunner) {
         try expect(bySession["ghost"] == nil)
     }
 
+    t.test("对话数统计：真实 prompt 计数、增量累加、tool_result 不算") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-claude-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        let file = try copyFixtureToTemp(
+            "claude-transcript-running.jsonl", as: "sess-42.jsonl", in: dir)
+        let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
+        _ = try scanner.scanOnce()
+        // running fixture：1 条真实 prompt + 1 条 tool_result（不算）
+        try expectEqual(try store.sessionStats.promptCounts(for: ["sess-42"]), ["sess-42": 1])
+
+        // 追加一条新 prompt → 增量累加
+        let newPrompt = """
+        {"type":"user","message":{"role":"user","content":"再跑一次"},"uuid":"u-p2","timestamp":"2026-06-09T11:00:00.000Z","sessionId":"sess-42","cwd":"/Users/me/work/pipeline"}
+
+        """
+        let handle = try FileHandle(forWritingTo: file)
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: Data(newPrompt.utf8))
+        try handle.close()
+        _ = try scanner.scanOnce()
+        try expectEqual(try store.sessionStats.promptCounts(for: ["sess-42"]), ["sess-42": 2])
+    }
+
     t.test("synthetic 错误行不记用量") {
         let store = try makeStore()
         let root = FileManager.default.temporaryDirectory

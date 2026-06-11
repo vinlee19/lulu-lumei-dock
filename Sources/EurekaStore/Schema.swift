@@ -1,8 +1,8 @@
 import Foundation
 
 enum Schema {
-    /// v5：usage_records 增加 session_id（会话级费用），派生表重建全量重扫
-    static let version: Int64 = 5
+    /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
+    static let version: Int64 = 6
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -13,6 +13,7 @@ enum Schema {
             DROP TABLE IF EXISTS dedup_keys;
             DROP TABLE IF EXISTS scan_files;
             DROP TABLE IF EXISTS usage_records;
+            DROP TABLE IF EXISTS session_stats;
             """)
         }
         try db.execute("""
@@ -53,6 +54,15 @@ enum Schema {
             offset INTEGER NOT NULL DEFAULT 0,
             extra TEXT
         );
+
+        -- 每会话对话数（真实用户 prompt 行计数；path 为主键以支持截断重扫归零）
+        CREATE TABLE IF NOT EXISTS session_stats (
+            path TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            prompts INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_stats_session
+            ON session_stats(session_id);
 
         -- 跨文件用量去重键（claude: requestId+message.id），按时间窗剪枝。
         -- record_id/output_tokens：流式重复行的 output 递增，

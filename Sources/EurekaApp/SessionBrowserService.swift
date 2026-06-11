@@ -29,6 +29,8 @@ final class SessionBrowserService: ObservableObject {
 
     @Published private(set) var groups: [ProjectGroup] = []
     @Published private(set) var costs: [String: SessionCost] = [:]
+    /// 每会话对话数
+    @Published private(set) var promptCounts: [String: Int] = [:]
     @Published private(set) var scanning = false
     @Published var sortMode: SortMode = .time {
         didSet { rebuild() }
@@ -80,9 +82,13 @@ final class SessionBrowserService: ObservableObject {
                 }
             }
 
+            let prompts = (try? self.store?.sessionStats.promptCounts(
+                for: indexed.map(\.id))) ?? [:]
+
             DispatchQueue.main.async {
                 self.sessions = indexed
                 self.costs = costMap
+                self.promptCounts = prompts
                 self.scanning = false
                 self.rebuild()
             }

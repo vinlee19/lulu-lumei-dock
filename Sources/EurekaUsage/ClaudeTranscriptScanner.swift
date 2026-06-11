@@ -62,11 +62,18 @@ public final class ClaudeTranscriptScanner {
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
 
-        // 批内合并：同 key 的流式重复行 output 递增，保留最大（最终）值
+        // 批内合并：同 key 的流式重复行 output 递增，保留最大（最终）值；
+        // 顺路数真实用户 prompt（对话数，零额外 IO）
         var merged: [String: UsageRecord] = [:]
         var order: [String] = []
+        var promptCount = 0
         for line in chunk.lines {
-            guard var (key, record) = Self.parseAssistantLine(line) else { continue }
+            guard
+                let object = try? JSONSerialization.jsonObject(with: line),
+                let root = object as? [String: Any]
+            else { continue }
+            if Self.isRealPrompt(root) { promptCount += 1 }
+            guard var (key, record) = Self.parseAssistantLine(root) else { continue }
             // 项目名按仓库根归组（子目录/子模块的会话归到仓库名下）
             record.project = projectResolver.projectName(forCwd: record.project) ?? record.project
             if let prior = merged[key] {
@@ -106,15 +113,28 @@ public final class ClaudeTranscriptScanner {
             try store.scanState.setFileState(
                 path: path,
                 .init(inode: info.inode, offset: Int64(chunk.newOffset)))
+            // 会话 = 文件（文件名即 session id）；offset==0 是全量重扫 → 覆盖而非累加
+            try store.sessionStats.recordPrompts(
+                path: path,
+                sessionId: url.deletingPathExtension().lastPathComponent,
+                count: promptCount,
+                reset: offset == 0)
         }
         return newCount
     }
 
+    /// 真实用户 prompt（对话轮次）：非 meta、content 是字符串（tool_result 是数组）
+    static func isRealPrompt(_ root: [String: Any]) -> Bool {
+        guard root["type"] as? String == "user",
+              root["isMeta"] as? Bool != true,
+              let message = root["message"] as? [String: Any]
+        else { return false }
+        return message["content"] is String
+    }
+
     /// assistant 行 → (去重键, 用量记录)；synthetic 错误行与非 assistant 行返回 nil
-    static func parseAssistantLine(_ line: Data) -> (key: String, record: UsageRecord)? {
+    static func parseAssistantLine(_ root: [String: Any]) -> (key: String, record: UsageRecord)? {
         guard
-            let object = try? JSONSerialization.jsonObject(with: line),
-            let root = object as? [String: Any],
             root["type"] as? String == "assistant",
             let message = root["message"] as? [String: Any],
             let model = message["model"] as? String,

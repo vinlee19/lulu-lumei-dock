@@ -65,6 +65,7 @@ struct SessionsView: View {
                                     SessionRow(
                                         session: session,
                                         cost: service.costs[session.id],
+                                        promptCount: service.promptCounts[session.id],
                                         service: service
                                     )
                                     .padding(.leading, 14)
@@ -125,6 +126,7 @@ private struct ProjectHeaderRow: View {
 private struct SessionRow: View {
     let session: AgentSessionInfo
     let cost: SessionBrowserService.SessionCost?
+    var promptCount: Int?
     let service: SessionBrowserService
     @State private var copied = false
 
@@ -150,6 +152,11 @@ private struct SessionRow: View {
                         for: session.lastActiveAt, relativeTo: Date()))
                     Text("·")
                     Text(formatBytes(session.sizeBytes))
+                    if let promptCount, promptCount > 0 {
+                        Text("·")
+                        Text("\(promptCount) 段对话")
+                            .foregroundStyle(.secondary)
+                    }
                     if let cost {
                         Text("·")
                         Text(formatTokens(cost.totalTokens) + " tok")

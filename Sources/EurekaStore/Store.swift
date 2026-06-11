@@ -7,6 +7,7 @@ public final class EurekaStore {
     public let history: TaskHistoryRepo
     public let usage: UsageRepo
     public let scanState: ScanStateRepo
+    public let sessionStats: SessionStatsRepo
 
     public init(path: URL) throws {
         try FileManager.default.createDirectory(
@@ -16,6 +17,7 @@ public final class EurekaStore {
         history = TaskHistoryRepo(db: db)
         usage = UsageRepo(db: db)
         scanState = ScanStateRepo(db: db)
+        sessionStats = SessionStatsRepo(db: db)
     }
 
     /// 默认 ~/Library/Application Support/Eureka/eureka.sqlite（EUREKA_DB_PATH 覆盖）
@@ -260,6 +262,50 @@ public struct UsageTotals: Equatable, Sendable {
         self.cacheCreation1hTokens = cacheCreation1hTokens
         self.cacheReadTokens = cacheReadTokens
         self.requestCount = requestCount
+    }
+}
+
+/// 每会话对话数（用量扫描器顺路计数）
+public final class SessionStatsRepo {
+    private let db: SQLiteDB
+
+    init(db: SQLiteDB) {
+        self.db = db
+    }
+
+    /// reset=true（全量重扫该文件）时覆盖，否则累加
+    public func recordPrompts(path: String, sessionId: String, count: Int, reset: Bool) throws {
+        if reset {
+            try db.run("""
+            INSERT OR REPLACE INTO session_stats (path, session_id, prompts) VALUES (?,?,?)
+            """, [.text(path), .text(sessionId), .int(Int64(count))])
+        } else {
+            guard count > 0 else { return }
+            try db.run("""
+            INSERT INTO session_stats (path, session_id, prompts) VALUES (?,?,?)
+            ON CONFLICT(path) DO UPDATE SET prompts = prompts + excluded.prompts
+            """, [.text(path), .text(sessionId), .int(Int64(count))])
+        }
+    }
+
+    /// 给定会话集合的对话数
+    public func promptCounts(for ids: [String]) throws -> [String: Int] {
+        var result: [String: Int] = [:]
+        for chunk in stride(from: 0, to: ids.count, by: 500).map({
+            Array(ids[$0..<min($0 + 500, ids.count)])
+        }) {
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let rows = try db.query("""
+            SELECT session_id, SUM(prompts) FROM session_stats
+            WHERE session_id IN (\(placeholders)) GROUP BY session_id
+            """, chunk.map { .text($0) }) { row -> (String, Int) in
+                (row.text(0) ?? "", Int(row.int(1)))
+            }
+            for (id, count) in rows {
+                result[id] = count
+            }
+        }
+        return result
     }
 }
 

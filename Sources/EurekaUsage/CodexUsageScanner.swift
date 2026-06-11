@@ -82,6 +82,7 @@ public final class CodexUsageScanner {
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
 
         var records: [UsageRecord] = []
+        var promptCount = 0
         for line in chunk.lines {
             guard
                 let object = try? JSONSerialization.jsonObject(with: line),
@@ -106,6 +107,10 @@ public final class CodexUsageScanner {
                 if let cwd = payload["cwd"] as? String {
                     extra.project = projectResolver.projectName(forCwd: cwd)
                 }
+                continue
+            }
+            if type == "event_msg", payload["type"] as? String == "user_message" {
+                promptCount += 1
                 continue
             }
             guard type == "event_msg",
@@ -157,6 +162,11 @@ public final class CodexUsageScanner {
             try store.scanState.setFileState(
                 path: path,
                 .init(inode: info.inode, offset: Int64(chunk.newOffset), extra: extraJSON))
+            if let sessionId = extra.sessionId {
+                try store.sessionStats.recordPrompts(
+                    path: path, sessionId: sessionId,
+                    count: promptCount, reset: offset == 0)
+            }
             newCount = records.count
         }
         return newCount
