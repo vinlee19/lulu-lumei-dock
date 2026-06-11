@@ -65,6 +65,22 @@ struct SettingsView: View {
                     }
                 }
 
+                section("健康提示") {
+                    Toggle("vibe coding 过久 / 会话过多 / 深夜时给我贴心提醒", isOn: $settings.wellnessEnabled)
+                    if settings.wellnessEnabled {
+                        HStack {
+                            Text("连续活跃")
+                            Slider(value: $settings.wellnessThresholdHours, in: 1...4, step: 0.5)
+                            Text(String(format: "%.1f 小时", settings.wellnessThresholdHours))
+                                .font(.system(size: 11).monospacedDigit())
+                                .frame(width: 52, alignment: .trailing)
+                        }
+                        Text("提醒后每小时最多再提醒一次；并发 ≥5 个会话、23 点后还在跑任务也会轻声提示。")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
                 section("数据健康") {
                     HealthSection()
                 }

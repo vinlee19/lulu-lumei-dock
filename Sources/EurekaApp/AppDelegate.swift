@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
+    private var wellnessMonitor: WellnessMonitor?
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -44,6 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         island.viewModel.onToggleTimeMode = { [weak settings] in
             settings?.showStartTime.toggle()
         }
+
+        // 健康提示：vibe coding 过久/会话过多/深夜关怀
+        let wellness = WellnessMonitor(settings: settings, store: store) { [weak island] notice in
+            island?.viewModel.enqueueNotice(notice)
+        }
+        wellness.start()
+        wellnessMonitor = wellness
 
         // 首次启动：引导到设置页一键安装
         if !UserDefaults.standard.bool(forKey: "didOnboard") {

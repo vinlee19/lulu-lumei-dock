@@ -6,6 +6,8 @@ public struct IslandState: Equatable, Sendable {
     public enum Card: Equatable, Sendable {
         case finished(FinishedTask)
         case waiting(AgentTask)
+        /// 健康提示等关怀类通知
+        case notice(IslandNotice)
     }
 
     /// 进行中任务（含 waiting），按开始时间排序

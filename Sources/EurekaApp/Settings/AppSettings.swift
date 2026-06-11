@@ -20,6 +20,14 @@ final class AppSettings: ObservableObject {
     @Published var showStartTime: Bool {
         didSet { defaults.set(showStartTime, forKey: "islandShowStartTime") }
     }
+    /// 健康提示（连续过久/会话过多/深夜关怀）
+    @Published var wellnessEnabled: Bool {
+        didSet { defaults.set(wellnessEnabled, forKey: "wellnessEnabled") }
+    }
+    /// 连续活跃多少小时后提醒
+    @Published var wellnessThresholdHours: Double {
+        didSet { defaults.set(wellnessThresholdHours, forKey: "wellnessThresholdHours") }
+    }
     @Published private(set) var launchAtLogin: Bool
     @Published private(set) var launchAtLoginHint: String?
 
@@ -31,6 +39,8 @@ final class AppSettings: ObservableObject {
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
         autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
         showStartTime = defaults.bool(forKey: "islandShowStartTime")
+        wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true
+        wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

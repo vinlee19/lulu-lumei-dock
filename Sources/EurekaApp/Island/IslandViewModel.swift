@@ -71,6 +71,11 @@ final class IslandViewModel: ObservableObject {
         refresh()
     }
 
+    func enqueueNotice(_ notice: IslandNotice) {
+        queue.enqueue(.notice(notice))
+        refresh()
+    }
+
     func islandTapped() {
         switch display {
         case .compact:
@@ -91,7 +96,7 @@ final class IslandViewModel: ObservableObject {
             hoverExtensions = 0
             // 真正移开后正常计时收起
             switch display {
-            case .card(.finished), .taskList:
+            case .card(.finished), .card(.notice), .taskList:
                 scheduleAutoDismiss()
             default:
                 break
@@ -173,6 +178,7 @@ final class IslandViewModel: ObservableObject {
             switch card {
             case .finished: scheduleAutoDismiss()
             case .waiting: cancelAutoDismiss()  // 等待卡常驻到任务恢复/手动点掉
+            case .notice: scheduleAutoDismiss(extraSeconds: 5)  // 关怀文案给足阅读时间
             }
         } else {
             setDisplay(activeTasks.isEmpty ? .hidden : .compact)
@@ -197,10 +203,10 @@ final class IslandViewModel: ObservableObject {
     private var hoverExtensions = 0
     private let maxHoverExtensions = 5
 
-    private func scheduleAutoDismiss() {
+    private func scheduleAutoDismiss(extraSeconds: TimeInterval = 0) {
         cancelAutoDismiss()
         dismissTimer = Timer.scheduledTimer(
-            withTimeInterval: autoDismissSeconds, repeats: false
+            withTimeInterval: autoDismissSeconds + extraSeconds, repeats: false
         ) { [weak self] _ in
             // Timer 回调在主 runloop
             MainActor.assumeIsolated {
@@ -235,6 +241,7 @@ final class IslandViewModel: ObservableObject {
         case .compact: name = "compact"
         case .card(.finished(let task)): name = "card-finished(\(task.outcome.rawValue))"
         case .card(.waiting): name = "card-waiting"
+        case .card(.notice): name = "card-notice"
         case .taskList: name = "taskList"
         }
         print("[eureka] island=\(name)")

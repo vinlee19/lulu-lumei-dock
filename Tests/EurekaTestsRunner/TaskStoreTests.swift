@@ -177,6 +177,97 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.sortedActiveTasks[0].sessionStartedAt, ts(500))
     }
 
+    t.test("WellnessAdvisor：阈值触发、每小时冷却、歇够重置") {
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone.current
+        // 用白天时间避免误触深夜规则
+        let base = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11, hour: 14))!
+        func input(streakHours: Double?, at offset: TimeInterval = 0) -> WellnessAdvisor.Input {
+            WellnessAdvisor.Input(
+                now: base.addingTimeInterval(offset),
+                streakStartAt: streakHours.map {
+                    base.addingTimeInterval(offset - $0 * 3600)
+                },
+                activeSessionCount: 1, aliveSessionCount: 1)
+        }
+        let pickFirst: (Int) -> Int = { _ in 0 }
+
+        // 未达阈值不提醒
+        var state = WellnessAdvisor.State()
+        var result = WellnessAdvisor.evaluate(
+            input(streakHours: 1.5), state: state, calendar: calendar, pick: pickFirst)
+        try expect(result.notices.isEmpty)
+
+        // 达阈值提醒一次
+        result = WellnessAdvisor.evaluate(
+            input(streakHours: 2.1), state: result.state, calendar: calendar, pick: pickFirst)
+        try expectEqual(result.notices.count, 1)
+        try expect(result.notices[0].headline.contains("2 小时"), result.notices[0].headline)
+
+        // 10 分钟后仍在阈值上：冷却期内不重复
+        result = WellnessAdvisor.evaluate(
+            input(streakHours: 2.3, at: 600), state: result.state,
+            calendar: calendar, pick: pickFirst)
+        try expect(result.notices.isEmpty, "冷却期内不应重复")
+
+        // 1 小时后再次提醒
+        result = WellnessAdvisor.evaluate(
+            input(streakHours: 3.2, at: 3700), state: result.state,
+            calendar: calendar, pick: pickFirst)
+        try expectEqual(result.notices.count, 1)
+
+        // 歇下来（无活跃段）→ 状态重置，下个段重新计
+        result = WellnessAdvisor.evaluate(
+            input(streakHours: nil, at: 7200), state: result.state,
+            calendar: calendar, pick: pickFirst)
+        try expect(result.state.lastDurationRemindAt == nil)
+    }
+
+    t.test("WellnessAdvisor：会话过多冷却、深夜每晚一次、总开关") {
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone.current
+        let day = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11, hour: 14))!
+        let night = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11, hour: 23, minute: 30))!
+        let pickFirst: (Int) -> Int = { _ in 0 }
+
+        // 会话过多
+        var result = WellnessAdvisor.evaluate(
+            WellnessAdvisor.Input(
+                now: day, streakStartAt: nil, activeSessionCount: 2, aliveSessionCount: 6),
+            state: .init(), calendar: calendar, pick: pickFirst)
+        try expectEqual(result.notices.count, 1)
+        try expect(result.notices[0].headline.contains("6 个会话"))
+        // 冷却期内不重复
+        result = WellnessAdvisor.evaluate(
+            WellnessAdvisor.Input(
+                now: day.addingTimeInterval(600), streakStartAt: nil,
+                activeSessionCount: 2, aliveSessionCount: 7),
+            state: result.state, calendar: calendar, pick: pickFirst)
+        try expect(result.notices.isEmpty)
+
+        // 深夜有任务 → 一次；同晚不再
+        result = WellnessAdvisor.evaluate(
+            WellnessAdvisor.Input(
+                now: night, streakStartAt: nil, activeSessionCount: 1, aliveSessionCount: 1),
+            state: .init(), calendar: calendar, pick: pickFirst)
+        try expectEqual(result.notices.count, 1)
+        try expect(result.notices[0].emoji == "🌙")
+        result = WellnessAdvisor.evaluate(
+            WellnessAdvisor.Input(
+                now: night.addingTimeInterval(3600),  // 凌晨 0:30 仍算同一晚
+                streakStartAt: nil, activeSessionCount: 1, aliveSessionCount: 1),
+            state: result.state, calendar: calendar, pick: pickFirst)
+        try expect(result.notices.isEmpty, "同一晚不应重复")
+
+        // 总开关关闭：什么都不发
+        result = WellnessAdvisor.evaluate(
+            WellnessAdvisor.Input(
+                now: night, streakStartAt: night.addingTimeInterval(-10 * 3600),
+                activeSessionCount: 9, aliveSessionCount: 9, enabled: false),
+            state: .init(), calendar: calendar, pick: pickFirst)
+        try expect(result.notices.isEmpty)
+    }
+
     t.test("HealthRegistry：轮询型停摆判红、事件驱动不误报、失败降级") {
         let registry = HealthRegistry()
         registry.register("poller", expectedInterval: 2)

@@ -83,6 +83,14 @@ enum PreviewRenderer {
             $0.enqueueFinished(finished)
             $0.enqueueFinished(errored)
         }
+        snapshot("9-card-wellness", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.enqueueNotice(IslandNotice(
+                id: "preview",
+                emoji: "🧘",
+                headline: "连续 vibe coding 2 小时了",
+                body: "站起来伸个懒腰、喝口水吧——任务有我盯着。"))
+        }
         snapshot("8-tasklist", screen: notched) {
             var idle1 = AgentTask(
                 source: .claude, sessionId: "0a1b2c3d-idle", title: "Calcite 优化器调研",

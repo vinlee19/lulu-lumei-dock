@@ -141,10 +141,16 @@ struct ExpandedCardView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: iconName)
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 34)
+            if case .notice(let notice) = card {
+                Text(notice.emoji)
+                    .font(.system(size: 30))
+                    .frame(width: 34)
+            } else {
+                Image(systemName: iconName)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 34)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(headline)
@@ -178,6 +184,8 @@ struct ExpandedCardView: View {
         case .waiting(let task):
             if case .waiting(.permission, _) = task.phase { return "hand.raised.fill" }
             return "ellipsis.bubble.fill"
+        case .notice:
+            return "heart.fill"  // 不会走到（notice 渲染 emoji），兜底
         }
     }
 
@@ -190,6 +198,7 @@ struct ExpandedCardView: View {
             case .interrupted: return .gray
             }
         case .waiting: return .orange
+        case .notice: return .pink
         }
     }
 
@@ -209,6 +218,8 @@ struct ExpandedCardView: View {
         case .waiting(let task):
             if case .waiting(let reason, _) = task.phase { return reason.displayName }
             return "等待中"
+        case .notice(let notice):
+            return notice.headline
         }
     }
 
@@ -216,6 +227,7 @@ struct ExpandedCardView: View {
         switch card {
         case .finished(let task): return task.title ?? task.projectName
         case .waiting(let task): return taskDisplayName(task)
+        case .notice(let notice): return notice.body
         }
     }
 
@@ -232,6 +244,10 @@ struct ExpandedCardView: View {
             source = task.source
             project = task.projectName
             sessionId = task.sessionId
+        case .notice:
+            var parts = ["Eureka 健康提示"]
+            if queuedCount > 0 { parts.append("还有 \(queuedCount) 条通知") }
+            return parts.joined(separator: " · ")
         }
         var parts = [source.displayName]
         if let project { parts.append(project) }

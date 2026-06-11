@@ -21,7 +21,7 @@ public struct IslandCardQueue: Equatable, Sendable {
             } else {
                 pending.insert(card, at: 0)
             }
-        case .finished:
+        case .finished, .notice:
             if current == nil {
                 current = card
             } else {
