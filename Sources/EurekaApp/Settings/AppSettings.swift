@@ -20,6 +20,10 @@ final class AppSettings: ObservableObject {
     @Published var showStartTime: Bool {
         didSet { defaults.set(showStartTime, forKey: "islandShowStartTime") }
     }
+    /// 菜单栏标题显示限额百分比
+    @Published var menuBarShowsLimit: Bool {
+        didSet { defaults.set(menuBarShowsLimit, forKey: "menuBarShowsLimit") }
+    }
     /// 健康提示（连续过久/会话过多/深夜关怀）
     @Published var wellnessEnabled: Bool {
         didSet { defaults.set(wellnessEnabled, forKey: "wellnessEnabled") }
@@ -39,6 +43,7 @@ final class AppSettings: ObservableObject {
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
         autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
         showStartTime = defaults.bool(forKey: "islandShowStartTime")
+        menuBarShowsLimit = defaults.object(forKey: "menuBarShowsLimit") as? Bool ?? true
         wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
         launchAtLogin = SMAppService.mainApp.status == .enabled

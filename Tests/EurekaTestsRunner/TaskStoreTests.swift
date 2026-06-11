@@ -268,6 +268,45 @@ func taskStoreTests(_ t: TestRunner) {
         try expect(result.notices.isEmpty)
     }
 
+    t.test("StatusTitleComposer：取最大值、分档、回退") {
+        func snapshot(_ percent: Double?) -> RateLimitSnapshot? {
+            guard let percent else { return nil }
+            return RateLimitSnapshot(
+                source: .codex, asOf: Date(),
+                primary: RateLimitWindow(usedPercent: percent, windowMinutes: 300))
+        }
+        // 双源取最大
+        try expectEqual(
+            StatusTitleComposer.maxPrimaryPercent([snapshot(37), snapshot(22)]), 37)
+        try expectEqual(StatusTitleComposer.maxPrimaryPercent([nil, nil]), nil)
+
+        // 组装与分档
+        let normal = StatusTitleComposer.compose(
+            taskCount: 2, hasWaiting: false, maxUsedPercent: 37, showLimit: true)
+        try expectEqual(normal.combined, "▶2 · 37%")
+        try expectEqual(normal.tier, .normal)
+
+        let warning = StatusTitleComposer.compose(
+            taskCount: 1, hasWaiting: true, maxUsedPercent: 72.4, showLimit: true)
+        try expectEqual(warning.combined, "⏳1 · 72%")
+        try expectEqual(warning.tier, .warning)
+
+        let critical = StatusTitleComposer.compose(
+            taskCount: 0, hasWaiting: false, maxUsedPercent: 91, showLimit: true)
+        try expectEqual(critical.combined, "✦ · 91%")
+        try expectEqual(critical.tier, .critical)
+
+        // 无数据 / 开关关闭 → 回退纯计数
+        try expectEqual(
+            StatusTitleComposer.compose(
+                taskCount: 3, hasWaiting: false, maxUsedPercent: nil, showLimit: true).combined,
+            "▶3")
+        try expectEqual(
+            StatusTitleComposer.compose(
+                taskCount: 3, hasWaiting: false, maxUsedPercent: 50, showLimit: false).combined,
+            "▶3")
+    }
+
     t.test("HealthRegistry：轮询型停摆判红、事件驱动不误报、失败降级") {
         let registry = HealthRegistry()
         registry.register("poller", expectedInterval: 2)

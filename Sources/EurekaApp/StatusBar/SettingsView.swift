@@ -40,6 +40,7 @@ struct SettingsView: View {
                             .frame(width: 36, alignment: .trailing)
                     }
                     Toggle("显示任务开始时间（而非已持续时长）", isOn: $settings.showStartTime)
+                    Toggle("菜单栏显示限额百分比", isOn: $settings.menuBarShowsLimit)
                 }
 
                 section("灵动岛位置") {

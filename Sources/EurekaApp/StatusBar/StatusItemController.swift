@@ -1,16 +1,21 @@
 import AppKit
+import Combine
 import EurekaKit
 import SwiftUI
 
-/// 菜单栏：左键开 popover（历史/用量），右键菜单（退出）
+/// 菜单栏：左键开 popover（历史/用量），右键菜单（退出）；
+/// 标题 = 任务计数 + 限额百分比（取双源 5h 窗口最大值，60%/85% 变色）
 @MainActor
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
     private let usageService: UsageService
     private let limitsService: RateLimitsService
+    private let settings: AppSettings
     private let sessionBrowser = SessionBrowserService()
     private let navigation = PopoverNavigation()
+    private var lastTasks: [AgentTask] = []
+    private var cancellables: Set<AnyCancellable> = []
 
     init(
         usageService: UsageService,
@@ -20,6 +25,7 @@ final class StatusItemController: NSObject {
     ) {
         self.usageService = usageService
         self.limitsService = limitsService
+        self.settings = settings
         super.init()
 
         popover.behavior = .transient
@@ -40,22 +46,64 @@ final class StatusItemController: NSObject {
         item.button?.action = #selector(statusItemClicked)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
+
+        // 限额变化 / 开关变化 → 重组标题（任务变化走 update(tasks:)）
+        limitsService.$codex
+            .combineLatest(limitsService.$claude, settings.$menuBarShowsLimit)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _, _ in
+                MainActor.assumeIsolated { self?.renderTitle() }
+            }
+            .store(in: &cancellables)
+        renderTitle()
     }
 
     /// 状态栏文字随活跃任务变化
     func update(tasks: [AgentTask]) {
-        let waiting = tasks.contains {
+        lastTasks = tasks
+        renderTitle()
+    }
+
+    private func renderTitle() {
+        guard let button = statusItem?.button else { return }
+        let waiting = lastTasks.contains {
             if case .waiting = $0.phase { return true } else { return false }
         }
-        let title: String
-        if tasks.isEmpty {
-            title = "✦"
-        } else if waiting {
-            title = "⏳\(tasks.count)"
+        let title = StatusTitleComposer.compose(
+            taskCount: lastTasks.count,
+            hasWaiting: waiting,
+            maxUsedPercent: StatusTitleComposer.maxPrimaryPercent(
+                [limitsService.codex, limitsService.claude]),
+            showLimit: settings.menuBarShowsLimit
+        )
+
+        if let percent = title.percent, title.tier != .normal {
+            // 百分比部分按档位着色
+            let font = button.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let attributed = NSMutableAttributedString(
+                string: title.base + " · ", attributes: [.font: font])
+            let color: NSColor = title.tier == .critical ? .systemRed : .systemOrange
+            attributed.append(NSAttributedString(
+                string: percent,
+                attributes: [.font: font, .foregroundColor: color]))
+            button.attributedTitle = attributed
         } else {
-            title = "▶\(tasks.count)"
+            button.title = title.combined
         }
-        statusItem?.button?.title = title
+        button.toolTip = limitsTooltip()
+    }
+
+    private func limitsTooltip() -> String {
+        var parts: [String] = []
+        for snapshot in [limitsService.codex, limitsService.claude] {
+            guard let snapshot, let primary = snapshot.primary else { continue }
+            var text = "\(snapshot.source.displayName) 5h \(Int(primary.usedPercent.rounded()))%"
+            if let secondary = snapshot.secondary {
+                text += "（周 \(Int(secondary.usedPercent.rounded()))%）"
+            }
+            parts.append(text)
+        }
+        return parts.isEmpty ? "Eureka" : parts.joined(separator: " · ")
     }
 
     /// 程序化打开 popover（首启引导直达设置页）
