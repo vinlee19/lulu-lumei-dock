@@ -116,6 +116,24 @@ func claudeScannerTests(_ t: TestRunner) {
         try expectEqual(first, 3)
     }
 
+    t.test("会话级费用：sessionId 入库且可按会话聚合") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-claude-\(UUID().uuidString)", isDirectory: true)
+        _ = try copyFixtureToTemp(
+            "claude-transcript-usage-dups.jsonl", as: "s1.jsonl",
+            in: root.appendingPathComponent("-Users-me-work-demo"))
+        let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
+        _ = try scanner.scanOnce()
+
+        let bySession = try store.usage.totalsForSessions(["fixture-session-1", "ghost"])
+        let rows = bySession["fixture-session-1"]
+        try expect(rows != nil, "应有该会话的聚合")
+        let fable = rows?.first { $0.model == "claude-fable-5" }
+        try expectEqual(fable?.inputTokens, 1200 + 3400)
+        try expect(bySession["ghost"] == nil)
+    }
+
     t.test("synthetic 错误行不记用量") {
         let store = try makeStore()
         let root = FileManager.default.temporaryDirectory

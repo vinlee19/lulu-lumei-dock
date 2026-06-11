@@ -86,12 +86,13 @@ public final class UsageRepo {
     public func insertReturningId(_ record: UsageRecord) throws -> Int64 {
         try db.run("""
         INSERT INTO usage_records
-            (source, model, project, ts, input_tokens, output_tokens,
+            (source, model, project, session_id, ts, input_tokens, output_tokens,
              cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens)
-        VALUES (?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
         """, [
             .text(record.source.rawValue), .text(record.model),
             .string(record.project),
+            .string(record.sessionId),
             .real(record.timestamp.timeIntervalSince1970),
             .int(Int64(record.inputTokens)), .int(Int64(record.outputTokens)),
             .int(Int64(record.cacheCreationTokens)),
@@ -130,6 +131,40 @@ public final class UsageRepo {
                 requestCount: Int(row.int(8))
             ))
         }
+    }
+
+    /// 给定会话集合的逐会话×模型聚合（会话级费用展示）
+    public func totalsForSessions(_ ids: [String]) throws -> [String: [UsageTotals]] {
+        var result: [String: [UsageTotals]] = [:]
+        for chunk in stride(from: 0, to: ids.count, by: 500).map({
+            Array(ids[$0..<min($0 + 500, ids.count)])
+        }) {
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let rows = try db.query("""
+            SELECT session_id, source, model,
+                   SUM(input_tokens), SUM(output_tokens),
+                   SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
+                   SUM(cache_read_tokens), COUNT(*)
+            FROM usage_records
+            WHERE session_id IN (\(placeholders))
+            GROUP BY session_id, source, model
+            """, chunk.map { .text($0) }) { row -> (String, UsageTotals) in
+                (row.text(0) ?? "", UsageTotals(
+                    source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,
+                    model: row.text(2) ?? "?",
+                    inputTokens: Int(row.int(3)),
+                    outputTokens: Int(row.int(4)),
+                    cacheCreationTokens: Int(row.int(5)),
+                    cacheCreation1hTokens: Int(row.int(6)),
+                    cacheReadTokens: Int(row.int(7)),
+                    requestCount: Int(row.int(8))
+                ))
+            }
+            for (sessionId, totals) in rows {
+                result[sessionId, default: []].append(totals)
+            }
+        }
+        return result
     }
 
     /// 近 N 天按日导出（CSV 用），本地时区日界

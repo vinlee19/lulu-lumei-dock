@@ -1,20 +1,23 @@
 import Foundation
 import EurekaKit
 
-/// 会话索引条目（项目会话管理用）
-public struct ClaudeSessionInfo: Equatable, Sendable, Identifiable {
-    public var id: String          // session uuid（文件名）
+/// 会话索引条目（项目会话管理用，Claude/Codex 通用）
+public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
+    public var source: AgentSource
+    public var id: String          // session uuid
     public var cwd: String?
-    /// ai-title 优先，退首条 prompt 摘要；nil = 只能显示短 id
+    /// ai-title / 首条 prompt 摘要；nil = 只能显示短 id
     public var name: String?
     public var lastActiveAt: Date
     public var sizeBytes: UInt64
     public var transcriptPath: String
 
     public init(
+        source: AgentSource = .claude,
         id: String, cwd: String?, name: String?,
         lastActiveAt: Date, sizeBytes: UInt64, transcriptPath: String
     ) {
+        self.source = source
         self.id = id
         self.cwd = cwd
         self.name = name
@@ -33,7 +36,7 @@ public enum ClaudeSessionIndexer {
         window: TimeInterval = 30 * 86400,
         maxSessions: Int = 300,
         now: Date = Date()
-    ) -> [ClaudeSessionInfo] {
+    ) -> [AgentSessionInfo] {
         let fm = FileManager.default
         var candidates: [(URL, Date, UInt64)] = []
         let projectDirs = (try? fm.contentsOfDirectory(
@@ -55,7 +58,8 @@ public enum ClaudeSessionIndexer {
         candidates.sort { $0.1 > $1.1 }
         return candidates.prefix(maxSessions).map { file, mtime, size in
             let head = headInfo(fileURL: file)
-            return ClaudeSessionInfo(
+            return AgentSessionInfo(
+                source: .claude,
                 id: file.deletingPathExtension().lastPathComponent,
                 cwd: head.cwd,
                 name: head.name,

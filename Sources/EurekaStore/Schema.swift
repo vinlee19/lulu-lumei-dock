@@ -1,8 +1,8 @@
 import Foundation
 
 enum Schema {
-    /// v4：项目名按仓库根归组（ProjectResolver），派生表重建全量重扫
-    static let version: Int64 = 4
+    /// v5：usage_records 增加 session_id（会话级费用），派生表重建全量重扫
+    static let version: Int64 = 5
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -35,6 +35,7 @@ enum Schema {
             source TEXT NOT NULL,
             model TEXT NOT NULL,
             project TEXT,
+            session_id TEXT,
             ts REAL NOT NULL,
             input_tokens INTEGER NOT NULL DEFAULT 0,
             output_tokens INTEGER NOT NULL DEFAULT 0,
@@ -43,6 +44,7 @@ enum Schema {
             cache_read_tokens INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_records(ts);
+        CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_records(session_id);
 
         -- 扫描状态：offset/inode 增量续读；extra 存扫描器私有状态（如 codex 累计值）
         CREATE TABLE IF NOT EXISTS scan_files (

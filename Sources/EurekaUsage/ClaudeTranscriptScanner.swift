@@ -150,6 +150,7 @@ public final class ClaudeTranscriptScanner {
             model: model,
             // 暂存原始 cwd，scanFile 经 ProjectResolver 归组为仓库名
             project: root["cwd"] as? String,
+            sessionId: root["sessionId"] as? String,
             timestamp: timestamp,
             inputTokens: input,
             outputTokens: output,

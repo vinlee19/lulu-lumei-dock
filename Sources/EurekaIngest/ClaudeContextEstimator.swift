@@ -1,11 +1,11 @@
 import Foundation
+import EurekaKit
 
 /// 从 transcript 尾部一次性提取运行期信息：
 /// - 上下文占用：最近一条主链 assistant 的 input + cache_read + cache_creation
-///   ≈ 当前上下文大小（窗口官方未暴露，按 200k 估，预警用足够）
+///   ≈ 当前上下文大小；窗口按行内 model 查 ContextWindows 表（用户主力模型 1M）
 /// - 会话标题：最近的 ai-title 行（Claude Code 自动生成，比原始 prompt 更适合做会话名）
 public enum ClaudeContextEstimator {
-    public static let assumedContextWindow = 200_000
 
     public struct TailInfo: Equatable {
         public var contextPercent: Double?
@@ -43,14 +43,13 @@ public enum ClaudeContextEstimator {
             if type == "assistant", info.contextPercent == nil,
                root["isSidechain"] as? Bool != true,
                let message = root["message"] as? [String: Any],
-               message["model"] as? String != "<synthetic>",
+               let model = message["model"] as? String, model != "<synthetic>",
                let usage = message["usage"] as? [String: Any] {
                 let used = (usage["input_tokens"] as? Int ?? 0)
                     + (usage["cache_read_input_tokens"] as? Int ?? 0)
                     + (usage["cache_creation_input_tokens"] as? Int ?? 0)
                 if used > 0 {
-                    info.contextPercent =
-                        Double(used) / Double(assumedContextWindow) * 100
+                    info.contextPercent = ContextWindows.percent(used: used, model: model)
                 }
             }
 

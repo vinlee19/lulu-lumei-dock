@@ -187,13 +187,24 @@ func codexRolloutTests(_ t: TestRunner) {
 func contextEstimatorTests(_ t: TestRunner) {
     t.suite("ClaudeContextEstimator")
 
-    t.test("取最近主链 assistant 的输入侧 token 估算占用") {
+    t.test("取最近主链 assistant 的输入侧 token，按模型窗口（fable=1M）折算") {
         let percent = ClaudeContextEstimator.estimate(
             transcriptPath: try fixtureURL("claude-transcript-usage-dups.jsonl").path)
-        // 最后主链 assistant = msg_01BBB：3400 + 8000 cache_read = 11400 / 200000 = 5.7%
+        // 最后主链 assistant = msg_01BBB（claude-fable-5，1M 窗口）：
+        // 3400 + 8000 cache_read = 11400 / 1_000_000 = 1.14%
         // （末尾的 sidechain haiku 行应被跳过）
         try expect(percent != nil)
-        try expect(abs(percent! - 5.7) < 0.01, "got \(percent!)")
+        try expect(abs(percent! - 1.14) < 0.01, "got \(percent!)")
+    }
+
+    t.test("ContextWindows：前缀匹配 + 覆盖优先 + 默认 200k") {
+        try expectEqual(ContextWindows.window(forModel: "claude-fable-5"), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: "claude-haiku-4-5"), 200_000)
+        try expectEqual(ContextWindows.window(forModel: nil), 200_000)
+        ContextWindows.overrides = ["claude-opus-4-8": 1_000_000]
+        defer { ContextWindows.overrides = [:] }
+        try expectEqual(ContextWindows.window(forModel: "claude-opus-4-8"), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: "claude-opus-4-1"), 200_000)
     }
 
     t.test("synthetic 错误行（usage 全零）不参与估算") {
@@ -378,6 +389,31 @@ func sessionIndexerTests(_ t: TestRunner) {
         try expectEqual(sessions[1].name, "修复登录页 Safari 兼容性报错")
         try expectEqual(sessions[1].cwd, "/Users/me/work/demo")
         try expect(sessions[0].sizeBytes > 0)
+        try expectEqual(sessions[0].source, .claude)
+    }
+
+    t.test("Codex 会话索引：session_meta 取 id/cwd，首条 user_message 命名") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-cxidx-\(UUID().uuidString)", isDirectory: true)
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let dayDir = root
+            .appendingPathComponent(String(format: "%04d", parts.year!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", parts.month!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", parts.day!), isDirectory: true)
+        try FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        let file = dayDir.appendingPathComponent(
+            "rollout-2026-06-11T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0002.jsonl")
+        try FileManager.default.copyItem(
+            at: fixtureURL("codex-rollout-lifecycle.jsonl"), to: file)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: file.path)
+
+        let sessions = CodexSessionIndexer.index(sessionsRoot: root)
+        try expectEqual(sessions.count, 1)
+        try expectEqual(sessions[0].source, .codex)
+        try expectEqual(sessions[0].id, "fixture-codex-1")
+        try expectEqual(sessions[0].cwd, "/Users/me/work/demo")
+        try expectEqual(sessions[0].name, "跑一下集成测试并修复失败用例")
     }
 }
 

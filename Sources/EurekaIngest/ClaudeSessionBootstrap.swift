@@ -164,8 +164,8 @@ public enum ClaudeSessionBootstrap {
                         + (usage["cache_read_input_tokens"] as? Int ?? 0)
                         + (usage["cache_creation_input_tokens"] as? Int ?? 0)
                     if used > 0 {
-                        contextPercent = Double(used)
-                            / Double(ClaudeContextEstimator.assumedContextWindow) * 100
+                        contextPercent = ContextWindows.percent(
+                            used: used, model: message["model"] as? String)
                     }
                 }
 

@@ -1,18 +1,22 @@
 import EurekaIngest
+import EurekaKit
 import SwiftUI
 
-/// 项目会话管理：按项目分组，命名（ai-title/首条 prompt）、时间/大小排序、
-/// 一键拷贝 resume 命令
+/// 项目会话管理：先看项目（数量/大小/费用），点开看会话；
+/// 双源（Claude/Codex）、搜索、时间/大小排序、会话级费用、一键拷贝 resume 命令
 struct SessionsView: View {
     @ObservedObject var service: SessionBrowserService
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("近 30 天会话")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                TextField("搜索会话名 / 项目 / id", text: $service.searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
                 Picker("", selection: $service.sortMode) {
                     ForEach(SessionBrowserService.SortMode.allCases, id: \.self) {
                         Text($0.rawValue)
@@ -20,11 +24,11 @@ struct SessionsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 130)
+                .frame(width: 116)
                 .controlSize(.mini)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
 
             Divider()
 
@@ -36,7 +40,7 @@ struct SessionsView: View {
                         Image(systemName: "tray")
                             .font(.system(size: 28))
                             .foregroundStyle(.tertiary)
-                        Text("近 30 天没有会话")
+                        Text(service.isSearching ? "没有匹配的会话" : "近 30 天没有会话")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
@@ -46,10 +50,8 @@ struct SessionsView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(service.groups) { group in
-                            ProjectHeaderRow(
-                                group: group,
-                                isExpanded: expanded.contains(group.id)
-                            ) {
+                            let isOpen = service.isSearching || expanded.contains(group.id)
+                            ProjectHeaderRow(group: group, isExpanded: isOpen) {
                                 withAnimation(.easeInOut(duration: 0.15)) {
                                     if expanded.contains(group.id) {
                                         expanded.remove(group.id)
@@ -58,10 +60,14 @@ struct SessionsView: View {
                                     }
                                 }
                             }
-                            if expanded.contains(group.id) {
+                            if isOpen {
                                 ForEach(group.sessions) { session in
-                                    SessionRow(session: session, service: service)
-                                        .padding(.leading, 14)
+                                    SessionRow(
+                                        session: session,
+                                        cost: service.costs[session.id],
+                                        service: service
+                                    )
+                                    .padding(.leading, 14)
                                 }
                                 Divider().padding(.leading, 12)
                             }
@@ -72,8 +78,6 @@ struct SessionsView: View {
         }
         .onAppear { service.refresh() }
     }
-
-    @State private var expanded: Set<String> = []
 }
 
 /// 项目行：点击展开/收起该项目下的会话
@@ -96,13 +100,18 @@ private struct ProjectHeaderRow: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 Spacer(minLength: 6)
-                Text("\(group.sessions.count) 个会话")
+                if let cost = group.totalCostUSD {
+                    Text("≈\(formatCost(cost))")
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.blue)
+                }
+                Text("\(group.sessions.count) 个")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Text(formatBytes(group.totalBytes))
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(.tertiary)
-                    .frame(width: 58, alignment: .trailing)
+                    .frame(width: 54, alignment: .trailing)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -114,16 +123,25 @@ private struct ProjectHeaderRow: View {
 }
 
 private struct SessionRow: View {
-    let session: ClaudeSessionInfo
+    let session: AgentSessionInfo
+    let cost: SessionBrowserService.SessionCost?
     let service: SessionBrowserService
     @State private var copied = false
 
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.name ?? "会话 \(session.id.prefix(8))")
-                    .font(.system(size: 12))
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(session.source == .claude ? "C" : "X")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 13, height: 13)
+                        .background(Circle().fill(
+                            session.source == .claude ? Color.orange : Color.teal))
+                    Text(session.name ?? "会话 \(session.id.prefix(8))")
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                }
                 HStack(spacing: 4) {
                     Text("#\(session.id.prefix(6))")
                         .font(.system(size: 10).monospaced())
@@ -132,6 +150,15 @@ private struct SessionRow: View {
                         for: session.lastActiveAt, relativeTo: Date()))
                     Text("·")
                     Text(formatBytes(session.sizeBytes))
+                    if let cost {
+                        Text("·")
+                        Text(formatTokens(cost.totalTokens) + " tok")
+                        if let usd = cost.costUSD {
+                            Text("·")
+                            Text(formatCost(usd))
+                                .foregroundStyle(.blue)
+                        }
+                    }
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
@@ -146,7 +173,7 @@ private struct SessionRow: View {
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("拷贝恢复命令（cd 项目 && claude --resume）")
+            .help("拷贝恢复命令（cd 项目 && \(session.source == .claude ? "claude --resume" : "codex resume")）")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
