@@ -22,7 +22,12 @@ final class UsageService: ObservableObject {
     private var codexScanner: CodexUsageScanner?
     private var pricing = PricingTable(models: [])
 
+    private static let claudeHealthName = "用量扫描 Claude"
+    private static let codexHealthName = "用量扫描 Codex"
+
     func start() {
+        HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.codexHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -102,14 +107,19 @@ final class UsageService: ObservableObject {
     private func scanAndPublish() {
         guard let store else { return }
         do {
-            try claudeScanner?.scanOnce()
-            try codexScanner?.scanOnce()
+            let claudeNew = try claudeScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.claudeHealthName)
+            if claudeNew > 0 { HealthRegistry.shared.event(Self.claudeHealthName) }
+            let codexNew = try codexScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.codexHealthName)
+            if codexNew > 0 { HealthRegistry.shared.event(Self.codexHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             publish { $0.summary = summary }
             publishHistory(store: store)
         } catch {
+            HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
             publish { $0.lastError = "扫描失败: \(error)" }
         }
     }

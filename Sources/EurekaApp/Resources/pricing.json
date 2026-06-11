@@ -10,7 +10,8 @@
     { "match": "claude-sonnet", "inputPerM": 3, "outputPerM": 15, "cacheReadPerM": 0.3, "cacheWrite5mPerM": 3.75, "cacheWrite1hPerM": 6 },
     { "match": "claude-haiku-3", "inputPerM": 0.8, "outputPerM": 4 },
     { "match": "claude-haiku", "inputPerM": 1, "outputPerM": 5, "cacheReadPerM": 0.1, "cacheWrite5mPerM": 1.25, "cacheWrite1hPerM": 2 },
-    { "match": "gpt-5.5", "unknown": true },
+    { "match": "gpt-5.5-pro", "inputPerM": 30, "outputPerM": 180, "cacheReadPerM": 3 },
+    { "match": "gpt-5.5", "inputPerM": 5, "outputPerM": 30, "cacheReadPerM": 0.5 },
     { "match": "gpt-5-mini", "inputPerM": 0.25, "outputPerM": 2, "cacheReadPerM": 0.025 },
     { "match": "gpt-5", "inputPerM": 1.25, "outputPerM": 10, "cacheReadPerM": 0.125 }
   ]

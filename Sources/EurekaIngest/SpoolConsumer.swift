@@ -24,8 +24,11 @@ public final class SpoolConsumer {
         self.handler = handler
     }
 
+    static let healthName = "事件队列（hooks / notify）"
+
     /// 开始监听。handler 在内部队列回调，调用方自行切主线程。
     public func start() {
+        HealthRegistry.shared.register(Self.healthName, expectedInterval: nil)
         let fm = FileManager.default
         try? fm.createDirectory(at: eventsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: processingDir, withIntermediateDirectories: true)
@@ -84,10 +87,14 @@ public final class SpoolConsumer {
             let raw = RawEvent(data: data)
         else {
             undecodableCount += 1
+            HealthRegistry.shared.failure(
+                Self.healthName, note: "事件文件无法解析: \(fileURL.lastPathComponent)")
             return
         }
+        HealthRegistry.shared.beat(Self.healthName)
         let isStale = Date().timeIntervalSince(raw.receivedAt) > staleThreshold
         for event in EventRouter.route(raw) {
+            HealthRegistry.shared.event(Self.healthName)
             handler(event, isStale)
         }
     }

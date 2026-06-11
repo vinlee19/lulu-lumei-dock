@@ -1,4 +1,5 @@
 import EurekaInstall
+import EurekaKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -64,6 +65,10 @@ struct SettingsView: View {
                     }
                 }
 
+                section("数据健康") {
+                    HealthSection()
+                }
+
                 Text("relay：~/Library/Application Support/Eureka/bin/eureka-relay\n事件 spool 与数据库同目录，可直接用 sqlite3 查询 eureka.sqlite。")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
@@ -118,6 +123,79 @@ struct SettingsView: View {
         case .partial: return .orange
         case .foreign: return .orange
         case .none: return .gray
+        }
+    }
+}
+
+/// 五个数据源的心跳/产出/失败一览（每 5 秒刷新）。
+/// 轮询型数据源停摆（定时器死掉）会直接红灯，不用再"感觉不对"。
+private struct HealthSection: View {
+    @State private var rows: [(name: String, entry: HealthRegistry.Entry)] = []
+    private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if rows.isEmpty {
+                Text("数据源尚未启动")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(rows, id: \.name) { row in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(color(for: row.entry.status()))
+                        .frame(width: 7, height: 7)
+                    Text(row.name)
+                        .font(.system(size: 10.5))
+                    Spacer()
+                    Text(detail(for: row.entry))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if row.entry.failureCount > 0, let note = row.entry.lastFailureNote {
+                    Text("失败 \(row.entry.failureCount) 次 · 最近：\(note)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .padding(.leading, 13)
+                }
+            }
+        }
+        .onAppear { rows = HealthRegistry.shared.snapshot() }
+        .onReceive(timer) { _ in rows = HealthRegistry.shared.snapshot() }
+    }
+
+    private func color(for status: HealthRegistry.Entry.Status) -> Color {
+        switch status {
+        case .ok: return .green
+        case .degraded: return .orange
+        case .stalled: return .red
+        case .idle: return .gray
+        }
+    }
+
+    private func detail(for entry: HealthRegistry.Entry) -> String {
+        var parts: [String] = []
+        if let beat = entry.lastBeatAt {
+            parts.append("心跳 \(ago(beat))")
+        }
+        if let event = entry.lastEventAt {
+            parts.append("产出 \(ago(event))")
+        }
+        if entry.status() == .stalled {
+            parts.append("已停摆")
+        }
+        return parts.isEmpty ? "等待中" : parts.joined(separator: " · ")
+    }
+
+    private func ago(_ date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        switch seconds {
+        case ..<5: return "刚刚"
+        case ..<60: return "\(seconds)秒前"
+        case ..<3600: return "\(seconds / 60)分钟前"
+        default: return "\(seconds / 3600)小时前"
         }
     }
 }

@@ -177,6 +177,30 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.sortedActiveTasks[0].sessionStartedAt, ts(500))
     }
 
+    t.test("HealthRegistry：轮询型停摆判红、事件驱动不误报、失败降级") {
+        let registry = HealthRegistry()
+        registry.register("poller", expectedInterval: 2)
+        registry.register("eventer", expectedInterval: nil)
+
+        var snapshot = Dictionary(uniqueKeysWithValues: registry.snapshot())
+        try expectEqual(snapshot["poller"]?.status(), .idle)
+
+        registry.beat("poller")
+        registry.beat("eventer")
+        snapshot = Dictionary(uniqueKeysWithValues: registry.snapshot())
+        try expectEqual(snapshot["poller"]?.status(), .ok)
+        // 轮询型：心跳早于 3×interval（且 ≥15s 容忍）→ 停摆
+        let future = Date().addingTimeInterval(60)
+        try expectEqual(snapshot["poller"]?.status(now: future), .stalled)
+        // 事件驱动：不按时间判停摆
+        try expectEqual(snapshot["eventer"]?.status(now: future), .ok)
+
+        registry.failure("eventer", note: "坏行")
+        snapshot = Dictionary(uniqueKeysWithValues: registry.snapshot())
+        try expectEqual(snapshot["eventer"]?.status(), .degraded)
+        try expectEqual(snapshot["eventer"]?.failureCount, 1)
+    }
+
     t.test("超时清理：空闲会话静默移除不出卡") {
         let store = TaskStore()
         store.apply(event(.sessionStarted, session: "old-idle", at: 0))

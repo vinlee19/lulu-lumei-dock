@@ -48,7 +48,10 @@ public final class CodexRolloutTailer {
         self.handler = handler
     }
 
+    static let healthName = "Codex rollout 监视"
+
     public func start(pollInterval: TimeInterval = 2) {
+        HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
@@ -63,6 +66,7 @@ public final class CodexRolloutTailer {
 
     /// 公开供测试与启动时同步调用
     public func scanOnce() {
+        HealthRegistry.shared.beat(Self.healthName)
         for url in recentRolloutFiles() {
             tail(url)
         }
@@ -153,6 +157,7 @@ public final class CodexRolloutTailer {
                 break  // context 已在发现文件时建立
             case .event(var event):
                 event.sessionStartedAt = context.sessionStartedAt
+                HealthRegistry.shared.event(Self.healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
                 handler(event, isStale)
             case .rateLimits(let snapshot):

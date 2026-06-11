@@ -30,7 +30,10 @@ public final class ClaudeTranscriptWatcher {
         self.handler = handler
     }
 
+    static let healthName = "Claude transcript 监视"
+
     public func start(pollInterval: TimeInterval = 5) {
+        HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
@@ -45,6 +48,7 @@ public final class ClaudeTranscriptWatcher {
 
     /// 公开供测试与启动首扫
     public func scanOnce(now: Date = Date(), idleWindow: TimeInterval = 1800) {
+        HealthRegistry.shared.beat(Self.healthName)
         let fm = FileManager.default
         let projectDirs = (try? fm.contentsOfDirectory(
             at: projectsRoot, includingPropertiesForKeys: nil)) ?? []
@@ -70,6 +74,7 @@ public final class ClaudeTranscriptWatcher {
         guard let snapshot = ClaudeSessionBootstrap.classify(fileURL: file) else { return }
 
         func emit(_ kind: TaskEvent.Kind, at date: Date) {
+            HealthRegistry.shared.event(Self.healthName)
             handler(TaskEvent(
                 source: .claude, sessionId: snapshot.sessionId, kind: kind,
                 timestamp: date, cwd: snapshot.cwd, transcriptPath: path
