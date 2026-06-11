@@ -134,12 +134,8 @@ private struct SessionRow: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(session.source == .claude ? "C" : "X")
-                        .font(.system(size: 8.5, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 13, height: 13)
-                        .background(Circle().fill(
-                            session.source == .claude ? Color.orange : Color.teal))
+                    // 与灵动岛统一的来源徽标（Claude 八芒星 / Codex 终端）
+                    SourceBadge(source: session.source, size: 11)
                     Text(session.name ?? "会话 \(session.id.prefix(8))")
                         .font(.system(size: 12))
                         .lineLimit(1)

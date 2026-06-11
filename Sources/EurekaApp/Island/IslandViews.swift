@@ -87,9 +87,9 @@ struct CompactPillView: View {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.orange)
-                } else {
-                    PulsingDot()
                 }
+                // 在场来源各一枚徽标（Claude 八芒星 / Codex 终端）
+                PulsingSourceBadges(sources: distinctSources)
                 Text("\(tasks.count)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(.white)
@@ -118,6 +118,13 @@ struct CompactPillView: View {
         }
         .padding(.horizontal, 12)
     }
+
+    /// 在场来源（保持稳定顺序：claude 前 codex 后）
+    private var distinctSources: [AgentSource] {
+        var seen = Set<AgentSource>()
+        for task in tasks { seen.insert(task.source) }
+        return AgentSource.allCases.filter { seen.contains($0) }
+    }
 }
 
 /// 运行中呼吸点
@@ -131,6 +138,76 @@ struct PulsingDot: View {
             .opacity(on ? 1 : 0.35)
             .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: on)
             .onAppear { on = true }
+    }
+}
+
+// MARK: - 来源标识（全岛统一语言）
+
+extension AgentSource {
+    var brandColor: Color {
+        switch self {
+        case .claude: return Color(red: 0.85, green: 0.47, blue: 0.34)  // Claude 橙
+        case .codex: return Color(red: 0.10, green: 0.65, blue: 0.60)   // 终端青
+        }
+    }
+}
+
+/// Claude 的八芒星标（手画近似，圆头辐条）
+struct ClaudeMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let outer = min(rect.width, rect.height) / 2
+        let inner = outer * 0.22
+        let thickness = outer * 0.30
+        var path = Path()
+        for index in 0..<8 {
+            let angle = CGFloat(index) * .pi / 4
+            let spoke = Path(
+                roundedRect: CGRect(
+                    x: -thickness / 2, y: -outer,
+                    width: thickness, height: outer - inner),
+                cornerRadius: thickness / 2)
+            let transform = CGAffineTransform(translationX: center.x, y: center.y)
+                .rotated(by: angle)
+            path.addPath(spoke, transform: transform)
+        }
+        return path
+    }
+}
+
+/// 来源徽标：Claude = 橙色八芒星；Codex = 青色终端
+struct SourceBadge: View {
+    let source: AgentSource
+    var size: CGFloat = 12
+
+    var body: some View {
+        switch source {
+        case .claude:
+            ClaudeMarkShape()
+                .fill(source.brandColor)
+                .frame(width: size, height: size)
+        case .codex:
+            Image(systemName: "terminal.fill")
+                .font(.system(size: size * 0.92, weight: .medium))
+                .foregroundStyle(source.brandColor)
+        }
+    }
+}
+
+/// 胶囊左翼：呼吸的来源徽标（在场来源各一枚）
+struct PulsingSourceBadges: View {
+    let sources: [AgentSource]
+    @State private var on = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(sources, id: \.self) { source in
+                SourceBadge(source: source, size: 11)
+            }
+        }
+        .opacity(on ? 1 : 0.45)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: on)
+        .onAppear { on = true }
     }
 }
 
@@ -150,6 +227,15 @@ struct ExpandedCardView: View {
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(iconColor)
                     .frame(width: 34)
+                    .overlay(alignment: .bottomTrailing) {
+                        // 来源角标：一眼区分 Claude / Codex
+                        if let source = cardSource {
+                            SourceBadge(source: source, size: 12)
+                                .padding(2)
+                                .background(Circle().fill(Color.black))
+                                .offset(x: 5, y: 5)
+                        }
+                    }
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -171,6 +257,14 @@ struct ExpandedCardView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+    }
+
+    private var cardSource: AgentSource? {
+        switch card {
+        case .finished(let task): return task.source
+        case .waiting(let task): return task.source
+        case .notice: return nil
+        }
     }
 
     private var iconName: String {
@@ -298,6 +392,7 @@ struct TaskListCardView: View {
             ForEach(tasks.prefix(4)) { task in
                 HStack(spacing: 8) {
                     statusIcon(task)
+                    SourceBadge(source: task.source, size: 10)
                     Text(taskDisplayName(task))
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.85))
@@ -345,6 +440,8 @@ struct TaskListCardView: View {
                         Circle()
                             .fill(Color.white.opacity(0.25))
                             .frame(width: 6, height: 6)
+                        SourceBadge(source: task.source, size: 9)
+                            .opacity(0.55)
                         Text(taskDisplayName(task))
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.45))
