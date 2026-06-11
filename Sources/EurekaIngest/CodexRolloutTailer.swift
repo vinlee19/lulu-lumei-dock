@@ -21,8 +21,6 @@ public final class CodexRolloutTailer {
 
     private let sessionsRoot: URL
     private let staleThreshold: TimeInterval
-    /// 只关注近期写入的文件
-    private let activeFileWindow: TimeInterval = 3600
     private let handler: Handler
     private let rateLimitHandler: RateLimitHandler?
     private let queue = DispatchQueue(label: "com.vinlee.eureka.codex-tailer")
@@ -74,35 +72,26 @@ public final class CodexRolloutTailer {
 
     // MARK: - 文件发现
 
-    /// 今天/昨天（本地时区，与 rollout 目录命名一致）日期目录里近期写入的 rollout
+    /// 今天/昨天（本地时区，与 rollout 目录命名一致）日期目录下全部 rollout 文件。
+    /// 不按 mtime 过滤：tail() 内部已有 size 检查（无新数据则跳过），过滤只会漏掉
+    /// 长时间空闲后重新活跃、或历史已完成的会话文件。
     private func recentRolloutFiles() -> [URL] {
         let fm = FileManager.default
         let calendar = Calendar.current
         let now = Date()
-        var dirs: [URL] = []
+        var results: [URL] = []
         for dayOffset in 0...1 {
             guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
             let parts = calendar.dateComponents([.year, .month, .day], from: day)
             guard let y = parts.year, let m = parts.month, let d = parts.day else { continue }
-            dirs.append(
-                sessionsRoot
-                    .appendingPathComponent(String(format: "%04d", y), isDirectory: true)
-                    .appendingPathComponent(String(format: "%02d", m), isDirectory: true)
-                    .appendingPathComponent(String(format: "%02d", d), isDirectory: true)
-            )
-        }
-
-        var results: [URL] = []
-        for dir in dirs {
-            let files = (try? fm.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            let dir = sessionsRoot
+                .appendingPathComponent(String(format: "%04d", y), isDirectory: true)
+                .appendingPathComponent(String(format: "%02d", m), isDirectory: true)
+                .appendingPathComponent(String(format: "%02d", d), isDirectory: true)
+            let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
             for file in files
             where file.lastPathComponent.hasPrefix("rollout-") && file.pathExtension == "jsonl" {
-                let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey])
-                    .contentModificationDate) ?? .distantPast
-                if Date().timeIntervalSince(mtime) < activeFileWindow {
-                    results.append(file)
-                }
+                results.append(file)
             }
         }
         return results
@@ -217,11 +206,18 @@ public final class CodexRolloutTailer {
 
         if let started = lastStartedEvent {
             if let finished = lastFinishedEvent, finished.timestamp >= started.timestamp {
-                // 任务已结束：按 stale 阈值决定是否弹卡（近期完成才展示）
-                var event = finished
-                event.sessionStartedAt = ctx.sessionStartedAt
-                let isStale = Date().timeIntervalSince(finished.timestamp) > staleThreshold
-                handler(event, isStale)
+                // 任务已结束：以 sessionStarted 直接注册为空闲（通知卡由 notify 通道负责）
+                // 避免发 taskFinished：store 里没有 existing task → idle 无法建立；
+                // 也避免重复卡或与 dedup 窗口产生竞态。
+                var ev = started
+                ev.kind = .sessionStarted
+                ev.sessionStartedAt = ctx.sessionStartedAt
+                handler(ev, false)
+                if let title = lastTitle {
+                    var titleEv = ev
+                    titleEv.kind = .titleUpdate(title: title)
+                    handler(titleEv, false)
+                }
             } else {
                 // 仍在进行中：补发 running（不按 stale 抑制，timestamp 用真实开始时间）
                 var event = started
@@ -230,11 +226,16 @@ public final class CodexRolloutTailer {
                 handler(event, false)
             }
         } else if let finished = lastFinishedEvent {
-            // 尾窗未含 task_started（超长会话），但任务已结束：仍尝试补发
-            var event = finished
-            event.sessionStartedAt = ctx.sessionStartedAt
-            let isStale = Date().timeIntervalSince(finished.timestamp) > staleThreshold
-            handler(event, isStale)
+            // 尾窗未含 task_started（超长会话），但任务已结束：同样注册空闲
+            var ev = finished
+            ev.kind = .sessionStarted
+            ev.sessionStartedAt = ctx.sessionStartedAt
+            handler(ev, false)
+            if let title = lastTitle {
+                var titleEv = ev
+                titleEv.kind = .titleUpdate(title: title)
+                handler(titleEv, false)
+            }
         }
     }
 
