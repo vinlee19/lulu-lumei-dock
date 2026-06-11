@@ -22,7 +22,7 @@ public final class CodexRolloutTailer {
     private let sessionsRoot: URL
     private let staleThreshold: TimeInterval
     /// 只关注近期写入的文件
-    private let activeFileWindow: TimeInterval = 600
+    private let activeFileWindow: TimeInterval = 3600
     private let handler: Handler
     private let rateLimitHandler: RateLimitHandler?
     private let queue = DispatchQueue(label: "com.vinlee.eureka.codex-tailer")
@@ -169,8 +169,9 @@ public final class CodexRolloutTailer {
     }
 
     /// 新发现的文件：读首行建上下文，再从尾部恢复"最后状态"——
-    /// 若最后的生命周期事件是 task_started（任务进行中），补发 running 事件
-    /// （app 重启/开机时不丢正在跑的任务，且 started_at 保证计时准确）。
+    /// - 仍在进行中（最后 task_started 晚于最后 task_complete）：补发 running 事件
+    /// - 已完成（最后 task_complete 晚于最后 task_started）：补发 finished 事件
+    ///   让最近完成的任务能正常出卡（超过 staleThreshold 则仅写历史，不弹岛）
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         let ctx = context(for: url)
@@ -183,7 +184,8 @@ public final class CodexRolloutTailer {
               let data = try? handle.readToEnd()
         else { return }
 
-        var lastLifecycle: TaskEvent?
+        var lastStartedEvent: TaskEvent?
+        var lastFinishedEvent: TaskEvent?
         var lastTitle: String?
         var lastRateLimits: RateLimitSnapshot?
         for line in data.split(separator: UInt8(ascii: "\n")) {
@@ -194,8 +196,10 @@ public final class CodexRolloutTailer {
                     switch event.kind {
                     case .taskStarted(let title) where title != nil:
                         lastTitle = title
-                    case .taskStarted, .taskFinished:
-                        lastLifecycle = event
+                    case .taskStarted:
+                        lastStartedEvent = event
+                    case .taskFinished:
+                        lastFinishedEvent = event
                     default:
                         break
                     }
@@ -210,17 +214,27 @@ public final class CodexRolloutTailer {
         if let snapshot = lastRateLimits {
             rateLimitHandler?(snapshot)
         }
-        if let last = lastLifecycle, case .taskStarted = last.kind {
-            // 仍在进行中：补发 running（不按 stale 抑制，timestamp 用真实开始时间）
-            handler(TaskEvent(
-                source: .codex,
-                sessionId: last.sessionId,
-                kind: .taskStarted(title: lastTitle),
-                timestamp: last.timestamp,
-                cwd: last.cwd,
-                turnId: last.turnId,
-                sessionStartedAt: ctx.sessionStartedAt
-            ), false)
+
+        if let started = lastStartedEvent {
+            if let finished = lastFinishedEvent, finished.timestamp >= started.timestamp {
+                // 任务已结束：按 stale 阈值决定是否弹卡（近期完成才展示）
+                var event = finished
+                event.sessionStartedAt = ctx.sessionStartedAt
+                let isStale = Date().timeIntervalSince(finished.timestamp) > staleThreshold
+                handler(event, isStale)
+            } else {
+                // 仍在进行中：补发 running（不按 stale 抑制，timestamp 用真实开始时间）
+                var event = started
+                event.sessionStartedAt = ctx.sessionStartedAt
+                if let title = lastTitle { event.kind = .taskStarted(title: title) }
+                handler(event, false)
+            }
+        } else if let finished = lastFinishedEvent {
+            // 尾窗未含 task_started（超长会话），但任务已结束：仍尝试补发
+            var event = finished
+            event.sessionStartedAt = ctx.sessionStartedAt
+            let isStale = Date().timeIntervalSince(finished.timestamp) > staleThreshold
+            handler(event, isStale)
         }
     }
 

@@ -80,15 +80,16 @@ public final class TaskStore {
                 outcome: outcome,
                 detail: detail
             )
-            if event.source == .claude, var task = existing {
-                // Claude 会话还开着：turn 结束 → 转空闲，等下一个 prompt
+            if var task = existing {
+                // 已知会话（Claude/Codex）：turn 结束 → 转空闲，等下一个 prompt
+                // Codex 空闲会话由 reapStaleTasks 按 idleTimeout 静默回收
                 task.phase = .idle
                 task.lastActivityAt = event.timestamp
                 task.currentActivity = nil
                 if task.title == nil { task.title = title }
                 activeTasks[key] = task
             } else {
-                // Codex（exec 一次性）或未知会话：直接移除
+                // 没赶上开始事件的未知会话：不留空闲残影
                 activeTasks.removeValue(forKey: key)
             }
             return [.taskFinished(finished), .activeTasksChanged]

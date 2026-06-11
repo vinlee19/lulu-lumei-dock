@@ -42,7 +42,7 @@ public final class EventPipeline {
 
     public func start() {
         spool?.start()
-        tailer?.start()
+        tailer?.start(pollInterval: 1)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {

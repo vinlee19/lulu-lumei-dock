@@ -123,12 +123,15 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(task.title, "第二轮")
     }
 
-    t.test("Codex 完成直接移除（exec 一次性会话）") {
+    t.test("Codex 完成后变空闲（可跨 turn 持续可见，由 reapStaleTasks 回收）") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: nil), source: .codex, at: 100))
         store.apply(event(
             .taskFinished(outcome: .success, title: nil, detail: nil), source: .codex, at: 150))
-        try expect(store.sortedIdleTasks.isEmpty && store.sortedActiveTasks.isEmpty)
+        // 完成后会话留在 idle 区（不计入 active）
+        try expect(store.sortedActiveTasks.isEmpty, "active 应为空")
+        try expectEqual(store.sortedIdleTasks.count, 1, "idle 应有 Codex 会话")
+        try expectEqual(store.sortedIdleTasks[0].source, .codex)
     }
 
     t.test("sessionStarted 注册空闲会话；心跳发现未知会话登记为运行中") {
