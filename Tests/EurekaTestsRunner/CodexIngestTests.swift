@@ -341,6 +341,46 @@ func transcriptWatcherTests(_ t: TestRunner) {
     }
 }
 
+func sessionIndexerTests(_ t: TestRunner) {
+    t.suite("ClaudeSessionIndexer")
+
+    t.test("索引：ai-title 命名优先，缺则退首条 prompt；时间窗过滤") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-index-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+
+        // 有 ai-title 的会话
+        let withTitle = dir.appendingPathComponent("aaaa-1111.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-usage-dups.jsonl"), to: withTitle)
+        try fm.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-100)], ofItemAtPath: withTitle.path)
+
+        // 只有 prompt 的会话（更新）
+        let promptOnly = dir.appendingPathComponent("bbbb-2222.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-api-error.jsonl"), to: promptOnly)
+        try fm.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: promptOnly.path)
+
+        // 窗口外的老会话
+        let ancient = dir.appendingPathComponent("cccc-3333.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-running.jsonl"), to: ancient)
+        try fm.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-40 * 86400)],
+            ofItemAtPath: ancient.path)
+
+        let sessions = ClaudeSessionIndexer.index(projectsRoot: root)
+        try expectEqual(sessions.count, 2, "窗口外的不索引: \(sessions.map(\.id))")
+        // 默认按 mtime 倒序
+        try expectEqual(sessions[0].id, "bbbb-2222")
+        try expectEqual(sessions[0].name, "继续重构数据管道")
+        try expectEqual(sessions[1].name, "修复登录页 Safari 兼容性报错")
+        try expectEqual(sessions[1].cwd, "/Users/me/work/demo")
+        try expect(sessions[0].sizeBytes > 0)
+    }
+}
+
 func errorSnifferTests(_ t: TestRunner) {
     t.suite("ClaudeErrorSniffer")
 

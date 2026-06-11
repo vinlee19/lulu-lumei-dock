@@ -9,6 +9,7 @@ final class StatusItemController: NSObject {
     private let popover = NSPopover()
     private let usageService: UsageService
     private let limitsService: RateLimitsService
+    private let sessionBrowser = SessionBrowserService()
     private let navigation = PopoverNavigation()
 
     init(
@@ -22,13 +23,14 @@ final class StatusItemController: NSObject {
         super.init()
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 360, height: 440)
+        popover.contentSize = NSSize(width: 380, height: 460)
         popover.contentViewController = NSHostingController(
             rootView: PopoverRootView(
                 usageService: usageService,
                 limitsService: limitsService,
                 settings: settings,
                 installer: installer,
+                sessionBrowser: sessionBrowser,
                 navigation: navigation))
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

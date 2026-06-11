@@ -13,10 +13,12 @@ struct PopoverRootView: View {
     @ObservedObject var limitsService: RateLimitsService
     @ObservedObject var settings: AppSettings
     @ObservedObject var installer: InstallerService
+    @ObservedObject var sessionBrowser: SessionBrowserService
     @ObservedObject var navigation: PopoverNavigation
 
     enum Tab: String, CaseIterable {
         case history = "历史"
+        case sessions = "会话"
         case usage = "用量"
         case limits = "限额"
         case settings = "设置"
@@ -36,6 +38,8 @@ struct PopoverRootView: View {
             switch navigation.tab {
             case .history:
                 HistoryView(tasks: usageService.recentHistory)
+            case .sessions:
+                SessionsView(service: sessionBrowser)
             case .usage:
                 UsagePanelView(usageService: usageService)
             case .limits:
@@ -44,7 +48,7 @@ struct PopoverRootView: View {
                 SettingsView(settings: settings, installer: installer)
             }
         }
-        .frame(width: 360, height: 440)
+        .frame(width: 380, height: 460)
     }
 }
 

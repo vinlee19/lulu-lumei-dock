@@ -41,19 +41,25 @@ public struct UsageSummary: Equatable, Sendable {
 
     public var today: [SourceSummary]
     public var thisWeek: [SourceSummary]
+    public var thisMonth: [SourceSummary]
     public var todayProjects: [ProjectLine]
     public var weekProjects: [ProjectLine]
+    public var monthProjects: [ProjectLine]
     public var generatedAt: Date
 
     public init(
         today: [SourceSummary], thisWeek: [SourceSummary],
+        thisMonth: [SourceSummary] = [],
         todayProjects: [ProjectLine] = [], weekProjects: [ProjectLine] = [],
+        monthProjects: [ProjectLine] = [],
         generatedAt: Date
     ) {
         self.today = today
         self.thisWeek = thisWeek
+        self.thisMonth = thisMonth
         self.todayProjects = todayProjects
         self.weekProjects = weekProjects
+        self.monthProjects = monthProjects
         self.generatedAt = generatedAt
     }
 }
@@ -71,19 +77,30 @@ public enum UsageAggregator {
             ?? cal.startOfDay(for: date)
     }
 
+    /// 自然月起点（本地时区）
+    public static func monthStart(of date: Date, calendar: Calendar = .current) -> Date {
+        calendar.dateInterval(of: .month, for: date)?.start
+            ?? calendar.startOfDay(for: date)
+    }
+
     public static func summarize(
         store: EurekaStore, pricing: PricingTable, now: Date = Date(),
         calendar: Calendar = .current
     ) throws -> UsageSummary {
         let todayFrom = dayStart(of: now, calendar: calendar)
         let weekFrom = weekStart(of: now, calendar: calendar)
+        let monthFrom = monthStart(of: now, calendar: calendar)
         return UsageSummary(
             today: fold(try store.usage.totalsByModel(from: todayFrom, to: now), pricing: pricing),
             thisWeek: fold(try store.usage.totalsByModel(from: weekFrom, to: now), pricing: pricing),
+            thisMonth: fold(
+                try store.usage.totalsByModel(from: monthFrom, to: now), pricing: pricing),
             todayProjects: foldProjects(
                 try store.usage.totalsByProject(from: todayFrom, to: now), pricing: pricing),
             weekProjects: foldProjects(
                 try store.usage.totalsByProject(from: weekFrom, to: now), pricing: pricing),
+            monthProjects: foldProjects(
+                try store.usage.totalsByProject(from: monthFrom, to: now), pricing: pricing),
             generatedAt: now
         )
     }

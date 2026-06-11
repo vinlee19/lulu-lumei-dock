@@ -269,5 +269,27 @@ func aggregatorTests(_ t: TestRunner) {
             store: store, pricing: pricing, now: now, calendar: calendar)
         try expectEqual(summary.today.first?.inputTokens, 100)
         try expectEqual(summary.thisWeek.first?.inputTokens, 150)
+        // 6-07（上周日）在本周窗口外、本月窗口内
+        try expectEqual(summary.thisMonth.first?.inputTokens, 157)
+    }
+
+    t.test("月度窗口：上月数据不计入") {
+        let store = try makeStore()
+        let calendar = Calendar.current
+        let now = calendar.date(from: DateComponents(
+            year: 2026, month: 6, day: 10, hour: 15))!
+        try store.usage.insert([
+            UsageRecord(
+                source: .claude, model: "m",
+                timestamp: calendar.date(from: DateComponents(year: 2026, month: 6, day: 1))!,
+                inputTokens: 10, outputTokens: 0),
+            UsageRecord(
+                source: .claude, model: "m",
+                timestamp: calendar.date(from: DateComponents(year: 2026, month: 5, day: 31))!,
+                inputTokens: 999, outputTokens: 0),
+        ])
+        let summary = try UsageAggregator.summarize(
+            store: store, pricing: PricingTable(models: []), now: now, calendar: calendar)
+        try expectEqual(summary.thisMonth.first?.inputTokens, 10)
     }
 }

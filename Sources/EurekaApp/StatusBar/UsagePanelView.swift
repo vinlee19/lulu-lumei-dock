@@ -21,6 +21,8 @@ struct UsagePanelView: View {
                     ProjectSection(title: "今日 · 按项目", projects: summary.todayProjects)
                     UsageSection(title: "本周（周一起）", sources: summary.thisWeek)
                     ProjectSection(title: "本周 · 按项目", projects: summary.weekProjects)
+                    UsageSection(title: "本月", sources: summary.thisMonth)
+                    ProjectSection(title: "本月 · 按项目", projects: summary.monthProjects)
 
                     HStack {
                         Button("导出近 30 天 CSV") { usageService.exportCSV() }

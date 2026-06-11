@@ -10,8 +10,8 @@ public final class CodexUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
-    /// 回看天数：与去重键剪枝窗口一致
-    private let lookbackDays = 8
+    /// 回看天数：覆盖月度统计（offset 续读，老文件只在首扫时全量读一次）
+    private let lookbackDays = 35
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
