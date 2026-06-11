@@ -44,24 +44,26 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(service.groups) { group in
-                            Section {
+                            ProjectHeaderRow(
+                                group: group,
+                                isExpanded: expanded.contains(group.id)
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    if expanded.contains(group.id) {
+                                        expanded.remove(group.id)
+                                    } else {
+                                        expanded.insert(group.id)
+                                    }
+                                }
+                            }
+                            if expanded.contains(group.id) {
                                 ForEach(group.sessions) { session in
                                     SessionRow(session: session, service: service)
+                                        .padding(.leading, 14)
                                 }
-                            } header: {
-                                HStack {
-                                    Text(group.name)
-                                        .font(.system(size: 11, weight: .semibold))
-                                    Spacer()
-                                    Text("\(group.sessions.count) 个 · \(formatBytes(group.totalBytes))")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .background(.regularMaterial)
+                                Divider().padding(.leading, 12)
                             }
                         }
                     }
@@ -69,6 +71,45 @@ struct SessionsView: View {
             }
         }
         .onAppear { service.refresh() }
+    }
+
+    @State private var expanded: Set<String> = []
+}
+
+/// 项目行：点击展开/收起该项目下的会话
+private struct ProjectHeaderRow: View {
+    let group: SessionBrowserService.ProjectGroup
+    let isExpanded: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 7) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.blue.opacity(0.8))
+                Text(group.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text("\(group.sessions.count) 个会话")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text(formatBytes(group.totalBytes))
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 58, alignment: .trailing)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isExpanded ? Color.primary.opacity(0.04) : .clear)
     }
 }
 
