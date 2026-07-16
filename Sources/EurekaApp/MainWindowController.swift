@@ -33,7 +33,7 @@ final class MainWindowController: NSWindowController {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "Eureka"
+        window.title = "lulu-lumei-dock"
         window.minSize = NSSize(width: 720, height: 480)
         window.collectionBehavior.insert(.fullScreenPrimary)
         // 关窗后不释放：菜单栏/Dock 点击可重新打开同一个窗口（否则 use-after-free）

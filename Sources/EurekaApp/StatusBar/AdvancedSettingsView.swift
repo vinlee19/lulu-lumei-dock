@@ -22,7 +22,7 @@ struct AdvancedSettingsView: View {
             CollapsibleCard(
                 icon: "folder.badge.gearshape", tint: Theme.sessions,
                 title: "配置文件目录",
-                subtitle: "Claude、Codex、opencode 与 Eureka 的数据存储路径"
+                subtitle: "Claude、Codex、opencode 与 lulu-lumei-dock 的数据存储路径"
             ) {
                 pathsContent
             }
@@ -97,7 +97,7 @@ struct AdvancedSettingsView: View {
         pathRow("Claude", home.appendingPathComponent(".claude"))
         pathRow("Codex", home.appendingPathComponent(".codex"))
         pathRow("opencode", home.appendingPathComponent(".config/opencode"))
-        pathRow("Eureka 数据", SpoolPaths.root())
+        pathRow("lulu-lumei-dock 数据", SpoolPaths.root())
     }
 
     private func pathRow(_ name: String, _ url: URL) -> some View {

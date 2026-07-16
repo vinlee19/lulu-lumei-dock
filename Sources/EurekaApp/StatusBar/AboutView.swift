@@ -23,7 +23,7 @@ struct AboutView: View {
             }
             installCommands
             Spacer(minLength: 8)
-            Button("退出 Eureka") { NSApp.terminate(nil) }
+            Button("退出 lulu-lumei-dock") { NSApp.terminate(nil) }
                 .controlSize(.small)
         }
         .onAppear { cliTools.detectLocal() }
@@ -40,7 +40,7 @@ struct AboutView: View {
                 .frame(width: 44, height: 44)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.1)))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Eureka")
+                Text("lulu-lumei-dock")
                     .font(.system(size: 14, weight: .semibold))
                 Text("版本 \(appVersion) · 本地 AI 编码活动面板")
                     .font(.system(size: 10.5))

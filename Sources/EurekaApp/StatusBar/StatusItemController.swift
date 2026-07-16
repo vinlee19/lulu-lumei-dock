@@ -29,7 +29,7 @@ final class StatusItemController: NSObject {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "✦"
-        item.button?.toolTip = "Eureka"
+        item.button?.toolTip = "lulu-lumei-dock"
         item.button?.target = self
         item.button?.action = #selector(statusItemClicked)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -92,7 +92,7 @@ final class StatusItemController: NSObject {
             }
             parts.append(text)
         }
-        return parts.isEmpty ? "Eureka" : parts.joined(separator: " · ")
+        return parts.isEmpty ? "lulu-lumei-dock" : parts.joined(separator: " · ")
     }
 
     @objc private func statusItemClicked() {
@@ -116,7 +116,7 @@ final class StatusItemController: NSObject {
         menu.addItem(openItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
-            title: "退出 Eureka",
+            title: "退出 lulu-lumei-dock",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))

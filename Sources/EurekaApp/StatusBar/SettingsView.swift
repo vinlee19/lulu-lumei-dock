@@ -220,7 +220,7 @@ struct SettingsView: View {
         case .unavailableNotBundled:
             return "当前为开发模式（swift run）运行，系统通知不可用，仅岛内红卡告警；安装为 .app 后生效。"
         case .denied:
-            return "系统通知权限已被拒绝，仅岛内红卡告警。可在 系统设置 > 通知 > Eureka 中开启。"
+            return "系统通知权限已被拒绝，仅岛内红卡告警。可在 系统设置 > 通知 > lulu-lumei-dock 中开启。"
         case .authorized, .unknown:
             return nil
         }

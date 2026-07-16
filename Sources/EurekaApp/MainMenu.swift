@@ -12,12 +12,12 @@ enum MainMenu {
         let appMenu = NSMenu()
         appItem.submenu = appMenu
         appMenu.addItem(
-            withTitle: "关于 Eureka",
+            withTitle: "关于 lulu-lumei-dock",
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(
-            withTitle: "隐藏 Eureka",
+            withTitle: "隐藏 lulu-lumei-dock",
             action: #selector(NSApplication.hide(_:)),
             keyEquivalent: "h")
         let hideOthers = NSMenuItem(
@@ -32,7 +32,7 @@ enum MainMenu {
             keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(
-            withTitle: "退出 Eureka",
+            withTitle: "退出 lulu-lumei-dock",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q")
 

@@ -508,7 +508,7 @@ struct ExpandedCardView: View {
             if queuedCount > 0 { parts.append("还有 \(queuedCount) 条") }
             return parts.joined(separator: " · ")
         case .notice:
-            var parts = ["Eureka 健康提示"]
+            var parts = ["lulu-lumei-dock 健康提示"]
             if queuedCount > 0 { parts.append("还有 \(queuedCount) 条通知") }
             return parts.joined(separator: " · ")
         }
