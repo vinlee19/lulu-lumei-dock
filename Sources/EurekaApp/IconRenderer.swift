@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 应用图标：黑色灵动岛胶囊 + 青色运行点 + 金色"尤里卡"火花。
+/// 应用图标：海青色（Codex 同色系）圆角方 + 白色「Lu」抽象字母组（黄金比例构造），呼应 lulu-lumei-dock。
 /// 用 SwiftUI 离屏渲染 1024px 母版（Scripts/make-icns.sh 据此生成 .icns）。
 @MainActor
 enum IconRenderer {
@@ -30,50 +30,25 @@ enum IconRenderer {
     }
 }
 
-/// 四角火花（凹边四芒星）
-struct SparkleShape: Shape {
-    /// 凹度：越小越尖锐
-    var concavity: CGFloat = 0.18
-
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        let inner = radius * concavity
-        var path = Path()
-        path.move(to: CGPoint(x: center.x, y: center.y - radius))
-        path.addQuadCurve(
-            to: CGPoint(x: center.x + radius, y: center.y),
-            control: CGPoint(x: center.x + inner, y: center.y - inner))
-        path.addQuadCurve(
-            to: CGPoint(x: center.x, y: center.y + radius),
-            control: CGPoint(x: center.x + inner, y: center.y + inner))
-        path.addQuadCurve(
-            to: CGPoint(x: center.x - radius, y: center.y),
-            control: CGPoint(x: center.x - inner, y: center.y + inner))
-        path.addQuadCurve(
-            to: CGPoint(x: center.x, y: center.y - radius),
-            control: CGPoint(x: center.x - inner, y: center.y - inner))
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// 1024×1024 母版。遵循 macOS 图标网格：
-/// 可见圆角方块 824px 居中，四周透明留白（阴影画在留白里）。
+/// 1024×1024 母版。遵循 macOS 图标网格：可见圆角方块 824px 居中，四周透明留白（阴影画在留白里）。
+/// 海青色圆角方（锚定 Codex 青绿 #14A08F）+ 白色「Lu」抽象字母组（黄金比例构造）。
 struct AppIconView: View {
     private let canvas: CGFloat = 1024
     private let plate: CGFloat = 824
+    /// 字母组字高（L 竖臂）；笔画粗 = H/φ³
+    private let glyphHeight: CGFloat = 430
+    private static let phi: CGFloat = 1.6180339
 
     var body: some View {
         ZStack {
-            // 底板：深空蓝紫渐变 + 左上隐约高光
+            // 底板：海青色渐变（左上亮青 → 右下深青）+ 左上高光描边 + 投影
             RoundedRectangle(cornerRadius: plate * 0.2237, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.47, green: 0.42, blue: 1.0),
-                            Color(red: 0.26, green: 0.20, blue: 0.78),
-                            Color(red: 0.07, green: 0.06, blue: 0.24),
+                            Color(red: 0.17, green: 0.82, blue: 0.72),
+                            Color(red: 0.08, green: 0.62, blue: 0.56),
+                            Color(red: 0.03, green: 0.35, blue: 0.35),
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -83,70 +58,74 @@ struct AppIconView: View {
                     RoundedRectangle(cornerRadius: plate * 0.2237, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
-                                colors: [.white.opacity(0.35), .white.opacity(0.02)],
+                                colors: [.white.opacity(0.4), .white.opacity(0.02)],
                                 startPoint: .top, endPoint: .bottom),
                             lineWidth: 6
                         )
                 )
                 .frame(width: plate, height: plate)
-                .shadow(color: .black.opacity(0.35), radius: 28, y: 14)
+                .shadow(color: .black.opacity(0.32), radius: 28, y: 14)
 
-            // 火花的背景辉光
+            // 中心柔光，托起白色字母
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [
-                            Color(red: 1.0, green: 0.84, blue: 0.25).opacity(0.5),
-                            Color(red: 0.55, green: 0.45, blue: 1.0).opacity(0.18),
-                            .clear,
-                        ],
-                        center: .center, startRadius: 0, endRadius: 330
-                    )
+                        colors: [.white.opacity(0.16), .clear],
+                        center: .center, startRadius: 0, endRadius: 300))
+                .frame(width: 640, height: 640)
+
+            // 「Lu」抽象字母组（圆头笔画，黄金比例）
+            LuluMark()
+                .stroke(
+                    LinearGradient(
+                        colors: [.white, Color(red: 0.88, green: 1.0, blue: 0.96)],
+                        startPoint: .top, endPoint: .bottom),
+                    style: StrokeStyle(
+                        lineWidth: glyphHeight / (Self.phi * Self.phi * Self.phi),
+                        lineCap: .round, lineJoin: .round)
                 )
-                .frame(width: 660, height: 660)
-                .offset(x: 86, y: 0)
-
-            // 灵动岛胶囊
-            Capsule(style: .continuous)
-                .fill(.black)
-                .frame(width: 600, height: 250)
-                .shadow(color: .black.opacity(0.55), radius: 36, y: 20)
-                .overlay {
-                    HStack(spacing: 0) {
-                        // 运行中的青色呼吸点
-                        Circle()
-                            .fill(Color(red: 0.25, green: 0.85, blue: 1.0))
-                            .frame(width: 58, height: 58)
-                            .shadow(color: Color(red: 0.25, green: 0.85, blue: 1.0).opacity(0.9),
-                                    radius: 26)
-                            .frame(maxWidth: .infinity)
-
-                        // 尤里卡火花
-                        SparkleShape()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 1.0, green: 0.92, blue: 0.55),
-                                        Color(red: 1.0, green: 0.72, blue: 0.10),
-                                    ],
-                                    startPoint: .top, endPoint: .bottom
-                                )
-                            )
-                            .frame(width: 188, height: 188)
-                            .shadow(color: Color(red: 1.0, green: 0.78, blue: 0.2).opacity(0.85),
-                                    radius: 34)
-                            .overlay(
-                                // 小伴星
-                                SparkleShape()
-                                    .fill(Color.white.opacity(0.95))
-                                    .frame(width: 44, height: 44)
-                                    .offset(x: 78, y: -64)
-                            )
-                            .frame(maxWidth: .infinity)
-                    }
-                    .padding(.horizontal, 64)
-                }
+                .frame(width: plate, height: glyphHeight)
+                .shadow(color: Color(red: 0.0, green: 0.16, blue: 0.15).opacity(0.35),
+                        radius: 10, y: 8)
         }
         .frame(width: canvas, height: canvas)
+    }
+}
+
+/// 「Lu」抽象字母组：大写 L + 小写 u，笔画/长度/字高全部由黄金比 φ 推导。
+/// L 竖臂 = 字高 H；L 底脚 = H/φ；u 字高 = H/φ；u 宽 = H/φ²；笔画粗 = H/φ³。
+struct LuluMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        let phi: CGFloat = 1.6180339
+        let H = rect.height
+        let t = H / (phi * phi * phi)           // 笔画粗细
+        let foot = H / phi                       // L 底脚长
+        let uH = H / phi                         // u 字高
+        let uW = H / (phi * phi)                 // u 宽
+        let gap = t                              // L 与 u 间距
+        // 组合自然宽度（含两端圆头半径 t/2）→ 用于在 rect 内水平居中
+        let groupW = foot + gap + uW + t
+        let x0 = rect.midX - groupW / 2 + t / 2  // L 竖臂中线 x
+        let topY = rect.midY - H / 2 + t / 2     // L 顶
+        let baseY = rect.midY + H / 2 - t / 2    // 基线（L 底脚 / u 底 的中线）
+
+        var path = Path()
+        // 大写 L：竖臂 + 底脚
+        path.move(to: CGPoint(x: x0, y: topY))
+        path.addLine(to: CGPoint(x: x0, y: baseY))
+        path.addLine(to: CGPoint(x: x0 + foot, y: baseY))
+
+        // 小写 u：左竖 + 底半圆 + 右竖（圆头）
+        let uLx = x0 + foot + gap                // u 左竖中线
+        let uRx = uLx + uW                        // u 右竖中线
+        let r = uW / 2                            // 底弧半径（中线）
+        let uTopY = baseY - uH
+        path.move(to: CGPoint(x: uLx, y: uTopY))
+        path.addLine(to: CGPoint(x: uLx, y: baseY - r))
+        path.addArc(
+            center: CGPoint(x: uLx + r, y: baseY - r), radius: r,
+            startAngle: .degrees(180), endAngle: .degrees(0), clockwise: true)
+        path.addLine(to: CGPoint(x: uRx, y: uTopY))
+        return path
     }
 }
