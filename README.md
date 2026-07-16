@@ -24,6 +24,25 @@ gauges, session/skill/agent/memory management, an audit trail and cloud backup �
 | ![tasklist](docs/images/island-tasklist.png) | ![wellness](docs/images/island-wellness.png) |
 | **Task list** — current tool / ctx% / idle sessions | **Wellness** — a gentle nudge after long vibe‑coding |
 
+## Install
+
+**Homebrew (recommended)**
+
+```bash
+brew tap vinlee19/tap
+brew install --cask lulu-lumei-dock
+```
+
+**Manual** — download the latest `.zip` from [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases), unzip `Eureka.app` into `/Applications`.
+
+**First launch:** the app is **ad‑hoc signed** (not Apple‑notarized), so Gatekeeper may block it. Either right‑click the app → **Open** → **Open**, or run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Eureka.app
+```
+
+> The installed bundle is `Eureka.app` and data lives in `~/Library/Application Support/Eureka/` (the internal name stays `Eureka` for compatibility). Building from source? See [Development](#development).
+
 ## What is this?
 
 `lulu-lumei-dock` is a native macOS menu‑bar app that watches the local logs of your AI coding

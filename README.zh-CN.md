@@ -21,6 +21,25 @@
 | ![tasklist](docs/images/island-tasklist.png) | ![wellness](docs/images/island-wellness.png) |
 | **任务列表** —— 当前工具 / 上下文占用 / 空闲会话 | **健康提示** —— 熬夜编码时的温柔提醒 |
 
+## 安装
+
+**Homebrew(推荐)**
+
+```bash
+brew tap vinlee19/tap
+brew install --cask lulu-lumei-dock
+```
+
+**手动下载** —— 从 [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases) 下载最新 `.zip`,解压把 `Eureka.app` 拖进「应用程序」。
+
+**首次打开:** 本应用为 **ad-hoc 签名**(未做 Apple 公证),可能被 Gatekeeper 拦截。任选其一:右键点按 App →「打开」→ 再次「打开」;或在终端执行:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Eureka.app
+```
+
+> 安装后的包名为 `Eureka.app`,数据在 `~/Library/Application Support/Eureka/`(内部名保留 `Eureka` 以兼容,见上方「关于名字」)。从源码构建见 [开发](#开发)。
+
 ## 这是什么
 
 `lulu-lumei-dock` 是一个原生 macOS 菜单栏应用:它监视本地 AI 编码助手的日志,把任务活动实时装进刘海
