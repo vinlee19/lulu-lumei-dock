@@ -18,6 +18,12 @@ public final class CodexUsageScanner {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
 
     /// 每文件的扫描私有状态（存 scan_files.extra）
     private struct FileExtra: Codable {
@@ -83,6 +89,12 @@ public final class CodexUsageScanner {
 
         var records: [UsageRecord] = []
         var promptCount = 0
+        // 工具/插件调用聚合：("day\u{1}kind\u{1}name") → count
+        var toolBumps: [String: Int] = [:]
+        func bumpTool(_ day: String, _ kind: String, _ name: String) {
+            guard !name.isEmpty else { return }
+            toolBumps["\(day)\u{1}\(kind)\u{1}\(name)", default: 0] += 1
+        }
         for line in chunk.lines {
             guard
                 let object = try? JSONSerialization.jsonObject(with: line),
@@ -90,6 +102,23 @@ public final class CodexUsageScanner {
                 let type = root["type"] as? String
             else { continue }
             let payload = root["payload"] as? [String: Any] ?? [:]
+
+            // 工具/插件调用：function_call（原生工具，MCP 以 "_" 前缀重复出现 → 跳过）
+            // 与 mcp_tool_call_end（MCP 插件，命名干净）
+            if type == "response_item", payload["type"] as? String == "function_call",
+               let name = payload["name"] as? String, !name.hasPrefix("_") {
+                let day = (root["timestamp"] as? String).flatMap { Self.isoFormatter.date(from: $0) }
+                    .map { Self.dayFormatter.string(from: $0) } ?? Self.dayFormatter.string(from: Date())
+                bumpTool(day, "tool", name)
+            }
+            if type == "event_msg", payload["type"] as? String == "mcp_tool_call_end" {
+                let inv = payload["invocation"] as? [String: Any] ?? [:]
+                let server = inv["server"] as? String ?? "?"
+                let tool = inv["tool"] as? String ?? "?"
+                let day = (root["timestamp"] as? String).flatMap { Self.isoFormatter.date(from: $0) }
+                    .map { Self.dayFormatter.string(from: $0) } ?? Self.dayFormatter.string(from: Date())
+                bumpTool(day, "mcp", "\(server).\(tool)")
+            }
 
             if type == "session_meta" {
                 if let cwd = payload["cwd"] as? String {
@@ -159,6 +188,12 @@ public final class CodexUsageScanner {
             data: (try? JSONEncoder().encode(extra)) ?? Data(), encoding: .utf8)
         try store.scanState.transaction {
             try store.usage.insert(records)
+            for (composite, count) in toolBumps {
+                let parts = composite.components(separatedBy: "\u{1}")
+                guard parts.count == 3 else { continue }
+                try store.toolCalls.bump(
+                    day: parts[0], source: .codex, kind: parts[1], name: parts[2], by: count)
+            }
             try store.scanState.setFileState(
                 path: path,
                 .init(inode: info.inode, offset: Int64(chunk.newOffset), extra: extraJSON))

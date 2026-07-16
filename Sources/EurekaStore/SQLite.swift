@@ -50,19 +50,31 @@ public struct SQLiteRow {
 /// 系统 libsqlite3 薄封装：串行使用（调用方负责队列约束），WAL 模式。
 /// 数据工程师可直接 `sqlite3 eureka.sqlite` 查库调试。
 public final class SQLiteDB {
+    /// 锁争用等待上限（毫秒）。扫描是每文件一个短事务，5s 足以吸收所有争用。
+    private static let busyTimeoutMs: Int32 = 5000
+
     private var handle: OpaquePointer?
 
-    public init(path: String) throws {
+    /// readOnly=true 用于只读打开外部库（如 opencode.db）：绝不建库/写入，也不改 journal 模式。
+    public init(path: String, readOnly: Bool = false) throws {
         var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        let flags = readOnly
+            ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX)
+            : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX)
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "无法打开"
             sqlite3_close_v2(db)
             throw SQLiteError(code: SQLITE_CANTOPEN, message: message)
         }
         handle = db
-        try execute("PRAGMA journal_mode=WAL")
-        try execute("PRAGMA synchronous=NORMAL")
+        // 锁争用时最多等待 5s 再返回，而非立刻抛 SQLITE_BUSY。
+        // 多连接（UsageService / SessionBrowser）与跨进程（--usage-snapshot CLI）
+        // 并发写时，配合 WAL + BEGIN IMMEDIATE 即可避免 "database is locked"。
+        sqlite3_busy_timeout(db, Self.busyTimeoutMs)
+        if !readOnly {
+            try execute("PRAGMA journal_mode=WAL")
+            try execute("PRAGMA synchronous=NORMAL")
+        }
     }
 
     deinit {
@@ -108,6 +120,11 @@ public final class SQLiteDB {
 
     public var lastInsertRowID: Int64 {
         sqlite3_last_insert_rowid(handle)
+    }
+
+    /// 最近一条语句实际改动的行数（INSERT OR IGNORE 判定是否真插入：0=被忽略）
+    public var changes: Int {
+        Int(sqlite3_changes(handle))
     }
 
     public func transaction(_ body: () throws -> Void) throws {

@@ -23,6 +23,8 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
     public var currentActivity: String?
     /// 上下文窗口占用百分比（0-100），nil = 未知
     public var contextUsedPercent: Double?
+    /// 本 turn 派生的 Claude 子 agent（无则空；Codex 永远空）
+    public var subagents: [SubagentInfo] = []
 
     public var id: String { Self.key(source: source, sessionId: sessionId) }
 
@@ -43,7 +45,8 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
         sessionStartedAt: Date? = nil,
         lastActivityAt: Date? = nil,
         phase: Phase = .running,
-        currentActivity: String? = nil
+        currentActivity: String? = nil,
+        subagents: [SubagentInfo] = []
     ) {
         self.source = source
         self.sessionId = sessionId
@@ -54,6 +57,7 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
         self.lastActivityAt = lastActivityAt ?? startedAt
         self.phase = phase
         self.currentActivity = currentActivity
+        self.subagents = subagents
     }
 }
 
@@ -65,6 +69,8 @@ public struct FinishedTask: Equatable, Sendable, Identifiable {
     public var title: String?
     public var cwd: String?
     public var startedAt: Date?
+    /// 会话最初创建的时间（跨 turn/resume 不变；历史列表"开始时间"排序/展示用）
+    public var sessionStartedAt: Date?
     public var finishedAt: Date
     public var outcome: TaskOutcome
     /// 错误信息 / 中断原因等补充说明
@@ -84,6 +90,7 @@ public struct FinishedTask: Equatable, Sendable, Identifiable {
         title: String? = nil,
         cwd: String? = nil,
         startedAt: Date? = nil,
+        sessionStartedAt: Date? = nil,
         finishedAt: Date,
         outcome: TaskOutcome,
         detail: String? = nil
@@ -94,6 +101,7 @@ public struct FinishedTask: Equatable, Sendable, Identifiable {
         self.title = title
         self.cwd = cwd
         self.startedAt = startedAt
+        self.sessionStartedAt = sessionStartedAt
         self.finishedAt = finishedAt
         self.outcome = outcome
         self.detail = detail

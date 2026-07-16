@@ -32,6 +32,8 @@ public struct TaskEvent: Equatable, Sendable {
         case contextUpdate(percent: Double)
         /// 任务标题升级（如 transcript 里的 ai-title，比原始 prompt 更适合做会话名）
         case titleUpdate(title: String)
+        /// 子 agent 列表快照更新（Claude transcript 监视扫 subagents/ 目录得来）
+        case subagentsUpdated([SubagentInfo])
         case sessionStarted
         case sessionEnded(reason: String?)
     }

@@ -21,12 +21,29 @@ public struct IslandCardQueue: Equatable, Sendable {
             } else {
                 pending.insert(card, at: 0)
             }
+        case .alert(let alert):
+            // 同一告警不重复入队；安全告警插队置顶（与等待卡同级紧急）
+            guard !alertExists(id: alert.id) else { return }
+            if current == nil {
+                current = card
+            } else {
+                pending.insert(card, at: 0)
+            }
         case .finished, .notice:
             if current == nil {
                 current = card
             } else {
                 pending.append(card)
             }
+        }
+    }
+
+    /// 队列（当前 + 待显）中是否已有该 id 的告警卡
+    private func alertExists(id: String) -> Bool {
+        if case .alert(let alert)? = current, alert.id == id { return true }
+        return pending.contains {
+            if case .alert(let alert) = $0 { return alert.id == id }
+            return false
         }
     }
 

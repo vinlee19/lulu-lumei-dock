@@ -45,6 +45,7 @@ public final class TaskStore {
                     // 空闲后开新 turn：计时从现在起，新 prompt 即新任务名
                     task.startedAt = event.timestamp
                     task.currentActivity = nil
+                    task.subagents = []  // 子 agent 属于上一 turn，清空
                     if let title { task.title = title }
                 }
                 if case .running = task.phase {} else { task.phase = .running }
@@ -76,6 +77,7 @@ public final class TaskStore {
                 title: title ?? existing?.title,
                 cwd: event.cwd ?? existing?.cwd,
                 startedAt: existing?.startedAt,
+                sessionStartedAt: existing?.sessionStartedAt ?? event.sessionStartedAt,
                 finishedAt: event.timestamp,
                 outcome: outcome,
                 detail: detail
@@ -86,6 +88,7 @@ public final class TaskStore {
                 task.phase = .idle
                 task.lastActivityAt = event.timestamp
                 task.currentActivity = nil
+                task.subagents = []  // 子 agent 属于本 turn，收尾即清
                 if task.title == nil { task.title = title }
                 activeTasks[key] = task
             } else {
@@ -160,6 +163,15 @@ public final class TaskStore {
             activeTasks[key] = task
             return [.activeTasksChanged]
 
+        case .subagentsUpdated(let subagents):
+            // 不为子 agent 事件凭空建会话；列表无变化则不刷 UI（防 5s 抖动）
+            guard var task = activeTasks[key] else { return [] }
+            guard task.subagents != subagents else { return [] }
+            task.subagents = subagents
+            task.lastActivityAt = event.timestamp
+            activeTasks[key] = task
+            return [.activeTasksChanged]
+
         case .sessionStarted:
             guard activeTasks[key] == nil else { return [] }
             // 会话打开但还没跑任务：登记为空闲（任务列表可见）
@@ -186,6 +198,7 @@ public final class TaskStore {
                 title: task.title,
                 cwd: task.cwd,
                 startedAt: task.startedAt,
+                sessionStartedAt: task.sessionStartedAt,
                 finishedAt: event.timestamp,
                 outcome: .interrupted,
                 detail: reason.map { "会话结束（\($0)）" }
@@ -215,6 +228,7 @@ public final class TaskStore {
                 title: task.title,
                 cwd: task.cwd,
                 startedAt: task.startedAt,
+                sessionStartedAt: task.sessionStartedAt,
                 finishedAt: now,
                 outcome: .interrupted,
                 detail: "长时间无活动，已自动清理"

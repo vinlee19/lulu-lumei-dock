@@ -131,8 +131,16 @@ final class IslandPanelController {
             setFrameProgrammatically(defaultFrame, animate: true)
             viewModel.isFloating = false
         } else {
-            IslandPositionStore.save(origin)
             viewModel.isFloating = true
+            // 跨屏后按新屏比例重设尺寸：锚定左上角（内容顶部）不动
+            let newSize = viewModel.layout.panelSize
+            if newSize != panel.frame.size {
+                let anchored = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - newSize.height)
+                setFrameProgrammatically(NSRect(origin: anchored, size: newSize), animate: true)
+                IslandPositionStore.save(anchored)
+            } else {
+                IslandPositionStore.save(origin)
+            }
         }
     }
 
@@ -146,11 +154,13 @@ final class IslandPanelController {
     func reposition() {
         // 有自定义位置且仍在某块屏幕上 → 沿用（浮动样式）
         if let origin = IslandPositionStore.load() {
-            let frame = NSRect(origin: origin, size: viewModel.layout.panelSize)
-            if let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) {
+            // 先按原点定位所在屏（用基准尺寸探测），更新缩放后再用新尺寸成帧
+            let probe = NSRect(origin: origin, size: IslandGeometry.Layout.standard.panelSize)
+            if let screen = NSScreen.screens.first(where: { $0.frame.intersects(probe) }) {
                 viewModel.updateScreen(Self.screenInfo(of: screen))
                 viewModel.isFloating = true
-                setFrameProgrammatically(frame, animate: false)
+                setFrameProgrammatically(
+                    NSRect(origin: origin, size: viewModel.layout.panelSize), animate: false)
                 return
             }
             IslandPositionStore.clear()  // 显示器拔了，回默认

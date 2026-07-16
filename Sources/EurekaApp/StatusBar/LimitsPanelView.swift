@@ -11,6 +11,9 @@ struct LimitsPanelView: View {
                 if let codex = service.codex {
                     LimitCard(snapshot: codex)
                 }
+                if let grok = service.grok {
+                    LimitCard(snapshot: grok)
+                }
 
                 if service.claudeEnabled {
                     if let claude = service.claude {
@@ -25,13 +28,13 @@ struct LimitsPanelView: View {
                     ClaudeOptInCard(service: service)
                 }
 
-                if service.codex == nil && !service.claudeEnabled {
-                    Text("还没有 Codex 限额快照（跑一次 codex 后出现）")
+                if service.codex == nil && service.grok == nil && !service.claudeEnabled {
+                    Text("还没有 Codex/Grok 限额快照（跑一次 codex 或 grok 后出现）")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
 
-                Text("Codex 限额来自本地会话快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。")
+                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -54,8 +57,8 @@ private struct LimitCard: View {
                         .font(.system(size: 9, weight: .medium))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.blue.opacity(0.15)))
-                        .foregroundStyle(.blue)
+                        .background(Capsule().fill(Theme.limits.opacity(0.15)))
+                        .foregroundStyle(Theme.limits)
                 }
                 Spacer()
                 if snapshot.isStale {
@@ -65,14 +68,28 @@ private struct LimitCard: View {
                 }
             }
             if let primary = snapshot.primary {
-                WindowGauge(label: "5 小时窗口", window: primary)
+                WindowGauge(
+                    label: Self.windowLabel(primary.windowMinutes, fallback: "5 小时窗口"),
+                    window: primary)
             }
             if let secondary = snapshot.secondary {
-                WindowGauge(label: "每周窗口", window: secondary)
+                WindowGauge(
+                    label: Self.windowLabel(secondary.windowMinutes, fallback: "每周窗口"),
+                    window: secondary)
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.045)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(Theme.limits)))
+    }
+
+    /// 窗口时长 → 中文标签（Codex 5h/周；Grok 周/月单窗）
+    static func windowLabel(_ minutes: Int, fallback: String) -> String {
+        switch minutes {
+        case 300: return "5 小时窗口"
+        case 10080: return "每周窗口"
+        case 43200: return "每月窗口"
+        default: return fallback
+        }
     }
 }
 
@@ -100,7 +117,9 @@ private struct WindowGauge: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
                     Capsule()
-                        .fill(barColor)
+                        .fill(LinearGradient(
+                            colors: [barColor.opacity(0.65), barColor],
+                            startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(
                             4, proxy.size.width * min(window.usedPercent, 100) / 100))
                 }
@@ -110,11 +129,7 @@ private struct WindowGauge: View {
     }
 
     private var barColor: Color {
-        switch window.usedPercent {
-        case ..<60: return .green
-        case ..<85: return .orange
-        default: return .red
-        }
+        Theme.percentColor(window.usedPercent)
     }
 }
 
@@ -134,6 +149,6 @@ private struct ClaudeOptInCard: View {
                 .controlSize(.small)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.045)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(Theme.limits)))
     }
 }

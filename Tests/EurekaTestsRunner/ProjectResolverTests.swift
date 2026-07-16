@@ -43,6 +43,18 @@ func projectResolverTests(_ t: TestRunner) {
         try expectEqual(ProjectResolver.resolve(cwd: plain.path), "notes")
     }
 
+    t.test("脏 cwd（含控制字符）不崩溃，安全回退") {
+        // 回归：含 NUL/控制字符的 cwd（来自二进制来源裸扫的碎片）曾让
+        // URL.appendingPathComponent 抛不可捕获的 NSException → 整个 app 崩溃。
+        let dirty = "/Users/me/proj\u{00}\u{0E}\u{03}\r"
+        let root = ProjectResolver.resolveRoot(cwd: dirty)  // 不应崩溃
+        try expect(!root.path.isEmpty)
+        try expectEqual(ProjectResolver.resolve(cwd: dirty), "proj")  // 截断到控制字符前
+        try expect(ProjectResolver().projectName(forCwd: dirty) == "proj")
+        // 纯控制字符 → 安全回退，不崩溃
+        _ = ProjectResolver.resolveRoot(cwd: "\u{00}\u{01}")
+    }
+
     t.test("缓存与空值") {
         let resolver = ProjectResolver()
         try expect(resolver.projectName(forCwd: nil) == nil)

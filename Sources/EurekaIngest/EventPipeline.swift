@@ -5,13 +5,19 @@ import EurekaKit
 /// 统一做去重与富化（错误嗅探/ai-title），串行后交给单一 handler。
 public final class EventPipeline {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
+    /// 审计旁路：Claude PostToolUse hook 解码出的操作事件（不经 TaskStore）
+    public typealias AuditHandler = (AuditEvent, _ isStale: Bool) -> Void
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.pipeline")
     private let dedup = EventDeduplicator()
     private let handler: Handler
+    private let auditHandler: AuditHandler?
     private var spool: SpoolConsumer?
     private var tailer: CodexRolloutTailer?
     private var claudeWatcher: ClaudeTranscriptWatcher?
+    private var opencodeTailer: OpencodeEventTailer?
+    private var grokTailer: GrokRolloutTailer?
+    private var antigravityTailer: AntigravityActivityTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -22,11 +28,27 @@ public final class EventPipeline {
         spoolRoot: URL,
         codexSessionsRoot: URL = CodexRolloutTailer.defaultSessionsRoot(),
         claudeProjectsRoot: URL = ClaudeSessionBootstrap.defaultProjectsRoot(),
+        opencodeDbPath: URL = OpencodePaths.db(),
+        grokSessionsRoot: URL = GrokPaths.sessionsRoot(),
+        antigravityConversationsRoot: URL = AntigravityPaths.conversationsRoot(),
+        auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
         self.handler = handler
+        self.auditHandler = auditHandler
         self.claudeProjectsRoot = claudeProjectsRoot
-        spool = SpoolConsumer(root: spoolRoot) { [weak self] event, isStale in
+        // 只审计 Claude hook 通道的 PostToolUse（inject 也走此通道）
+        let rawObserver: SpoolConsumer.RawObserver? = auditHandler.map { audit in
+            { raw, isStale in
+                guard raw.channel == "claude-hook",
+                      let event = ClaudeAuditDecoder.decode(
+                        payload: raw.payload, receivedAt: raw.receivedAt)
+                else { return }
+                audit(event, isStale)
+            }
+        }
+        spool = SpoolConsumer(root: spoolRoot, rawObserver: rawObserver) {
+            [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
         tailer = CodexRolloutTailer(
@@ -38,11 +60,30 @@ public final class EventPipeline {
                 self?.ingest(event, isStale: isStale)
             }
         )
+        // opencode 无 hook/notify，尾随 opencode.db event 表做实时
+        opencodeTailer = OpencodeEventTailer(dbPath: opencodeDbPath) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
+        // grok 无 hook/notify，尾随 ~/.grok/sessions/*/*/events.jsonl 做实时
+        grokTailer = GrokRolloutTailer(sessionsRoot: grokSessionsRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
+        // antigravity 内容为 protobuf，只按 conversations/<uuid>.db 写入判 running/idle
+        antigravityTailer = AntigravityActivityTailer(
+            conversationsRoot: antigravityConversationsRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
         spool?.start()
         tailer?.start(pollInterval: 1)
+        opencodeTailer?.start(pollInterval: 2)
+        grokTailer?.start(pollInterval: 2)
+        antigravityTailer?.start(pollInterval: 2)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -56,6 +97,9 @@ public final class EventPipeline {
     public func stop() {
         spool?.stop()
         tailer?.stop()
+        opencodeTailer?.stop()
+        grokTailer?.stop()
+        antigravityTailer?.stop()
         claudeWatcher?.stop()
     }
 

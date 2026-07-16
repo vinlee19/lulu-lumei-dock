@@ -20,28 +20,65 @@ final class SessionBrowserService: ObservableObject {
         var totalBytes: UInt64
         var latestActiveAt: Date
         var totalCostUSD: Double?
+        /// 项目总时长 = 组内各会话跨度求和
+        var totalDuration: TimeInterval
     }
 
+    /// rawValue 为稳定持久化 token；label 为界面展示文案（解耦，改文案不动存档）
     enum SortMode: String, CaseIterable {
-        case time = "按时间"
-        case size = "按大小"
+        case time
+        case size
+        case duration
+
+        var label: String {
+            switch self {
+            case .time: return "最近活跃"
+            case .size: return "按大小"
+            case .duration: return "按时长"
+            }
+        }
+    }
+
+    /// 全部会话的账本总览（不受搜索/截断影响）
+    struct Summary: Equatable {
+        var totalBytes: UInt64 = 0
+        var sessionCount: Int = 0
+        var totalCostUSD: Double?
     }
 
     @Published private(set) var groups: [ProjectGroup] = []
+    @Published private(set) var summary = Summary()
+    /// id → 会话索引信息（用量"按会话"排行 join 会话名 + 跨页签跳转用），refresh 完成时填充
+    @Published private(set) var sessionsById: [String: AgentSessionInfo] = [:]
     @Published private(set) var costs: [String: SessionCost] = [:]
     /// 每会话对话数
     @Published private(set) var promptCounts: [String: Int] = [:]
     @Published private(set) var scanning = false
+    /// 当前选中的会话（详情栏渲染对象）
+    @Published private(set) var selected: AgentSessionInfo?
+    @Published private(set) var transcript: [TranscriptMessage] = []
+    @Published private(set) var transcriptTruncated = false
+    @Published private(set) var transcriptLoading = false
     @Published var sortMode: SortMode = .time {
         didSet { rebuild() }
     }
     @Published var searchText = "" {
         didSet { rebuild() }
     }
+    /// 来源筛选（nil = 全部）
+    @Published var sourceFilter: AgentSource? {
+        didSet { rebuild() }
+    }
+    /// 按时间/大小最多展示多少个会话（0 = 全部）；搜索态忽略此限制
+    @Published var displayLimit: Int = 10 {
+        didSet { rebuild() }
+    }
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.sessions", qos: .userInitiated)
     private let resolver = ProjectResolver()
     private var sessions: [AgentSessionInfo] = []
+    /// 待跳转的会话 id（索引未就绪时记下，refresh 完成后消费）
+    private var pendingRevealId: String?
     // 以下仅 queue 上访问
     private var store: EurekaStore?
     private var pricing = PricingTable(models: [])
@@ -63,6 +100,10 @@ final class SessionBrowserService: ObservableObject {
                 projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot())
             indexed += CodexSessionIndexer.index(
                 sessionsRoot: CodexRolloutTailer.defaultSessionsRoot())
+            indexed += OpencodeSessionIndexer.index(dbPath: OpencodePaths.db())
+            indexed += GrokSessionIndexer.index(sessionsRoot: GrokPaths.sessionsRoot())
+            indexed += AntigravitySessionIndexer.index(
+                conversationsRoot: AntigravityPaths.conversationsRoot())
 
             // 会话级费用：逐会话×模型聚合后按价格表折算
             var costMap: [String: SessionCost] = [:]
@@ -87,24 +128,56 @@ final class SessionBrowserService: ObservableObject {
 
             DispatchQueue.main.async {
                 self.sessions = indexed
+                self.sessionsById = Dictionary(
+                    indexed.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 self.costs = costMap
                 self.promptCounts = prompts
                 self.scanning = false
                 self.rebuild()
+                // 索引就绪后消费待跳转请求（用量"按会话"排行点击时索引可能还没建）
+                if let pending = self.pendingRevealId {
+                    self.pendingRevealId = nil
+                    if let hit = self.sessionsById[pending] {
+                        self.select(hit)
+                    }
+                }
             }
         }
     }
 
     private func rebuild() {
+        // 总览：全部会话，不过滤、不截断
+        let allCosts = sessions.compactMap { costs[$0.id]?.costUSD }
+        summary = Summary(
+            totalBytes: sessions.reduce(0) { $0 + $1.sizeBytes },
+            sessionCount: sessions.count,
+            totalCostUSD: allCosts.isEmpty ? nil : allCosts.reduce(0, +))
+
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        var byProject: [String: [AgentSessionInfo]] = [:]
-        for session in sessions {
-            if !query.isEmpty {
+        var visible = sessions
+        if let filter = sourceFilter {
+            visible = visible.filter { $0.source == filter }
+        }
+        if !query.isEmpty {
+            // 搜索态：全量匹配，不截断
+            visible = visible.filter { session in
                 let haystack = [
                     session.name, session.id, session.cwd,
                 ].compactMap { $0?.lowercased() }.joined(separator: " ")
-                guard haystack.contains(query) else { continue }
+                return haystack.contains(query)
             }
+        } else if displayLimit > 0 {
+            // 非搜索态：按当前排序维度取最近/最大/最久的前 N 个会话
+            switch sortMode {
+            case .time: visible.sort { $0.lastActiveAt > $1.lastActiveAt }
+            case .size: visible.sort { $0.sizeBytes > $1.sizeBytes }
+            case .duration: visible.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
+            }
+            visible = Array(visible.prefix(displayLimit))
+        }
+
+        var byProject: [String: [AgentSessionInfo]] = [:]
+        for session in visible {
             let name = resolver.projectName(forCwd: session.cwd) ?? "（未知项目）"
             byProject[name, default: []].append(session)
         }
@@ -115,7 +188,8 @@ final class SessionBrowserService: ObservableObject {
                 sessions: sessions,
                 totalBytes: sessions.reduce(0) { $0 + $1.sizeBytes },
                 latestActiveAt: sessions.map(\.lastActiveAt).max() ?? .distantPast,
-                totalCostUSD: groupCosts.isEmpty ? nil : groupCosts.reduce(0, +)
+                totalCostUSD: groupCosts.isEmpty ? nil : groupCosts.reduce(0, +),
+                totalDuration: sessions.reduce(0) { $0 + ($1.duration ?? 0) }
             )
         }
         switch sortMode {
@@ -129,6 +203,11 @@ final class SessionBrowserService: ObservableObject {
             for index in result.indices {
                 result[index].sessions.sort { $0.sizeBytes > $1.sizeBytes }
             }
+        case .duration:
+            result.sort { $0.totalDuration > $1.totalDuration }
+            for index in result.indices {
+                result[index].sessions.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
+            }
         }
         groups = result
     }
@@ -137,16 +216,131 @@ final class SessionBrowserService: ObservableObject {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    // MARK: - 选中与对话记录
+
+    /// 跨页签跳转：按 id 选中会话（索引未就绪时记下，refresh 完成后自动选中）
+    func reveal(sessionId: String) {
+        if let hit = sessionsById[sessionId] {
+            select(hit)
+            return
+        }
+        pendingRevealId = sessionId
+        refresh()
+    }
+
+    /// 选中会话并在后台加载对话记录
+    func select(_ session: AgentSessionInfo?) {
+        selected = session
+        transcript = []
+        transcriptTruncated = false
+        guard let session else { return }
+        transcriptLoading = true
+        queue.async { [weak self] in
+            let result = TranscriptReader.load(session: session)
+            DispatchQueue.main.async {
+                guard let self, self.selected?.id == session.id else { return }
+                self.transcript = result.messages
+                self.transcriptTruncated = result.truncated
+                self.transcriptLoading = false
+            }
+        }
+    }
+
+    // MARK: - 恢复与删除
+
+    /// 恢复命令（详情栏展示 + 复制 + 终端执行共用）
+    func resumeCommand(for session: AgentSessionInfo) -> String {
+        let resume: String
+        switch session.source {
+        case .claude: resume = "claude --resume \(session.id)"
+        case .codex: resume = "codex resume \(session.id)"
+        case .opencode: resume = "opencode --session \(session.id)"  // 用 --session 重新进入指定会话（opencode 1.17+）
+        case .grok: resume = "grok --resume \(session.id)"
+        case .antigravity: resume = "agy --conversation \(session.id)"
+        }
+        guard let cwd = session.cwd else { return resume }
+        return "cd '\(cwd)' && " + resume
+    }
+
     /// 拷贝恢复命令到剪贴板
     func copyResumeCommand(_ session: AgentSessionInfo) {
-        let resume = session.source == .claude
-            ? "claude --resume \(session.id)"
-            : "codex resume \(session.id)"
-        var command = resume
-        if let cwd = session.cwd {
-            command = "cd '\(cwd)' && " + resume
-        }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
+        NSPasteboard.general.setString(resumeCommand(for: session), forType: .string)
+    }
+
+    /// 在 Terminal 新窗口/标签执行恢复命令（osascript；命令内双引号/反斜杠转义）
+    func resumeInTerminal(_ session: AgentSessionInfo) {
+        let command = resumeCommand(for: session)
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "\(escaped)"
+        end tell
+        """
+        queue.async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try? process.run()
+            process.waitUntilExit()
+        }
+    }
+
+    /// 删除会话（移废纸篓，可恢复）：claude/codex/grok/antigravity 支持（opencode 存共享库，不支持）。
+    /// Claude 会话若有嵌套子代理目录（<session>/…）一并清理；grok 是整个 <uuid>/ 目录；
+    /// antigravity 是 <uuid>.db（连 -wal/-shm）。
+    func deleteSessions(_ toDelete: [AgentSessionInfo], completion: ((Int) -> Void)? = nil) {
+        let deletable = toDelete.filter { $0.source != .opencode }
+        guard !deletable.isEmpty else {
+            completion?(0)
+            return
+        }
+        if let selectedId = selected?.id, deletable.contains(where: { $0.id == selectedId }) {
+            select(nil)
+        }
+        queue.async { [weak self] in
+            let fm = FileManager.default
+            var trashed = 0
+            for session in deletable {
+                let fileURL = URL(fileURLWithPath: session.transcriptPath)
+                // grok：transcriptPath = <uuid>/chat_history.jsonl，删整个会话目录
+                if session.source == .grok {
+                    let sessionDir = fileURL.deletingLastPathComponent()
+                    if (try? fm.trashItem(at: sessionDir, resultingItemURL: nil)) != nil {
+                        trashed += 1
+                    }
+                    continue
+                }
+                // antigravity：transcriptPath = <uuid>.db，连同 -wal/-shm 一并删
+                if session.source == .antigravity {
+                    if (try? fm.trashItem(at: fileURL, resultingItemURL: nil)) != nil {
+                        trashed += 1
+                    }
+                    for suffix in ["-wal", "-shm"] {
+                        let sidecar = URL(fileURLWithPath: session.transcriptPath + suffix)
+                        if fm.fileExists(atPath: sidecar.path) {
+                            try? fm.trashItem(at: sidecar, resultingItemURL: nil)
+                        }
+                    }
+                    continue
+                }
+                if (try? fm.trashItem(at: fileURL, resultingItemURL: nil)) != nil {
+                    trashed += 1
+                }
+                // Claude 嵌套目录（subagents 等）：<dir>/<sessionId>/
+                let nested = fileURL.deletingPathExtension()
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: nested.path, isDirectory: &isDir), isDir.boolValue {
+                    try? fm.trashItem(at: nested, resultingItemURL: nil)
+                }
+            }
+            DispatchQueue.main.async { completion?(trashed) }
+            DispatchQueue.main.async { [weak self] in self?.refresh() }
+        }
     }
 }

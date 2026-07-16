@@ -20,6 +20,8 @@ final class IslandViewModel: ObservableObject {
     /// 空闲会话（开着但没在跑 turn）：任务列表展示，胶囊计数不算
     @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
+    /// 任务列表里当前展开子 agent 框的任务 id（nil = 全收起；单开，几何有界）
+    @Published private(set) var expandedSubagentTaskId: String?
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
     /// 用户把岛拖到了自定义位置：脱离刘海融合，渲染为四角全圆的悬浮样式
@@ -30,7 +32,10 @@ final class IslandViewModel: ObservableObject {
     /// 岛上切换按钮回调（AppDelegate 接到 AppSettings）
     var onToggleTimeMode: (@MainActor () -> Void)?
 
-    let layout = IslandGeometry.Layout.standard
+    /// 当前屏对应布局（随 screen 变化按比例缩放）
+    var layout: IslandGeometry.Layout { IslandGeometry.layout(for: screen) }
+    /// 当前屏 UI 缩放系数（字体/内边距/徽标用；pill 高度受刘海钉死，不适用）
+    var uiScale: CGFloat { IslandGeometry.scaleFactor(for: screen) }
     /// 完成/出错卡自动收起秒数（等待卡不自动收）
     var autoDismissSeconds: TimeInterval = 6
 
@@ -58,6 +63,10 @@ final class IslandViewModel: ObservableObject {
         for id in queue.waitingTaskIds where !stillWaiting.contains(id) {
             queue.removeWaiting(taskId: id)
         }
+        // 展开的任务消失了就收起（防停在已不存在的会话上）
+        if let id = expandedSubagentTaskId, !tasks.contains(where: { $0.id == id }) {
+            expandedSubagentTaskId = nil
+        }
         refresh()
     }
 
@@ -76,6 +85,11 @@ final class IslandViewModel: ObservableObject {
         refresh()
     }
 
+    func enqueueAlert(_ alert: RiskAlert) {
+        queue.enqueue(.alert(alert))
+        refresh()
+    }
+
     func islandTapped() {
         switch display {
         case .compact:
@@ -90,13 +104,19 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
+    /// 行内展开/收起某任务的子 agent 框（任务列表里的内层按钮调用）
+    func toggleSubagentExpansion(_ taskId: String) {
+        expandedSubagentTaskId = (expandedSubagentTaskId == taskId) ? nil : taskId
+        scheduleAutoDismiss()  // 展开=用户在看，续期收起计时
+    }
+
     func setHovering(_ value: Bool) {
         hovering = value
         if !value {
             hoverExtensions = 0
             // 真正移开后正常计时收起
             switch display {
-            case .card(.finished), .card(.notice), .taskList:
+            case .card(.finished), .card(.notice), .card(.alert), .taskList:
                 scheduleAutoDismiss()
             default:
                 break
@@ -140,9 +160,15 @@ final class IslandViewModel: ObservableObject {
             let activeRows = min(activeTasks.count, 4)
             let idleRows = min(idleTasks.count, 3)
             let idleHeader = idleRows > 0 ? 18 : 0
-            return CGSize(
-                width: layout.expandedCardSize.width,
-                height: CGFloat(34 + activeRows * 30 + idleHeader + idleRows * 24 + 10))
+            // 展开的子 agent 框（仅当展开任务在可见的前 4 个且确有子 agent）
+            var expanded: CGFloat = 0
+            if let id = expandedSubagentTaskId,
+               let task = activeTasks.prefix(4).first(where: { $0.id == id }),
+               !task.subagents.isEmpty {
+                expanded = IslandGeometry.subagentBoxHeight(count: task.subagents.count)
+            }
+            let base = CGFloat(34 + activeRows * 30 + idleHeader + idleRows * 24 + 10) + expanded
+            return CGSize(width: layout.expandedCardSize.width, height: base * uiScale)
         }
     }
 
@@ -179,6 +205,7 @@ final class IslandViewModel: ObservableObject {
             case .finished: scheduleAutoDismiss()
             case .waiting: cancelAutoDismiss()  // 等待卡常驻到任务恢复/手动点掉
             case .notice: scheduleAutoDismiss(extraSeconds: 5)  // 关怀文案给足阅读时间
+            case .alert: scheduleAutoDismiss(extraSeconds: 6)  // 安全告警多停一会，不常驻（审计页/通知中心留存）
             }
         } else {
             setDisplay(activeTasks.isEmpty ? .hidden : .compact)
@@ -193,6 +220,8 @@ final class IslandViewModel: ObservableObject {
 
     private func setDisplay(_ new: Display) {
         guard display != new else { return }
+        // 离开任务列表即收起子 agent 框，避免下次再进时停在旧展开态
+        if case .taskList = new {} else { expandedSubagentTaskId = nil }
         display = new
         logIsland(new)
         onDisplayChange?(new)
@@ -242,6 +271,7 @@ final class IslandViewModel: ObservableObject {
         case .card(.finished(let task)): name = "card-finished(\(task.outcome.rawValue))"
         case .card(.waiting): name = "card-waiting"
         case .card(.notice): name = "card-notice"
+        case .card(.alert(let alert)): name = "card-alert(\(alert.ruleId))"
         case .taskList: name = "taskList"
         }
         print("[eureka] island=\(name)")

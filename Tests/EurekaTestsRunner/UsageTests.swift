@@ -44,6 +44,48 @@ func claudeScannerTests(_ t: TestRunner) {
         try expectEqual(haiku?.requestCount, 1, "sidechain 用量也要记")
     }
 
+    t.test("工具/技能/插件/子代理/命令计数（去重后计，重复行不翻倍）") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-claude-tc-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // assistant 行（含 Skill + Bash 两个 tool_use）；后附一份完全相同的流式重复行
+        let assistant = """
+        {"type":"assistant","uuid":"u1","timestamp":"2026-07-05T10:00:00.000Z","requestId":"req_T","message":{"id":"msg_T","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":100,"output_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[{"type":"text","text":"ok"},{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"dataviz"}},{"type":"tool_use","id":"t2","name":"Bash","input":{}}]},"sessionId":"s","cwd":"/w"}
+        """
+        // 另一 assistant 行：MCP 插件 + 子代理
+        let assistant2 = """
+        {"type":"assistant","uuid":"u2","timestamp":"2026-07-05T10:01:00.000Z","requestId":"req_U","message":{"id":"msg_U","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":50,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[{"type":"tool_use","id":"t3","name":"mcp__claude_ai_Atlassian__search","input":{}},{"type":"tool_use","id":"t4","name":"Task","input":{"subagent_type":"Explore"}}]},"sessionId":"s","cwd":"/w"}
+        """
+        // user 行：斜杠命令
+        let commandLine = """
+        {"type":"user","uuid":"uc1","timestamp":"2026-07-05T10:02:00.000Z","message":{"role":"user","content":"<command-name>/plan</command-name>\\n<command-message>plan</command-message>"},"sessionId":"s","cwd":"/w"}
+        """
+        let content = [assistant, assistant2, commandLine, assistant].joined(separator: "\n") + "\n"
+        try content.write(
+            to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
+
+        let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
+        _ = try scanner.scanOnce()
+        // 二次扫描：全局去重 + 命令 s:uuid 去重 → 计数不应翻倍
+        _ = try scanner.scanOnce()
+
+        let totals = try store.toolCalls.totals(
+            from: Date(timeIntervalSince1970: 0),
+            to: Date(timeIntervalSince1970: 4_000_000_000))
+        func count(_ kind: String, _ name: String) -> Int {
+            totals.first { $0.kind == kind && $0.name == name }?.count ?? 0
+        }
+        try expectEqual(count("skill", "dataviz"), 1)
+        try expectEqual(count("tool", "Bash"), 1)
+        try expectEqual(count("mcp", "Atlassian.search"), 1)
+        try expectEqual(count("agent", "Explore"), 1)
+        try expectEqual(count("command", "/plan"), 1)
+        try expect(totals.allSatisfy { $0.source == .claude })
+    }
+
     t.test("跨扫描回填：第一轮记了部分 output，第二轮见到更大值要更新") {
         let store = try makeStore()
         let root = FileManager.default.temporaryDirectory
@@ -211,6 +253,38 @@ func codexScannerTests(_ t: TestRunner) {
         try expectEqual(codex?.inputTokens, 8000 + 3000)
         try expectEqual(codex?.cacheReadTokens, 2000 + 3000)
         try expectEqual(codex?.outputTokens, 500 + 800)
+    }
+
+    t.test("工具/MCP 插件计数：function_call（跳过 _ 前缀 MCP 代理）+ mcp_tool_call_end") {
+        let store = try makeStore()
+        let root = try makeSessionsDir()
+        let lines = [
+            #"{"type":"session_meta","payload":{"id":"s1","cwd":"/w"}}"#,
+            // 原生工具（计入 tool）
+            #"{"type":"response_item","timestamp":"2026-07-08T10:00:00.000Z","payload":{"type":"function_call","name":"exec_command"}}"#,
+            #"{"type":"response_item","timestamp":"2026-07-08T10:00:01.000Z","payload":{"type":"function_call","name":"exec_command"}}"#,
+            // MCP 代理的 function_call（_ 前缀）应跳过，避免与 mcp_tool_call_end 重复
+            #"{"type":"response_item","timestamp":"2026-07-08T10:00:02.000Z","payload":{"type":"function_call","name":"_search"}}"#,
+            // MCP 插件调用（计入 mcp，命名干净）
+            #"{"type":"event_msg","timestamp":"2026-07-08T10:00:03.000Z","payload":{"type":"mcp_tool_call_end","invocation":{"server":"codex_apps.notion","tool":"search"}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try lines.write(
+            to: dayDir(root).appendingPathComponent("rollout-2026-07-08T10-00-00-cccc.jsonl"),
+            atomically: true, encoding: .utf8)
+
+        let scanner = CodexUsageScanner(sessionsRoot: root, store: store)
+        _ = try scanner.scanOnce()
+        _ = try scanner.scanOnce()  // 幂等：offset 已过
+
+        let totals = try store.toolCalls.totals(
+            from: Date(timeIntervalSince1970: 0),
+            to: Date(timeIntervalSince1970: 4_000_000_000), source: .codex)
+        func count(_ kind: String, _ name: String) -> Int {
+            totals.first { $0.kind == kind && $0.name == name }?.count ?? 0
+        }
+        try expectEqual(count("tool", "exec_command"), 2)
+        try expectEqual(count("mcp", "codex_apps.notion.search"), 1)
+        try expectEqual(count("tool", "_search"), 0, "MCP 代理 function_call 不重复计入 tool")
     }
 
     t.test("compaction 计数回落：回退 last_token_usage 不算负数") {

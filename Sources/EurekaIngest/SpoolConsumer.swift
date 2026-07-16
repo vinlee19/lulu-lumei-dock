@@ -8,9 +8,13 @@ public final class SpoolConsumer {
     /// isStale = 事件落地时间距今超过阈值（开机排空积压时只入历史，不触发岛动画）
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
+    /// 旁路观察者：拿到原始信封（route 之前），供审计等旁路管道消费。isStale 一并传。
+    public typealias RawObserver = (RawEvent, _ isStale: Bool) -> Void
+
     private let root: URL
     private let staleThreshold: TimeInterval
     private let handler: Handler
+    private let rawObserver: RawObserver?
     private let queue = DispatchQueue(label: "com.vinlee.eureka.spool")
     private var dirSource: DispatchSourceFileSystemObject?
     public private(set) var undecodableCount = 0
@@ -18,9 +22,13 @@ public final class SpoolConsumer {
     private var eventsDir: URL { SpoolPaths.eventsDir(root: root) }
     private var processingDir: URL { SpoolPaths.processingDir(root: root) }
 
-    public init(root: URL, staleThreshold: TimeInterval = 300, handler: @escaping Handler) {
+    public init(
+        root: URL, staleThreshold: TimeInterval = 300,
+        rawObserver: RawObserver? = nil, handler: @escaping Handler
+    ) {
         self.root = root
         self.staleThreshold = staleThreshold
+        self.rawObserver = rawObserver
         self.handler = handler
     }
 
@@ -93,6 +101,7 @@ public final class SpoolConsumer {
         }
         HealthRegistry.shared.beat(Self.healthName)
         let isStale = Date().timeIntervalSince(raw.receivedAt) > staleThreshold
+        rawObserver?(raw, isStale)  // 旁路（审计）先于生命周期路由，两条链互不影响
         for event in EventRouter.route(raw) {
             HealthRegistry.shared.event(Self.healthName)
             handler(event, isStale)

@@ -36,13 +36,13 @@ func geometryTests(_ t: TestRunner) {
         try expectEqual(IslandGeometry.contentTopInset(screen: notched), 0)
         let pill = IslandGeometry.pillSize(screen: notched)
         try expectEqual(pill.height, 32)  // 与刘海等高
-        try expectEqual(pill.width, 196 + 66 * 2)  // 刘海 + 两翼
+        try expectEqual(pill.width, 196 + 92 * 2)  // 刘海 + 两翼
         try expectEqual(IslandGeometry.pillCenterGap(screen: notched), 196)
     }
 
     t.test("无刘海屏：避开菜单栏悬浮、小胶囊、无中缝") {
         try expectEqual(IslandGeometry.contentTopInset(screen: external4K), 24 + 5)
-        try expectEqual(IslandGeometry.pillSize(screen: external4K), CGSize(width: 184, height: 30))
+        try expectEqual(IslandGeometry.pillSize(screen: external4K), CGSize(width: 232, height: 40))
         try expectEqual(IslandGeometry.pillCenterGap(screen: external4K), 0)
     }
 
@@ -86,8 +86,52 @@ func geometryTests(_ t: TestRunner) {
     t.test("未知刘海宽度时用默认值兜底") {
         var screen = notched
         screen.notchWidth = nil
-        try expectEqual(IslandGeometry.pillSize(screen: screen).width, 196 + 132)
+        try expectEqual(IslandGeometry.pillSize(screen: screen).width, 196 + 184)
         try expectEqual(IslandGeometry.pillCenterGap(screen: screen), 196)
+    }
+
+    t.test("按屏缩放：内建屏 1.0×、大屏放大、钳制上下限") {
+        // 内建屏（1512 宽）= 基准
+        try expectEqual(IslandGeometry.scaleFactor(for: notched), 1.0)
+        // 4K 缩放后逻辑宽 1920 → ~1.27
+        let fourK = IslandGeometry.ScreenInfo(
+            frame: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        let f4k = IslandGeometry.scaleFactor(for: fourK)
+        try expect(f4k > 1.2 && f4k < 1.3, "4K 应放大约 1.27×，实际 \(f4k)")
+        // 超大屏钳到 1.6
+        let huge = IslandGeometry.ScreenInfo(
+            frame: CGRect(x: 0, y: 0, width: 3840, height: 2160))
+        try expectEqual(IslandGeometry.scaleFactor(for: huge), 1.6)
+        // 过小屏钳到 0.9
+        let tiny = IslandGeometry.ScreenInfo(
+            frame: CGRect(x: 0, y: 0, width: 1000, height: 700))
+        try expectEqual(IslandGeometry.scaleFactor(for: tiny), 0.9)
+    }
+
+    t.test("layout(for:)：卡片维持黄金比、随屏等比放大") {
+        let base = IslandGeometry.layout(for: notched)  // 1.0×
+        let ratio = base.expandedCardSize.width / base.expandedCardSize.height
+        try expect(abs(ratio - 1.618) < 0.05, "卡片应近似黄金比 φ，实际 \(ratio)")
+
+        let fourK = IslandGeometry.ScreenInfo(
+            frame: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        let big = IslandGeometry.layout(for: fourK)
+        try expect(big.expandedCardSize.width > base.expandedCardSize.width, "大屏应更大")
+        // 等比放大：比例不变
+        let bigRatio = big.expandedCardSize.width / big.expandedCardSize.height
+        try expect(abs(bigRatio - ratio) < 0.001, "缩放应保持长宽比")
+    }
+
+    t.test("子 agent 框高度：空为 0、随数量单增、6 行封顶") {
+        try expectEqual(IslandGeometry.subagentBoxHeight(count: 0), 0)
+        let h1 = IslandGeometry.subagentBoxHeight(count: 1)
+        let h3 = IslandGeometry.subagentBoxHeight(count: 3)
+        try expect(h1 > 0 && h3 > h1, "应随数量单调增")
+        try expectEqual(h3, 3 * 22 + 2 * 4 + 16)  // 行 + 行距 + 上下内距
+        // 超 6 行加一行"…等 N 个"，7 与更多封顶一致
+        try expectEqual(
+            IslandGeometry.subagentBoxHeight(count: 99),
+            IslandGeometry.subagentBoxHeight(count: 7))
     }
 }
 
@@ -144,5 +188,31 @@ func cardQueueTests(_ t: TestRunner) {
         queue.enqueue(waiting("w1"))
         queue.enqueue(waiting("w2"))
         try expectEqual(Set(queue.waitingTaskIds), Set(["claude:w1", "claude:w2"]))
+    }
+
+    func alert(_ opId: String, rule: String = "rm-rf") -> IslandState.Card {
+        .alert(RiskAlert(
+            opId: opId, source: .claude, sessionId: "s1", ruleId: rule,
+            ruleTitle: "高危", tool: "Bash", detail: "sudo rm -rf /",
+            timestamp: Date(timeIntervalSince1970: 1000)))
+    }
+
+    t.test("告警卡插队置顶且按 id 去重") {
+        var queue = IslandCardQueue()
+        queue.enqueue(finished("a"))
+        queue.enqueue(finished("b"))
+        queue.enqueue(alert("op-1"))
+        queue.enqueue(alert("op-1"))  // 同一告警重复
+        try expectEqual(queue.current, finished("a"))   // 当前卡不被打断
+        try expectEqual(queue.pending.first, alert("op-1"))  // 告警插到待显队首
+        try expectEqual(queue.pendingCount, 2)  // alert 只一张 + b
+    }
+
+    t.test("空队列告警直接成为当前卡") {
+        var queue = IslandCardQueue()
+        queue.enqueue(alert("op-9"))
+        try expectEqual(queue.current, alert("op-9"))
+        queue.advance()
+        try expect(queue.isEmpty)
     }
 }

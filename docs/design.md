@@ -74,6 +74,16 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
   PostToolUse；stdin JSON 含 session_id/transcript_path/cwd
 - **Codex 外部 notify 仅 `agent-turn-complete`**（approval 不触发外部 notify）→
   rollout tailer 为主事件源，notify 仅低延迟冗余（按 turn_id 去重）
+- **opencode 单一 SQLite 库** `~/.local/share/opencode/opencode.db`（WAL，**只读**打开，绝不写）：
+  - `session`(id,parent_id,directory,title,agent,model,cost,tokens_input/output/reasoning/
+    cache_read/cache_write,time_created/time_updated **毫秒**)——顶层会话（parent_id 空）进浏览列表，
+    子会话=子 agent。会话/技能/agent 路径走 XDG（`~/.config/opencode/{skills,agents}`），非 ~/Library。
+  - `message.data`(JSON) assistant：`tokens{input,output,reasoning,cache{read,write}}`、`time{created,
+    completed}`、`modelID/providerID`、`finish`——用量扫描按 message.rowid 水位增量、只结算已完成消息
+    （无跨文件去重需求，reasoning 计入 output 侧）
+  - `event`(append-only；rowid 单调)：`session.created.1`/`session.updated.1`/`message.updated.1`/
+    `message.part.updated.1`，`data` 含 `sessionID` + `info`/`part`。**opencode 无 hook/notify 子进程回调**，
+    实时靠尾随 event 表（首扫定基线不重放；子会话事件按 session.parent_id 过滤）。**无订阅限额概念**（BYO provider）
 
 ## 任务状态机
 

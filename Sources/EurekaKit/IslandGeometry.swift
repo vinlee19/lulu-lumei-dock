@@ -42,11 +42,13 @@ public enum IslandGeometry {
         /// 无刘海屏内容与菜单栏的间距
         public var noNotchTopMargin: CGFloat
 
+        /// 1.0× 基准（内建刘海屏）。展开卡片宽:高 ≈ 黄金比 φ(1.618)。
+        /// panel 高度留足：任务列表满载(~254) + 展开子 agent 框(最多~168) ≈ 422 < 460。
         public static let standard = Layout(
-            panelSize: CGSize(width: 460, height: 190),
-            expandedCardSize: CGSize(width: 384, height: 124),
-            compactPillNoNotchSize: CGSize(width: 184, height: 30),
-            notchWingWidth: 66,
+            panelSize: CGSize(width: 440, height: 460),
+            expandedCardSize: CGSize(width: 360, height: 222),  // 360/222 ≈ 1.62
+            compactPillNoNotchSize: CGSize(width: 232, height: 40),
+            notchWingWidth: 92,
             noNotchTopMargin: 5
         )
 
@@ -63,6 +65,46 @@ public enum IslandGeometry {
             self.notchWingWidth = notchWingWidth
             self.noNotchTopMargin = noNotchTopMargin
         }
+
+        /// 按缩放系数等比放大（noNotchTopMargin 跟随菜单栏、不缩放）
+        public func scaled(by factor: CGFloat) -> Layout {
+            Layout(
+                panelSize: CGSize(
+                    width: panelSize.width * factor, height: panelSize.height * factor),
+                expandedCardSize: CGSize(
+                    width: expandedCardSize.width * factor,
+                    height: expandedCardSize.height * factor),
+                compactPillNoNotchSize: CGSize(
+                    width: compactPillNoNotchSize.width * factor,
+                    height: compactPillNoNotchSize.height * factor),
+                notchWingWidth: notchWingWidth * factor,
+                noNotchTopMargin: noNotchTopMargin
+            )
+        }
+    }
+
+    /// 按屏幕逻辑宽度换算的 UI 缩放系数：以 15″ MacBook Air（1512 宽）为基准 1.0，
+    /// 大屏（27″4K 等）按比例放大，钳制在 [0.9, 1.6] 防极端尺寸。
+    public static func scaleFactor(for screen: ScreenInfo) -> CGFloat {
+        let referenceWidth: CGFloat = 1512
+        let raw = screen.frame.width / referenceWidth
+        return min(max(raw, 0.9), 1.6)
+    }
+
+    /// 当前屏对应的布局：基准 × 该屏缩放系数。
+    public static func layout(for screen: ScreenInfo) -> Layout {
+        Layout.standard.scaled(by: scaleFactor(for: screen))
+    }
+
+    /// 任务列表里展开的子 agent 嵌套框高度（1.0× 基准，未乘 scale）。
+    /// 最多展示 6 行，超出加一行"…等 N 个"。须与 IslandViews 的行高/内距一致。
+    public static func subagentBoxHeight(count: Int) -> CGFloat {
+        guard count > 0 else { return 0 }
+        let shown = min(count, 6)
+        let rows = CGFloat(shown) * 22       // 每行 22
+        let gaps = CGFloat(shown - 1) * 4    // 行距 4
+        let overflow: CGFloat = count > 6 ? 16 : 0
+        return rows + gaps + overflow + 16   // 16 = 框上下内距
     }
 
     /// panel 的固定 frame：顶部居中、上沿与屏幕上沿齐平

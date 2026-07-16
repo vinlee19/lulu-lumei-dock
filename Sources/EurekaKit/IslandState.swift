@@ -8,6 +8,8 @@ public struct IslandState: Equatable, Sendable {
         case waiting(AgentTask)
         /// 健康提示等关怀类通知
         case notice(IslandNotice)
+        /// 高危操作安全告警（红卡，插队置顶、自动收起）
+        case alert(RiskAlert)
     }
 
     /// 进行中任务（含 waiting），按开始时间排序

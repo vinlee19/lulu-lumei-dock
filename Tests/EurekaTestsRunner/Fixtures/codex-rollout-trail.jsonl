@@ -1,0 +1,14 @@
+{"timestamp":"2026-07-01T12:00:00.000Z","type":"session_meta","payload":{"id":"fixture-codex-trail-1","timestamp":"2026-07-01T11:59:58.000Z","cwd":"/Users/me/work/demo","originator":"codex-tui","cli_version":"0.139.0","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-07-01T12:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-001","started_at":1782907201,"model_context_window":258400}}
+{"timestamp":"2026-07-01T12:00:01.100Z","type":"event_msg","payload":{"type":"user_message","message":"分析仓库结构","images":[],"local_images":[]}}
+{"timestamp":"2026-07-01T12:00:05.000Z","type":"response_item","payload":{"type":"reasoning","id":"rs_1","encrypted_content":"gAAAA...","summary":[]}}
+{"timestamp":"2026-07-01T12:00:06.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls -la\",\"workdir\":\"/Users/me/work/demo\"}","call_id":"call-1","id":"fc_1"}}
+{"timestamp":"2026-07-01T12:00:07.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"{\"output\":\"total 8\",\"metadata\":{\"exit_code\":1,\"duration_seconds\":0.1}}"}}
+{"timestamp":"2026-07-01T12:00:08.000Z","type":"response_item","payload":{"type":"function_call","name":"_query-docs","arguments":"{\"query\":\"dup\"}","call_id":"call-2","id":"fc_2"}}
+{"timestamp":"2026-07-01T12:00:09.000Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"server":"context7","tool":"query-docs","arguments":{"query":"swiftpm resources"}},"result":{"Err":"timeout"}}}
+{"timestamp":"2026-07-01T12:00:10.000Z","type":"response_item","payload":{"type":"web_search_call","id":"ws_1","action":{"type":"search","query":"SwiftPM resources copy"}}}
+{"timestamp":"2026-07-01T12:00:20.000Z","type":"event_msg","payload":{"type":"agent_message","message":"仓库结构分析完成。","phase":"commentary"}}
+{"timestamp":"2026-07-01T12:00:21.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-001","last_agent_message":"仓库结构分析完成。"}}
+{"timestamp":"2026-07-01T12:10:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-002","started_at":1782907800,"model_context_window":258400}}
+{"timestamp":"2026-07-01T12:10:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"跑下测试","images":[],"local_images":[]}}
+{"timestamp":"2026-07-01T12:10:05.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"bash\",\"-lc\",\"swift test\"]}","call_id":"call-3","id":"fc_3"}}

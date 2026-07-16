@@ -8,19 +8,28 @@ public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
     public var cwd: String?
     /// ai-title / 首条 prompt 摘要；nil = 只能显示短 id
     public var name: String?
+    /// 会话首次活跃时间（transcript 首行时间戳）；nil = 头部无时间戳
+    public var startedAt: Date?
     public var lastActiveAt: Date
     public var sizeBytes: UInt64
     public var transcriptPath: String
 
+    /// 会话跨度：首次 → 最后活跃；startedAt 缺失时 nil
+    public var duration: TimeInterval? {
+        startedAt.map { lastActiveAt.timeIntervalSince($0) }.map { max(0, $0) }
+    }
+
     public init(
         source: AgentSource = .claude,
         id: String, cwd: String?, name: String?,
+        startedAt: Date? = nil,
         lastActiveAt: Date, sizeBytes: UInt64, transcriptPath: String
     ) {
         self.source = source
         self.id = id
         self.cwd = cwd
         self.name = name
+        self.startedAt = startedAt
         self.lastActiveAt = lastActiveAt
         self.sizeBytes = sizeBytes
         self.transcriptPath = transcriptPath
@@ -63,6 +72,7 @@ public enum ClaudeSessionIndexer {
                 id: file.deletingPathExtension().lastPathComponent,
                 cwd: head.cwd,
                 name: head.name,
+                startedAt: head.startedAt,
                 lastActiveAt: mtime,
                 sizeBytes: size,
                 transcriptPath: file.path
@@ -70,23 +80,29 @@ public enum ClaudeSessionIndexer {
         }
     }
 
-    /// 头部 64KB：cwd + 名字（ai-title 优先、首条真实 prompt 兜底）
-    static func headInfo(fileURL: URL, headBytes: Int = 65536) -> (cwd: String?, name: String?) {
+    /// 头部 64KB：cwd + 名字（ai-title 优先、首条真实 prompt 兜底）+ 会话开始时间（首行时间戳）
+    static func headInfo(
+        fileURL: URL, headBytes: Int = 65536
+    ) -> (cwd: String?, name: String?, startedAt: Date?) {
         guard
             let handle = FileHandle(forReadingAtPath: fileURL.path),
             let data = try? handle.read(upToCount: headBytes)
-        else { return (nil, nil) }
+        else { return (nil, nil, nil) }
         try? handle.close()
 
         var cwd: String?
         var aiTitle: String?
         var firstPrompt: String?
+        var startedAt: Date?
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard
                 let object = try? JSONSerialization.jsonObject(with: Data(line)),
                 let root = object as? [String: Any]
             else { continue }  // 头窗截断的半行会落到这里，安全跳过
             if cwd == nil { cwd = root["cwd"] as? String }
+            if startedAt == nil, let ts = root["timestamp"] as? String {
+                startedAt = ClaudeSessionFirstTimestamp.parse(ts)
+            }
             switch root["type"] as? String {
             case "ai-title":
                 if aiTitle == nil { aiTitle = root["aiTitle"] as? String }
@@ -100,8 +116,8 @@ public enum ClaudeSessionIndexer {
             default:
                 break
             }
-            if cwd != nil && aiTitle != nil { break }
+            if cwd != nil && aiTitle != nil && startedAt != nil { break }
         }
-        return (cwd, aiTitle ?? firstPrompt)
+        return (cwd, aiTitle ?? firstPrompt, startedAt)
     }
 }

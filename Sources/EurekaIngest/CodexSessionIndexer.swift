@@ -43,6 +43,7 @@ public enum CodexSessionIndexer {
                 id: head.id ?? fallbackId(file),
                 cwd: head.cwd,
                 name: head.name,
+                startedAt: head.startedAt,
                 lastActiveAt: mtime,
                 sizeBytes: size,
                 transcriptPath: file.path
@@ -52,16 +53,17 @@ public enum CodexSessionIndexer {
 
     static func headInfo(
         fileURL: URL, headBytes: Int = 65536
-    ) -> (id: String?, cwd: String?, name: String?) {
+    ) -> (id: String?, cwd: String?, name: String?, startedAt: Date?) {
         guard
             let handle = FileHandle(forReadingAtPath: fileURL.path),
             let data = try? handle.read(upToCount: headBytes)
-        else { return (nil, nil, nil) }
+        else { return (nil, nil, nil, nil) }
         try? handle.close()
 
         var id: String?
         var cwd: String?
         var name: String?
+        var startedAt: Date?
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard
                 let object = try? JSONSerialization.jsonObject(with: Data(line)),
@@ -72,6 +74,10 @@ public enum CodexSessionIndexer {
             case "session_meta":
                 id = payload["id"] as? String
                 cwd = payload["cwd"] as? String
+                // session_meta 行的顶层 timestamp = 会话开始时间
+                if let ts = root["timestamp"] as? String {
+                    startedAt = ClaudeSessionFirstTimestamp.parse(ts)
+                }
             case "event_msg":
                 if name == nil, payload["type"] as? String == "user_message",
                    let message = payload["message"] as? String {
@@ -82,7 +88,7 @@ public enum CodexSessionIndexer {
             }
             if id != nil && name != nil { break }
         }
-        return (id, cwd, name)
+        return (id, cwd, name, startedAt)
     }
 
     /// rollout-2026-06-08T23-36-02-<uuid>.jsonl → uuid

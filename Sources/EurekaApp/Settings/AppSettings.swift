@@ -32,6 +32,74 @@ final class AppSettings: ObservableObject {
     @Published var wellnessThresholdHours: Double {
         didSet { defaults.set(wellnessThresholdHours, forKey: "wellnessThresholdHours") }
     }
+    /// 会话面板按时间最多展示多少个会话（0 = 全部）
+    @Published var sessionDisplayLimit: Int {
+        didSet { defaults.set(sessionDisplayLimit, forKey: "sessionDisplayLimit") }
+    }
+    /// 历史列表排序：active=最近活跃 / start=最初对话开始时间（存 rawValue）
+    @Published var historySortMode: String {
+        didSet { defaults.set(historySortMode, forKey: "historySortMode") }
+    }
+    /// 会话列表排序：time=最近活跃 / size=按大小 / duration=按时长（存 rawValue）
+    @Published var sessionSortMode: String {
+        didSet { defaults.set(sessionSortMode, forKey: "sessionSortMode") }
+    }
+    /// 外观主题：system=跟随系统 / light=浅色 / dark=深色
+    @Published var appearanceMode: String {
+        didSet { defaults.set(appearanceMode, forKey: "appearanceMode") }
+    }
+    /// 桌面吉祥物（默认关，opt-in）
+    @Published var mascotEnabled: Bool {
+        didSet { defaults.set(mascotEnabled, forKey: "mascotEnabled") }
+    }
+    /// 当前吉祥物动画包 id（"built-in" 或 mascots/ 下目录名）
+    @Published var mascotPack: String {
+        didSet { defaults.set(mascotPack, forKey: "mascotPack") }
+    }
+    /// 云端备份（默认关，opt-in；密钥存钥匙串、不进 UserDefaults）
+    @Published var cloudBackupEnabled: Bool {
+        didSet { defaults.set(cloudBackupEnabled, forKey: "cloudBackupEnabled") }
+    }
+    /// 存储服务商（StorageProvider rawValue）
+    @Published var storageProvider: String {
+        didSet { defaults.set(storageProvider, forKey: "storageProvider") }
+    }
+    /// COS 地域（如 ap-guangzhou）
+    @Published var cosRegion: String {
+        didSet { defaults.set(cosRegion, forKey: "cosRegion") }
+    }
+    /// COS 存储桶（如 backup-1250000000）
+    @Published var cosBucket: String {
+        didSet { defaults.set(cosBucket, forKey: "cosBucket") }
+    }
+    /// 自定义 endpoint host（空 = COS 默认；AWS 填 s3.<region>.amazonaws.com）
+    @Published var cosEndpointHost: String {
+        didSet { defaults.set(cosEndpointHost, forKey: "cosEndpointHost") }
+    }
+    /// 对象键前缀
+    @Published var cosKeyPrefix: String {
+        didSet { defaults.set(cosKeyPrefix, forKey: "cosKeyPrefix") }
+    }
+    /// 增量同步间隔（分钟，最小 1）
+    @Published var cosSyncIntervalMinutes: Double {
+        didSet { defaults.set(cosSyncIntervalMinutes, forKey: "cosSyncIntervalMinutes") }
+    }
+    /// 安全审计：记录 agent 执行的操作（命令全文/文件路径，不含输出）。默认开。
+    @Published var auditEnabled: Bool {
+        didSet { defaults.set(auditEnabled, forKey: "auditEnabled") }
+    }
+    /// 高危操作岛内红卡告警。默认开。
+    @Published var auditRiskAlertsEnabled: Bool {
+        didSet { defaults.set(auditRiskAlertsEnabled, forKey: "auditRiskAlertsEnabled") }
+    }
+    /// 高危操作系统通知（锁屏/其他 Space 可见）。默认关，opt-in，开启时才请求授权。
+    @Published var auditSystemNotifyEnabled: Bool {
+        didSet { defaults.set(auditSystemNotifyEnabled, forKey: "auditSystemNotifyEnabled") }
+    }
+    /// 审计流水保留天数（0 = 永久）。默认 90。
+    @Published var auditRetentionDays: Int {
+        didSet { defaults.set(auditRetentionDays, forKey: "auditRetentionDays") }
+    }
     @Published private(set) var launchAtLogin: Bool
     @Published private(set) var launchAtLoginHint: String?
 
@@ -46,6 +114,24 @@ final class AppSettings: ObservableObject {
         menuBarShowsLimit = defaults.object(forKey: "menuBarShowsLimit") as? Bool ?? true
         wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
+        sessionDisplayLimit = defaults.object(forKey: "sessionDisplayLimit") as? Int ?? 10
+        historySortMode = defaults.string(forKey: "historySortMode") ?? "active"
+        sessionSortMode = defaults.string(forKey: "sessionSortMode") ?? "time"
+        appearanceMode = defaults.string(forKey: "appearanceMode") ?? "system"
+        mascotEnabled = defaults.bool(forKey: "mascotEnabled")
+        mascotPack = defaults.string(forKey: "mascotPack") ?? "built-in"
+        cloudBackupEnabled = defaults.bool(forKey: "cloudBackupEnabled")
+        storageProvider = defaults.string(forKey: "storageProvider") ?? "tencent-cos"
+        cosRegion = defaults.string(forKey: "cosRegion") ?? ""
+        cosBucket = defaults.string(forKey: "cosBucket") ?? ""
+        cosEndpointHost = defaults.string(forKey: "cosEndpointHost") ?? ""
+        cosKeyPrefix = defaults.string(forKey: "cosKeyPrefix") ?? "eureka"
+        cosSyncIntervalMinutes = max(
+            1, defaults.object(forKey: "cosSyncIntervalMinutes") as? Double ?? 30)
+        auditEnabled = defaults.object(forKey: "auditEnabled") as? Bool ?? true
+        auditRiskAlertsEnabled = defaults.object(forKey: "auditRiskAlertsEnabled") as? Bool ?? true
+        auditSystemNotifyEnabled = defaults.bool(forKey: "auditSystemNotifyEnabled")
+        auditRetentionDays = defaults.object(forKey: "auditRetentionDays") as? Int ?? 90
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

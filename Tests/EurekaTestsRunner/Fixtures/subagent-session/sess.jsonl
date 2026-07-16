@@ -1,0 +1,4 @@
+{"type":"user","sessionId":"sess","cwd":"/Users/me/work/demo","message":{"content":"派 4 个子 agent 干活"}}
+{"type":"assistant","sessionId":"sess","message":{"model":"claude-opus-4-8","content":[{"type":"tool_use","name":"Agent","id":"toolu_RUN","input":{"description":"探索 transcript 解析","subagent_type":"Explore"}},{"type":"tool_use","name":"Agent","id":"toolu_DONE","input":{"description":"设计方案","subagent_type":"Plan"}}]}}
+{"type":"user","sessionId":"sess","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_DONE","content":[{"type":"text","text":"方案已给出"}]}]}}
+{"type":"user","sessionId":"sess","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_FAIL","is_error":true,"content":"子 agent 失败"}]}}

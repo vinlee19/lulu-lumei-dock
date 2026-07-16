@@ -44,6 +44,17 @@ func taskStoreTests(_ t: TestRunner) {
         try expect(finished.startedAt == nil)
     }
 
+    t.test("会话最初开始时间贯通到完成任务（历史开始时间排序用）") {
+        let store = TaskStore()
+        store.apply(TaskEvent(
+            source: .claude, sessionId: "s1", kind: .taskStarted(title: "x"),
+            timestamp: ts(100), cwd: "/w", sessionStartedAt: ts(50)))
+        let effects = store.apply(
+            event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 160))
+        let finished = try finishedTask(in: effects)
+        try expectEqual(finished.sessionStartedAt, ts(50))
+    }
+
     t.test("等待确认→心跳复位 running") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "跑测试"), at: 100))
@@ -399,5 +410,31 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(finished.sessionId, "old")
         try expectEqual(finished.outcome, .interrupted)
         try expectEqual(store.sortedActiveTasks.map(\.sessionId), ["new"])
+    }
+
+    t.test("subagentsUpdated：存入子 agent、相同快照幂等、未知会话不建任务") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "主任务"), at: 100))
+        let subs = [SubagentInfo(
+            agentId: "a1", agentType: "Explore", description: "探索", status: .running)]
+        try expectEqual(
+            store.apply(event(.subagentsUpdated(subs), at: 110)), [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks[0].subagents, subs)
+        // 相同快照不刷 UI（防 5s 抖动）
+        try expectEqual(store.apply(event(.subagentsUpdated(subs), at: 111)), [])
+        // 未知会话：不凭空建任务
+        try expectEqual(
+            store.apply(event(.subagentsUpdated(subs), session: "ghost", at: 112)), [])
+        try expectEqual(store.sortedActiveTasks.count, 1)
+    }
+
+    t.test("turn 收尾转空闲时清空子 agent") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "主任务"), at: 100))
+        store.apply(event(.subagentsUpdated([SubagentInfo(
+            agentId: "a1", agentType: "Plan", description: "设计", status: .completed)]), at: 110))
+        store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 160))
+        try expect(
+            store.sortedIdleTasks.first?.subagents.isEmpty ?? false, "收尾后应清空子 agent")
     }
 }

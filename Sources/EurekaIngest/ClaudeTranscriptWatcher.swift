@@ -22,6 +22,7 @@ public final class ClaudeTranscriptWatcher {
         var running: Bool
         var knownTitle: String?
         var contextBucket: Int?
+        var lastSubagents: [SubagentInfo] = []
     }
     private var states: [String: FileState] = [:]
 
@@ -109,11 +110,25 @@ public final class ClaudeTranscriptWatcher {
             emit(.contextUpdate(percent: percent), at: mtime)
         }
 
+        // 子 agent 现场：仅运行中扫（subagents/ 跨 turn 累积，按 prompt 时间裁到本 turn），
+        // 只在列表变化时发；turn 结束后清缓存，下一 turn 重新发。
+        var subagents: [SubagentInfo] = []
+        if snapshot.running {
+            subagents = ClaudeSubagentScanner.scan(
+                sessionDir: file.deletingPathExtension(),
+                parentTranscript: file,
+                turnStartedAt: snapshot.promptAt)
+            if subagents != (previous?.lastSubagents ?? []) {
+                emit(.subagentsUpdated(subagents), at: mtime)
+            }
+        }
+
         states[path] = FileState(
             mtime: mtime,
             running: snapshot.running,
             knownTitle: snapshot.aiTitle ?? previous?.knownTitle,
-            contextBucket: bucket ?? previous?.contextBucket
+            contextBucket: bucket ?? previous?.contextBucket,
+            lastSubagents: subagents
         )
     }
 }

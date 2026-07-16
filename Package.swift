@@ -19,14 +19,17 @@ let package = Package(
         .target(name: "EurekaUsage", dependencies: ["EurekaKit", "EurekaStore"]),
         // hooks / notify 配置安装器（纯文本进出，独立可测）
         .target(name: "EurekaInstall"),
+        // 云端备份：S3/COS 增量上传（SigV4 签名、同步引擎、钥匙串凭证）
+        .target(name: "EurekaSync", dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest"]),
         // 菜单栏应用本体
         .executableTarget(
             name: "eureka",
-            dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall"],
+            dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall", "EurekaSync"],
             path: "Sources/EurekaApp",
             resources: [
                 .copy("Resources/pricing.json"),
                 .copy("Resources/AppIcon.icns"),
+                .copy("Resources/mascots"),
             ]
         ),
         // hooks/notify 调用的轻量转发 CLI：静默、永远 exit 0
@@ -34,7 +37,7 @@ let package = Package(
         // 测试 runner（CLT 无 XCTest，自建 harness）
         .executableTarget(
             name: "eureka-tests",
-            dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall"],
+            dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall", "EurekaSync"],
             path: "Tests/EurekaTestsRunner",
             resources: [.copy("Fixtures")]
         ),

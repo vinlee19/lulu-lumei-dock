@@ -16,9 +16,9 @@ app: release
 	Scripts/build-app.sh
 
 install: app
-	rm -rf ~/Applications/Eureka.app
-	ditto dist/Eureka.app ~/Applications/Eureka.app
-	@echo "已安装到 ~/Applications/Eureka.app"
+	rm -rf /Applications/Eureka.app ~/Applications/Eureka.app
+	ditto dist/Eureka.app /Applications/Eureka.app
+	@echo "已安装到 /Applications/Eureka.app"
 
 demo:
 	Scripts/demo-island.sh

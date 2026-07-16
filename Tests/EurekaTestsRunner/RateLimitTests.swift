@@ -56,4 +56,28 @@ func rateLimitTests(_ t: TestRunner) {
         try expect(ClaudeOAuthUsageProvider.parseUsageResponse(
             Data("not json".utf8)) == nil)
     }
+
+    t.suite("GrokRateLimitProvider 账单解析")
+
+    t.test("billing 行 → 周窗 usedPercent + 计划 + 重置时间；单窗 secondary=nil") {
+        let line = #"{"ts":"2026-07-16T03:37:05.302Z","msg":"billing: fetched credits config","ctx":{"config":{"creditUsagePercent":42.0,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-07-09T09:49:33Z","end":"2026-07-16T09:49:33Z"}},"subscriptionTier":"SuperGrok"}}"#
+        let snapshot = GrokRateLimitProvider.parse(Data(line.utf8))
+        try expect(snapshot != nil)
+        try expectEqual(snapshot?.source, .grok)
+        try expectEqual(snapshot?.primary?.usedPercent, 42)
+        try expectEqual(snapshot?.primary?.windowMinutes, 10080)
+        try expectEqual(snapshot?.planType, "SuperGrok")
+        try expect(snapshot?.secondary == nil, "Grok 单一配额池，无 secondary")
+        try expect(snapshot?.primary?.resetsAt != nil, "重置时间不带小数秒也应解析")
+    }
+
+    t.test("creditUsagePercent 缺省（proto3 省零值，0% 周）→ 0") {
+        let line = #"{"ts":"2026-07-16T03:37:05.302Z","msg":"billing: fetched credits config","ctx":{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-07-16T09:49:33Z"}}}}"#
+        try expectEqual(GrokRateLimitProvider.parse(Data(line.utf8))?.primary?.usedPercent, 0)
+    }
+
+    t.test("非 billing 行 / 非 JSON → nil") {
+        try expect(GrokRateLimitProvider.parse(Data(#"{"msg":"other"}"#.utf8)) == nil)
+        try expect(GrokRateLimitProvider.parse(Data("not json".utf8)) == nil)
+    }
 }

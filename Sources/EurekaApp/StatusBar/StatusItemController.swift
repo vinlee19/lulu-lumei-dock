@@ -1,19 +1,17 @@
 import AppKit
 import Combine
 import EurekaKit
-import SwiftUI
 
-/// 菜单栏：左键开 popover（历史/用量），右键菜单（退出）；
+/// 菜单栏：左键前置主窗口，右键菜单（退出）；
 /// 标题 = 任务计数 + 限额百分比（取双源 5h 窗口最大值，60%/85% 变色）
 @MainActor
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
-    private let popover = NSPopover()
     private let usageService: UsageService
     private let limitsService: RateLimitsService
     private let settings: AppSettings
-    private let sessionBrowser = SessionBrowserService()
-    private let navigation = PopoverNavigation()
+    /// 左键回调：前置/激活主窗口（由 AppDelegate 接到 MainWindowController.show）
+    private let onActivate: () -> Void
     private var lastTasks: [AgentTask] = []
     private var cancellables: Set<AnyCancellable> = []
 
@@ -21,23 +19,13 @@ final class StatusItemController: NSObject {
         usageService: UsageService,
         limitsService: RateLimitsService,
         settings: AppSettings,
-        installer: InstallerService
+        onActivate: @escaping () -> Void
     ) {
         self.usageService = usageService
         self.limitsService = limitsService
         self.settings = settings
+        self.onActivate = onActivate
         super.init()
-
-        popover.behavior = .transient
-        popover.contentSize = NSSize(width: 380, height: 460)
-        popover.contentViewController = NSHostingController(
-            rootView: PopoverRootView(
-                usageService: usageService,
-                limitsService: limitsService,
-                settings: settings,
-                installer: installer,
-                sessionBrowser: sessionBrowser,
-                navigation: navigation))
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "✦"
@@ -49,9 +37,10 @@ final class StatusItemController: NSObject {
 
         // 限额变化 / 开关变化 → 重组标题（任务变化走 update(tasks:)）
         limitsService.$codex
-            .combineLatest(limitsService.$claude, settings.$menuBarShowsLimit)
+            .combineLatest(
+                limitsService.$grok, limitsService.$claude, settings.$menuBarShowsLimit)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _, _, _ in
                 MainActor.assumeIsolated { self?.renderTitle() }
             }
             .store(in: &cancellables)
@@ -73,7 +62,7 @@ final class StatusItemController: NSObject {
             taskCount: lastTasks.count,
             hasWaiting: waiting,
             maxUsedPercent: StatusTitleComposer.maxPrimaryPercent(
-                [limitsService.codex, limitsService.claude]),
+                [limitsService.codex, limitsService.grok, limitsService.claude]),
             showLimit: settings.menuBarShowsLimit
         )
 
@@ -95,9 +84,9 @@ final class StatusItemController: NSObject {
 
     private func limitsTooltip() -> String {
         var parts: [String] = []
-        for snapshot in [limitsService.codex, limitsService.claude] {
+        for snapshot in [limitsService.codex, limitsService.grok, limitsService.claude] {
             guard let snapshot, let primary = snapshot.primary else { continue }
-            var text = "\(snapshot.source.displayName) 5h \(Int(primary.usedPercent.rounded()))%"
+            var text = "\(snapshot.source.displayName) \(Int(primary.usedPercent.rounded()))%"
             if let secondary = snapshot.secondary {
                 text += "（周 \(Int(secondary.usedPercent.rounded()))%）"
             }
@@ -106,36 +95,26 @@ final class StatusItemController: NSObject {
         return parts.isEmpty ? "Eureka" : parts.joined(separator: " · ")
     }
 
-    /// 程序化打开 popover（首启引导直达设置页）
-    func showPopover(tab: PopoverRootView.Tab) {
-        navigation.tab = tab
-        guard let button = statusItem?.button, !popover.isShown else { return }
-        usageService.refreshNow()
-        limitsService.refresh()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    }
-
     @objc private func statusItemClicked() {
         MainActor.assumeIsolated {
-            guard let button = statusItem?.button else { return }
             if NSApp.currentEvent?.type == .rightMouseUp {
                 showMenu()
                 return
             }
-            if popover.isShown {
-                popover.performClose(nil)
-            } else {
-                usageService.refreshNow()
-                limitsService.refresh()
-                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-                popover.contentViewController?.view.window?.makeKey()
-            }
+            onActivate()
         }
     }
 
     private func showMenu() {
         guard let item = statusItem else { return }
         let menu = NSMenu()
+        let openItem = NSMenuItem(
+            title: "打开主窗口",
+            action: #selector(openMainWindow),
+            keyEquivalent: "")
+        openItem.target = self
+        menu.addItem(openItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(
             title: "退出 Eureka",
             action: #selector(NSApplication.terminate(_:)),
@@ -144,5 +123,9 @@ final class StatusItemController: NSObject {
         item.menu = menu
         item.button?.performClick(nil)
         item.menu = nil  // 用完即拆，避免左键也弹菜单
+    }
+
+    @objc private func openMainWindow() {
+        MainActor.assumeIsolated { onActivate() }
     }
 }

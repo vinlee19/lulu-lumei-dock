@@ -25,6 +25,12 @@ public final class ClaudeTranscriptScanner {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+    static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
 
     public init(projectsRoot: URL, store: EurekaStore) {
         self.projectsRoot = projectsRoot
@@ -67,15 +73,32 @@ public final class ClaudeTranscriptScanner {
         var merged: [String: UsageRecord] = [:]
         var order: [String] = []
         var promptCount = 0
+        // 工具/技能/插件调用：按 assistant 去重键收集（末次覆盖，取完整那份）
+        var toolsByKey: [String: [(kind: String, name: String)]] = [:]
+        // 斜杠命令：(uuid, day, name)，用 s:<uuid> 去重后计数
+        var commands: [(uuid: String, day: String, name: String)] = []
         for line in chunk.lines {
             guard
                 let object = try? JSONSerialization.jsonObject(with: line),
                 let root = object as? [String: Any]
             else { continue }
             if Self.isRealPrompt(root) { promptCount += 1 }
-            guard var (key, record) = Self.parseAssistantLine(root) else { continue }
+            if let command = Self.extractCommand(root) {
+                let day = (root["timestamp"] as? String)
+                    .flatMap { Self.isoFormatter.date(from: $0) }
+                    .map { Self.dayFormatter.string(from: $0) }
+                    ?? Self.dayFormatter.string(from: Date())
+                commands.append((command.uuid, day, command.name))
+            }
+            guard let parsed = Self.parseAssistantLine(root) else { continue }
+            let key = parsed.key
+            var record = parsed.record
             // 项目名按仓库根归组（子目录/子模块的会话归到仓库名下）
             record.project = projectResolver.projectName(forCwd: record.project) ?? record.project
+            if let message = root["message"] as? [String: Any] {
+                let calls = Self.extractToolCalls(message)
+                if !calls.isEmpty { toolsByKey[key] = calls }  // 末次（完整）覆盖
+            }
             if let prior = merged[key] {
                 if record.outputTokens > prior.outputTokens {
                     merged[key] = record
@@ -108,6 +131,33 @@ public final class ClaudeTranscriptScanner {
                         key, recordId: recordId,
                         outputTokens: record.outputTokens, at: now)
                     newCount += 1
+                    // 仅对首次入库的 assistant 行计工具/技能/插件调用（与用量同门去重）
+                    if let calls = toolsByKey[key] {
+                        let day = Self.dayFormatter.string(from: record.timestamp)
+                        let ts = record.timestamp.timeIntervalSince1970
+                        // 触发时 token = 该 assistant 行 token 合计（≈调用时上下文规模，仅 Claude 可得）；
+                        // 同行多 tool_use 时按行归给每个调用，技能场景重叠可忽略
+                        let lineTokens = record.inputTokens + record.outputTokens
+                            + record.cacheCreationTokens + record.cacheReadTokens
+                        for call in calls {
+                            try store.toolCalls.bump(
+                                day: day, source: .claude, kind: call.kind, name: call.name,
+                                ts: ts, tokens: lineTokens)
+                        }
+                    }
+                }
+            }
+            // 斜杠命令：用 s:<uuid> 跨文件去重，新键才计数
+            if !commands.isEmpty {
+                let commandKeys = commands.map { "s:\($0.uuid)" }
+                let existingCommands = try store.scanState.existingDedupKeys(commandKeys)
+                for command in commands {
+                    let dkey = "s:\(command.uuid)"
+                    guard existingCommands[dkey] == nil else { continue }
+                    try store.toolCalls.bump(
+                        day: command.day, source: .claude, kind: "command", name: command.name)
+                    try store.scanState.upsertDedupKey(
+                        dkey, recordId: nil, outputTokens: 0, at: now)
                 }
             }
             try store.scanState.setFileState(
@@ -121,6 +171,50 @@ public final class ClaudeTranscriptScanner {
                 reset: offset == 0)
         }
         return newCount
+    }
+
+    /// assistant 行的 tool_use 块 → (kind, name)：
+    /// Skill→(skill,技能名) / mcp__ 前缀→(mcp, server.tool) / Task|Agent→(agent,子代理类型) / 其余→(tool,工具名)
+    static func extractToolCalls(_ message: [String: Any]) -> [(kind: String, name: String)] {
+        guard let blocks = message["content"] as? [[String: Any]] else { return [] }
+        var result: [(String, String)] = []
+        for block in blocks where block["type"] as? String == "tool_use" {
+            guard let name = block["name"] as? String, !name.isEmpty else { continue }
+            let input = block["input"] as? [String: Any]
+            if name == "Skill" {
+                result.append(("skill", (input?["skill"] as? String) ?? "?"))
+            } else if name.hasPrefix("mcp__") {
+                let comps = name.components(separatedBy: "__").filter { !$0.isEmpty }
+                var server = comps.count >= 2 ? comps[1] : name
+                if server.hasPrefix("claude_ai_") {
+                    server = String(server.dropFirst("claude_ai_".count))
+                }
+                let tool = comps.count >= 3 ? comps[2...].joined(separator: "__") : ""
+                result.append(("mcp", tool.isEmpty ? server : "\(server).\(tool)"))
+            } else if name == "Task" || name == "Agent" {
+                result.append(("agent", (input?["subagent_type"] as? String) ?? "?"))
+            } else {
+                result.append(("tool", name))
+            }
+        }
+        return result
+    }
+
+    /// user 行内嵌的斜杠命令：`<command-name>/xx</command-name>` → (uuid, 命令名)
+    static func extractCommand(_ root: [String: Any]) -> (uuid: String, name: String)? {
+        guard root["type"] as? String == "user",
+              root["isMeta"] as? Bool != true,
+              let uuid = root["uuid"] as? String,
+              let message = root["message"] as? [String: Any],
+              let content = message["content"] as? String,
+              let start = content.range(of: "<command-name>"),
+              let end = content.range(
+                of: "</command-name>", range: start.upperBound..<content.endIndex)
+        else { return nil }
+        let name = String(content[start.upperBound..<end.lowerBound])
+            .trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return nil }
+        return (uuid, name)
     }
 
     /// 真实用户 prompt（对话轮次）：非 meta、content 是字符串（tool_result 是数组）

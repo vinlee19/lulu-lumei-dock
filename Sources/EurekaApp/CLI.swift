@@ -37,11 +37,26 @@ enum EurekaCLI {
             usageSnapshot()
         case "--limits-snapshot":
             limitsSnapshot(includeClaude: args.contains("--claude"))
+        case "--audit-snapshot":
+            auditSnapshot(
+                riskOnly: args.contains("--risk-only"),
+                limit: args.firstIndex(of: "--limit").flatMap { idx in
+                    args.indices.contains(idx + 1) ? Int(args[idx + 1]) : nil
+                } ?? 50)
         case "--render-previews":
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-previews"
             MainActor.assumeIsolated {
                 PreviewRenderer.renderAll(to: dir)
             }
+        case "--render-mascot":
+            let dir = args.count > 1 ? args[1] : "/tmp/eureka-mascot"
+            MainActor.assumeIsolated {
+                PreviewRenderer.renderMascot(to: dir)
+            }
+        case "--prep-mascot-assets":
+            let src = args.count > 1 ? args[1] : "Sources/EurekaApp/Resources/mascots/lulu"
+            let dst = args.count > 2 ? args[2] : "/tmp/lulu-cut"
+            MascotAssetPrep.run(srcDir: src, dstDir: dst)
         case "--render-icon":
             let path = args.count > 1 ? args[1] : "/tmp/eureka-icon-1024.png"
             MainActor.assumeIsolated {
@@ -143,10 +158,14 @@ enum EurekaCLI {
                 projectsRoot: ClaudeTranscriptScanner.defaultProjectsRoot(), store: store)
             let codex = CodexUsageScanner(
                 sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(), store: store)
+            let opencode = OpencodeUsageScanner(dbPath: OpencodePaths.db(), store: store)
+            let grok = GrokUsageScanner(sessionsRoot: GrokPaths.sessionsRoot(), store: store)
             let newClaude = try claude.scanOnce()
             let newCodex = try codex.scanOnce()
+            let newOpencode = try opencode.scanOnce()
+            let newGrok = try grok.scanOnce()  // grok 无 token，仅入工具调用计数
             FileHandle.standardError.write(Data(
-                "扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条\n".utf8))
+                "扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，opencode +\(newOpencode) 条，grok 工具 +\(newGrok)\n".utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(
@@ -173,6 +192,47 @@ enum EurekaCLI {
         }
     }
 
+    /// 审计快照：跑一次 Codex 审计扫描，再输出最近的操作流水（调试/脚本对拍用）
+    private static func auditSnapshot(riskOnly: Bool, limit: Int) {
+        do {
+            let store = try EurekaStore(path: EurekaStore.defaultURL())
+            let pipeline = AuditPipeline(store: store)
+            let scanner = CodexAuditScanner(
+                sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(),
+                store: store, pipeline: pipeline)
+            let newCount = try scanner.scanOnce()
+            let riskTotal = try store.audit.count(.init(riskOnly: true))
+            FileHandle.standardError.write(Data(
+                "审计扫描完成：codex +\(newCount) 条，累计风险 \(riskTotal) 条\n".utf8))
+
+            let rows = try store.audit.recent(.init(riskOnly: riskOnly), limit: limit)
+            let isoFormatter = ISO8601DateFormatter()
+            var output: [[String: Any]] = []
+            for row in rows {
+                var item: [String: Any] = [
+                    "ts": isoFormatter.string(from: row.timestamp),
+                    "source": row.source.rawValue,
+                    "session": row.sessionId,
+                    "kind": row.kind.rawValue,
+                    "tool": row.tool,
+                    "detail": row.detail,
+                    "isError": row.isError,
+                ]
+                if let exitCode = row.exitCode { item["exitCode"] = exitCode }
+                if let level = row.riskLevel { item["riskLevel"] = level.label }
+                if let rule = row.riskRule { item["riskRule"] = rule }
+                output.append(item)
+            }
+            let json = try JSONSerialization.data(
+                withJSONObject: ["count": rows.count, "riskTotal": riskTotal, "events": output],
+                options: [.prettyPrinted, .sortedKeys])
+            print(String(decoding: json, as: UTF8.self))
+        } catch {
+            print("{\"error\": \"\(error)\"}")
+            exit(1)
+        }
+    }
+
     /// 限额快照（默认只读本地 Codex；--claude 同时测非官方接口）
     private static func limitsSnapshot(includeClaude: Bool) {
         let semaphore = DispatchSemaphore(value: 0)
@@ -182,9 +242,12 @@ enum EurekaCLI {
                 var parts: [String] = []
                 if let plan = snapshot.planType { parts.append("plan=\(plan)") }
                 if let primary = snapshot.primary {
-                    parts.append(String(format: "5h=%.1f%%", primary.usedPercent))
+                    let label = primary.windowMinutes == 10080 ? "周"
+                        : primary.windowMinutes == 43200 ? "月"
+                        : "5h"
+                    parts.append(String(format: "\(label)=%.1f%%", primary.usedPercent))
                     if let resets = primary.resetsAt {
-                        parts.append("5h重置=\(resets)")
+                        parts.append("\(label)重置=\(resets)")
                     }
                 }
                 if let secondary = snapshot.secondary {
@@ -197,6 +260,8 @@ enum EurekaCLI {
             let codex = await CodexRateLimitProvider(
                 sessionsRoot: CodexRolloutTailer.defaultSessionsRoot()).snapshot()
             print("Codex: \(describe(codex))")
+            let grok = await GrokRateLimitProvider(logURL: GrokPaths.unifiedLog()).snapshot()
+            print("Grok: \(describe(grok))")
             if includeClaude {
                 let provider = ClaudeOAuthUsageProvider()
                 let claude = await provider.snapshot()
@@ -219,6 +284,7 @@ enum EurekaCLI {
           --install-codex-notify    安装 Codex notify（写前备份）
           --uninstall-codex-notify  卸载 Codex notify
           --hooks-status            查看安装状态
+          --audit-snapshot          扫描并输出 agent 操作审计流水（--risk-only 仅风险 / --limit N）
           --render-previews [目录]   离屏渲染灵动岛各形态 PNG
         """)
     }

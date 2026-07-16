@@ -127,7 +127,15 @@ func runInject(_ args: [String]) {
             "notification_type": "idle_prompt",
         ])
     case "post-tool-use":
-        emitClaude(["hook_event_name": "PostToolUse", "tool_name": "Bash"])
+        let tool = options["tool"] ?? "Bash"
+        var extra: [String: Any] = ["hook_event_name": "PostToolUse", "tool_name": tool]
+        if let title {
+            // 命令类工具入 command，其余入 file_path（供审计解析出 detail）
+            let key = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"].contains(tool)
+                ? "file_path" : "command"
+            extra["tool_input"] = [key: title]
+        }
+        emitClaude(extra)
     case "session-end":
         emitClaude(["hook_event_name": "SessionEnd", "reason": title ?? "other"])
     case "codex-complete":

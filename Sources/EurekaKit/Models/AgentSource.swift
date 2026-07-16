@@ -4,11 +4,17 @@ import Foundation
 public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case claude
     case codex
+    case opencode
+    case grok
+    case antigravity
 
     public var displayName: String {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
+        case .opencode: return "opencode"
+        case .grok: return "Grok"
+        case .antigravity: return "Antigravity"
         }
     }
 }

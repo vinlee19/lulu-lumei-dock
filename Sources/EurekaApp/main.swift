@@ -5,14 +5,14 @@ if EurekaCLI.runIfNeeded() {
     exit(0)
 }
 
-// 菜单栏应用入口：无 Dock 图标（accessory），生命周期交给 AppDelegate。
-// 打包后由 Info.plist 的 LSUIElement 兜底；swift run 直跑时靠 setActivationPolicy。
+// 常规应用入口：有 Dock 图标 + 应用菜单 + 主窗口（生命周期交给 AppDelegate）。
+// swift run 直跑时这里是激活策略的唯一来源，运行期也压过 Info.plist。
 // 顶层代码不是静态 MainActor 上下文，但主线程事实成立 → assumeIsolated。
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
-    app.setActivationPolicy(.accessory)
+    app.setActivationPolicy(.regular)
     withExtendedLifetime(delegate) {
         app.run()
     }

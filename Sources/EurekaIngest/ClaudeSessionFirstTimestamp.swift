@@ -11,6 +11,11 @@ enum ClaudeSessionFirstTimestamp {
     }()
     private static let isoPlain = ISO8601DateFormatter()
 
+    /// 解析 ISO8601 时间戳字符串（带/不带小数秒都容忍）
+    static func parse(_ raw: String) -> Date? {
+        isoWithFraction.date(from: raw) ?? isoPlain.date(from: raw)
+    }
+
     /// 头部最多扫前几行（首行可能是无 timestamp 的 summary/meta 行）
     static func read(transcriptPath: String, headBytes: Int = 16384) -> Date? {
         guard
