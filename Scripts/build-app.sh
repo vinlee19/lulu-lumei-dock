@@ -1,11 +1,11 @@
 #!/bin/bash
-# 打包 dist/Eureka.app（无 Xcode 路线：SwiftPM release + 手工组装 + ad-hoc 签名）
+# 打包 dist/lulu-lumei-dock.app（无 Xcode 路线：SwiftPM release + 手工组装 + ad-hoc 签名）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 swift build -c release
 BUILD=.build/release
-APP=dist/Eureka.app
+APP=dist/lulu-lumei-dock.app
 VERSION=$(git describe --tags --always 2>/dev/null || echo "0.1.0")
 
 rm -rf "$APP"

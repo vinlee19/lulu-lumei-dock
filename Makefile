@@ -16,9 +16,10 @@ app: release
 	Scripts/build-app.sh
 
 install: app
-	rm -rf /Applications/Eureka.app ~/Applications/Eureka.app
-	ditto dist/Eureka.app /Applications/Eureka.app
-	@echo "已安装到 /Applications/Eureka.app"
+	rm -rf /Applications/Eureka.app ~/Applications/Eureka.app \
+	       /Applications/lulu-lumei-dock.app ~/Applications/lulu-lumei-dock.app
+	ditto dist/lulu-lumei-dock.app /Applications/lulu-lumei-dock.app
+	@echo "已安装到 /Applications/lulu-lumei-dock.app"
 
 demo:
 	Scripts/demo-island.sh

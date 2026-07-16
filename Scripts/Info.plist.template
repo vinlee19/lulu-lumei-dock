@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Eureka</string>
+    <string>lulu-lumei-dock</string>
     <key>CFBundleDisplayName</key>
-    <string>Eureka</string>
+    <string>lulu-lumei-dock</string>
     <key>CFBundleIdentifier</key>
     <string>com.vinlee.eureka</string>
     <key>CFBundleExecutable</key>

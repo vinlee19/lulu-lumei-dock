@@ -12,7 +12,7 @@ enum RelaySyncer {
             .appendingPathComponent("eureka-relay")
     }
 
-    /// 与当前可执行文件同目录的 relay（.build/debug/ 与 Eureka.app/Contents/MacOS/ 都成立）
+    /// 与当前可执行文件同目录的 relay（.build/debug/ 与 lulu-lumei-dock.app/Contents/MacOS/ 都成立）
     static var bundledRelayURL: URL? {
         guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
             return nil

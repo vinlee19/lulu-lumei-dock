@@ -12,10 +12,10 @@ gauges, session/skill/agent/memory management, an audit trail and cloud backup �
 · builds with Command Line Tools (no full Xcode needed)
 
 > **About the name** — the project (this repo) is **lulu-lumei-dock**. It is built on the internal
-> **Eureka** codebase, so Swift module names (`EurekaKit`, …), the app bundle (`Eureka.app`) and the
-> on‑disk data directory (`~/Library/Application Support/Eureka/`) keep the `Eureka` prefix for
-> compatibility. Renaming those would break the relay stable path and existing installs, so they are
-> intentionally left as‑is.
+> **Eureka** codebase, so the Swift module names (`EurekaKit`, …), the bundle identifier
+> (`com.vinlee.eureka`) and the on‑disk data directory (`~/Library/Application Support/Eureka/`) keep the
+> `Eureka` name for compatibility. Renaming those would break the relay stable path and existing installs,
+> so they are intentionally left as‑is.
 
 |  |  |
 |---|---|
@@ -33,15 +33,15 @@ brew tap vinlee19/tap
 brew install --cask lulu-lumei-dock
 ```
 
-**Manual** — download the latest `.zip` from [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases), unzip `Eureka.app` into `/Applications`.
+**Manual** — download the latest `.zip` from [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases), unzip `lulu-lumei-dock.app` into `/Applications`.
 
 **First launch:** the app is **ad‑hoc signed** (not Apple‑notarized), so Gatekeeper may block it. Either right‑click the app → **Open** → **Open**, or run:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Eureka.app
+xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 ```
 
-> The installed bundle is `Eureka.app` and data lives in `~/Library/Application Support/Eureka/` (the internal name stays `Eureka` for compatibility). Building from source? See [Development](#development).
+> The installed bundle is `lulu-lumei-dock.app` and data lives in `~/Library/Application Support/Eureka/` (the internal name stays `Eureka` for compatibility). Building from source? See [Development](#development).
 
 ## What is this?
 
@@ -131,8 +131,8 @@ per‑request token accounting locally — only activity (invocations / sessions
 ## Quick start
 
 ```bash
-make install                 # build release + install to /Applications/Eureka.app
-open /Applications/Eureka.app
+make install                 # build release + install to /Applications/lulu-lumei-dock.app
+open /Applications/lulu-lumei-dock.app
 ```
 
 On first launch the Settings tab opens — click **一键安装/更新 (Install / Update)** to write Claude
@@ -189,8 +189,8 @@ make build      # debug build (Command Line Tools is enough — no full Xcode)
 make test       # runs the full hand-rolled test suite (276 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
-make app        # release build → dist/Eureka.app (ad-hoc signed)
-make install    # app + install to /Applications/Eureka.app
+make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
+make install    # app + install to /Applications/lulu-lumei-dock.app
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # diff usage totals vs. ccusage (expect 0.00%)
 ```
@@ -238,7 +238,7 @@ Full design doc: [docs/design.md](docs/design.md).
 ## Uninstall
 
 Use Settings → "Uninstall all" to remove hooks/notify (restoring backups), then delete
-`/Applications/Eureka.app` and `~/Library/Application Support/Eureka/`. Nothing is left behind.
+`/Applications/lulu-lumei-dock.app` and `~/Library/Application Support/Eureka/`. Nothing is left behind.
 
 ## License
 

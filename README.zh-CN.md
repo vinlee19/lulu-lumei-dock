@@ -10,8 +10,8 @@
 `Swift 5.10 + SwiftPM` · `零第三方依赖` · `全部数据本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
 > **关于名字** —— 本项目(此仓库)叫 **lulu-lumei-dock**,构建于内部 **Eureka** 代码库之上,因此 Swift
-> 模块名(`EurekaKit` 等)、应用 bundle(`Eureka.app`)与磁盘数据目录
-> (`~/Library/Application Support/Eureka/`)保留 `Eureka` 前缀。改动这些会破坏 relay 稳定路径并让现有
+> 模块名(`EurekaKit` 等)、bundle id(`com.vinlee.eureka`)与磁盘数据目录
+> (`~/Library/Application Support/Eureka/`)保留 `Eureka` 名以兼容。改动这些会破坏 relay 稳定路径并让现有
 > 安装 / 数据库失联,故有意保持原样。
 
 |  |  |
@@ -30,15 +30,15 @@ brew tap vinlee19/tap
 brew install --cask lulu-lumei-dock
 ```
 
-**手动下载** —— 从 [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases) 下载最新 `.zip`,解压把 `Eureka.app` 拖进「应用程序」。
+**手动下载** —— 从 [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases) 下载最新 `.zip`,解压把 `lulu-lumei-dock.app` 拖进「应用程序」。
 
 **首次打开:** 本应用为 **ad-hoc 签名**(未做 Apple 公证),可能被 Gatekeeper 拦截。任选其一:右键点按 App →「打开」→ 再次「打开」;或在终端执行:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Eureka.app
+xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 ```
 
-> 安装后的包名为 `Eureka.app`,数据在 `~/Library/Application Support/Eureka/`(内部名保留 `Eureka` 以兼容,见上方「关于名字」)。从源码构建见 [开发](#开发)。
+> 安装后的包名为 `lulu-lumei-dock.app`,数据在 `~/Library/Application Support/Eureka/`(内部名保留 `Eureka` 以兼容,见上方「关于名字」)。从源码构建见 [开发](#开发)。
 
 ## 这是什么
 
@@ -112,8 +112,8 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 ## 快速上手
 
 ```bash
-make install                 # 构建 release 并安装到 /Applications/Eureka.app
-open /Applications/Eureka.app
+make install                 # 构建 release 并安装到 /Applications/lulu-lumei-dock.app
+open /Applications/lulu-lumei-dock.app
 ```
 
 首次启动自动打开设置页 → 点「**一键安装/更新**」写入 Claude hooks 与 Codex notify(写前自动备份
@@ -169,8 +169,8 @@ make build      # 调试编译(Command Line Tools 即可,无需完整 Xcode)
 make test       # 跑全部自建单测(276 个;CLT 无 XCTest)
 make run        # 开发模式直跑 GUI
 make demo       # 注入伪造事件,演示灵动岛全场景
-make app        # 打包 dist/Eureka.app(ad‑hoc 签名)
-make install    # 打包并安装到 /Applications/Eureka.app
+make app        # 打包 dist/lulu-lumei-dock.app(ad‑hoc 签名)
+make install    # 打包并安装到 /Applications/lulu-lumei-dock.app
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # 用量与 ccusage 对拍(期望 0.00%)
 ```
@@ -213,7 +213,7 @@ Claude transcript 监视 ────────────────→ Tas
 
 ## 卸载
 
-设置页「全部卸载」移除 hooks/notify(自动恢复备份),然后删除 `/Applications/Eureka.app` 与
+设置页「全部卸载」移除 hooks/notify(自动恢复备份),然后删除 `/Applications/lulu-lumei-dock.app` 与
 `~/Library/Application Support/Eureka/` 即可,不留任何残余。
 
 ## 许可证
