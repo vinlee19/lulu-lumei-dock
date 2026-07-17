@@ -214,4 +214,21 @@ public enum AgentDefinitionIndexer {
                 sizeBytes: 0, modifiedAt: .distantPast)
         }
     }
+
+    /// Kimi Code 内置 subagent profile 静态清单：编译内嵌于 CLI 二进制（profile/default/*.yaml），
+    /// 磁盘上无用户自定义 agent 约定 → 只读展示，随 Kimi Code 版本可能变化。
+    public static func builtinKimiAgents() -> [AgentDefinition] {
+        let entries: [(name: String, description: String)] = [
+            ("coder", "默认编码子代理（AgentSwarm 缺省类型）：写码 / 改码 / 跑命令"),
+            ("explore", "只读探索：搜索与阅读代码，不做修改"),
+            ("plan", "规划：产出实现计划（plan mode 配套）"),
+            ("agent", "通用 agent profile（其余类型的 extends 基底）"),
+        ]
+        return entries.map { entry in
+            AgentDefinition(
+                source: .kimi, name: entry.name, description: entry.description,
+                builtin: true, path: "", enabled: true,
+                sizeBytes: 0, modifiedAt: .distantPast)
+        }
+    }
 }

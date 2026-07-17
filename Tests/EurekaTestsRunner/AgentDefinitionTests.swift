@@ -5,6 +5,14 @@ import Foundation
 func agentDefinitionTests(_ t: TestRunner) {
     t.suite("AgentDefinitionIndexer")
 
+    t.test("Kimi 内置 profile 静态清单：4 条只读（coder/explore/plan/agent）") {
+        let builtins = AgentDefinitionIndexer.builtinKimiAgents()
+        try expectEqual(builtins.count, 4)
+        try expectEqual(
+            Set(builtins.map(\.name)), Set(["coder", "explore", "plan", "agent"]))
+        try expect(builtins.allSatisfy { $0.source == .kimi && $0.builtin && $0.path.isEmpty })
+    }
+
     t.test("扫描 Claude agent：frontmatter tools/model、系统/项目 scope、启用/停用") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("eureka-agenttest", isDirectory: true)

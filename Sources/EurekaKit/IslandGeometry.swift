@@ -107,6 +107,21 @@ public enum IslandGeometry {
         return rows + gaps + overflow + 16   // 16 = 框上下内距
     }
 
+    /// 自定义位置是否仍然可用：面板顶部的「胶囊带」（顶部 72pt × 中央半宽）须完整落在某块屏内。
+    /// 仅擦边相交（如外接屏拔掉/重排后残留的旧坐标）判不可用 → 调用方清存档回默认位。
+    /// 纯函数（screens 传 frame 数组），便于单测。
+    public static func positionUsable(
+        origin: CGPoint, panelSize: CGSize, screens: [CGRect]
+    ) -> Bool {
+        let bandHeight: CGFloat = 72
+        let band = CGRect(
+            x: origin.x + panelSize.width * 0.25,
+            y: origin.y + panelSize.height - bandHeight,
+            width: panelSize.width * 0.5,
+            height: bandHeight)
+        return screens.contains { $0.contains(band) }
+    }
+
     /// panel 的固定 frame：顶部居中、上沿与屏幕上沿齐平
     public static func panelFrame(screen: ScreenInfo, layout: Layout = .standard) -> CGRect {
         CGRect(

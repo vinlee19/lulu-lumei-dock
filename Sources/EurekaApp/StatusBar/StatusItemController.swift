@@ -114,6 +114,12 @@ final class StatusItemController: NSObject {
             keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+        let resetItem = NSMenuItem(
+            title: "重置灵动岛位置",
+            action: #selector(resetIslandPosition),
+            keyEquivalent: "")
+        resetItem.target = self
+        menu.addItem(resetItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
             title: "退出 lulu-lumei-dock",
@@ -127,5 +133,10 @@ final class StatusItemController: NSObject {
 
     @objc private func openMainWindow() {
         MainActor.assumeIsolated { onActivate() }
+    }
+
+    /// 岛拖到外接屏/位置丢失时的快捷救援（与设置页「恢复默认位置」同一通知）
+    @objc private func resetIslandPosition() {
+        NotificationCenter.default.post(name: .eurekaResetIslandPosition, object: nil)
     }
 }

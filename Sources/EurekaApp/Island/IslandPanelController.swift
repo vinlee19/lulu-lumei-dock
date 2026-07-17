@@ -152,18 +152,23 @@ final class IslandPanelController {
     }
 
     func reposition() {
-        // 有自定义位置且仍在某块屏幕上 → 沿用（浮动样式）
+        // 有自定义位置且仍充分可见 → 沿用（浮动样式）
         if let origin = IslandPositionStore.load() {
-            // 先按原点定位所在屏（用基准尺寸探测），更新缩放后再用新尺寸成帧
-            let probe = NSRect(origin: origin, size: IslandGeometry.Layout.standard.panelSize)
-            if let screen = NSScreen.screens.first(where: { $0.frame.intersects(probe) }) {
+            // 可用性用严判（胶囊带须完整在屏内）：仅擦边相交的残留坐标（外接屏拔掉/重排）
+            // 会把岛放到几乎全在屏外的位置 → 视为不可用，清存档回默认
+            let probeSize = IslandGeometry.Layout.standard.panelSize
+            let usable = IslandGeometry.positionUsable(
+                origin: origin, panelSize: probeSize,
+                screens: NSScreen.screens.map(\.frame))
+            let probe = NSRect(origin: origin, size: probeSize)
+            if usable, let screen = NSScreen.screens.first(where: { $0.frame.intersects(probe) }) {
                 viewModel.updateScreen(Self.screenInfo(of: screen))
                 viewModel.isFloating = true
                 setFrameProgrammatically(
                     NSRect(origin: origin, size: viewModel.layout.panelSize), animate: false)
                 return
             }
-            IslandPositionStore.clear()  // 显示器拔了，回默认
+            IslandPositionStore.clear()  // 显示器拔了/位置已不可见，回默认
         }
         guard let screen = targetScreen() else { return }
         let info = Self.screenInfo(of: screen)

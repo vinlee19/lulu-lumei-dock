@@ -177,6 +177,44 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expect(fields["description"]?.contains("审查代码") == true, "block scalar 描述应被收编")
     }
 
+    t.test("kimi 记忆：全局 AGENTS.md + 项目 .kimi-code/AGENTS.md；opencode memories 目录") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory
+            .appendingPathComponent("eureka-kimimen-\(UUID())", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let kimiHome = base.appendingPathComponent("kimi-code", isDirectory: true)
+        let opencodeHome = base.appendingPathComponent("opencode", isDirectory: true)
+        let repo = base.appendingPathComponent("myrepo/.kimi-code", isDirectory: true)
+        try fm.createDirectory(at: kimiHome, withIntermediateDirectories: true)
+        try fm.createDirectory(
+            at: opencodeHome.appendingPathComponent("memories"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "# 全局".write(
+            to: kimiHome.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+        try "# 项目".write(
+            to: repo.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+        try "oc note".write(
+            to: opencodeHome.appendingPathComponent("memories/oc.md"),
+            atomically: true, encoding: .utf8)
+
+        let memories = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("c", isDirectory: true),
+            codexHome: base.appendingPathComponent("x", isDirectory: true),
+            opencodeHome: opencodeHome,
+            claudeProjectsRoot: base.appendingPathComponent("p", isDirectory: true),
+            kimiHome: kimiHome,
+            projectRoots: [(root: repo.deletingLastPathComponent(), name: "myrepo")])
+        try expect(memories.contains {
+            $0.source == .kimi && $0.scope == "全局" && $0.projectName == nil
+        }, "缺 kimi 全局 AGENTS.md")
+        try expect(memories.contains {
+            $0.source == .kimi && $0.projectName == "myrepo"
+        }, "缺项目 .kimi-code/AGENTS.md")
+        try expect(memories.contains {
+            $0.source == .opencode && $0.scope == "oc"
+        }, "缺 opencode memories/oc.md（死路径修复）")
+    }
+
     t.test("bundledRoots → origin=.bundled；用户根 → origin=.user") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory

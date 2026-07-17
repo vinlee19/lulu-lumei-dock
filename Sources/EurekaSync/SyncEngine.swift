@@ -17,6 +17,8 @@ public struct SyncReport: Equatable {
     public struct UploadedFile: Equatable, Sendable {
         public var name: String
         public var size: Int64
+        /// 来源类目（如 "claude/skills"、"kimi/sessions"、"custom/notes"）；首段即来源
+        public var category: String = ""
     }
 
     static let maxRecordedFiles = 500
@@ -51,6 +53,10 @@ public final class SyncEngine {
         public var maxBytesPerCycle: Int64 = 100 << 20
         /// 连续传输层失败（URLError）达到该数 → 判定断网，中止余量
         public var abortAfterConsecutiveNetworkFailures = 3
+        /// 单文件失败后的额外重试次数（0 = 关；仅 URLError / 5xx 重试，4xx 不重试）
+        public var maxRetries = 2
+        /// 重试退避基数（秒），指数递增：base × 2^已试次数
+        public var retryBackoffSeconds: TimeInterval = 3
 
         public init() {}
 
@@ -100,7 +106,7 @@ public final class SyncEngine {
                 remoteKey: SyncKeyMapper.key(
                     prefix: keyPrefix, host: host, category: "opencode",
                     relativePath: "opencode.db"),
-                size: fp.size, mtime: fp.mtime, priority: 1))
+                size: fp.size, mtime: fp.mtime, priority: 1, category: "opencode"))
         }
 
         // 3. diff
@@ -128,7 +134,7 @@ public final class SyncEngine {
             }
             do {
                 let data = try readData(for: candidate)
-                let etag = try client.putObject(key: candidate.remoteKey, data: data)
+                let etag = try putWithRetry(key: candidate.remoteKey, data: data)
                 try repo.upsert(SyncStateRepo.Entry(
                     path: candidate.localPath, remoteKey: candidate.remoteKey,
                     size: candidate.size, mtime: candidate.mtime,
@@ -138,8 +144,8 @@ public final class SyncEngine {
                 if report.uploadedFiles.count < SyncReport.maxRecordedFiles {
                     let name = candidate.remoteKey.split(separator: "/").last.map(String.init)
                         ?? candidate.remoteKey
-                    report.uploadedFiles.append(
-                        SyncReport.UploadedFile(name: name, size: candidate.size))
+                    report.uploadedFiles.append(SyncReport.UploadedFile(
+                        name: name, size: candidate.size, category: candidate.category))
                 }
                 consecutiveNetworkFailures = 0
             } catch let error as URLError {
@@ -166,6 +172,25 @@ public final class SyncEngine {
             try? repo.deletePaths(plan.vanishedPaths)
         }
         return report
+    }
+
+    /// putObject + 可配置重试：仅传输层错误（URLError）与服务端 5xx 重试
+    /// （4xx = 权限/键错误，重试无意义直接抛）。指数退避 base × 2^已试次数；
+    /// 引擎本就在后台串行队列上执行，阻塞 sleep 可接受。
+    private func putWithRetry(key: String, data: Data) throws -> String? {
+        var attempt = 0
+        while true {
+            do {
+                return try client.putObject(key: key, data: data)
+            } catch {
+                let retryable = error is URLError
+                    || (error as? S3Error).map { $0.status >= 500 } ?? false
+                guard retryable, attempt < limits.maxRetries else { throw error }
+                Thread.sleep(
+                    forTimeInterval: limits.retryBackoffSeconds * pow(2, Double(attempt)))
+                attempt += 1
+            }
+        }
     }
 
     /// 常规文件直接读；opencode 库先 VACUUM 快照再读（用后即删）。

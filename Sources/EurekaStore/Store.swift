@@ -669,6 +669,25 @@ public final class SyncStateRepo {
         }.first ?? Stats(fileCount: 0, totalBytes: 0, lastUploadAt: nil)
     }
 
+    /// 备份构成：remote_key 第三段（<prefix>/<host>/<来源>/…）→ (文件数, 字节)。
+    /// 「按来源构成」chips 用；键在 Swift 侧解析（量级数千，开销可忽略）。
+    public func sourceComposition() throws -> [String: (count: Int, bytes: Int64)] {
+        let rows = try db.query(
+            "SELECT remote_key, size FROM sync_state"
+        ) { row in (row.text(0) ?? "", row.int(1)) }
+        var result: [String: (count: Int, bytes: Int64)] = [:]
+        for (key, size) in rows {
+            let parts = key.split(separator: "/")
+            guard parts.count >= 3 else { continue }
+            let source = String(parts[2])
+            var entry = result[source] ?? (0, 0)
+            entry.count += 1
+            entry.bytes += size
+            result[source] = entry
+        }
+        return result
+    }
+
     /// 本地已消失的文件清状态（远端不删，上传-only）
     public func deletePaths(_ paths: [String]) throws {
         for chunk in stride(from: 0, to: paths.count, by: 500).map({
@@ -707,9 +726,12 @@ public final class SyncRunsRepo {
     public struct RunFile: Equatable, Sendable {
         public var name: String
         public var size: Int64
-        public init(name: String, size: Int64) {
+        /// 来源类目（如 "claude/skills"、"custom/notes"）；老记录无此字段 = nil
+        public var category: String?
+        public init(name: String, size: Int64, category: String? = nil) {
             self.name = name
             self.size = size
+            self.category = category
         }
     }
 
@@ -770,23 +792,27 @@ public final class SyncRunsRepo {
         """, [.int(Int64(keepingLast))])
     }
 
-    // MARK: - files JSON（key n=名 / s=字节）
+    // MARK: - files JSON（key n=名 / s=字节 / c=来源类目，c 为后加字段，老行缺省兼容）
 
-    static func encodeFiles(_ files: [RunFile]) -> String? {
+    public static func encodeFiles(_ files: [RunFile]) -> String? {
         guard !files.isEmpty else { return nil }
-        let array = files.map { ["n": $0.name, "s": $0.size] as [String: Any] }
+        let array = files.map { file -> [String: Any] in
+            var item: [String: Any] = ["n": file.name, "s": file.size]
+            if let category = file.category, !category.isEmpty { item["c"] = category }
+            return item
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: array) else { return nil }
         return String(decoding: data, as: UTF8.self)
     }
 
-    static func decodeFiles(_ json: String?) -> [RunFile] {
+    public static func decodeFiles(_ json: String?) -> [RunFile] {
         guard let json, let data = json.data(using: .utf8),
               let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return [] }
         return array.compactMap { item in
             guard let name = item["n"] as? String else { return nil }
             let size = (item["s"] as? NSNumber)?.int64Value ?? 0
-            return RunFile(name: name, size: size)
+            return RunFile(name: name, size: size, category: item["c"] as? String)
         }
     }
 }

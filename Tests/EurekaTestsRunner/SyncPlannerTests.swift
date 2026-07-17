@@ -96,8 +96,10 @@ func syncPlannerTests(_ t: TestRunner) {
         try write("kimi/sessions/wd_x/session_1/agents/main/wire.jsonl")
         try write("kimi/sessions/wd_x/session_1/state.json")
         try write("kimi/skills/kk/SKILL.md")
+        // 自定义目录：任意文件类型都收
+        try write("mydocs/note.txt")
 
-        let roots = SyncRoots(
+        var roots = SyncRoots(
             claudeHome: base.appendingPathComponent("claude"),
             claudeProjects: base.appendingPathComponent("claude/projects"),
             claudeSkills: base.appendingPathComponent("claude/skills"),
@@ -113,6 +115,8 @@ func syncPlannerTests(_ t: TestRunner) {
             kimiSessions: base.appendingPathComponent("kimi/sessions"),
             claudePlans: base.appendingPathComponent("claude/plans"),
             plansStaging: base.appendingPathComponent("plans-staging"))
+        roots.customDirs = [(
+            root: base.appendingPathComponent("mydocs"), category: "custom/docs")]
         let result = SyncSourceCatalog.enumerate(
             roots: roots, prefix: "eureka", host: "mac", maxFileSize: 1 << 20)
         let keys = Set(result.candidates.map(\.remoteKey))
@@ -142,6 +146,11 @@ func syncPlannerTests(_ t: TestRunner) {
         try expect(keys.contains(
             "eureka/mac/kimi/sessions/wd_x/session_1/state.json"), "kimi state.json 必须收（恢复会话要用）")
         try expect(keys.contains("eureka/mac/kimi/skills/kk/SKILL.md"), "kimi 技能必须收")
+        try expect(keys.contains("eureka/mac/custom/docs/note.txt"), "自定义目录必须收")
+        // category 已随候选携带（历史记录按来源分组用）
+        try expect(result.candidates.contains {
+            $0.category == "custom/docs" && $0.remoteKey.hasSuffix("note.txt")
+        }, "自定义目录候选应带 category")
     }
 
     t.test("Catalog：超大文件跳过并计数") {

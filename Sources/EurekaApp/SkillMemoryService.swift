@@ -79,6 +79,7 @@ final class SkillMemoryService: ObservableObject {
                 opencodeHome: OpencodePaths.configHome(),
                 claudeProjectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
                 grokMemoryRoot: GrokPaths.memoryRoot(),
+                kimiHome: KimiPaths.configHome(),
                 projectRoots: repoRoots)
             DispatchQueue.main.async {
                 self.allSkills = skills
@@ -211,9 +212,22 @@ final class SkillMemoryService: ObservableObject {
                 dir = AntigravityPaths.geminiHome()
                     .appendingPathComponent("memories", isDirectory: true)
             case .kimi:
-                // kimi 无全局记忆概念（AGENTS.md-first，UI 不提供入口）；仅为穷举
-                dir = KimiPaths.configHome()
-                    .appendingPathComponent("memories", isDirectory: true)
+                // kimi 记忆 = 单一全局 AGENTS.md（AGENTS.md-first，无 memories 目录概念）：
+                // 直接创建 ~/.kimi-code/AGENTS.md（name 参数忽略），已存在则不覆盖
+                let file = KimiPaths.globalAgentsMd()
+                var ok = false
+                do {
+                    try FileManager.default.createDirectory(
+                        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if !FileManager.default.fileExists(atPath: file.path) {
+                        try "# AGENTS.md\n\n".write(to: file, atomically: true, encoding: .utf8)
+                    }
+                    ok = true
+                } catch {
+                    self?.report(error)
+                }
+                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                return
             }
             let file = dir.appendingPathComponent(Self.slugify(name) + ".md")
             var ok = false

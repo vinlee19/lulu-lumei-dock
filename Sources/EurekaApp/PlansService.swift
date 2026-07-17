@@ -58,6 +58,37 @@ final class PlansService: ObservableObject {
         try? String(contentsOfFile: path, encoding: .utf8)
     }
 
+    /// 原子写入：写前留 .bak.eureka.<ts> 备份（仅 Claude 计划是真实文件可编辑；
+    /// 其它源为物化副本，改了也会被下一轮扫描覆盖——调用方负责只对 claude 开放）
+    func save(path: String, content: String, completion: ((Bool) -> Void)? = nil) {
+        queue.async { [weak self] in
+            var ok = false
+            let fm = FileManager.default
+            do {
+                if fm.fileExists(atPath: path) {
+                    let backup = path + ".bak.eureka.\(Int(Date().timeIntervalSince1970))"
+                    try? fm.removeItem(atPath: backup)
+                    try? fm.copyItem(atPath: path, toPath: backup)
+                }
+                try content.write(to: URL(fileURLWithPath: path), atomically: true, encoding: .utf8)
+                ok = true
+            } catch {
+                ok = false
+            }
+            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+        }
+    }
+
+    /// 删除计划 → 废纸篓（仅 Claude：真实文件；物化副本删了会被下一轮复原，不提供）
+    func delete(_ entry: PlanMaterializer.PlanEntry, completion: ((Bool) -> Void)? = nil) {
+        guard entry.source == .claude else { completion?(false); return }
+        queue.async { [weak self] in
+            let ok = (try? FileManager.default.trashItem(
+                at: URL(fileURLWithPath: entry.path), resultingItemURL: nil)) != nil
+            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+        }
+    }
+
     func reveal(path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }

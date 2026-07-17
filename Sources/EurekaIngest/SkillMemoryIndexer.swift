@@ -279,6 +279,7 @@ public enum SkillMemoryIndexer {
         claudeHome: URL, codexHome: URL, opencodeHome: URL,
         claudeProjectsRoot: URL,
         grokMemoryRoot: URL? = nil,
+        kimiHome: URL? = nil,
         projectRoots: [(root: URL, name: String)] = []
     ) -> [MemoryEntry] {
         let fm = FileManager.default
@@ -323,6 +324,10 @@ public enum SkillMemoryIndexer {
 
         // opencode 全局 AGENTS.md（~/.config/opencode/AGENTS.md，遵循 AGENTS.md 标准）
         add(opencodeHome.appendingPathComponent("AGENTS.md"), source: .opencode, scope: "全局")
+        // opencode memories/**/*.md（createMemory 写这里，索引须对齐避免死路径）
+        for file in enumerateMarkdown(opencodeHome.appendingPathComponent("memories", isDirectory: true)) {
+            add(file, source: .opencode, scope: file.deletingPathExtension().lastPathComponent)
+        }
 
         // grok 跨会话记忆 ~/.grok/memory/**/*.md（实验特性，目录可能不存在）
         if let grokMemoryRoot {
@@ -331,10 +336,19 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、AGENTS.md→Codex/opencode 共用（归 Codex 一次避免重复）
+        // kimi 全局记忆 ~/.kimi-code/AGENTS.md（Kimi 唯一全局记忆文件，AGENTS.md-first）
+        if let kimiHome {
+            add(kimiHome.appendingPathComponent("AGENTS.md"), source: .kimi, scope: "全局")
+        }
+
+        // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、
+        // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
+        // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
         for (root, name) in projectRoots {
             add(root.appendingPathComponent("CLAUDE.md"), source: .claude, scope: name, projectName: name)
             add(root.appendingPathComponent("AGENTS.md"), source: .codex, scope: name, projectName: name)
+            add(root.appendingPathComponent(".kimi-code/AGENTS.md"),
+                source: .kimi, scope: name, projectName: name)
         }
 
         return result.sorted {

@@ -140,6 +140,11 @@ struct AgentsView: View {
                             agentSubsections(agents: service.grokAgents)
                         }
                     }
+                    if kimiCount > 0 {
+                        sourceCategory(.kimi, count: kimiCount) {
+                            kimiBuiltinSection
+                        }
+                    }
                     if codexCount > 0 {
                         sourceCategory(.codex, count: codexCount) {
                             codexProfileSection
@@ -164,6 +169,7 @@ struct AgentsView: View {
     }
     private var opencodeCount: Int { service.opencodeAgents.count }
     private var grokCount: Int { service.grokAgents.count }
+    private var kimiCount: Int { service.kimiBuiltinAgents.count }
     private var codexCount: Int { service.codexProfiles.count }
 
     private var createAlertTitle: String {
@@ -254,6 +260,16 @@ struct AgentsView: View {
             sectionHeader("内置（Claude Code） \(service.builtinAgents.count)",
                           icon: "shippingbox.fill", tint: Theme.history)
             ForEach(service.builtinAgents) { systemAgentRow($0) }
+        }
+    }
+
+    /// Kimi 内置 subagent profile：编译内嵌于 CLI，磁盘无用户自定义约定 → 只读
+    @ViewBuilder
+    private var kimiBuiltinSection: some View {
+        if !service.kimiBuiltinAgents.isEmpty {
+            sectionHeader("内置（Kimi Code，只读） \(service.kimiBuiltinAgents.count)",
+                          icon: "shippingbox.fill", tint: Theme.history)
+            ForEach(service.kimiBuiltinAgents) { systemAgentRow($0) }
         }
     }
 

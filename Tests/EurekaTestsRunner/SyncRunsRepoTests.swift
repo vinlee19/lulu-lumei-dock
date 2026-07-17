@@ -34,6 +34,28 @@ func syncRunsRepoTests(_ t: TestRunner) {
         try expectEqual(page1[0].uploadedBytes, 500)
     }
 
+    t.test("文件明细带来源类目（c 键）+ 老 JSON（无 c）兼容") {
+        let path = tempStorePath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let store = try EurekaStore(path: path)
+        try store.syncRuns.insert(
+            date: Date(timeIntervalSince1970: 1), uploaded: 2, uploadedBytes: 30,
+            failed: 0, deferred: 0, error: nil,
+            files: [
+                SyncRunsRepo.RunFile(name: "SKILL.md", size: 10, category: "claude/skills"),
+                SyncRunsRepo.RunFile(name: "note.txt", size: 20, category: "custom/docs"),
+            ])
+        let run = try store.syncRuns.recent(limit: 1)[0]
+        try expectEqual(run.files[0].category, "claude/skills")
+        try expectEqual(run.files[1].category, "custom/docs")
+
+        // 老记录 JSON 无 "c" → category nil，不炸
+        let legacy = SyncRunsRepo.decodeFiles(#"[{"n":"old.jsonl","s":7}]"#)
+        try expectEqual(legacy.count, 1)
+        try expectEqual(legacy[0].name, "old.jsonl")
+        try expect(legacy[0].category == nil)
+    }
+
     t.test("error 与空文件明细") {
         let path = tempStorePath()
         defer { try? FileManager.default.removeItem(at: path) }

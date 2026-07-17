@@ -120,7 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 provider: StorageProvider(rawValue: self.settings.storageProvider) ?? .tencentCOS,
                 region: self.settings.cosRegion, bucket: self.settings.cosBucket,
                 endpointHost: self.settings.cosEndpointHost,
-                keyPrefix: self.settings.cosKeyPrefix)
+                keyPrefix: self.settings.cosKeyPrefix,
+                retryAttempts: self.settings.cosRetryAttempts,
+                retryBackoffSeconds: self.settings.cosRetryBackoffSeconds,
+                customFolders: self.settings.customSyncFolders)
         }
         pushSyncConfig()
         settings.$storageProvider.sink { _ in pushSyncConfig() }.store(in: &cancellables)
@@ -128,6 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$cosBucket.sink { _ in pushSyncConfig() }.store(in: &cancellables)
         settings.$cosEndpointHost.sink { _ in pushSyncConfig() }.store(in: &cancellables)
         settings.$cosKeyPrefix.sink { _ in pushSyncConfig() }.store(in: &cancellables)
+        settings.$cosRetryAttempts.sink { _ in pushSyncConfig() }.store(in: &cancellables)
+        settings.$cosRetryBackoffSeconds.sink { _ in pushSyncConfig() }.store(in: &cancellables)
+        settings.$customSyncFolders.sink { _ in pushSyncConfig() }.store(in: &cancellables)
         syncService.updateInterval(minutes: settings.cosSyncIntervalMinutes)
         settings.$cosSyncIntervalMinutes
             .sink { [weak syncService] minutes in syncService?.updateInterval(minutes: minutes) }

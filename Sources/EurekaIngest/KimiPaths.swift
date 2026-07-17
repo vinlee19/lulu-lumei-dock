@@ -40,6 +40,13 @@ public enum KimiPaths {
         configHome(environment: environment).appendingPathComponent("config.toml")
     }
 
+    /// 全局记忆 `<home>/AGENTS.md`（Kimi 唯一的全局记忆文件；二进制 collect() 证实会读取）
+    public static func globalAgentsMd(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        configHome(environment: environment).appendingPathComponent("AGENTS.md")
+    }
+
     /// 系统级技能根 `<home>/skills`（env `EUREKA_KIMI_SKILLS` 覆盖；SKILL.md 格式与 Claude 同构）
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment

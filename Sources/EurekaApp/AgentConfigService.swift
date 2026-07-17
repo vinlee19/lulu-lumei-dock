@@ -16,6 +16,8 @@ final class AgentConfigService: ObservableObject {
     @Published private(set) var pluginAgents: [AgentDefinition] = []
     /// Claude Code 内置 agent（静态清单，只读）
     @Published private(set) var builtinAgents: [AgentDefinition] = []
+    /// Kimi Code 内置 subagent profile（编译内嵌，只读；磁盘无用户自定义约定）
+    @Published private(set) var kimiBuiltinAgents: [AgentDefinition] = []
     @Published private(set) var codexProfiles: [CodexProfile] = []
     @Published private(set) var scanning = false
     @Published private(set) var lastError: String?
@@ -30,6 +32,7 @@ final class AgentConfigService: ObservableObject {
     private var allGrokAgents: [AgentDefinition] = []
     private var allPluginAgents: [AgentDefinition] = []
     private var allBuiltinAgents: [AgentDefinition] = []
+    private var allKimiBuiltinAgents: [AgentDefinition] = []
     private var allProfiles: [CodexProfile] = []
 
     private var codexConfigURL: URL { EurekaCLI.codexConfigURL }
@@ -68,6 +71,7 @@ final class AgentConfigService: ObservableObject {
             let pluginAgents = AgentDefinitionIndexer.indexPluginAgents(
                 pluginsRoot: AgentDefinitionIndexer.claudePluginsRoot())
             let builtinAgents = AgentDefinitionIndexer.builtinClaudeAgents()
+            let kimiBuiltins = AgentDefinitionIndexer.builtinKimiAgents()
             let profiles = CodexProfileEditor.read(from: ConfigFile.read(self.codexConfigURL))
             DispatchQueue.main.async {
                 self.allAgents = agents
@@ -75,6 +79,7 @@ final class AgentConfigService: ObservableObject {
                 self.allGrokAgents = grokAgents
                 self.allPluginAgents = pluginAgents
                 self.allBuiltinAgents = builtinAgents
+                self.allKimiBuiltinAgents = kimiBuiltins
                 self.allProfiles = profiles
                 self.scanning = false
                 self.rebuild()
@@ -90,6 +95,7 @@ final class AgentConfigService: ObservableObject {
             grokAgents = allGrokAgents
             pluginAgents = allPluginAgents
             builtinAgents = allBuiltinAgents
+            kimiBuiltinAgents = allKimiBuiltinAgents
             codexProfiles = allProfiles
             return
         }
@@ -103,6 +109,7 @@ final class AgentConfigService: ObservableObject {
         grokAgents = allGrokAgents.filter(matchAgent)
         pluginAgents = allPluginAgents.filter(matchAgent)
         builtinAgents = allBuiltinAgents.filter(matchAgent)
+        kimiBuiltinAgents = allKimiBuiltinAgents.filter(matchAgent)
         codexProfiles = allProfiles.filter {
             [$0.name, $0.model, $0.personality, $0.reasoningEffort]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)

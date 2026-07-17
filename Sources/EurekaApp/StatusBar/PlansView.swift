@@ -8,6 +8,7 @@ struct PlansView: View {
     @ObservedObject var service: PlansService
 
     @State private var viewer: PlanViewerTarget?
+    @State private var deleting: PlanMaterializer.PlanEntry?
     /// 已折叠的来源（存 AgentSource.rawValue）；默认展开
     @State private var collapsed: Set<String> = []
 
@@ -22,6 +23,17 @@ struct PlansView: View {
         .onAppear { service.refresh() }
         .sheet(item: $viewer) { target in
             PlanViewerSheet(service: service, target: target)
+        }
+        .confirmationDialog(
+            deleting.map { "删除计划「\($0.title)」？文件会移入废纸篓，可恢复。" } ?? "",
+            isPresented: Binding(
+                get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                if let entry = deleting { service.delete(entry) }
+            }
+            Button("取消", role: .cancel) {}
         }
     }
 
@@ -66,10 +78,14 @@ struct PlansView: View {
                             ) { toggle(source) }
                             if isExpanded {
                                 ForEach(items) { plan in
-                                    PlanRow(plan: plan, service: service) {
-                                        viewer = PlanViewerTarget(
-                                            id: plan.path, title: plan.title, path: plan.path)
-                                    }
+                                    PlanRow(
+                                        plan: plan, service: service,
+                                        onOpen: {
+                                            viewer = PlanViewerTarget(
+                                                id: plan.path, title: plan.title,
+                                                path: plan.path, source: plan.source)
+                                        },
+                                        onDelete: { deleting = plan })
                                 }
                             }
                         }
@@ -143,6 +159,7 @@ private struct PlanRow: View {
     let plan: PlanMaterializer.PlanEntry
     let service: PlansService
     let onOpen: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -163,9 +180,14 @@ private struct PlanRow: View {
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.tertiary)
             Menu {
-                Button("查看") { onOpen() }
+                Button(plan.source == .claude ? "查看 / 编辑" : "查看") { onOpen() }
                 Button("用默认编辑器打开") { service.openInEditor(path: plan.path) }
                 Button("在 Finder 中显示") { service.reveal(path: plan.path) }
+                if plan.source == .claude {
+                    // 仅 Claude 计划是真实文件；其它源为物化副本，删了会被下一轮复原
+                    Divider()
+                    Button("删除", role: .destructive) { onDelete() }
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12))
@@ -184,12 +206,13 @@ private struct PlanRow: View {
     }
 }
 
-// MARK: - 查看 sheet（只读 Markdown 渲染）
+// MARK: - 查看 sheet（Claude 可编辑；其它源为物化副本只读）
 
 struct PlanViewerTarget: Identifiable {
     let id: String
     let title: String
     let path: String
+    var source: AgentSource = .claude
 }
 
 private struct PlanViewerSheet: View {
@@ -199,6 +222,10 @@ private struct PlanViewerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var loaded = false
+    @State private var editing = false  // 仅 claude 可切编辑
+    @State private var saved = false
+
+    private var editable: Bool { target.source == .claude }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -207,6 +234,15 @@ private struct PlanViewerSheet: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
+                if editable {
+                    Picker("", selection: $editing) {
+                        Text("预览").tag(false)
+                        Text("编辑").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 120)
+                }
                 Button { service.reveal(path: target.path) } label: {
                     Image(systemName: "folder")
                 }
@@ -220,21 +256,39 @@ private struct PlanViewerSheet: View {
             .padding(10)
             Divider()
 
-            ScrollView {
-                MarkdownRichText(text: text)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if editing {
+                    TextEditor(text: $text)
+                        .font(.system(size: 12).monospaced())
+                } else {
+                    ScrollView {
+                        MarkdownRichText(text: text)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
             .frame(minWidth: 460, minHeight: 320)
 
             Divider()
             HStack {
-                Text(target.path)
+                Text(editable
+                    ? target.path
+                    : "物化副本（只读，每轮扫描自动重建） · \(target.path)")
                     .font(.system(size: 9).monospaced())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
+                if editable {
+                    Button(saved ? "已保存" : "保存") {
+                        service.save(path: target.path, content: text) { _ in }
+                        saved = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
+                    }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .buttonStyle(.borderedProminent)
+                }
                 Button("关闭") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }

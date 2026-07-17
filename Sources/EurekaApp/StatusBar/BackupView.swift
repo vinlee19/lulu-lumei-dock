@@ -1,3 +1,5 @@
+import AppKit
+import EurekaKit
 import EurekaStore
 import EurekaSync
 import SwiftUI
@@ -148,10 +150,42 @@ struct BackupView: View {
                     relativeFormatter.localizedString(for: $0, relativeTo: Date())
                 } ?? "—")
             }
+            compositionRow
             if let result = service.lastResult {
                 Text("上轮：\(result)")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 「按来源构成」chips：来源徽标（命中 AgentSource）/文件夹图标（custom/其它）+ 文件数 + 字节
+    @ViewBuilder
+    private var compositionRow: some View {
+        let composition = service.sourceComposition.sorted { $0.value.count > $1.value.count }
+        if !composition.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(composition, id: \.key) { key, value in
+                        HStack(spacing: 4) {
+                            if let source = AgentSource(rawValue: key) {
+                                SourceBadge(source: source, size: 9)
+                            } else {
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(Theme.backup.opacity(0.7))
+                            }
+                            Text("\(key) \(value.count)")
+                                .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+                            Text(formatBytes(UInt64(max(0, value.bytes))))
+                                .font(.system(size: 9).monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.primary.opacity(0.05)))
+                    }
+                }
             }
         }
     }
@@ -240,17 +274,34 @@ struct BackupView: View {
 
         if expanded {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(run.files.enumerated()), id: \.offset) { _, file in
-                    HStack(spacing: 6) {
-                        Text(file.name)
-                            .font(.system(size: 9.5).monospaced())
+                // 按来源分组（category 首段；老记录无 category → "其他"）
+                ForEach(groupedFiles(run.files), id: \.source) { group in
+                    HStack(spacing: 5) {
+                        if let source = AgentSource(rawValue: group.source) {
+                            SourceBadge(source: source, size: 9)
+                        } else {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(Theme.backup.opacity(0.7))
+                        }
+                        Text("\(group.source) · \(group.files.count) 个 · \(formatBytes(UInt64(max(0, group.bytes))))")
+                            .font(.system(size: 9.5, weight: .semibold))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 4)
-                        Text(formatBytes(UInt64(max(0, file.size))))
-                            .font(.system(size: 9.5).monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.top, 3)
+                    ForEach(Array(group.files.enumerated()), id: \.offset) { _, file in
+                        HStack(spacing: 6) {
+                            Text(file.name)
+                                .font(.system(size: 9.5).monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 4)
+                            Text(formatBytes(UInt64(max(0, file.size))))
+                                .font(.system(size: 9.5).monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.leading, 14)
                     }
                 }
                 if run.uploaded > run.files.count {
@@ -262,6 +313,20 @@ struct BackupView: View {
             .padding(.leading, 22)
             .padding(.top, 1)
         }
+    }
+
+    /// 一轮的文件按来源分组（category 首段），组按文件数降序
+    private func groupedFiles(
+        _ files: [SyncRunsRepo.RunFile]
+    ) -> [(source: String, files: [SyncRunsRepo.RunFile], bytes: Int64)] {
+        var groups: [String: [SyncRunsRepo.RunFile]] = [:]
+        for file in files {
+            let source = file.category?.split(separator: "/").first.map(String.init) ?? "其他"
+            groups[source, default: []].append(file)
+        }
+        return groups
+            .map { (source: $0.key, files: $0.value, bytes: $0.value.reduce(0) { $0 + $1.size }) }
+            .sorted { $0.files.count > $1.files.count }
     }
 
     // MARK: - 空态
@@ -302,7 +367,10 @@ struct BackupView: View {
             region: settings.cosRegion.trimmingCharacters(in: .whitespaces),
             bucket: settings.cosBucket.trimmingCharacters(in: .whitespaces),
             endpointHost: settings.cosEndpointHost.trimmingCharacters(in: .whitespaces),
-            keyPrefix: settings.cosKeyPrefix.trimmingCharacters(in: .whitespaces))
+            keyPrefix: settings.cosKeyPrefix.trimmingCharacters(in: .whitespaces),
+            retryAttempts: settings.cosRetryAttempts,
+            retryBackoffSeconds: settings.cosRetryBackoffSeconds,
+            customFolders: settings.customSyncFolders)
     }
 
     private func card(
@@ -418,6 +486,24 @@ private struct BackupConfigSheet: View {
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                     }
+                    row("失败重试") {
+                        Stepper(value: $settings.cosRetryAttempts, in: 0...5) {
+                            Text("\(settings.cosRetryAttempts) 次")
+                                .font(.system(size: 11).monospacedDigit())
+                        }
+                        .controlSize(.small)
+                        TextField("3", value: $settings.cosRetryBackoffSeconds, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 48)
+                            .multilineTextAlignment(.trailing)
+                        Text("秒退避 ×2 递增（仅网络错误/5xx 重试）")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider().padding(.vertical, 2)
+
+                    customFoldersSection
 
                     Divider().padding(.vertical, 2)
 
@@ -490,6 +576,73 @@ private struct BackupConfigSheet: View {
         .font(.system(size: 11.5))
         .onAppear { service.refreshCredentialStatus() }
         .onDisappear { clampInterval() }
+    }
+
+    /// 自定义同步目录：任意本地目录 → 远端 custom/<远端名>/…
+    @ViewBuilder
+    private var customFoldersSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("自定义目录")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("添加文件夹…") { pickFolder() }
+                    .controlSize(.small)
+            }
+            if settings.customSyncFolders.isEmpty {
+                Text("把任意本地目录纳入备份：远端键 = <前缀>/<主机>/custom/<远端名>/<相对路径>")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
+            ForEach($settings.customSyncFolders) { $folder in
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.backup.opacity(0.8))
+                    Text(folder.path)
+                        .font(.system(size: 10).monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(folder.path)
+                    Spacer(minLength: 4)
+                    Text("→ custom/")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                    TextField("远端名", text: $folder.remoteName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 100)
+                    Toggle("", isOn: $folder.enabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .labelsHidden()
+                        .help(folder.enabled ? "已纳入备份" : "已暂停")
+                    Button {
+                        settings.customSyncFolders.removeAll { $0.id == folder.id }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("移除（不删除本地文件，远端已传内容保留）")
+                }
+            }
+        }
+    }
+
+    /// 系统目录选择器（非沙盒，直接存路径）
+    private func pickFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "选择"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        // 同一路径不重复添加
+        guard !settings.customSyncFolders.contains(where: { $0.path == url.path }) else { return }
+        settings.customSyncFolders.append(CustomSyncFolder(
+            path: url.path, remoteName: url.lastPathComponent))
     }
 
     /// 间隔钳制：最小 1 分钟

@@ -20,6 +20,8 @@ final class SyncService: ObservableObject {
     @Published private(set) var runsTotal = 0
     /// 备份总量统计（sync_state 聚合）
     @Published private(set) var stats: SyncStateRepo.Stats?
+    /// 备份按来源构成（remote_key 来源段 → 文件数/字节；「构成」chips 用）
+    @Published private(set) var sourceComposition: [String: (count: Int, bytes: Int64)] = [:]
     /// 当前同步间隔（分钟，只读展示用）
     @Published private(set) var intervalMinutes: Double = 30
 
@@ -34,6 +36,11 @@ final class SyncService: ObservableObject {
         var bucket: String
         var endpointHost: String  // 仅 provider == .custom 时使用
         var keyPrefix: String
+        /// 单文件失败重试次数（0=关）与退避基数（秒，指数 ×2）
+        var retryAttempts = 2
+        var retryBackoffSeconds: Double = 3
+        /// 用户自定义同步目录（仅 enabled 的会进 roots）
+        var customFolders: [CustomSyncFolder] = []
 
         /// 按服务商预设解析 endpoint host；自定义用用户填写值（空 = 未配置）
         var resolvedEndpointHost: String {
@@ -86,7 +93,11 @@ final class SyncService: ObservableObject {
                   let store = try? EurekaStore(path: EurekaStore.defaultURL()),
                   let stats = try? store.syncState.stats()
             else { return }
-            self.publish { $0.stats = stats }
+            let composition = (try? store.syncState.sourceComposition()) ?? [:]
+            self.publish {
+                $0.stats = stats
+                $0.sourceComposition = composition
+            }
         }
     }
 
@@ -109,12 +120,17 @@ final class SyncService: ObservableObject {
     /// 配置变更时由 UI 侧调用（每轮开跑读取最新快照）
     func updateConfig(
         provider: StorageProvider, region: String, bucket: String,
-        endpointHost: String, keyPrefix: String
+        endpointHost: String, keyPrefix: String,
+        retryAttempts: Int = 2, retryBackoffSeconds: Double = 3,
+        customFolders: [CustomSyncFolder] = []
     ) {
         queue.async { [weak self] in
             self?.config = Config(
                 provider: provider, region: region, bucket: bucket,
-                endpointHost: endpointHost, keyPrefix: keyPrefix)
+                endpointHost: endpointHost, keyPrefix: keyPrefix,
+                retryAttempts: retryAttempts,
+                retryBackoffSeconds: retryBackoffSeconds,
+                customFolders: customFolders)
         }
     }
 
@@ -191,10 +207,22 @@ final class SyncService: ObservableObject {
 
         Self.materializePlans()  // 物化三源计划到暂存，纳入本轮增量上传
 
+        // 重试参数与自定义目录来自配置快照
+        var effectiveLimits = limits
+        effectiveLimits.maxRetries = config.retryAttempts
+        effectiveLimits.retryBackoffSeconds = config.retryBackoffSeconds
+        var roots = Self.defaultRoots()
+        roots.customDirs = config.customFolders
+            .filter { $0.enabled && !$0.path.isEmpty }
+            .map { folder in
+                (root: URL(fileURLWithPath: folder.path, isDirectory: true),
+                 category: folder.remoteCategory)
+            }
+
         let engine = SyncEngine(
-            client: client, repo: store.syncState, roots: Self.defaultRoots(),
+            client: client, repo: store.syncState, roots: roots,
             keyPrefix: config.keyPrefix.isEmpty ? "eureka" : config.keyPrefix,
-            host: SyncKeyMapper.deviceNamespace(), limits: limits)
+            host: SyncKeyMapper.deviceNamespace(), limits: effectiveLimits)
         engine.onProgress = { [weak self] snapshot in
             self?.publish { $0.progress = snapshot }
         }
@@ -213,7 +241,7 @@ final class SyncService: ObservableObject {
                 date: Date(), uploaded: report.uploaded, uploadedBytes: report.uploadedBytes,
                 failed: report.failed, deferred: report.deferred, error: report.firstError,
                 files: report.uploadedFiles.map {
-                    SyncRunsRepo.RunFile(name: $0.name, size: $0.size)
+                    SyncRunsRepo.RunFile(name: $0.name, size: $0.size, category: $0.category)
                 })
             try? store.syncRuns.prune(keepingLast: 200)
         }

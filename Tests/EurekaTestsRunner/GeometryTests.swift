@@ -32,6 +32,29 @@ func geometryTests(_ t: TestRunner) {
         try expectEqual(frame2.maxY, -200 + 1080)
     }
 
+    t.test("positionUsable：完整可见 true；擦边残留 false；全屏外 false") {
+        let panel = CGSize(width: 440, height: 460)
+        let builtin = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let external = CGRect(x: -1920, y: -124, width: 1920, height: 1080)
+
+        // 完整落在外接屏内 → 可用
+        try expect(IslandGeometry.positionUsable(
+            origin: CGPoint(x: -1200, y: 300), panelSize: panel,
+            screens: [builtin, external]))
+        // 真实事故坐标：外接屏拔掉后 X=-462 残留——与内建屏零相交/仅擦边 → 不可用
+        try expect(!IslandGeometry.positionUsable(
+            origin: CGPoint(x: -462, y: 380.87), panelSize: panel,
+            screens: [builtin]))
+        // 擦边一像素（面板右缘刚够到屏）→ 胶囊带不完整在屏内 → 不可用
+        try expect(!IslandGeometry.positionUsable(
+            origin: CGPoint(x: -439, y: 300), panelSize: panel,
+            screens: [builtin]))
+        // 完全在所有屏之外 → 不可用
+        try expect(!IslandGeometry.positionUsable(
+            origin: CGPoint(x: 5000, y: 5000), panelSize: panel,
+            screens: [builtin, external]))
+    }
+
     t.test("刘海屏：内容贴顶、胶囊与刘海融合") {
         try expectEqual(IslandGeometry.contentTopInset(screen: notched), 0)
         let pill = IslandGeometry.pillSize(screen: notched)

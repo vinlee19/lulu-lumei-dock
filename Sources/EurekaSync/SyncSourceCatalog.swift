@@ -8,13 +8,19 @@ public struct SyncCandidate: Equatable {
     public var mtime: Double
     /// 0 = memory/skills（小而贵，先传）；1 = 会话 transcript
     public var priority: Int
+    /// 来源类目（如 "claude/skills"、"custom/notes"）；首段即来源，历史记录按来源分组用
+    public var category: String
 
-    public init(localPath: String, remoteKey: String, size: Int64, mtime: Double, priority: Int) {
+    public init(
+        localPath: String, remoteKey: String, size: Int64, mtime: Double,
+        priority: Int, category: String = ""
+    ) {
         self.localPath = localPath
         self.remoteKey = remoteKey
         self.size = size
         self.mtime = mtime
         self.priority = priority
+        self.category = category
     }
 }
 
@@ -35,6 +41,8 @@ public struct SyncRoots {
     public var kimiSessions: URL     // ~/.kimi-code/sessions（wire.jsonl + state.json）
     public var claudePlans: URL      // ~/.claude/plans（Claude 计划，本就是 .md）
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
+    /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
+    public var customDirs: [(root: URL, category: String)] = []
 
     public init(
         claudeHome: URL, claudeProjects: URL, claudeSkills: URL,
@@ -91,7 +99,8 @@ public enum SyncSourceCatalog {
                     prefix: prefix, host: host, category: category, relativePath: relativePath),
                 size: size,
                 mtime: values.contentModificationDate?.timeIntervalSince1970 ?? 0,
-                priority: priority))
+                priority: priority,
+                category: category))
         }
 
         /// 递归枚举 root 下常规文件。用 path-based enumerator 直接拿相对路径 ——
@@ -172,6 +181,11 @@ public enum SyncSourceCatalog {
              category: "grok/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("kimi", isDirectory: true),
              category: "kimi/plans", priority: 0, include: markdownOnly)
+
+        // 用户自定义目录：远端类目由用户指定（custom/<名>），全部常规文件（隐藏文件仍跳过）
+        for dir in roots.customDirs {
+            walk(root: dir.root, category: dir.category, priority: 1, include: always)
+        }
 
         return Result(candidates: candidates, skippedOversize: oversize)
     }

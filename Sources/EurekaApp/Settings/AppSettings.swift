@@ -1,6 +1,23 @@
 import Foundation
 import ServiceManagement
 
+/// 用户自定义同步目录（备份自选目录 → 远端 `custom/<名>`）
+struct CustomSyncFolder: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var path: String
+    var remoteName: String
+    var enabled = true
+
+    /// 远端类目：`custom/<清洗后的远端名>`（去斜杠与首尾空白；空名回退文件夹名）
+    var remoteCategory: String {
+        let cleaned = remoteName
+            .replacingOccurrences(of: "/", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = URL(fileURLWithPath: path).lastPathComponent
+        return "custom/" + (cleaned.isEmpty ? fallback : cleaned)
+    }
+}
+
 /// 用户偏好（UserDefaults 持久化）
 @MainActor
 final class AppSettings: ObservableObject {
@@ -84,6 +101,22 @@ final class AppSettings: ObservableObject {
     @Published var cosSyncIntervalMinutes: Double {
         didSet { defaults.set(cosSyncIntervalMinutes, forKey: "cosSyncIntervalMinutes") }
     }
+    /// 备份单文件失败重试次数（0 = 关；仅网络错误/5xx 重试）
+    @Published var cosRetryAttempts: Int {
+        didSet { defaults.set(cosRetryAttempts, forKey: "cosRetryAttempts") }
+    }
+    /// 重试退避基数（秒，指数 ×2）
+    @Published var cosRetryBackoffSeconds: Double {
+        didSet { defaults.set(cosRetryBackoffSeconds, forKey: "cosRetryBackoffSeconds") }
+    }
+    /// 自定义同步目录（JSON 编码存 UserDefaults——本仓库首个数组型设置）
+    @Published var customSyncFolders: [CustomSyncFolder] {
+        didSet {
+            if let data = try? JSONEncoder().encode(customSyncFolders) {
+                defaults.set(data, forKey: "customSyncFolders")
+            }
+        }
+    }
     /// 安全审计：记录 agent 执行的操作（命令全文/文件路径，不含输出）。默认开。
     @Published var auditEnabled: Bool {
         didSet { defaults.set(auditEnabled, forKey: "auditEnabled") }
@@ -128,6 +161,11 @@ final class AppSettings: ObservableObject {
         cosKeyPrefix = defaults.string(forKey: "cosKeyPrefix") ?? "eureka"
         cosSyncIntervalMinutes = max(
             1, defaults.object(forKey: "cosSyncIntervalMinutes") as? Double ?? 30)
+        cosRetryAttempts = defaults.object(forKey: "cosRetryAttempts") as? Int ?? 2
+        cosRetryBackoffSeconds =
+            defaults.object(forKey: "cosRetryBackoffSeconds") as? Double ?? 3
+        customSyncFolders = defaults.data(forKey: "customSyncFolders")
+            .flatMap { try? JSONDecoder().decode([CustomSyncFolder].self, from: $0) } ?? []
         auditEnabled = defaults.object(forKey: "auditEnabled") as? Bool ?? true
         auditRiskAlertsEnabled = defaults.object(forKey: "auditRiskAlertsEnabled") as? Bool ?? true
         auditSystemNotifyEnabled = defaults.bool(forKey: "auditSystemNotifyEnabled")

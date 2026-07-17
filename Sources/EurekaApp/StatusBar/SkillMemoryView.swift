@@ -111,6 +111,8 @@ struct SkillMemoryView: View {
                     Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                     Button("Codex 记忆") { startCreate(.codex, isSkill: false, "Codex 记忆") }
                     Button("Grok 记忆") { startCreate(.grok, isSkill: false, "Grok 记忆") }
+                    // kimi 记忆 = 单一全局 AGENTS.md，无需命名 → 直接创建并刷新
+                    Button("Kimi 记忆（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
                 }
             } label: {
                 Image(systemName: "plus.circle")

@@ -137,6 +137,52 @@ func s3ClientTests(_ t: TestRunner) {
         return (engine, store, base)
     }
 
+    t.test("重试：网络错误 2 次后成功 → 全部上传成功") {
+        let transport = MockTransport()
+        var calls = 0
+        transport.handler = { _, _ in
+            calls += 1
+            if calls <= 2 { throw URLError(.networkConnectionLost) }
+            return HTTPReply(status: 200, body: Data(), headers: ["etag": "\"e\""])
+        }
+        var limits = SyncEngine.Limits()
+        limits.maxRetries = 2
+        limits.retryBackoffSeconds = 0.01  // 测试快速退避
+        let fixture = try makeEngineFixture(transport: transport, limits: limits)
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let report = fixture.engine.runCycle()
+        try expectEqual(report.failed, 0)
+        try expectEqual(report.uploaded, 2)  // 首文件重试 2 次后成功，第二个直接成功
+        try expectEqual(calls, 4)            // 2 失败 + 2 成功
+    }
+
+    t.test("重试：4xx 不重试（权限/键错误重试无意义）") {
+        let transport = MockTransport()
+        transport.handler = { _, _ in
+            HTTPReply(status: 403, body: Data("AccessDenied".utf8))
+        }
+        var limits = SyncEngine.Limits()
+        limits.maxRetries = 3
+        limits.retryBackoffSeconds = 0.01
+        let fixture = try makeEngineFixture(transport: transport, limits: limits)
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let report = fixture.engine.runCycle()
+        try expectEqual(report.uploaded, 0)
+        try expectEqual(report.failed, 2)
+        try expectEqual(transport.requests.count, 2, "4xx 不应产生重试请求")
+    }
+
+    t.test("上传记录带来源类目（category 透传到 UploadedFile）") {
+        let transport = MockTransport()
+        let fixture = try makeEngineFixture(transport: transport)
+        defer { try? FileManager.default.removeItem(at: fixture.base) }
+        let report = fixture.engine.runCycle()
+        try expectEqual(report.uploaded, 2)
+        let categories = Set(report.uploadedFiles.map(\.category))
+        try expect(categories.contains("claude/skills"), "缺 claude/skills: \(categories)")
+        try expect(categories.contains("claude/memories"), "缺 claude/memories: \(categories)")
+    }
+
     t.test("engine：首轮全传并落库，二轮零上传；进度回调覆盖全程") {
         let transport = MockTransport()
         let (engine, store, base) = try makeEngineFixture(transport: transport)
