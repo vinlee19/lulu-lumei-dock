@@ -174,6 +174,7 @@ extension AgentSource {
         case .opencode: return Color(red: 0.45, green: 0.42, blue: 0.90)   // opencode 靛紫
         case .grok: return Color(red: 0.129, green: 0.588, blue: 0.953)    // xAI Dodger 蓝 #2196F3
         case .antigravity: return Color(red: 0.898, green: 0.298, blue: 0.612)  // 品红/玫 #E54C9C
+        case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot 蔚蓝 #1783FF
         }
     }
 }
@@ -278,6 +279,36 @@ struct GrokMarkShape: Shape {
     }
 }
 
+/// Kimi 标记：几何「K」三笔（竖杆 + 上臂 + 下腿，圆头）+ 右上圆点，
+/// 呼应 Moonshot/Kimi 官方字标（K 向上伸展、蓝点收顶）。与 Grok 蓝接近，靠 K 字形状区分。
+struct KimiMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let x0 = rect.midX - side / 2
+        let y0 = rect.midY - side / 2
+        func point(_ fx: CGFloat, _ fy: CGFloat) -> CGPoint {
+            CGPoint(x: x0 + fx * side, y: y0 + fy * side)
+        }
+        var strokes = Path()
+        // 竖杆
+        strokes.move(to: point(0.19, 0.17))
+        strokes.addLine(to: point(0.19, 0.83))
+        // 上臂（从杆中部伸向右上）
+        strokes.move(to: point(0.19, 0.50))
+        strokes.addLine(to: point(0.72, 0.20))
+        // 下腿（从杆中部伸向右下）
+        strokes.move(to: point(0.19, 0.50))
+        strokes.addLine(to: point(0.71, 0.83))
+        var path = strokes.strokedPath(
+            .init(lineWidth: side * 0.13, lineCap: .round, lineJoin: .round))
+        // 右上圆点（K 的"探月"收顶）
+        let r = side * 0.075
+        let nub = point(0.87, 0.11)
+        path.addEllipse(in: CGRect(x: nub.x - r, y: nub.y - r, width: r * 2, height: r * 2))
+        return path
+    }
+}
+
 /// Antigravity 标记：双层上升人字（⌃⌃），呼应「反重力 / 上升」
 struct AntigravityMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
@@ -321,6 +352,10 @@ struct SourceBadge: View {
                 .frame(width: size, height: size)
         case .antigravity:
             AntigravityMarkShape()
+                .fill(source.brandColor)
+                .frame(width: size, height: size)
+        case .kimi:
+            KimiMarkShape()
                 .fill(source.brandColor)
                 .frame(width: size, height: size)
         }

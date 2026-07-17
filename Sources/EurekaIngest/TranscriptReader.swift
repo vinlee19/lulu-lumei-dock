@@ -62,6 +62,8 @@ public enum TranscriptReader {
             return loadGrok(path: session.transcriptPath, maxMessages: maxMessages)
         case .antigravity:
             return loadAntigravity()
+        case .kimi:
+            return loadKimi(path: session.transcriptPath, maxMessages: maxMessages)
         }
     }
 
@@ -389,6 +391,38 @@ public enum TranscriptReader {
                     id: messages.count, role: .assistant, text: text, timestamp: currentTime))
             default:
                 break
+            }
+            return true
+        }
+        return Result(messages: messages, truncated: truncated)
+    }
+
+    // MARK: - kimi（~/.kimi-code/sessions/<ws>/<session>/agents/main/wire.jsonl）
+
+    /// wire.jsonl 为事件溯源日志（epoch-ms `time`，schema 已对真实会话核验）：
+    /// user 正文 = turn.prompt(origin=user) 的 input text 块；
+    /// assistant 正文 = loop 事件 content.part(part.type=text) 整段（think 段跳过）；
+    /// tool.call 记 🔧 小注；metadata/config/usage 等跳过。
+    public static func loadKimi(path: String, maxMessages: Int) -> Result {
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+
+        forEachJSONLine(path: path) { root in
+            guard messages.count < maxMessages else {
+                truncated = true
+                return false
+            }
+            let timestamp = KimiWireDecoder.timestamp(root)
+            if let prompt = KimiWireDecoder.promptText(root) {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .user, text: prompt, timestamp: timestamp))
+            } else if let text = KimiWireDecoder.assistantText(root) {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .assistant, text: text, timestamp: timestamp))
+            } else if let call = KimiWireDecoder.toolCall(root) {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .toolNote,
+                    text: "🔧 \(call.name)", timestamp: timestamp))
             }
             return true
         }

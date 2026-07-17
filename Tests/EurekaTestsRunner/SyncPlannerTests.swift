@@ -92,6 +92,10 @@ func syncPlannerTests(_ t: TestRunner) {
         try write("grok/memory/m1.md")
         try write("grok/sessions/-enc/uuid/events.jsonl")
         try write("grok/skills/gk/SKILL.md")
+        // kimi：session wire.jsonl + state.json + skill
+        try write("kimi/sessions/wd_x/session_1/agents/main/wire.jsonl")
+        try write("kimi/sessions/wd_x/session_1/state.json")
+        try write("kimi/skills/kk/SKILL.md")
 
         let roots = SyncRoots(
             claudeHome: base.appendingPathComponent("claude"),
@@ -105,6 +109,8 @@ func syncPlannerTests(_ t: TestRunner) {
             grokSkills: base.appendingPathComponent("grok/skills"),
             grokMemory: base.appendingPathComponent("grok/memory"),
             grokSessions: base.appendingPathComponent("grok/sessions"),
+            kimiSkills: base.appendingPathComponent("kimi/skills"),
+            kimiSessions: base.appendingPathComponent("kimi/sessions"),
             claudePlans: base.appendingPathComponent("claude/plans"),
             plansStaging: base.appendingPathComponent("plans-staging"))
         let result = SyncSourceCatalog.enumerate(
@@ -131,6 +137,11 @@ func syncPlannerTests(_ t: TestRunner) {
         try expect(keys.contains("eureka/mac/grok/memories/m1.md"), "grok 记忆必须收")
         try expect(keys.contains("eureka/mac/grok/sessions/-enc/uuid/events.jsonl"), "grok 会话 jsonl 必须收")
         try expect(keys.contains("eureka/mac/grok/skills/gk/SKILL.md"), "grok 技能必须收")
+        try expect(keys.contains(
+            "eureka/mac/kimi/sessions/wd_x/session_1/agents/main/wire.jsonl"), "kimi 会话 wire 必须收")
+        try expect(keys.contains(
+            "eureka/mac/kimi/sessions/wd_x/session_1/state.json"), "kimi state.json 必须收（恢复会话要用）")
+        try expect(keys.contains("eureka/mac/kimi/skills/kk/SKILL.md"), "kimi 技能必须收")
     }
 
     t.test("Catalog：超大文件跳过并计数") {
@@ -154,6 +165,8 @@ func syncPlannerTests(_ t: TestRunner) {
             grokSkills: base.appendingPathComponent("nope"),
             grokMemory: base.appendingPathComponent("nope"),
             grokSessions: base.appendingPathComponent("nope"),
+            kimiSkills: base.appendingPathComponent("nope"),
+            kimiSessions: base.appendingPathComponent("nope"),
             claudePlans: base.appendingPathComponent("nope"),
             plansStaging: base.appendingPathComponent("nope"))
         let result = SyncSourceCatalog.enumerate(

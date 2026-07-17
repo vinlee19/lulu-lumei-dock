@@ -31,6 +31,8 @@ public struct SyncRoots {
     public var grokSkills: URL       // ~/.grok/skills
     public var grokMemory: URL       // ~/.grok/memory（跨会话记忆，实验特性）
     public var grokSessions: URL     // ~/.grok/sessions（events/chat_history *.jsonl）
+    public var kimiSkills: URL       // ~/.kimi-code/skills
+    public var kimiSessions: URL     // ~/.kimi-code/sessions（wire.jsonl + state.json）
     public var claudePlans: URL      // ~/.claude/plans（Claude 计划，本就是 .md）
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
 
@@ -39,6 +41,7 @@ public struct SyncRoots {
         codexHome: URL, codexSessions: URL, codexSkills: URL,
         opencodeSkills: URL, opencodeDB: URL,
         grokSkills: URL, grokMemory: URL, grokSessions: URL,
+        kimiSkills: URL, kimiSessions: URL,
         claudePlans: URL, plansStaging: URL
     ) {
         self.claudeHome = claudeHome
@@ -52,6 +55,8 @@ public struct SyncRoots {
         self.grokSkills = grokSkills
         self.grokMemory = grokMemory
         self.grokSessions = grokSessions
+        self.kimiSkills = kimiSkills
+        self.kimiSessions = kimiSessions
         self.claudePlans = claudePlans
         self.plansStaging = plansStaging
     }
@@ -149,6 +154,14 @@ public enum SyncSourceCatalog {
         walk(root: disabledSibling(of: roots.grokSkills),
              category: "grok/skills.eureka-disabled", priority: 0, include: always)
 
+        // kimi：sessions（wire.jsonl + state.json，恢复会话两者都要）+ skills（含停用区）
+        walk(root: roots.kimiSessions, category: "kimi/sessions", priority: 1) { rel in
+            rel.lowercased().hasSuffix(".jsonl") || rel.hasSuffix("state.json")
+        }
+        walk(root: roots.kimiSkills, category: "kimi/skills", priority: 0, include: always)
+        walk(root: disabledSibling(of: roots.kimiSkills),
+             category: "kimi/skills.eureka-disabled", priority: 0, include: always)
+
         // 计划（.md 首类工件）：Claude 直接文件；Codex/opencode 由 PlanMaterializer 物化到暂存
         walk(root: roots.claudePlans, category: "claude/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("codex", isDirectory: true),
@@ -157,6 +170,8 @@ public enum SyncSourceCatalog {
              category: "opencode/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("grok", isDirectory: true),
              category: "grok/plans", priority: 0, include: markdownOnly)
+        walk(root: roots.plansStaging.appendingPathComponent("kimi", isDirectory: true),
+             category: "kimi/plans", priority: 0, include: markdownOnly)
 
         return Result(candidates: candidates, skippedOversize: oversize)
     }

@@ -5,7 +5,7 @@
 **把本地 AI 编码助手装进 macOS 菜单栏的一座「灵动岛」。**
 
 把任务活动实时呈现,配上 ccusage 级精度的用量账本、订阅限额余量,以及会话 / 技能 / agent / 记忆管理、
-操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity**,全在一处。
+操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code**,全在一处。
 
 `Swift 5.10 + SwiftPM` · `零第三方依赖` · `全部数据本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
@@ -45,7 +45,7 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 `lulu-lumei-dock` 是一个原生 macOS 菜单栏应用:它监视本地 AI 编码助手的日志,把任务活动实时装进刘海
 旁的一座「灵动岛」,并提供一个完整面板——用量分析、订阅限额,以及会话 / 技能 / agent / 记忆的管理。
 
-开箱支持五种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity**,核心功能**零网络**:
+开箱支持六种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code**,核心功能**零网络**:
 一切都靠读取本地 transcript / rollout / session 文件推导。唯一的联网功能是 Claude 订阅限额(非官方
 接口,默认关闭,可在设置里 opt‑in)。
 
@@ -105,9 +105,10 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 | **opencode** | ✅ | ✅ | — | ✅ | ✅ |
 | **Grok** | ✅ | 仅活动量¹ | ✅(本地) | ✅ | ✅ |
 | **Antigravity** | ✅ | 仅活动量¹ | — | ✅ | ✅ |
+| **Kimi Code** | ✅ | ✅ | — | ✅ | ✅(技能) |
 
 ¹ Grok 是订阅制、Antigravity 会话是 protobuf,两者本地都不暴露 per‑request token 账,只能给活动量
-(调用 / 会话)。
+(调用 / 会话)。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
 
 ## 快速上手
 

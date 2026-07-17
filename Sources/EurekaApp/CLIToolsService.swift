@@ -34,6 +34,9 @@ final class CLIToolsService: ObservableObject {
         Tool(id: "antigravity", name: "Antigravity CLI (agy)", source: .antigravity,
              command: "agy", npmPackage: "",
              installCommand: "从 https://antigravity.google 下载 Antigravity 后运行 `agy install`"),
+        Tool(id: "kimi", name: "Kimi Code CLI", source: .kimi,
+             command: "kimi", npmPackage: "@moonshot-ai/kimi-code",
+             installCommand: "npm install -g @moonshot-ai/kimi-code"),
     ]
     @Published private(set) var detected = false
 

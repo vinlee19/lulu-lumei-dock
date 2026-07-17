@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · opencode · Grok · Antigravity**, all in one overlay.
+**Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `zero third‑party dependencies` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -49,9 +49,9 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with five agents out of the box — **Claude Code, Codex CLI, opencode, Grok, and
-Antigravity** — and needs **no network** for its core features: everything is derived by reading
-local transcript / rollout / session files. The only opt‑in network feature is the Claude
+It works with six agents out of the box — **Claude Code, Codex CLI, opencode, Grok,
+Antigravity, and Kimi Code** — and needs **no network** for its core features: everything is
+derived by reading local transcript / rollout / session files. The only opt‑in network feature is the Claude
 subscription rate‑limit gauge (an unofficial endpoint, off by default).
 
 It also works **without installing any hooks** — transcript/rollout watchers are the fallback, so
@@ -124,9 +124,12 @@ many concurrent sessions, or late‑night runs.
 | **opencode** | ✅ | ✅ | — | ✅ | ✅ |
 | **Grok** | ✅ | activity only¹ | ✅ (local) | ✅ | ✅ |
 | **Antigravity** | ✅ | activity only¹ | — | ✅ | ✅ |
+| **Kimi Code** | ✅ | ✅ | — | ✅ | ✅ (skills) |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
+Kimi Code has no local rate‑limit snapshot and no global memory / on‑disk agent-definition
+convention, so those columns are skipped for it.
 
 ## Quick start
 

@@ -27,6 +27,8 @@ final class PlansService: ObservableObject {
             PlanMaterializer.materializeOpencode(dbPath: OpencodePaths.db(), into: staging)
             PlanMaterializer.materializeGrok(
                 sessionsRoot: GrokPaths.sessionsRoot(), into: staging)
+            PlanMaterializer.materializeKimi(
+                sessionsRoot: KimiPaths.sessionsRoot(), into: staging)
             let entries = PlanMaterializer.index(
                 claudePlansDir: PlanMaterializer.defaultClaudePlansDir(), stagingRoot: staging)
             DispatchQueue.main.async {

@@ -250,6 +250,8 @@ final class SyncService: ObservableObject {
             grokSkills: GrokPaths.skillsRoot(),
             grokMemory: GrokPaths.memoryRoot(),
             grokSessions: GrokPaths.sessionsRoot(),
+            kimiSkills: KimiPaths.skillsRoot(),
+            kimiSessions: KimiPaths.sessionsRoot(),
             claudePlans: PlanMaterializer.defaultClaudePlansDir(),
             plansStaging: PlanMaterializer.defaultStagingRoot())
     }
@@ -262,6 +264,7 @@ final class SyncService: ObservableObject {
             sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(), into: staging)
         PlanMaterializer.materializeOpencode(dbPath: OpencodePaths.db(), into: staging)
         PlanMaterializer.materializeGrok(sessionsRoot: GrokPaths.sessionsRoot(), into: staging)
+        PlanMaterializer.materializeKimi(sessionsRoot: KimiPaths.sessionsRoot(), into: staging)
     }
 
     static func describe(_ report: SyncReport) -> String {

@@ -29,6 +29,9 @@ enum PreviewRenderer {
         let running4 = AgentTask(
             source: .antigravity, sessionId: "p6", title: nil,
             cwd: "/Users/me/work/agy-app", startedAt: now.addingTimeInterval(-20))
+        let running5 = AgentTask(
+            source: .kimi, sessionId: "p7", title: "梳理会员配额文档",
+            cwd: "/Users/me/work/kimi-docs", startedAt: now.addingTimeInterval(-66))
         let waitingTask = AgentTask(
             source: .claude, sessionId: "p3", title: "批量更新依赖版本",
             cwd: "/Users/me/work/deps", startedAt: now.addingTimeInterval(-301),
@@ -66,7 +69,7 @@ enum PreviewRenderer {
         }
 
         snapshot("1-compact-notched", screen: notched) {
-            $0.updateActiveTasks([running1, running2, running3, running4])
+            $0.updateActiveTasks([running1, running2, running3, running4, running5])
         }
         snapshot("2-compact-plain", screen: plain) {
             $0.updateActiveTasks([running1])

@@ -47,6 +47,9 @@ final class SkillMemoryService: ObservableObject {
                 projectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".gemini/skills", isDirectory: true),
                     source: .antigravity, projectName: name))
+                projectRoots.append(ProjectScopedRoot(
+                    root: root.appendingPathComponent(".kimi-code/skills", isDirectory: true),
+                    source: .kimi, projectName: name))
             }
             // 内置/携带技能根（只读，供详情矩阵与跨源判定；不进列表）
             var bundledRoots: [(root: URL, source: AgentSource)] = []
@@ -66,6 +69,7 @@ final class SkillMemoryService: ObservableObject {
                 codexSkillsRoot: SkillMemoryIndexer.codexSkillsRoot(),
                 opencodeSkillsRoot: OpencodePaths.skillsRoot(),
                 grokSkillsRoot: GrokPaths.skillsRoot(),
+                kimiSkillsRoot: KimiPaths.skillsRoot(),
                 antigravitySkillsRoots: [AntigravityPaths.userSkillsRoot()],
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
@@ -167,6 +171,7 @@ final class SkillMemoryService: ObservableObject {
             case .opencode: root = OpencodePaths.skillsRoot()
             case .grok: root = GrokPaths.skillsRoot()
             case .antigravity: root = AntigravityPaths.userSkillsRoot()
+            case .kimi: root = KimiPaths.skillsRoot()
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -204,6 +209,10 @@ final class SkillMemoryService: ObservableObject {
             case .antigravity:
                 // antigravity 无记忆概念（UI 不提供入口）；仅为穷举，写 ~/.gemini/memories
                 dir = AntigravityPaths.geminiHome()
+                    .appendingPathComponent("memories", isDirectory: true)
+            case .kimi:
+                // kimi 无全局记忆概念（AGENTS.md-first，UI 不提供入口）；仅为穷举
+                dir = KimiPaths.configHome()
                     .appendingPathComponent("memories", isDirectory: true)
             }
             let file = dir.appendingPathComponent(Self.slugify(name) + ".md")

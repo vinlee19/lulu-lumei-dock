@@ -106,6 +106,7 @@ struct SkillMemoryView: View {
                     Button("opencode 技能") { startCreate(.opencode, isSkill: true, "opencode 技能") }
                     Button("Grok 技能") { startCreate(.grok, isSkill: true, "Grok 技能") }
                     Button("Antigravity 技能") { startCreate(.antigravity, isSkill: true, "Antigravity 技能") }
+                    Button("Kimi 技能") { startCreate(.kimi, isSkill: true, "Kimi 技能") }
                 } else {
                     Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                     Button("Codex 记忆") { startCreate(.codex, isSkill: false, "Codex 记忆") }

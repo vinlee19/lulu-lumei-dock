@@ -108,18 +108,21 @@ final class UsageService: ObservableObject {
     private var codexScanner: CodexUsageScanner?
     private var opencodeScanner: OpencodeUsageScanner?
     private var grokScanner: GrokUsageScanner?
+    private var kimiScanner: KimiUsageScanner?
     private var pricing = PricingTable(models: [])
 
     private static let claudeHealthName = "用量扫描 Claude"
     private static let codexHealthName = "用量扫描 Codex"
     private static let opencodeHealthName = "用量扫描 opencode"
     private static let grokHealthName = "用量扫描 Grok"
+    private static let kimiHealthName = "用量扫描 Kimi"
 
     func start() {
         HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codexHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.opencodeHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.grokHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.kimiHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -133,6 +136,8 @@ final class UsageService: ObservableObject {
                     dbPath: OpencodePaths.db(), store: store)
                 self.grokScanner = GrokUsageScanner(
                     sessionsRoot: GrokPaths.sessionsRoot(), store: store)
+                self.kimiScanner = KimiUsageScanner(
+                    sessionsRoot: KimiPaths.sessionsRoot(), store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: Bundle.module.url(forResource: "pricing", withExtension: "json"),
                     overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
@@ -399,6 +404,9 @@ final class UsageService: ObservableObject {
             let grokNew = try grokScanner?.scanOnce() ?? 0
             HealthRegistry.shared.beat(Self.grokHealthName)
             if grokNew > 0 { HealthRegistry.shared.event(Self.grokHealthName) }
+            let kimiNew = try kimiScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.kimiHealthName)
+            if kimiNew > 0 { HealthRegistry.shared.event(Self.kimiHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)

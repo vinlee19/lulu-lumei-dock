@@ -104,6 +104,7 @@ final class SessionBrowserService: ObservableObject {
             indexed += GrokSessionIndexer.index(sessionsRoot: GrokPaths.sessionsRoot())
             indexed += AntigravitySessionIndexer.index(
                 conversationsRoot: AntigravityPaths.conversationsRoot())
+            indexed += KimiSessionIndexer.index(sessionsRoot: KimiPaths.sessionsRoot())
 
             // 会话级费用：逐会话×模型聚合后按价格表折算
             var costMap: [String: SessionCost] = [:]
@@ -257,6 +258,7 @@ final class SessionBrowserService: ObservableObject {
         case .opencode: resume = "opencode --session \(session.id)"  // 用 --session 重新进入指定会话（opencode 1.17+）
         case .grok: resume = "grok --resume \(session.id)"
         case .antigravity: resume = "agy --conversation \(session.id)"
+        case .kimi: resume = "kimi --session \(session.id)"
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume
@@ -291,9 +293,9 @@ final class SessionBrowserService: ObservableObject {
         }
     }
 
-    /// 删除会话（移废纸篓，可恢复）：claude/codex/grok/antigravity 支持（opencode 存共享库，不支持）。
+    /// 删除会话（移废纸篓，可恢复）：claude/codex/grok/antigravity/kimi 支持（opencode 存共享库，不支持）。
     /// Claude 会话若有嵌套子代理目录（<session>/…）一并清理；grok 是整个 <uuid>/ 目录；
-    /// antigravity 是 <uuid>.db（连 -wal/-shm）。
+    /// antigravity 是 <uuid>.db（连 -wal/-shm）；kimi 是整个 session_<uuid>/ 目录。
     func deleteSessions(_ toDelete: [AgentSessionInfo], completion: ((Int) -> Void)? = nil) {
         let deletable = toDelete.filter { $0.source != .opencode }
         guard !deletable.isEmpty else {
@@ -311,6 +313,17 @@ final class SessionBrowserService: ObservableObject {
                 // grok：transcriptPath = <uuid>/chat_history.jsonl，删整个会话目录
                 if session.source == .grok {
                     let sessionDir = fileURL.deletingLastPathComponent()
+                    if (try? fm.trashItem(at: sessionDir, resultingItemURL: nil)) != nil {
+                        trashed += 1
+                    }
+                    continue
+                }
+                // kimi：transcriptPath = session_<uuid>/agents/main/wire.jsonl，上翻三级删整个会话目录
+                if session.source == .kimi {
+                    let sessionDir = fileURL
+                        .deletingLastPathComponent()   // main/
+                        .deletingLastPathComponent()   // agents/
+                        .deletingLastPathComponent()   // session_<uuid>/
                     if (try? fm.trashItem(at: sessionDir, resultingItemURL: nil)) != nil {
                         trashed += 1
                     }

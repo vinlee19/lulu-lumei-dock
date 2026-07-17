@@ -13,6 +13,7 @@
     { "match": "gpt-5.5-pro", "inputPerM": 30, "outputPerM": 180, "cacheReadPerM": 3 },
     { "match": "gpt-5.5", "inputPerM": 5, "outputPerM": 30, "cacheReadPerM": 0.5 },
     { "match": "gpt-5-mini", "inputPerM": 0.25, "outputPerM": 2, "cacheReadPerM": 0.025 },
-    { "match": "gpt-5", "inputPerM": 1.25, "outputPerM": 10, "cacheReadPerM": 0.125 }
+    { "match": "gpt-5", "inputPerM": 1.25, "outputPerM": 10, "cacheReadPerM": 0.125 },
+    { "match": "kimi-code/", "unknown": true }
   ]
 }

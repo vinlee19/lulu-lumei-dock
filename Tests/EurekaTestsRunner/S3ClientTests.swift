@@ -124,6 +124,8 @@ func s3ClientTests(_ t: TestRunner) {
             grokSkills: base.appendingPathComponent("nope"),
             grokMemory: base.appendingPathComponent("nope"),
             grokSessions: base.appendingPathComponent("nope"),
+            kimiSkills: base.appendingPathComponent("nope"),
+            kimiSessions: base.appendingPathComponent("nope"),
             claudePlans: base.appendingPathComponent("nope"),
             plansStaging: base.appendingPathComponent("nope"))
         let client = S3Client(

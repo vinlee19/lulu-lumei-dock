@@ -207,7 +207,45 @@ public enum PlanMaterializer {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
     }
 
-    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok
+    // MARK: - kimi：会话内 agents/<id>/plans/* → 暂存 kimi/<sessionId>-<名>.md
+
+    /// kimi 计划落在每 agent 的 plans/ 目录（`sessions/<ws>/<session>/agents/<id>/plans/*`）。
+    /// 非空文件原样拷进暂存；文件名带会话目录名前缀防跨会话/agent 撞名。
+    @discardableResult
+    public static func materializeKimi(sessionsRoot: URL, into stagingRoot: URL) -> Int {
+        let fm = FileManager.default
+        let outDir = stagingRoot.appendingPathComponent("kimi", isDirectory: true)
+        var written = 0
+        let workspaceDirs = (try? fm.contentsOfDirectory(
+            at: sessionsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        for workspaceDir in workspaceDirs where isDirectory(workspaceDir) {
+            let sessionDirs = (try? fm.contentsOfDirectory(
+                at: workspaceDir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            for sessionDir in sessionDirs where isDirectory(sessionDir) {
+                let agentsDir = sessionDir.appendingPathComponent("agents", isDirectory: true)
+                let agentDirs = (try? fm.contentsOfDirectory(
+                    at: agentsDir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+                for agentDir in agentDirs where isDirectory(agentDir) {
+                    let plansDir = agentDir.appendingPathComponent("plans", isDirectory: true)
+                    let plans = (try? fm.contentsOfDirectory(
+                        at: plansDir, includingPropertiesForKeys: nil)) ?? []
+                    for planURL in plans {
+                        guard let content = try? String(contentsOf: planURL, encoding: .utf8),
+                              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        else { continue }
+                        let stem = planURL.deletingPathExtension().lastPathComponent
+                        let name = "\(sessionDir.lastPathComponent)-\(stem).md"
+                        if writeIfChanged(content, to: outDir.appendingPathComponent(name)) {
+                            written += 1
+                        }
+                    }
+                }
+            }
+        }
+        return written
+    }
+
+    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi
 
     public static func index(claudePlansDir: URL, stagingRoot: URL) -> [PlanEntry] {
         var result: [PlanEntry] = []
@@ -218,6 +256,8 @@ public enum PlanMaterializer {
                 source: .opencode, into: &result)
         collect(dir: stagingRoot.appendingPathComponent("grok", isDirectory: true),
                 source: .grok, into: &result)
+        collect(dir: stagingRoot.appendingPathComponent("kimi", isDirectory: true),
+                source: .kimi, into: &result)
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 

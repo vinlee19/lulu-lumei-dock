@@ -183,6 +183,7 @@ public enum SkillMemoryIndexer {
         claudeSkillsRoot: URL, codexSkillsRoot: URL,
         opencodeSkillsRoot: URL? = nil,
         grokSkillsRoot: URL? = nil,
+        kimiSkillsRoot: URL? = nil,
         antigravitySkillsRoots: [URL] = [],
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
@@ -206,6 +207,12 @@ public enum SkillMemoryIndexer {
                 grokSkillsRoot, source: .grok, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: grokSkillsRoot), source: .grok, enabled: false, scope: .system)
+        }
+        if let kimiSkillsRoot {
+            result += scanSkillRoot(
+                kimiSkillsRoot, source: .kimi, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: kimiSkillsRoot), source: .kimi, enabled: false, scope: .system)
         }
         // antigravity：用户 ~/.gemini/skills + 内置 builtin/skills（各含停用区）
         for root in antigravitySkillsRoots {

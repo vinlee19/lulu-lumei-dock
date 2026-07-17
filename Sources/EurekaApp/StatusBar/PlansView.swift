@@ -11,7 +11,7 @@ struct PlansView: View {
     /// 已折叠的来源（存 AgentSource.rawValue）；默认展开
     @State private var collapsed: Set<String> = []
 
-    private let sources: [AgentSource] = [.claude, .codex, .opencode, .grok]
+    private let sources: [AgentSource] = [.claude, .codex, .opencode, .grok, .kimi]
 
     var body: some View {
         VStack(spacing: 0) {

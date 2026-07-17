@@ -213,6 +213,27 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expect(roots[0].path.hasSuffix("5.0.7/skills"))
     }
 
+    t.test("kimi 技能根：source .kimi、系统级、含停用区") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory
+            .appendingPathComponent("eureka-kimiskill-\(UUID())", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let kimiSkills = base.appendingPathComponent("kimi-skills", isDirectory: true)
+        try writeSkill(kimiSkills, dir: "ks", body: "---\nname: KimiSkill\n---\n")
+        try writeSkill(
+            SkillMemoryIndexer.disabledRoot(for: kimiSkills),
+            dir: "koff", body: "---\nname: KimiOff\n---\n")
+
+        let skills = SkillMemoryIndexer.indexSkills(
+            claudeSkillsRoot: base.appendingPathComponent("c", isDirectory: true),
+            codexSkillsRoot: base.appendingPathComponent("x", isDirectory: true),
+            kimiSkillsRoot: kimiSkills)
+        let active = try requireSkill(skills, named: "KimiSkill")
+        try expect(active.source == .kimi && active.enabled && active.scope == .system)
+        let disabled = try requireSkill(skills, named: "KimiOff")
+        try expect(disabled.source == .kimi && !disabled.enabled)
+    }
+
     t.test("normalizeSkillName：plugin:skill 取冒号后段、小写") {
         try expectEqual(
             SkillMemoryIndexer.normalizeSkillName("superpowers:Brainstorming"), "brainstorming")
