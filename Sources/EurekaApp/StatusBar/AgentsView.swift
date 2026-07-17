@@ -97,10 +97,12 @@ struct AgentsView: View {
 
     @ViewBuilder
     private var content: some View {
-        if service.claudeAgents.isEmpty && service.opencodeAgents.isEmpty
-            && service.grokAgents.isEmpty
-            && service.pluginAgents.isEmpty && service.builtinAgents.isEmpty
-            && service.codexProfiles.isEmpty {
+        // 非搜索态类别常显（空类别带占位），整页空态只在搜索无命中/扫描中出现
+        if service.isSearching,
+           service.claudeAgents.isEmpty, service.opencodeAgents.isEmpty,
+           service.grokAgents.isEmpty, service.kimiBuiltinAgents.isEmpty,
+           service.pluginAgents.isEmpty, service.builtinAgents.isEmpty,
+           service.codexProfiles.isEmpty {
             VStack(spacing: 8) {
                 if service.scanning {
                     ProgressView("正在扫描…")
@@ -122,32 +124,55 @@ struct AgentsView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // 按来源分为三大类别（Claude / opencode / Codex），每类可折叠
-                    if claudeCount > 0 {
+                    // 按来源分类别，每类可折叠；非搜索态空类别也常显（带新建占位）
+                    if claudeCount > 0 || !service.isSearching {
                         sourceCategory(.claude, count: claudeCount) {
                             agentSubsections(agents: service.claudeAgents)
                             pluginSections
                             builtinSection
                         }
                     }
-                    if opencodeCount > 0 {
+                    if opencodeCount > 0 || !service.isSearching {
                         sourceCategory(.opencode, count: opencodeCount) {
-                            agentSubsections(agents: service.opencodeAgents)
+                            if service.opencodeAgents.isEmpty {
+                                emptyCategoryRow("暂无 agent", actionTitle: "新建") {
+                                    newAgentName = ""
+                                    creatingKind = .opencode
+                                    creatingAgent = true
+                                }
+                            } else {
+                                agentSubsections(agents: service.opencodeAgents)
+                            }
                         }
                     }
-                    if grokCount > 0 {
+                    if grokCount > 0 || !service.isSearching {
                         sourceCategory(.grok, count: grokCount) {
-                            agentSubsections(agents: service.grokAgents)
+                            if service.grokAgents.isEmpty {
+                                emptyCategoryRow("暂无 agent", actionTitle: "新建") {
+                                    newAgentName = ""
+                                    creatingKind = .grok
+                                    creatingAgent = true
+                                }
+                            } else {
+                                agentSubsections(agents: service.grokAgents)
+                            }
                         }
                     }
-                    if kimiCount > 0 {
+                    if kimiCount > 0 || !service.isSearching {
                         sourceCategory(.kimi, count: kimiCount) {
                             kimiBuiltinSection
                         }
                     }
-                    if codexCount > 0 {
+                    if codexCount > 0 || !service.isSearching {
                         sourceCategory(.codex, count: codexCount) {
-                            codexProfileSection
+                            if service.codexProfiles.isEmpty {
+                                emptyCategoryRow("暂无 profile", actionTitle: "新建") {
+                                    profileEditor = ProfileEditTarget(
+                                        id: "new", profile: CodexProfile(name: ""), isNew: true)
+                                }
+                            } else {
+                                codexProfileSection
+                            }
                         }
                     }
                     if let error = service.lastError {
@@ -278,6 +303,24 @@ struct AgentsView: View {
             agent: agent, service: service,
             onView: { fileEditor = AgentFileEditTarget(
                 id: agent.path, title: agent.name, path: agent.path) })
+    }
+
+    /// 空类别占位行：小字 + 内联新建（视觉重量低于正常行）
+    private func emptyCategoryRow(
+        _ text: String, actionTitle: String, action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(text)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+            Button(actionTitle, action: action)
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .font(.system(size: 10))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 30)
+        .padding(.vertical, 4)
     }
 
     private func sectionHeader(_ title: String, icon: String? = nil, tint: Color = .secondary) -> some View {

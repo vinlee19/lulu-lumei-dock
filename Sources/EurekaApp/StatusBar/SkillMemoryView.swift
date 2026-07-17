@@ -140,7 +140,8 @@ struct SkillMemoryView: View {
     @ViewBuilder
     private var listContent: some View {
         let isEmpty = mode == .skills ? service.skills.isEmpty : service.memories.isEmpty
-        if isEmpty {
+        // 非搜索态不再整页空态：来源分组常显（空组带占位 + 新建入口）
+        if isEmpty && (service.isSearching || service.scanning) {
             emptyState
         } else {
             ScrollView {
@@ -179,10 +180,10 @@ struct SkillMemoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 技能页：系统技能（按来源可折叠）+ 各项目技能（可折叠）
+    /// 技能页：系统技能（按来源可折叠，空组常显带新建入口）+ 各项目技能（可折叠）
     @ViewBuilder
     private var skillsSections: some View {
-        if !systemSkills.isEmpty {
+        if !systemSkills.isEmpty || !service.isSearching {
             sectionHeader("系统技能 \(systemSkills.count)", icon: "wand.and.stars", tint: Theme.skills)
             ForEach(systemSkillsBySource, id: \.0) { source, group in
                 let isExpanded = !collapsedSkillSources.contains(source.rawValue)
@@ -198,7 +199,13 @@ struct SkillMemoryView: View {
                     }
                 }
                 if isExpanded {
-                    ForEach(group) { skillRow($0) }
+                    if group.isEmpty {
+                        emptySourceRow(text: "暂无技能", actionTitle: "新建") {
+                            startCreate(source, isSkill: true, "\(source.displayName) 技能")
+                        }
+                    } else {
+                        ForEach(group) { skillRow($0) }
+                    }
                 }
             }
         }
@@ -220,10 +227,10 @@ struct SkillMemoryView: View {
         }
     }
 
-    /// 记忆页：系统记忆（按来源可折叠）+ 各项目记忆（可折叠）
+    /// 记忆页：系统记忆（按来源可折叠，空组常显带新建入口）+ 各项目记忆（可折叠）
     @ViewBuilder
     private var memorySections: some View {
-        if !systemMemories.isEmpty {
+        if !systemMemories.isEmpty || !service.isSearching {
             sectionHeader("系统记忆 \(systemMemories.count)", icon: "brain.fill", tint: Theme.memory)
             ForEach(systemMemoriesBySource, id: \.0) { source, group in
                 let isExpanded = !collapsedMemorySources.contains(source.rawValue)
@@ -239,7 +246,11 @@ struct SkillMemoryView: View {
                     }
                 }
                 if isExpanded {
-                    ForEach(group) { memoryRow($0) }
+                    if group.isEmpty {
+                        memoryEmptyRow(source)
+                    } else {
+                        ForEach(group) { memoryRow($0) }
+                    }
                 }
             }
         }
@@ -266,11 +277,13 @@ struct SkillMemoryView: View {
     private var systemSkills: [SkillEntry] {
         service.skills.filter { !$0.scope.isProject }
     }
-    /// 系统技能按来源分组（Claude / Codex / opencode，按 allCases 顺序，仅非空组）
+    /// 系统技能按来源分组（allCases 顺序）。非搜索态空组也保留（来源常显，空组给占位 + 新建入口）；
+    /// 搜索态只留命中组避免噪音。
     private var systemSkillsBySource: [(AgentSource, [SkillEntry])] {
         AgentSource.allCases.compactMap { source in
             let group = systemSkills.filter { $0.source == source }
-            return group.isEmpty ? nil : (source, group)
+            if group.isEmpty && service.isSearching { return nil }
+            return (source, group)
         }
     }
     private var skillProjectNames: [String] {
@@ -310,11 +323,12 @@ struct SkillMemoryView: View {
     private var systemMemories: [MemoryEntry] {
         service.memories.filter { $0.projectName == nil }
     }
-    /// 系统记忆按来源分组（Claude / Codex，按 allCases 顺序，仅非空组）
+    /// 系统记忆按来源分组（allCases 顺序）。非搜索态空组也保留（来源常显）；搜索态只留命中组。
     private var systemMemoriesBySource: [(AgentSource, [MemoryEntry])] {
         AgentSource.allCases.compactMap { source in
             let group = systemMemories.filter { $0.source == source }
-            return group.isEmpty ? nil : (source, group)
+            if group.isEmpty && service.isSearching { return nil }
+            return (source, group)
         }
     }
     private var memoryProjectNames: [String] {
@@ -328,6 +342,44 @@ struct SkillMemoryView: View {
             memory: memory, service: service,
             onEdit: { openEditor(path: memory.path, title: memory.scope, isSkill: false) },
             onDelete: { deleting = .memory(memory) })
+    }
+
+    /// 空来源占位行：小字说明 + 可选内联新建（视觉重量低于正常行）
+    @ViewBuilder
+    private func emptySourceRow(
+        text: String, actionTitle: String? = nil, action: (() -> Void)? = nil
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(text)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.borderless)
+                    .controlSize(.mini)
+                    .font(.system(size: 10))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 30)
+        .padding(.vertical, 4)
+    }
+
+    /// 记忆页空来源占位：kimi 一键建 AGENTS.md；antigravity 无概念只给文案；其余走命名新建
+    @ViewBuilder
+    private func memoryEmptyRow(_ source: AgentSource) -> some View {
+        switch source {
+        case .kimi:
+            emptySourceRow(text: "未创建 AGENTS.md", actionTitle: "创建 AGENTS.md") {
+                service.createMemory(source: .kimi, name: "AGENTS")
+            }
+        case .antigravity:
+            emptySourceRow(text: "无记忆概念")
+        default:
+            emptySourceRow(text: "暂无记忆", actionTitle: "新建") {
+                startCreate(source, isSkill: false, "\(source.displayName) 记忆")
+            }
+        }
     }
 
     private func sectionHeader(_ title: String, icon: String? = nil, tint: Color = .secondary) -> some View {
