@@ -8,7 +8,7 @@ Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate�
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code**, all in one overlay.
 
-`Swift 5.10 + SwiftPM` · `zero third‑party dependencies` · `all data stays local`
+`Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
 
 > **About the name** — the project (this repo) is **lulu-lumei-dock**. It is built on the internal
@@ -35,6 +35,9 @@ brew install --cask lulu-lumei-dock
 
 **Manual** — download the latest `.zip` from [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases), unzip `lulu-lumei-dock.app` into `/Applications`.
 
+Starting with `v0.1.5`, installed apps can check for signed updates in **Settings → About**. `v0.1.4`
+and earlier need one final manual/Homebrew upgrade before in-app updates become available.
+
 **First launch:** the app is **ad‑hoc signed** (not Apple‑notarized), so Gatekeeper may block it. Either right‑click the app → **Open** → **Open**, or run:
 
 ```bash
@@ -51,8 +54,9 @@ with usage analytics, rate limits, and management for sessions, skills, agents a
 
 It works with six agents out of the box — **Claude Code, Codex CLI, opencode, Grok,
 Antigravity, and Kimi Code** — and needs **no network** for its core features: everything is
-derived by reading local transcript / rollout / session files. The only opt‑in network feature is the Claude
-subscription rate‑limit gauge (an unofficial endpoint, off by default).
+derived by reading local transcript / rollout / session files. The updater checks this repository's GitHub
+Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
+other network feature and remains opt-in/off by default.
 
 It also works **without installing any hooks** — transcript/rollout watchers are the fallback, so
 sessions opened before hooks were installed are still visible.
@@ -111,6 +115,9 @@ with risk flagging.
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
 
+**Signed in-app updates** — checks once per installed-app launch by default, then lets you explicitly
+approve download/install in Sparkle's standard UI. Automatic download and unattended installation stay off.
+
 **Health & wellness** — a data‑health dashboard shows heartbeat / output / failure status of every
 data source (a stalled poller turns red), plus gentle wellness cards after long continuous activity,
 many concurrent sessions, or late‑night runs.
@@ -167,8 +174,9 @@ All data lives in `~/Library/Application Support/Eureka/`:
 | `pricing.json` (optional) | override the built‑in price table (USD / million tokens, prefix match) |
 | `context-windows.json` (optional) | override per‑model context window size, e.g. `{"claude-opus": 1000000}` |
 
-**Privacy:** apart from the opt‑in "Claude subscription limits" feature (which sends a Keychain OAuth
-token to Anthropic), **no data ever leaves your machine**.
+**Privacy:** automatic update checks contact this repository's GitHub Releases feed and can be disabled.
+The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. Core activity,
+session and usage data stays local unless you explicitly configure cloud backup.
 
 ## CLI
 
@@ -189,10 +197,11 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (276 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (300 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
+make package-release # verified ZIP + appcast containing its EdDSA signature
 make install    # app + install to /Applications/lulu-lumei-dock.app
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # diff usage totals vs. ccusage (expect 0.00%)

@@ -4,6 +4,7 @@ import SwiftUI
 /// 设置→关于：应用信息 + CLI 工具版本卡片网格（仿参考设计）
 struct AboutView: View {
     @ObservedObject var cliTools: CLIToolsService
+    @ObservedObject var updateService: UpdateService
 
     @State private var showInstallCommands = false
     @State private var copiedToolId: String?
@@ -32,30 +33,52 @@ struct AboutView: View {
     // MARK: - 应用卡
 
     private var appCard: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "sparkle")
-                .font(.system(size: 22))
-                .foregroundStyle(LinearGradient(
-                    colors: [.indigo, .purple], startPoint: .top, endPoint: .bottom))
-                .frame(width: 44, height: 44)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.1)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("lulu-lumei-dock")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("版本 \(appVersion) · 本地 AI 编码活动面板")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                Text("数据目录：\(SpoolPaths.root().path)")
-                    .font(.system(size: 9.5).monospaced())
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(LinearGradient(
+                        colors: [.indigo, .purple], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 44, height: 44)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.1)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("lulu-lumei-dock")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("版本 \(appVersion) · 本地 AI 编码活动面板")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                    Text("数据目录：\(SpoolPaths.root().path)")
+                        .font(.system(size: 9.5).monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Button("在 Finder 显示数据") {
+                    NSWorkspace.shared.activateFileViewerSelecting([SpoolPaths.root()])
+                }
+                .controlSize(.small)
+            }
+
+            Divider()
+
+            HStack {
+                Toggle("启动时自动检查更新", isOn: Binding(
+                    get: { updateService.automaticallyChecksForUpdates },
+                    set: { updateService.setAutomaticallyChecksForUpdates($0) }
+                ))
+                .disabled(!updateService.isAvailable)
+                Spacer()
+                Button("检查更新…") { updateService.checkForUpdates() }
+                    .controlSize(.small)
+                    .disabled(!updateService.canCheckForUpdates)
+            }
+            if !updateService.isAvailable {
+                Text("开发模式（swift run）不检查应用更新；安装为 .app 后可用。")
+                    .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer()
-            Button("在 Finder 显示数据") {
-                NSWorkspace.shared.activateFileViewerSelecting([SpoolPaths.root()])
-            }
-            .controlSize(.small)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Theme.neutralCard))
@@ -68,7 +91,7 @@ struct AboutView: View {
             Text("CLI 工具")
                 .font(.system(size: 12, weight: .semibold))
             Spacer()
-            Button("检查更新") { cliTools.checkLatest() }
+            Button("检查 CLI 更新") { cliTools.checkLatest() }
                 .controlSize(.small)
                 .disabled(cliTools.tools.contains { $0.checkingLatest })
         }

@@ -1,53 +1,86 @@
-# 构建 / 打包 / 安装速查
+# 构建 / 打包 / 发布速查
 
-Eureka 用 SwiftPM + Command Line Tools（无需完整 Xcode），零第三方依赖。所有命令在仓库根目录执行。
+项目使用 SwiftPM + Command Line Tools；应用 target 的唯一第三方依赖是精确锁定的 Sparkle 2.9.2。
+所有命令在仓库根目录执行。
 
-## 一句话：开发完新功能后直接打包上线
+## 日常开发与本地安装
 
 ```bash
+make build
+make test
+make app
 make install
 ```
 
-`make install` 会自动串起：`release`（release 构建）→ `app`（打包 `dist/Eureka.app` + ad-hoc 签名）→ 拷贝到 `~/Applications/Eureka.app`。装完直接从启动台/`~/Applications` 打开即可。
-
-## Makefile 目标一览
-
 | 命令 | 作用 |
 |---|---|
-| `make build` | debug 构建（`swift build`），最快，日常改代码用 |
-| `make test` | 跑全部单测（`swift run eureka-tests`，一个手写 harness，约 136 个） |
-| `make run` | dev 模式直接跑 GUI（`swift run eureka`），验证交互 |
-| `make release` | release 构建（`swift build -c release`） |
-| `make app` | release + `Scripts/build-app.sh` → `dist/Eureka.app`（ad-hoc 签名） |
-| `make install` | `app` + 覆盖安装到 `~/Applications/Eureka.app` |
-| `make demo` | `Scripts/demo-island.sh`，注入假事件演示灵动岛各状态 |
-| `make clean` | `rm -rf .build dist` |
+| `make build` | debug 构建 |
+| `make test` | 运行全部手写测试（当前 300 项） |
+| `make run` | 开发模式直接跑 GUI；不会启动 Sparkle 更新检查 |
+| `make release` | release 构建 |
+| `make app` | 构建并组装 `dist/lulu-lumei-dock.app`，嵌入 Sparkle、逐层 ad-hoc 签名并冒烟验证 |
+| `make package-release` | 生成 `dist/lulu-lumei-dock-<版本>.zip` 和带 archive EdDSA 签名的 `dist/appcast.xml` |
+| `make install` | 覆盖安装到 `/Applications/lulu-lumei-dock.app` |
+| `make demo` | 注入假事件演示灵动岛各状态 |
+| `make clean` | 删除 `.build` 与 `dist` |
 
-## 推荐的开发→上线流程
+版本的唯一来源是仓库根目录 `VERSION`。内容必须是纯数字点分格式（如 `0.1.5`），发布 tag 必须
+严格等于 `v` + 该版本。`CFBundleShortVersionString` 和 `CFBundleVersion` 都写纯数字版本，不能写
+`v`、commit hash 或 `-dirty` 后缀。
 
-```bash
-make build      # 1. 改完代码先编译过
-make test       # 2. 跑测试，全绿再继续（新增功能记得补 suite 并在 Tests/EurekaTestsRunner/main.swift 注册）
-make run        # 3. dev 跑一遍，手动点一下受影响的 tab 验证交互（可选）
-make install    # 4. 打包 + 安装到 ~/Applications，日常使用
-```
+## Sparkle 密钥（一次性）
 
-只想重新打包一份 app（不装）：`make app`，产物在 `dist/Eureka.app`。
-
-## 说明与常见提示
-
-- **版本号**：`build-app.sh` 用当前 git 提交号打标（如 `版本 1cb900c`）。要让版本号跟上新功能，先 `git commit` 再 `make app/install`。
-- **ad-hoc 签名**：本地打包是 ad-hoc 签名（非 Developer ID）。首次打开若被 Gatekeeper 拦，右键「打开」一次即可；重新签名后 Keychain 读取走 `/usr/bin/security` 子进程，不会反复弹 ACL 授权。
-- **`xcrun: unable to lookup item 'PlatformPath'` 警告**：CLT 环境下的无害 SDK 查找噪声，不影响构建产物，可忽略。
-- **跑单个测试**：runner 无过滤参数，临时在 `Tests/EurekaTestsRunner/main.swift` 里注释掉其它 `xxxTests(t)` 调用即可只跑子集。
-- **DB 迁移**：`Schema.version` 递增后，派生表（usage/scan/session_stats）会 drop 重建下轮重扫；`task_history` 是真实历史，只能走幂等 `ALTER`（见 `Sources/EurekaStore/Schema.swift`）。升级后首次 `make run` 或任意开库的 CLI（如 `swift run eureka --usage-snapshot`）会触发迁移。
-
-## 调试用 CLI（不起 GUI）
+首次启用发布时运行：
 
 ```bash
-swift run eureka --hooks-status            # Claude hooks + Codex notify 安装状态
-swift run eureka --usage-snapshot          # 全量扫描 → 今日用量 JSON（也会触发 DB 迁移）
-swift run eureka --limits-snapshot --claude # 限额快照（--claude 额外打非官方 API）
-swift run eureka --render-previews [dir]    # 离屏渲染灵动岛各状态到 PNG
-swift run eureka-relay inject --event stop --session demo  # 往 spool 注入测试事件
+swift package resolve
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account com.vinlee.eureka
 ```
+
+该命令把私钥保存在本机登录钥匙串，只输出公钥。公钥必须写入
+`Scripts/Info.plist.template` 的 `SUPublicEDKey`；私钥严禁提交、粘贴到日志或放进普通文件。
+
+确认 `gh auth status` 正常后，把钥匙串私钥写入 GitHub Actions Secret：
+
+```bash
+Scripts/configure-sparkle-secret.sh
+```
+
+脚本仅使用权限为 0600 的临时文件，上传为 `SPARKLE_EDDSA_PRIVATE_KEY` 后立即删除临时文件。
+
+## 正式发布
+
+1. 更新 `VERSION`，完成变更并推送。
+2. 本地运行 `make test` 和 `make package-release`。
+3. 创建并推送稳定 tag，例如 `git tag v0.1.5 && git push origin v0.1.5`。
+4. `.github/workflows/release.yml` 在 `macos-15` arm64 runner 上重跑测试、构建、签名、appcast 和
+   冒烟验证；所有门禁通过后，最后一步才创建公开 GitHub Release，并且只上传 ZIP 与 appcast 两项资产。
+5. 发布后下载公开资产，核对 plist 版本、enclosure URL/长度/EdDSA 签名与 ZIP SHA-256。
+6. 用 Release ZIP 的实际 SHA 更新并推送 `vinlee19/homebrew-tap`，再执行 `brew fetch` / `brew install`。
+
+`v0.1.4` 没有 Sparkle，用户必须最后一次通过 Homebrew 或 Release 手动升级到 `v0.1.5`。
+
+## 发布前人工更新闭环
+
+ad-hoc 签名不等同于 Developer ID。`v0.1.5` 发布前必须用本地 HTTP feed 和两个数字版本测试包走完：
+
+- 启动自动发现与「检查更新…」手动检查；
+- EdDSA 验签、下载、用户确认安装、替换、退出和重启；
+- 关闭自动检查后启动不联网；无更新、离线与重复点击的标准界面行为；
+- 更新后 `~/Library/Application Support/Eureka/` 数据与稳定 relay 路径保持不变。
+
+自动化脚本会检查 framework 符号链接、`@rpath`、内部 XPC/Updater/framework/relay/外层 app 的
+签名、`codesign --verify --deep --strict`、打包后资源启动、appcast XML、下载 URL、archive 长度及
+EdDSA archive 签名。涉及点击确认和重启的最后一段必须在真实安装目录人工执行。
+
+## 调试 CLI
+
+```bash
+swift run eureka --hooks-status
+swift run eureka --usage-snapshot
+swift run eureka --limits-snapshot --claude
+swift run eureka --render-previews [dir]
+swift run eureka-relay inject --event stop --session demo
+```
+
+CLI 与 `swift run` 模式不会启动 Sparkle updater。

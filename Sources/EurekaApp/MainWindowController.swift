@@ -22,6 +22,7 @@ final class MainWindowController: NSWindowController {
         cliToolsService: CLIToolsService,
         auditService: AuditService,
         notificationService: NotificationService,
+        updateService: UpdateService,
         navigation: PopoverNavigation
     ) {
         self.usageService = usageService
@@ -54,6 +55,7 @@ final class MainWindowController: NSWindowController {
                 cliToolsService: cliToolsService,
                 auditService: auditService,
                 notificationService: notificationService,
+                updateService: updateService,
                 navigation: navigation))
 
         super.init(window: window)

@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "eureka",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // 应用内更新：精确锁定，避免发布机自动漂移到未经验证的 Sparkle 版本。
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2"),
+    ],
     targets: [
         // 纯领域层：模型、状态机、几何纯函数。无 IO、无 AppKit。
         .target(name: "EurekaKit"),
@@ -24,12 +28,23 @@ let package = Package(
         // 菜单栏应用本体
         .executableTarget(
             name: "eureka",
-            dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall", "EurekaSync"],
+            dependencies: [
+                "EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall",
+                "EurekaSync",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/EurekaApp",
             resources: [
                 .copy("Resources/pricing.json"),
                 .copy("Resources/AppIcon.icns"),
                 .copy("Resources/mascots"),
+            ],
+            linkerSettings: [
+                // 手工组装 .app 时从 Contents/Frameworks 加载 Sparkle.framework。
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
+                ]),
             ]
         ),
         // hooks/notify 调用的轻量转发 CLI：静默、永远 exit 0

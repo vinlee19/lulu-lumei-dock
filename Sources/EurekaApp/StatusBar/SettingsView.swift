@@ -10,6 +10,7 @@ struct SettingsView: View {
     @ObservedObject var sessionBrowser: SessionBrowserService
     @ObservedObject var cliTools: CLIToolsService
     @ObservedObject var notificationService: NotificationService
+    @ObservedObject var updateService: UpdateService
 
     @State private var section: SettingsSection = .general
 
@@ -33,7 +34,7 @@ struct SettingsView: View {
                         .padding(-12)  // 仪表盘自带 padding，抵消外层
                     case .advanced: AdvancedSettingsView(
                         installer: installer, usageService: usageService)
-                    case .about: AboutView(cliTools: cliTools)
+                    case .about: AboutView(cliTools: cliTools, updateService: updateService)
                     }
                 }
                 .padding(12)

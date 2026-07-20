@@ -21,6 +21,7 @@ struct PopoverRootView: View {
     @ObservedObject var cliToolsService: CLIToolsService
     @ObservedObject var auditService: AuditService
     @ObservedObject var notificationService: NotificationService
+    @ObservedObject var updateService: UpdateService
     @ObservedObject var navigation: PopoverNavigation
 
     enum Tab: String, CaseIterable {
@@ -117,7 +118,8 @@ struct PopoverRootView: View {
                 SettingsView(
                     settings: settings, installer: installer,
                     usageService: usageService, sessionBrowser: sessionBrowser,
-                    cliTools: cliToolsService, notificationService: notificationService)
+                    cliTools: cliToolsService, notificationService: notificationService,
+                    updateService: updateService)
             }
         }
         // 主窗口可缩放：填满窗口，但不小于原 popover 尺寸

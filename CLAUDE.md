@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI** task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM, **zero third-party dependencies**, builds with Command Line Tools (no full Xcode needed). UI strings and code comments are in Chinese — match that convention.
+Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI** task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
 
 ## Commands
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs ALL ~106 tests
+make test       # swift run eureka-tests  — runs all 300 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
-make app        # release + Scripts/build-app.sh → dist/Eureka.app (ad-hoc signed)
-make install    # app + copy to ~/Applications/Eureka.app
+make app        # release + Scripts/build-app.sh → dist/lulu-lumei-dock.app (ad-hoc signed)
+make install    # app + copy to /Applications/lulu-lumei-dock.app
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # diff usage totals against ccusage (expect 0.00%)
 ```
@@ -74,7 +74,7 @@ Key = `source:sessionId`. Phases: `running` / `waiting(permission|idle)` / `idle
 - **Stale-event suppression:** events older than 5 minutes only enter history/usage; they must NOT trigger island animations (`AppDelegate.handle` drops stale heartbeat/waiting/session-start events entirely).
 - **Usage dedup is mandatory and persistent:** Claude transcripts duplicate `(requestId, message.id)` rows heavily across files (resume/fork copies old rows into new files). Dedup must persist across files (via `scan_state`), or usage will be inflated.
 - **Claude OAuth usage (rate limits) is unofficial, opt-in, default-off.** Any failure returns `nil` → the entire UI block hides. Keychain is read via the `/usr/bin/security` subprocess (avoids ACL re-prompts after ad-hoc re-signing).
-- **Zero third-party dependencies** is a project constraint. SQLite uses system `libsqlite3` so the DB stays `sqlite3`-inspectable.
+- **Dependency scope stays narrow:** Sparkle 2.9.2 is exact-pinned and only linked by the app target. SQLite still uses system `libsqlite3`, so the DB stays `sqlite3`-inspectable.
 
 ## Data & config locations
 

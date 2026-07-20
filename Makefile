@@ -12,8 +12,11 @@ run:
 release:
 	$(SWIFT) build -c release
 
-app: release
+app:
 	Scripts/build-app.sh
+
+package-release:
+	Scripts/package-release.sh
 
 install: app
 	rm -rf /Applications/Eureka.app ~/Applications/Eureka.app \
@@ -27,4 +30,4 @@ demo:
 clean:
 	rm -rf .build dist
 
-.PHONY: build test run release app install demo clean
+.PHONY: build test run release app package-release install demo clean

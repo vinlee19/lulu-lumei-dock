@@ -7,7 +7,7 @@
 把任务活动实时呈现,配上 ccusage 级精度的用量账本、订阅限额余量,以及会话 / 技能 / agent / 记忆管理、
 操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code**,全在一处。
 
-`Swift 5.10 + SwiftPM` · `零第三方依赖` · `全部数据本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
+`Swift 5.10 + SwiftPM` · `唯一第三方依赖为 Sparkle` · `核心数据留在本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
 > **关于名字** —— 本项目(此仓库)叫 **lulu-lumei-dock**,构建于内部 **Eureka** 代码库之上,因此 Swift
 > 模块名(`EurekaKit` 等)、bundle id(`com.vinlee.eureka`)与磁盘数据目录
@@ -32,6 +32,9 @@ brew install --cask lulu-lumei-dock
 
 **手动下载** —— 从 [Releases](https://github.com/vinlee19/lulu-lumei-dock/releases) 下载最新 `.zip`,解压把 `lulu-lumei-dock.app` 拖进「应用程序」。
 
+从 `v0.1.5` 起可在「设置 → 关于」中检查带签名的应用更新。`v0.1.4` 及更早版本需要最后一次通过
+Homebrew 或 Release 手动升级，之后才具备应用内更新能力。
+
 **首次打开:** 本应用为 **ad-hoc 签名**(未做 Apple 公证),可能被 Gatekeeper 拦截。任选其一:右键点按 App →「打开」→ 再次「打开」;或在终端执行:
 
 ```bash
@@ -47,7 +50,8 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 
 开箱支持六种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code**,核心功能**零网络**:
 一切都靠读取本地 transcript / rollout / session 文件推导。唯一的联网功能是 Claude 订阅限额(非官方
-接口,默认关闭,可在设置里 opt‑in)。
+接口,默认关闭,可在设置里 opt‑in)。此外，更新器默认会访问本仓库的 GitHub Releases feed 检查新版，
+可在「设置 → 关于」关闭。
 
 而且**不装 hooks 也能用**——transcript/rollout 常驻监视兜底,装 hooks 之前开的老会话同样可见。
 
@@ -92,6 +96,9 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 **审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带风险标记。
 
 **备份** —— 可选:把本地数据备份到 S3 兼容的云存储(SigV4 签名)。
+
+**签名应用内更新** —— 正式安装的 App 默认每次启动检查一次；发现新版后由你确认下载 / 安装。
+自动下载与无人值守安装始终关闭。
 
 **健康关怀** —— 数据健康仪表盘展示每个数据源的心跳 / 产出 / 失败状态(轮询停摆直接红灯);外加连续
 活跃过久、并发会话过多、深夜还在跑任务时的温柔提示卡。
@@ -145,8 +152,9 @@ open /Applications/lulu-lumei-dock.app
 | `pricing.json`(可选) | 覆盖内置价格表(USD / 百万 token,前缀匹配) |
 | `context-windows.json`(可选) | 按模型覆盖上下文窗口大小,如 `{"claude-opus": 1000000}` |
 
-**隐私:** 除「Claude 订阅限额」这一 opt‑in 功能会携带钥匙串中的 OAuth token 访问 Anthropic 外,
-**没有任何数据离开本机**。
+**隐私:** 自动更新检查会访问本仓库的 GitHub Releases feed，可在设置中关闭；「Claude 订阅限额」
+这一 opt‑in 功能会携带钥匙串中的 OAuth token 访问 Anthropic。除非你主动配置云端备份，任务活动、
+会话与用量数据都留在本机。
 
 ## CLI
 
@@ -167,10 +175,11 @@ eureka-relay inject --event stop --session demo   # 注入测试事件
 
 ```bash
 make build      # 调试编译(Command Line Tools 即可,无需完整 Xcode)
-make test       # 跑全部自建单测(276 个;CLT 无 XCTest)
+make test       # 跑全部自建单测(300 个;CLT 无 XCTest)
 make run        # 开发模式直跑 GUI
 make demo       # 注入伪造事件,演示灵动岛全场景
 make app        # 打包 dist/lulu-lumei-dock.app(ad‑hoc 签名)
+make package-release # 生成已验证 ZIP + 内含 ZIP EdDSA 签名的 appcast
 make install    # 打包并安装到 /Applications/lulu-lumei-dock.app
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # 用量与 ccusage 对拍(期望 0.00%)

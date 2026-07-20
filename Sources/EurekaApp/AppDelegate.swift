@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let cliTools = CLIToolsService()
     private let auditService = AuditService()
     private let notificationService = NotificationService()
+    private let updateService = UpdateService()
     private let navigation = PopoverNavigation()
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
@@ -40,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 常规应用主菜单（关于/隐藏/退出 + 窗口）
         NSApp.mainMenu = MainMenu.build()
 
+        // 仅正式 .app 启用；启动后按 Sparkle 自带偏好立即执行一次后台检查。
+        updateService.start()
+
         // 主窗口：复用 PopoverRootView 的 6 个页签，与菜单栏共享服务
         let window = MainWindowController(
             usageService: usageService, limitsService: limitsService,
@@ -48,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             plansService: plans,
             agentConfigService: agentConfig, syncService: syncService,
             cliToolsService: cliTools, auditService: auditService,
-            notificationService: notificationService,
+            notificationService: notificationService, updateService: updateService,
             navigation: navigation)
         mainWindow = window
 

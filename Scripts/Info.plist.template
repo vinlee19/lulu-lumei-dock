@@ -24,5 +24,15 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/vinlee19/lulu-lumei-dock/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>QzYkB0JDoaPLofEEDiy2xzRVowAAtcqzMCneYry7rbI=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
 </dict>
 </plist>

@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate runner and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == "arm64" ]]
+          repository_version="$(tr -d '[:space:]' < VERSION)"
+          [[ "$GITHUB_REF_NAME" == "v$repository_version" ]]
+
+      - name: Run all tests
+        run: swift run eureka-tests
+
+      - name: Build and verify signed release assets
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SPARKLE_EDDSA_PRIVATE_KEY" ]]
+          Scripts/package-release.sh "${GITHUB_REF_NAME#v}"
+
+      # 公开 Release 是最后一步；前面的测试、签名、appcast 或冒烟检查失败时不会执行。
+      - name: Create stable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository_version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/lulu-lumei-dock-${repository_version}.zip" \
+            "dist/appcast.xml" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --latest
