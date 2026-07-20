@@ -23,7 +23,8 @@ if [[ -n "${LULU_SWIFT_JOBS:-}" ]]; then
 fi
 
 if [[ "${LULU_SKIP_BUILD:-0}" != "1" ]]; then
-  swift build "${SWIFT_BUILD_ARGS[@]}"
+  swift build "${SWIFT_BUILD_ARGS[@]}" --product eureka
+  swift build "${SWIFT_BUILD_ARGS[@]}" --product eureka-relay
 fi
 
 BUILD_PATH="$(swift build "${SWIFT_BUILD_ARGS[@]}" --show-bin-path)"

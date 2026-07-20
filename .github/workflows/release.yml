@@ -16,7 +16,7 @@ jobs:
       LULU_SWIFT_JOBS: "2"
     steps:
       - name: Checkout tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -28,8 +28,15 @@ jobs:
           repository_version="$(tr -d '[:space:]' < VERSION)"
           [[ "$GITHUB_REF_NAME" == "v$repository_version" ]]
 
+      - name: Build test runner
+        run: swift build --jobs "$LULU_SWIFT_JOBS" --product eureka-tests
+
       - name: Run all tests
-        run: swift run --jobs "$LULU_SWIFT_JOBS" eureka-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_binary="$(swift build --show-bin-path)/eureka-tests"
+          "$test_binary"
 
       - name: Build and verify signed release assets
         env:
