@@ -139,7 +139,7 @@ final class UsageService: ObservableObject {
                 self.kimiScanner = KimiUsageScanner(
                     sessionsRoot: KimiPaths.sessionsRoot(), store: store)
                 self.pricing = PricingTable.load(
-                    bundledURL: Bundle.module.url(forResource: "pricing", withExtension: "json"),
+                    bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
                     overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
                 self.scanAndPublish()
             } catch {

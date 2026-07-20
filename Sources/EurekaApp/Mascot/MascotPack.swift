@@ -104,11 +104,12 @@ enum MascotPackLoader {
     }
     """
 
-    /// 内置包:从 Bundle.module 的 mascots/lulu 读 PNG 帧(state→2 帧循环)
+    /// 内置包:从应用资源 bundle 的 mascots/lulu 读 PNG 帧(state→2 帧循环)
     static func builtIn() -> MascotPack {
         func frames(_ names: [String]) -> MascotAnimation {
             let urls = names.compactMap {
-                Bundle.module.url(forResource: $0, withExtension: "png", subdirectory: "mascots/lulu")
+                AppResources.bundle.url(
+                    forResource: $0, withExtension: "png", subdirectory: "mascots/lulu")
             }
             return .frames(urls, fps: 2)
         }
