@@ -2,10 +2,11 @@ import Foundation
 import EurekaKit
 
 /// Codex 会话索引：~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
-/// 头部 64KB 取 session_meta（id/cwd）与首条 user_message 作名字。
+/// 正式 thread_name 优先；缺失时流式读取 session_meta 与首条完整 user_message 兜底。
 public enum CodexSessionIndexer {
     public static func index(
         sessionsRoot: URL,
+        threadNameIndexURL: URL? = nil,
         window: TimeInterval = 30 * 86400,
         maxSessions: Int = 300,
         now: Date = Date()
@@ -36,13 +37,16 @@ public enum CodexSessionIndexer {
             }
         }
         candidates.sort { $0.1 > $1.1 }
+        let names = CodexThreadNameIndex.load(
+            threadNameIndexURL ?? CodexThreadNameIndex.resolvedURL(for: sessionsRoot))
         return candidates.prefix(maxSessions).map { file, mtime, size in
             let head = headInfo(fileURL: file)
+            let id = head.id ?? fallbackId(file)
             return AgentSessionInfo(
                 source: .codex,
-                id: head.id ?? fallbackId(file),
+                id: id,
                 cwd: head.cwd,
-                name: head.name,
+                name: names[id] ?? head.name,
                 startedAt: head.startedAt,
                 lastActiveAt: mtime,
                 sizeBytes: size,
@@ -51,31 +55,23 @@ public enum CodexSessionIndexer {
         }
     }
 
-    static func headInfo(
-        fileURL: URL, headBytes: Int = 65536
-    ) -> (id: String?, cwd: String?, name: String?, startedAt: Date?) {
-        guard
-            let handle = FileHandle(forReadingAtPath: fileURL.path),
-            let data = try? handle.read(upToCount: headBytes)
-        else { return (nil, nil, nil, nil) }
-        try? handle.close()
-
+    static func headInfo(fileURL: URL) -> (id: String?, cwd: String?, name: String?, startedAt: Date?) {
         var id: String?
         var cwd: String?
         var name: String?
         var startedAt: Date?
-        for line in data.split(separator: UInt8(ascii: "\n")) {
+        CodexJSONLReader.forEachCompleteLine(fileURL, includeTrailingLine: true) { line in
             guard
-                let object = try? JSONSerialization.jsonObject(with: Data(line)),
+                let object = try? JSONSerialization.jsonObject(with: line),
                 let root = object as? [String: Any],
                 let payload = root["payload"] as? [String: Any]
-            else { continue }
+            else { return true }
             switch root["type"] as? String {
             case "session_meta":
                 id = payload["id"] as? String
                 cwd = payload["cwd"] as? String
-                // session_meta 行的顶层 timestamp = 会话开始时间
-                if let ts = root["timestamp"] as? String {
+                // 新版 Codex 在 payload.timestamp 给出真实开始时间；旧版退顶层时间。
+                if let ts = payload["timestamp"] as? String ?? root["timestamp"] as? String {
                     startedAt = ClaudeSessionFirstTimestamp.parse(ts)
                 }
             case "event_msg":
@@ -86,7 +82,7 @@ public enum CodexSessionIndexer {
             default:
                 break
             }
-            if id != nil && name != nil { break }
+            return !(id != nil && name != nil)
         }
         return (id, cwd, name, startedAt)
     }

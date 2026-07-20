@@ -4,25 +4,42 @@ import Foundation
 
 /// 把三源的「计划」物化为可读、可同步的 .md 首类工件。
 ///   - Claude Code：`~/.claude/plans/*.md` 本就是文件，直接索引（不物化）。
-///   - Codex：rollout JSONL 里的 `update_plan` function_call（取每个会话最后一次）→ checklist `.md`。
+///   - Codex：Plan Mode 最终 `<proposed_plan>` 优先，`update_plan` 工作清单兜底。
 ///   - opencode：`opencode.db` 中 `mode='plan'` 的 assistant 消息的 text 分片 → `.md`。
 /// 写前比对，内容不变则不覆盖（保持 mtime 稳定，避免同步每轮重传）。纯 IO、路径入参、可单测。
 public enum PlanMaterializer {
+    public enum PlanKind: String, Equatable, Sendable {
+        case finalPlan
+        case workingChecklist
+        case document
+
+        public var displayName: String {
+            switch self {
+            case .finalPlan: return "最终方案"
+            case .workingChecklist: return "工作清单"
+            case .document: return "计划文档"
+            }
+        }
+    }
+
     /// 计划条目（Plans 标签浏览用）
     public struct PlanEntry: Equatable, Sendable, Identifiable {
         public var id: String { path }
         public var source: AgentSource
         public var title: String
+        public var kind: PlanKind
         public var path: String
         public var sizeBytes: UInt64
         public var modifiedAt: Date
 
         public init(
             source: AgentSource, title: String, path: String,
+            kind: PlanKind = .document,
             sizeBytes: UInt64, modifiedAt: Date
         ) {
             self.source = source
             self.title = title
+            self.kind = kind
             self.path = path
             self.sizeBytes = sizeBytes
             self.modifiedAt = modifiedAt
@@ -50,54 +67,166 @@ public enum PlanMaterializer {
             .appendingPathComponent("plans", isDirectory: true)
     }
 
-    // MARK: - Codex：rollout JSONL 里的 update_plan → checklist .md
+    // MARK: - Codex：Plan Mode 最终方案优先，update_plan 工作清单兜底
+
+    private enum CodexPlanContent {
+        case finalPlan(String)
+        case workingChecklist([[String: Any]])
+    }
+
+    private struct CodexPlanArtifact {
+        var sessionId: String
+        var title: String
+        var content: CodexPlanContent
+    }
 
     @discardableResult
-    public static func materializeCodex(sessionsRoot: URL, into stagingRoot: URL) -> Int {
+    public static func materializeCodex(
+        sessionsRoot: URL,
+        into stagingRoot: URL,
+        threadNameIndexURL: URL? = nil
+    ) -> Int {
         let outDir = stagingRoot.appendingPathComponent("codex", isDirectory: true)
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(atPath: sessionsRoot.path) else { return 0 }
-        var written = 0
+        let threadNames = CodexThreadNameIndex.load(
+            threadNameIndexURL ?? CodexThreadNameIndex.resolvedURL(for: sessionsRoot))
+        var changed = 0
+        var expected = Set<String>()
         for case let rel as String in enumerator {
             let name = (rel as NSString).lastPathComponent
             guard name.hasPrefix("rollout-"), name.hasSuffix(".jsonl") else { continue }
             let fileURL = sessionsRoot.appendingPathComponent(rel)
-            guard let plan = lastUpdatePlan(fileURL) else { continue }  // 无 update_plan 跳过
             let stem = fileURL.deletingPathExtension().lastPathComponent
-            let markdown = renderCodexPlan(stem: stem, plan: plan)
-            if writeIfChanged(markdown, to: outDir.appendingPathComponent(stem + ".md")) {
-                written += 1
+            guard let artifact = extractCodexPlan(
+                fileURL, stem: stem, threadNames: threadNames) else { continue }
+            let outputName = stem + ".md"
+            expected.insert(outputName)
+            let markdown: String
+            switch artifact.content {
+            case .finalPlan(let body):
+                markdown = renderCodexFinalPlan(artifact: artifact, body: body)
+            case .workingChecklist(let plan):
+                markdown = renderCodexChecklist(artifact: artifact, plan: plan)
+            }
+            if writeIfChanged(markdown, to: outDir.appendingPathComponent(outputName)) {
+                changed += 1
             }
         }
-        return written
+
+        // 来源会话被删除、或最后已不再含计划时，移除陈旧物化副本。
+        let staged = (try? fm.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)) ?? []
+        for file in staged
+        where file.pathExtension.lowercased() == "md" && !expected.contains(file.lastPathComponent) {
+            if (try? fm.removeItem(at: file)) != nil { changed += 1 }
+        }
+        return changed
     }
 
-    /// 扫描一个 rollout，返回最后一次 update_plan 的 plan 数组（[{status, step}]）
-    private static func lastUpdatePlan(_ url: URL) -> [[String: Any]]? {
-        var latest: [[String: Any]]?
+    private static func extractCodexPlan(
+        _ url: URL, stem: String, threadNames: [String: String]
+    ) -> CodexPlanArtifact? {
+        var sessionId: String?
+        var fallbackTitle: String?
+        var eventThreadName: String?
+        var finalPlan: String?
+        var latestChecklist: [[String: Any]]?
+
         forEachJSONLine(url) { root in
-            guard let payload = root["payload"] as? [String: Any],
-                  payload["type"] as? String == "function_call",
-                  payload["name"] as? String == "update_plan",
-                  let argsString = payload["arguments"] as? String,
-                  let args = (try? JSONSerialization.jsonObject(
+            let rootType = root["type"] as? String
+            let payload = root["payload"] as? [String: Any] ?? [:]
+            let payloadType = payload["type"] as? String
+
+            if rootType == "session_meta" {
+                sessionId = payload["id"] as? String ?? sessionId
+            } else if rootType == "event_msg", payloadType == "user_message",
+                      fallbackTitle == nil, let message = payload["message"] as? String {
+                fallbackTitle = summarizeTitle(message)
+            } else if rootType == "event_msg", payloadType == "thread_name_updated",
+                      let name = payload["thread_name"] as? String {
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { eventThreadName = trimmed }
+            }
+
+            if rootType == "response_item", payloadType == "message",
+               payload["role"] as? String == "assistant" {
+                for item in payload["content"] as? [[String: Any]] ?? []
+                where item["type"] as? String == "output_text" {
+                    if let text = item["text"] as? String,
+                       let proposed = extractProposedPlan(text) {
+                        finalPlan = proposed
+                    }
+                }
+            }
+
+            // 兼容未来 rollout 直接持久化 app-server 的 ThreadItem.plan。
+            if payloadType == "plan", let text = payload["text"] as? String {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { finalPlan = trimmed }
+            }
+            if rootType == "event_msg", payloadType == "item_completed",
+               let item = payload["item"] as? [String: Any],
+               item["type"] as? String == "plan", let text = item["text"] as? String {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { finalPlan = trimmed }
+            }
+
+            if rootType == "response_item", payloadType == "function_call",
+               payload["name"] as? String == "update_plan",
+               let argsString = payload["arguments"] as? String,
+               let args = (try? JSONSerialization.jsonObject(
                     with: Data(argsString.utf8))) as? [String: Any],
-                  let plan = args["plan"] as? [[String: Any]]
-            else { return true }
-            latest = plan
+               let plan = args["plan"] as? [[String: Any]] {
+                latestChecklist = plan
+            }
             return true
         }
-        return latest
+
+        let id = sessionId ?? stem
+        let title = threadNames[id] ?? eventThreadName ?? fallbackTitle ?? "Codex 计划"
+        if let finalPlan {
+            return CodexPlanArtifact(sessionId: id, title: title, content: .finalPlan(finalPlan))
+        }
+        if let latestChecklist {
+            return CodexPlanArtifact(
+                sessionId: id, title: title, content: .workingChecklist(latestChecklist))
+        }
+        return nil
     }
 
-    private static func renderCodexPlan(stem: String, plan: [[String: Any]]) -> String {
-        var lines = ["# Codex 计划", "", "> 来源：\(stem)", ""]
+    private static func extractProposedPlan(_ text: String) -> String? {
+        guard let open = text.range(of: "<proposed_plan>", options: .backwards) else { return nil }
+        let remainder = text[open.upperBound...]
+        guard let close = remainder.range(of: "</proposed_plan>") else { return nil }
+        let body = remainder[..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? nil : body
+    }
+
+    private static func renderCodexFinalPlan(artifact: CodexPlanArtifact, body: String) -> String {
+        let title = summarizeTitle(artifact.title) ?? "Codex 计划"
+        var lines = body.components(separatedBy: "\n")
+        if let first = lines.firstIndex(where: {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }), lines[first].hasPrefix("# ") {
+            lines.remove(at: first)  // 正式线程名统一作为物化文档标题，避免双 H1。
+        }
+        let content = lines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "# \(title)\n\n> Codex Plan Mode 最终方案 · 会话 \(artifact.sessionId)\n\n\(content)\n"
+    }
+
+    private static func renderCodexChecklist(
+        artifact: CodexPlanArtifact, plan: [[String: Any]]
+    ) -> String {
+        let title = summarizeTitle(artifact.title) ?? "Codex 工作清单"
+        var lines = ["# \(title)", "", "> Codex 工作清单 · 会话 \(artifact.sessionId)", ""]
         for item in plan {
             let step = (item["step"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !step.isEmpty else { continue }
             let box: String
             switch item["status"] as? String {
             case "completed": box = "[x]"
-            case "in_progress": box = "[~]"
+            case "in_progress", "inProgress": box = "[~]"
             default: box = "[ ]"
             }
             lines.append("- \(box) \(step)")
@@ -272,6 +401,7 @@ public enum PlanMaterializer {
                 source: source,
                 title: planTitle(url),
                 path: url.path,
+                kind: planKind(url, source: source),
                 sizeBytes: UInt64(values?.fileSize ?? 0),
                 modifiedAt: values?.contentModificationDate ?? .distantPast))
         }
@@ -286,6 +416,13 @@ public enum PlanMaterializer {
             }
         }
         return url.deletingPathExtension().lastPathComponent
+    }
+
+    private static func planKind(_ url: URL, source: AgentSource) -> PlanKind {
+        guard source == .codex, let head = readHead(url) else { return .document }
+        if head.contains("> Codex Plan Mode 最终方案") { return .finalPlan }
+        if head.contains("> Codex 工作清单") { return .workingChecklist }
+        return .document
     }
 
     // MARK: - 工具
@@ -308,17 +445,10 @@ public enum PlanMaterializer {
 
     /// 逐行解析 jsonl（坏行容错跳过）；body 返回 false 提前终止
     private static func forEachJSONLine(_ url: URL, _ body: ([String: Any]) -> Bool) {
-        guard let data = FileManager.default.contents(atPath: url.path) else { return }
-        var start = data.startIndex
-        while start < data.endIndex {
-            let end = data[start...].firstIndex(of: UInt8(ascii: "\n")) ?? data.endIndex
-            let lineData = data[start..<end]
-            start = end < data.endIndex ? data.index(after: end) : data.endIndex
-            guard !lineData.isEmpty,
-                  let root = (try? JSONSerialization.jsonObject(
-                    with: Data(lineData))) as? [String: Any]
-            else { continue }
-            if !body(root) { return }
+        CodexJSONLReader.forEachCompleteLine(url, includeTrailingLine: true) { line in
+            guard let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
+            else { return true }
+            return body(root)
         }
     }
 

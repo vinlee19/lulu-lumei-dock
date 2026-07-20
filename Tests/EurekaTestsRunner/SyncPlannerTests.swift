@@ -81,6 +81,7 @@ func syncPlannerTests(_ t: TestRunner) {
         try write("claude/skills.eureka-disabled/bar/SKILL.md") // 停用区该收
         // Codex + opencode
         try write("codex/AGENTS.md")
+        try write("codex/AGENTS.override.md")
         try write("codex/sessions/2026/07/07/rollout-1.jsonl")
         try write("codex/skills/baz/SKILL.md")
         try write("oc-skills/s/SKILL.md")
@@ -132,6 +133,7 @@ func syncPlannerTests(_ t: TestRunner) {
         try expect(keys.contains("eureka/mac/claude/skills/foo/SKILL.md"))
         try expect(keys.contains("eureka/mac/claude/skills.eureka-disabled/bar/SKILL.md"))
         try expect(keys.contains("eureka/mac/codex/AGENTS.md"))
+        try expect(keys.contains("eureka/mac/codex/AGENTS.override.md"))
         try expect(keys.contains("eureka/mac/codex/sessions/2026/07/07/rollout-1.jsonl"))
         try expect(keys.contains("eureka/mac/codex/skills/baz/SKILL.md"))
         try expect(keys.contains("eureka/mac/opencode/skills/s/SKILL.md"))

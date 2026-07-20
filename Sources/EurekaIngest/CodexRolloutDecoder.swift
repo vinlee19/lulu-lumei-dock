@@ -51,7 +51,7 @@ public enum CodexRolloutDecoder {
             return [.sessionMeta(
                 id: id,
                 cwd: payload["cwd"] as? String,
-                startedAt: parseDate(payload["timestamp"] as? String))]
+                startedAt: parseDate(payload["timestamp"] as? String) ?? timestamp)]
 
         case "event_msg":
             return decodeEventMessage(
@@ -95,6 +95,20 @@ public enum CodexRolloutDecoder {
                 let title = summarizeTitle(message)
             else { return [] }
             return [task(.taskStarted(title: title))]
+
+        case "thread_name_updated":
+            // Codex app-server/桌面端生成或修改的正式会话名，优先级高于 prompt 摘要。
+            guard let rawName = payload["thread_name"] as? String else { return [] }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return [] }
+            let targetSessionId = payload["thread_id"] as? String ?? sessionId
+            return [.event(TaskEvent(
+                source: .codex,
+                sessionId: targetSessionId,
+                kind: .titleUpdate(title: name),
+                timestamp: timestamp,
+                cwd: cwd
+            ))]
 
         case "task_complete":
             let detail = (payload["last_agent_message"] as? String)

@@ -3,7 +3,7 @@ import EurekaKit
 
 /// 增量 tail Codex rollout 文件（~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl）。
 /// 轮询今天/昨天日期目录中近期有写入的文件；按 offset 续读、半行不消费。
-/// 新发现的文件只做"尾部状态恢复"（找出最后的生命周期状态），不重放历史。
+/// 新发现的文件流式找出最后的生命周期状态，不向 UI 重放中间历史。
 public final class CodexRolloutTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
     public typealias RateLimitHandler = (RateLimitSnapshot) -> Void
@@ -20,6 +20,7 @@ public final class CodexRolloutTailer {
     }
 
     private let sessionsRoot: URL
+    private let sessionIndexURL: URL
     private let staleThreshold: TimeInterval
     private let handler: Handler
     private let rateLimitHandler: RateLimitHandler?
@@ -33,14 +34,19 @@ public final class CodexRolloutTailer {
         var sessionStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
+    private var threadNames: [String: String] = [:]
+    private var loadedThreadNames = false
 
     public init(
         sessionsRoot: URL,
+        sessionIndexURL: URL? = nil,
         staleThreshold: TimeInterval = 300,
         rateLimitHandler: RateLimitHandler? = nil,
         handler: @escaping Handler
     ) {
         self.sessionsRoot = sessionsRoot
+        self.sessionIndexURL = sessionIndexURL
+            ?? CodexThreadNameIndex.resolvedURL(for: sessionsRoot)
         self.staleThreshold = staleThreshold
         self.rateLimitHandler = rateLimitHandler
         self.handler = handler
@@ -65,9 +71,27 @@ public final class CodexRolloutTailer {
     /// 公开供测试与启动时同步调用
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
+        refreshThreadNames()
         for url in recentRolloutFiles() {
             tail(url)
         }
+    }
+
+    /// session_index.jsonl 是正式线程名的 append-only 索引；变化时给活跃任务补 titleUpdate。
+    private func refreshThreadNames() {
+        let latest = CodexThreadNameIndex.load(sessionIndexURL)
+        if loadedThreadNames {
+            for (sessionId, name) in latest where threadNames[sessionId] != name {
+                handler(TaskEvent(
+                    source: .codex,
+                    sessionId: sessionId,
+                    kind: .titleUpdate(title: name),
+                    timestamp: Date()
+                ), false)
+            }
+        }
+        threadNames = latest
+        loadedThreadNames = true
     }
 
     // MARK: - 文件发现
@@ -146,6 +170,20 @@ public final class CodexRolloutTailer {
                 break  // context 已在发现文件时建立
             case .event(var event):
                 event.sessionStartedAt = context.sessionStartedAt
+                switch event.kind {
+                case .titleUpdate(let title):
+                    threadNames[event.sessionId] = title
+                case .taskStarted:
+                    if let name = threadNames[event.sessionId] {
+                        event.kind = .taskStarted(title: name)
+                    }
+                case .taskFinished(let outcome, _, let detail):
+                    if let name = threadNames[event.sessionId] {
+                        event.kind = .taskFinished(outcome: outcome, title: name, detail: detail)
+                    }
+                default:
+                    break
+                }
                 HealthRegistry.shared.event(Self.healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
                 handler(event, isStale)
@@ -157,29 +195,22 @@ public final class CodexRolloutTailer {
         }
     }
 
-    /// 新发现的文件：读首行建上下文，再从尾部恢复"最后状态"——
+    /// 新发现的文件：读完整首行建上下文，再流式恢复"最后状态"——
     /// - 仍在进行中（最后 task_started 晚于最后 task_complete）：补发 running 事件
     /// - 已完成（最后 task_complete 晚于最后 task_started）：补发 finished 事件
     ///   让最近完成的任务能正常出卡（超过 staleThreshold 则仅写历史，不弹岛）
+    /// 不使用固定尾窗：长 turn 的最近 prompt 很容易早于尾部 64KB。
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         let ctx = context(for: url)
-        offsets[path] = size
-
-        guard let handle = FileHandle(forReadingAtPath: path) else { return }
-        defer { try? handle.close() }
-        let tailLength: UInt64 = min(size, 65536)
-        guard (try? handle.seek(toOffset: size - tailLength)) != nil,
-              let data = try? handle.readToEnd()
-        else { return }
 
         var lastStartedEvent: TaskEvent?
         var lastFinishedEvent: TaskEvent?
         var lastTitle: String?
         var lastRateLimits: RateLimitSnapshot?
-        for line in data.split(separator: UInt8(ascii: "\n")) {
+        let consumed = CodexJSONLReader.forEachCompleteLine(url) { line in
             for item in CodexRolloutDecoder.decode(
-                line: Data(line), sessionId: ctx.sessionId, cwd: ctx.cwd) {
+                line: line, sessionId: ctx.sessionId, cwd: ctx.cwd) {
                 switch item {
                 case .event(let event):
                     switch event.kind {
@@ -189,6 +220,9 @@ public final class CodexRolloutTailer {
                         lastStartedEvent = event
                     case .taskFinished:
                         lastFinishedEvent = event
+                    case .titleUpdate(let title):
+                        lastTitle = title
+                        threadNames[event.sessionId] = title
                     default:
                         break
                     }
@@ -198,11 +232,16 @@ public final class CodexRolloutTailer {
                     break
                 }
             }
+            return true
         }
+        // 半行不消费；下次追加完成后从该行开头重读。
+        offsets[path] = min(consumed, size)
 
         if let snapshot = lastRateLimits {
             rateLimitHandler?(snapshot)
         }
+
+        let resolvedTitle = threadNames[ctx.sessionId] ?? lastTitle
 
         if let started = lastStartedEvent {
             if let finished = lastFinishedEvent, finished.timestamp >= started.timestamp {
@@ -213,7 +252,7 @@ public final class CodexRolloutTailer {
                 ev.kind = .sessionStarted
                 ev.sessionStartedAt = ctx.sessionStartedAt
                 handler(ev, false)
-                if let title = lastTitle {
+                if let title = resolvedTitle {
                     var titleEv = ev
                     titleEv.kind = .titleUpdate(title: title)
                     handler(titleEv, false)
@@ -222,7 +261,7 @@ public final class CodexRolloutTailer {
                 // 仍在进行中：补发 running（不按 stale 抑制，timestamp 用真实开始时间）
                 var event = started
                 event.sessionStartedAt = ctx.sessionStartedAt
-                if let title = lastTitle { event.kind = .taskStarted(title: title) }
+                if let title = resolvedTitle { event.kind = .taskStarted(title: title) }
                 handler(event, false)
             }
         } else if let finished = lastFinishedEvent {
@@ -231,7 +270,7 @@ public final class CodexRolloutTailer {
             ev.kind = .sessionStarted
             ev.sessionStartedAt = ctx.sessionStartedAt
             handler(ev, false)
-            if let title = lastTitle {
+            if let title = resolvedTitle {
                 var titleEv = ev
                 titleEv.kind = .titleUpdate(title: title)
                 handler(titleEv, false)
@@ -244,18 +283,14 @@ public final class CodexRolloutTailer {
         if let cached = contexts[path] { return cached }
 
         var ctx = FileContext(sessionId: sessionIdFromFilename(url), cwd: nil, sessionStartedAt: nil)
-        // 首行应是 session_meta
-        if let handle = FileHandle(forReadingAtPath: path),
-           let head = try? handle.read(upToCount: 16384) {
-            try? handle.close()
-            if let newline = head.firstIndex(of: UInt8(ascii: "\n")) {
-                let decoded = CodexRolloutDecoder.decode(
-                    line: head[head.startIndex..<newline],
-                    sessionId: ctx.sessionId, cwd: nil)
-                for case .sessionMeta(let id, let cwd, let startedAt) in decoded {
-                    ctx = FileContext(sessionId: id, cwd: cwd, sessionStartedAt: startedAt)
-                }
+        // 首行应是 session_meta；当前 Codex 会把 instructions 放在同一行，常超过 16KB。
+        CodexJSONLReader.forEachCompleteLine(url) { line in
+            let decoded = CodexRolloutDecoder.decode(
+                line: line, sessionId: ctx.sessionId, cwd: nil)
+            for case .sessionMeta(let id, let cwd, let startedAt) in decoded {
+                ctx = FileContext(sessionId: id, cwd: cwd, sessionStartedAt: startedAt)
             }
+            return false
         }
         contexts[path] = ctx
         return ctx

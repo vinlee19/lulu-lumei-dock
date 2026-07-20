@@ -140,9 +140,11 @@ public enum SyncSourceCatalog {
         walk(root: disabledSibling(of: roots.claudeSkills),
              category: "claude/skills.eureka-disabled", priority: 0, include: always)
 
-        // Codex：AGENTS.md + memories + sessions + skills
+        // Codex：持久指令（override 优先语义由 Codex 决定，两份都备份）+ memories + sessions + skills
         add(roots.codexHome.appendingPathComponent("AGENTS.md"),
             category: "codex", relativePath: "AGENTS.md", priority: 0)
+        add(roots.codexHome.appendingPathComponent("AGENTS.override.md"),
+            category: "codex", relativePath: "AGENTS.override.md", priority: 0)
         walk(root: roots.codexHome.appendingPathComponent("memories", isDirectory: true),
              category: "codex/memories", priority: 0, include: markdownOnly)
         walk(root: roots.codexSessions, category: "codex/sessions", priority: 1,

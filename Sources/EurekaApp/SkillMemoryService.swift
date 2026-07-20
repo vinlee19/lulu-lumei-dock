@@ -29,6 +29,8 @@ final class SkillMemoryService: ObservableObject {
             guard let self else { return }
             // 各项目仓库根（技能与记忆共用同一份发现）
             let repoRoots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)
+            let codexInstructionScopes = ProjectScopeDiscovery.codexInstructionScopes(
+                resolver: self.resolver)
             // 项目级技能根：各项目仓库根下的 .claude/skills 与 .codex/skills
             var projectRoots: [ProjectScopedRoot] = []
             for (root, name) in repoRoots {
@@ -80,7 +82,8 @@ final class SkillMemoryService: ObservableObject {
                 claudeProjectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
                 grokMemoryRoot: GrokPaths.memoryRoot(),
                 kimiHome: KimiPaths.configHome(),
-                projectRoots: repoRoots)
+                projectRoots: repoRoots,
+                codexInstructionScopes: codexInstructionScopes)
             DispatchQueue.main.async {
                 self.allSkills = skills
                 self.allMemories = memories
@@ -145,6 +148,10 @@ final class SkillMemoryService: ObservableObject {
 
     /// 原子写入：写前留 .bak.eureka.<ts> 备份
     func save(path: String, content: String, completion: ((Bool) -> Void)? = nil) {
+        guard !Self.isCodexGeneratedMemory(path) else {
+            completion?(false)
+            return
+        }
         queue.async { [weak self] in
             var ok = false
             let fm = FileManager.default
@@ -200,8 +207,23 @@ final class SkillMemoryService: ObservableObject {
                 dir = SkillMemoryIndexer.claudeHome()
                     .appendingPathComponent("memories", isDirectory: true)
             case .codex:
-                dir = SkillMemoryIndexer.codexHome()
-                    .appendingPathComponent("memories", isDirectory: true)
+                // Codex memories/ 是后台生成状态；用户持久指令写 AGENTS.md。
+                let home = SkillMemoryIndexer.codexHome()
+                let file = home.appendingPathComponent("AGENTS.md")
+                var ok = false
+                do {
+                    try FileManager.default.createDirectory(
+                        at: home, withIntermediateDirectories: true)
+                    if !FileManager.default.fileExists(atPath: file.path) {
+                        try "# AGENTS.md\n\n".write(
+                            to: file, atomically: true, encoding: .utf8)
+                    }
+                    ok = true
+                } catch {
+                    self?.report(error)
+                }
+                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                return
             case .opencode:
                 dir = OpencodePaths.configHome()
                     .appendingPathComponent("memories", isDirectory: true)
@@ -251,6 +273,7 @@ final class SkillMemoryService: ObservableObject {
 
     /// 删除记忆文件 → 废纸篓
     func deleteMemory(_ memory: MemoryEntry, completion: ((Bool) -> Void)? = nil) {
+        guard memory.isDeletable else { completion?(false); return }
         trash(path: memory.path, completion: completion)
     }
 
@@ -309,6 +332,15 @@ final class SkillMemoryService: ObservableObject {
     private func report(_ error: Error) {
         let message = error.localizedDescription
         DispatchQueue.main.async { self.lastError = message }
+    }
+
+    /// `~/.codex/memories` 由 Codex 后台维护，服务层也拒绝写入，避免绕过 UI 只读态。
+    private static func isCodexGeneratedMemory(_ path: String) -> Bool {
+        let root = SkillMemoryIndexer.codexHome()
+            .appendingPathComponent("memories", isDirectory: true)
+            .standardizedFileURL.path
+        let target = URL(fileURLWithPath: path).standardizedFileURL.path
+        return target.hasPrefix(root + "/")
     }
 
     /// 停用区根 `<x>.eureka-disabled` → 对应启用区根 `<x>`（反推）

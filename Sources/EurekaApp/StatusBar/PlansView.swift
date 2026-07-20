@@ -170,10 +170,15 @@ private struct PlanRow: View {
                 Text(plan.title)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                Text(plan.modifiedAt, formatter: relativeFormatter)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    if plan.source == .codex {
+                        Text(plan.kind.displayName)
+                    }
+                    Text(plan.modifiedAt, formatter: relativeFormatter)
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
             }
             Spacer(minLength: 6)
             Text(formatBytes(plan.sizeBytes))

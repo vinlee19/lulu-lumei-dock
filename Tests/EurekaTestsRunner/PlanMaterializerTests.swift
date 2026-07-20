@@ -11,6 +11,10 @@ func planMaterializerTests(_ t: TestRunner) {
             .appendingPathComponent("eureka-plan-\(tag)-\(UUID().uuidString)", isDirectory: true)
     }
 
+    func jsonLine(_ object: [String: Any]) throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
     t.test("Codex：取最后一次 update_plan 渲染 checklist；重复运行不改 mtime；无 plan 不产文件") {
         let fm = FileManager.default
         let base = temp("codex")
@@ -56,6 +60,70 @@ func planMaterializerTests(_ t: TestRunner) {
         try expectEqual(again, 0)
         let mtime2 = try out.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         try expectEqual(mtime1, mtime2)
+    }
+
+    t.test("Codex：最终 proposed_plan 胜过工作清单，采用正式线程名并清理陈旧副本") {
+        let fm = FileManager.default
+        let base = temp("codex-final")
+        defer { try? fm.removeItem(at: base) }
+        let sessionsRoot = base.appendingPathComponent("sessions", isDirectory: true)
+        let day = sessionsRoot.appendingPathComponent("2026/07/21", isDirectory: true)
+        let staging = base.appendingPathComponent("staging", isDirectory: true)
+        let codexStaging = staging.appendingPathComponent("codex", isDirectory: true)
+        try fm.createDirectory(at: day, withIntermediateDirectories: true)
+        try fm.createDirectory(at: codexStaging, withIntermediateDirectories: true)
+        let rollout = day.appendingPathComponent("rollout-final.jsonl")
+        let checklistArgs = try jsonLine([
+            "plan": [["status": "pending", "step": "不应成为最终方案"]],
+        ])
+        let lines = [
+            try jsonLine(["type": "session_meta", "payload": ["id": "session-final"]]),
+            try jsonLine([
+                "type": "event_msg",
+                "payload": ["type": "user_message", "message": "原始 prompt 标题"],
+            ]),
+            try jsonLine([
+                "type": "response_item",
+                "payload": [
+                    "type": "function_call", "name": "update_plan", "arguments": checklistArgs,
+                ],
+            ]),
+            try jsonLine([
+                "type": "response_item",
+                "payload": [
+                    "type": "message", "role": "assistant",
+                    "content": [[
+                        "type": "output_text",
+                        "text": "完成分析。\n<proposed_plan>\n# 内部旧标题\n\n## Summary\n\n采用流式 JSONL 与官方线程名。\n</proposed_plan>",
+                    ]],
+                ],
+            ]),
+        ]
+        // 最后一行故意不加换行，验证完整静态 rollout 也能被物化。
+        try lines.joined(separator: "\n").write(to: rollout, atomically: true, encoding: .utf8)
+        let indexURL = base.appendingPathComponent("session_index.jsonl")
+        try jsonLine(["id": "session-final", "thread_name": "Codex 标题计划修复"])
+            .write(to: indexURL, atomically: true, encoding: .utf8)
+        let stale = codexStaging.appendingPathComponent("stale.md")
+        try "# 陈旧计划".write(to: stale, atomically: true, encoding: .utf8)
+
+        let changed = PlanMaterializer.materializeCodex(
+            sessionsRoot: sessionsRoot, into: staging, threadNameIndexURL: indexURL)
+        try expectEqual(changed, 2, "应写入最终方案并删除一个陈旧副本")
+        try expect(!fm.fileExists(atPath: stale.path), "陈旧物化文件应被清理")
+        let out = codexStaging.appendingPathComponent("rollout-final.md")
+        let content = try String(contentsOf: out, encoding: .utf8)
+        try expect(content.hasPrefix("# Codex 标题计划修复\n"), "标题应取正式 thread_name")
+        try expect(content.contains("Codex Plan Mode 最终方案"))
+        try expect(content.contains("采用流式 JSONL 与官方线程名"))
+        try expect(!content.contains("内部旧标题"), "正文自带 H1 应去重")
+        try expect(!content.contains("不应成为最终方案"), "最终方案应胜过 update_plan 清单")
+
+        let indexed = PlanMaterializer.index(
+            claudePlansDir: base.appendingPathComponent("none"), stagingRoot: staging)
+        try expectEqual(indexed.count, 1)
+        try expectEqual(indexed[0].kind, .finalPlan)
+        try expectEqual(indexed[0].title, "Codex 标题计划修复")
     }
 
     t.test("opencode：只收 plan 模式 assistant 文本，按会话成文，用 session.title 作标题") {

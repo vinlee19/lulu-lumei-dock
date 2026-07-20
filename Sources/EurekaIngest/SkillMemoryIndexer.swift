@@ -66,25 +66,39 @@ public struct SkillEntry: Equatable, Sendable, Identifiable {
     }
 }
 
-/// 一份记忆文件（CLAUDE.md / AGENTS.md / memory 目录下的 markdown）
+public enum MemoryEntryKind: String, Equatable, Sendable {
+    /// CLAUDE.md / AGENTS.md 等用户维护的持久指令。
+    case instructions
+    /// 用户自行创建、可正常增删改的记忆文档。
+    case userManaged
+    /// Codex 后台生成的本地 memory state，只允许查看。
+    case generated
+}
+
+/// 一份记忆/指令文件（CLAUDE.md / AGENTS.md / memory 目录下的 markdown）
 public struct MemoryEntry: Equatable, Sendable, Identifiable {
     public var id: String { path }
     public var source: AgentSource
     public var scope: String  // "全局" / 项目名 / 文件名（展示用）
     public var path: String
+    public var kind: MemoryEntryKind
     /// 归属项目名；nil = 系统级记忆（全局 / 用户自建），非 nil = 该项目的记忆
     public var projectName: String?
     public var sizeBytes: UInt64
     public var modifiedAt: Date
+    public var isEditable: Bool { kind != .generated }
+    public var isDeletable: Bool { kind != .generated }
 
     public init(
         source: AgentSource, scope: String, path: String,
         projectName: String? = nil,
+        kind: MemoryEntryKind = .userManaged,
         sizeBytes: UInt64, modifiedAt: Date
     ) {
         self.source = source
         self.scope = scope
         self.path = path
+        self.kind = kind
         self.projectName = projectName
         self.sizeBytes = sizeBytes
         self.modifiedAt = modifiedAt
@@ -280,12 +294,16 @@ public enum SkillMemoryIndexer {
         claudeProjectsRoot: URL,
         grokMemoryRoot: URL? = nil,
         kimiHome: URL? = nil,
-        projectRoots: [(root: URL, name: String)] = []
+        projectRoots: [(root: URL, name: String)] = [],
+        codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
     ) -> [MemoryEntry] {
         let fm = FileManager.default
         var result: [MemoryEntry] = []
 
-        func add(_ url: URL, source: AgentSource, scope: String, projectName: String? = nil) {
+        func add(
+            _ url: URL, source: AgentSource, scope: String,
+            projectName: String? = nil, kind: MemoryEntryKind = .userManaged
+        ) {
             guard fm.fileExists(atPath: url.path),
                   let values = try? url.resourceValues(
                     forKeys: [.contentModificationDateKey, .fileSizeKey])
@@ -293,12 +311,29 @@ public enum SkillMemoryIndexer {
             result.append(MemoryEntry(
                 source: source, scope: scope, path: url.path,
                 projectName: projectName,
+                kind: kind,
                 sizeBytes: UInt64(values.fileSize ?? 0),
                 modifiedAt: values.contentModificationDate ?? .distantPast))
         }
 
+        /// Codex 每一级目录只加载 override/AGENTS 中第一个存在的文件。
+        func addEffectiveCodexInstruction(
+            directory: URL, scope: String, projectName: String? = nil
+        ) {
+            let override = directory.appendingPathComponent("AGENTS.override.md")
+            let standard = directory.appendingPathComponent("AGENTS.md")
+            if fm.fileExists(atPath: override.path) {
+                add(override, source: .codex, scope: scope,
+                    projectName: projectName, kind: .instructions)
+            } else {
+                add(standard, source: .codex, scope: scope,
+                    projectName: projectName, kind: .instructions)
+            }
+        }
+
         // Claude 全局 CLAUDE.md
-        add(claudeHome.appendingPathComponent("CLAUDE.md"), source: .claude, scope: "全局")
+        add(claudeHome.appendingPathComponent("CLAUDE.md"), source: .claude,
+            scope: "全局", kind: .instructions)
         // Claude ~/.claude/memories/**/*.md（用户自建记忆）
         for file in enumerateMarkdown(claudeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .claude, scope: file.deletingPathExtension().lastPathComponent)
@@ -315,15 +350,17 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // Codex 全局 AGENTS.md
-        add(codexHome.appendingPathComponent("AGENTS.md"), source: .codex, scope: "全局")
-        // Codex memories/**/*.md
+        // Codex 全局持久指令：AGENTS.override.md 优先于 AGENTS.md。
+        addEffectiveCodexInstruction(directory: codexHome, scope: "全局")
+        // Codex memories/**/*.md 是后台生成状态，仅供查看。
         for file in enumerateMarkdown(codexHome.appendingPathComponent("memories", isDirectory: true)) {
-            add(file, source: .codex, scope: file.deletingPathExtension().lastPathComponent)
+            add(file, source: .codex,
+                scope: file.deletingPathExtension().lastPathComponent, kind: .generated)
         }
 
         // opencode 全局 AGENTS.md（~/.config/opencode/AGENTS.md，遵循 AGENTS.md 标准）
-        add(opencodeHome.appendingPathComponent("AGENTS.md"), source: .opencode, scope: "全局")
+        add(opencodeHome.appendingPathComponent("AGENTS.md"), source: .opencode,
+            scope: "全局", kind: .instructions)
         // opencode memories/**/*.md（createMemory 写这里，索引须对齐避免死路径）
         for file in enumerateMarkdown(opencodeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .opencode, scope: file.deletingPathExtension().lastPathComponent)
@@ -338,17 +375,29 @@ public enum SkillMemoryIndexer {
 
         // kimi 全局记忆 ~/.kimi-code/AGENTS.md（Kimi 唯一全局记忆文件，AGENTS.md-first）
         if let kimiHome {
-            add(kimiHome.appendingPathComponent("AGENTS.md"), source: .kimi, scope: "全局")
+            add(kimiHome.appendingPathComponent("AGENTS.md"), source: .kimi,
+                scope: "全局", kind: .instructions)
         }
 
         // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、
         // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
         // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
         for (root, name) in projectRoots {
-            add(root.appendingPathComponent("CLAUDE.md"), source: .claude, scope: name, projectName: name)
-            add(root.appendingPathComponent("AGENTS.md"), source: .codex, scope: name, projectName: name)
+            add(root.appendingPathComponent("CLAUDE.md"), source: .claude,
+                scope: name, projectName: name, kind: .instructions)
             add(root.appendingPathComponent(".kimi-code/AGENTS.md"),
-                source: .kimi, scope: name, projectName: name)
+                source: .kimi, scope: name, projectName: name, kind: .instructions)
+        }
+
+        // Codex 项目指令只沿实际近期 cwd 的 root → cwd 链发现；项目根始终纳入。
+        var codexScopes = codexInstructionScopes
+        codexScopes.append(contentsOf: projectRoots.map {
+            (directory: $0.root, projectName: $0.name, scope: $0.name)
+        })
+        var seenInstructionDirs = Set<String>()
+        for item in codexScopes where seenInstructionDirs.insert(item.directory.path).inserted {
+            addEffectiveCodexInstruction(
+                directory: item.directory, scope: item.scope, projectName: item.projectName)
         }
 
         return result.sorted {

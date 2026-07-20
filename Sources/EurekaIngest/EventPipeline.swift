@@ -24,10 +24,12 @@ public final class EventPipeline {
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
 
     private let claudeProjectsRoot: URL
+    private var codexThreadNames: [String: String]
 
     public init(
         spoolRoot: URL,
         codexSessionsRoot: URL = CodexRolloutTailer.defaultSessionsRoot(),
+        codexSessionIndexURL: URL? = nil,
         claudeProjectsRoot: URL = ClaudeSessionBootstrap.defaultProjectsRoot(),
         opencodeDbPath: URL = OpencodePaths.db(),
         grokSessionsRoot: URL = GrokPaths.sessionsRoot(),
@@ -39,6 +41,9 @@ public final class EventPipeline {
         self.handler = handler
         self.auditHandler = auditHandler
         self.claudeProjectsRoot = claudeProjectsRoot
+        let resolvedSessionIndexURL = codexSessionIndexURL
+            ?? CodexThreadNameIndex.resolvedURL(for: codexSessionsRoot)
+        self.codexThreadNames = CodexThreadNameIndex.load(resolvedSessionIndexURL)
         // 只审计 Claude hook 通道的 PostToolUse（inject 也走此通道）
         let rawObserver: SpoolConsumer.RawObserver? = auditHandler.map { audit in
             { raw, isStale in
@@ -55,6 +60,7 @@ public final class EventPipeline {
         }
         tailer = CodexRolloutTailer(
             sessionsRoot: codexSessionsRoot,
+            sessionIndexURL: resolvedSessionIndexURL,
             rateLimitHandler: { [weak self] snapshot in
                 self?.queue.async { self?.latestCodexRateLimits = snapshot }
             },
@@ -129,6 +135,27 @@ public final class EventPipeline {
 
     private func enrich(_ event: TaskEvent) -> [TaskEvent] {
         var events = [event]
+
+        // Codex 正式 thread_name 的优先级高于 prompt 摘要；notify 与 rollout 共用此处。
+        if event.source == .codex {
+            var enriched = event
+            switch event.kind {
+            case .titleUpdate(let title):
+                codexThreadNames[event.sessionId] = title
+            case .taskStarted:
+                if let title = codexThreadNames[event.sessionId] {
+                    enriched.kind = .taskStarted(title: title)
+                }
+            case .taskFinished(let outcome, _, let detail):
+                if let title = codexThreadNames[event.sessionId] {
+                    enriched.kind = .taskFinished(
+                        outcome: outcome, title: title, detail: detail)
+                }
+            default:
+                break
+            }
+            events[0] = enriched
+        }
 
         // 会话首启时间：所有带 transcript 的 Claude 事件统一补上（头读一次，缓存）
         if event.source == .claude, event.sessionStartedAt == nil,

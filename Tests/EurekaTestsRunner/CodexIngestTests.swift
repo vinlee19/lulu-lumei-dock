@@ -100,6 +100,10 @@ func codexRolloutTests(_ t: TestRunner) {
         }
     }
 
+    func jsonLine(_ object: [String: Any]) throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
     t.test("初见文件恢复进行中状态；增量追加产出完整生命周期") {
         let spool = try makeSessions()
         var events: [(TaskEvent, Bool)] = []
@@ -180,6 +184,81 @@ func codexRolloutTests(_ t: TestRunner) {
         try expectEqual(events.count, 1)
         guard case .taskStarted = events[0].0.kind else {
             throw ExpectationError(description: "补全后应产出 task_started")
+        }
+    }
+
+    t.test("超长 session_meta 不截断；session_index 正式标题优先并实时更新") {
+        let spool = try makeSessions()
+        let indexURL = spool.root.appendingPathComponent("session_index.jsonl")
+        let sessionId = "codex-large-meta"
+        let meta = try jsonLine([
+            "timestamp": "2026-07-21T08:00:00.000Z",
+            "type": "session_meta",
+            "payload": [
+                "id": sessionId,
+                "timestamp": "2026-07-21T07:59:59.000Z",
+                "cwd": "/Users/me/work/large",
+                "base_instructions": String(repeating: "x", count: 128 * 1024),
+            ],
+        ])
+        let started = try jsonLine([
+            "timestamp": "2026-07-21T08:00:01.000Z",
+            "type": "event_msg",
+            "payload": ["type": "task_started", "turn_id": "turn-large"],
+        ])
+        let prompt = try jsonLine([
+            "timestamp": "2026-07-21T08:00:02.000Z",
+            "type": "event_msg",
+            "payload": ["type": "user_message", "message": "这不是最终标题"],
+        ])
+        try append([meta, started, prompt], to: spool.file)
+        try append([
+            try jsonLine(["id": sessionId, "thread_name": "修复 Codex 会话标题"]),
+        ], to: indexURL)
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = CodexRolloutTailer(
+            sessionsRoot: spool.root, sessionIndexURL: indexURL
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()
+
+        try expectEqual(events.count, 1)
+        try expectEqual(events[0].0.sessionId, sessionId)
+        try expectEqual(events[0].0.cwd, "/Users/me/work/large")
+        try expectEqual(
+            events[0].0.sessionStartedAt,
+            ISO8601DateFormatter().date(from: "2026-07-21T07:59:59Z"))
+        guard case .taskStarted(title: "修复 Codex 会话标题") = events[0].0.kind else {
+            throw ExpectationError(description: "正式线程名应覆盖 prompt 摘要: \(events)")
+        }
+
+        events.removeAll()
+        try append([
+            try jsonLine(["id": sessionId, "thread_name": "Codex 标题已更新"]),
+        ], to: indexURL)
+        tailer.scanOnce()
+        try expect(events.contains {
+            $0.0.kind == .titleUpdate(title: "Codex 标题已更新")
+                && $0.0.sessionId == sessionId
+        }, "session_index 追加的新标题应实时送达")
+    }
+
+    t.test("rollout 内 thread_name_updated 解码为正式标题事件") {
+        let line = try jsonLine([
+            "timestamp": "2026-07-21T08:00:03.000Z",
+            "type": "event_msg",
+            "payload": [
+                "type": "thread_name_updated",
+                "thread_id": "named-thread",
+                "thread_name": "分析 Plan 与 Memory",
+            ],
+        ])
+        let decoded = CodexRolloutDecoder.decode(
+            line: Data(line.utf8), sessionId: "fallback", cwd: "/work")
+        guard case .event(let event) = decoded.first,
+              event.sessionId == "named-thread",
+              event.kind == .titleUpdate(title: "分析 Plan 与 Memory") else {
+            throw ExpectationError(description: "未解码 thread_name_updated: \(decoded)")
         }
     }
 }
@@ -414,6 +493,54 @@ func sessionIndexerTests(_ t: TestRunner) {
         try expectEqual(sessions[0].id, "fixture-codex-1")
         try expectEqual(sessions[0].cwd, "/Users/me/work/demo")
         try expectEqual(sessions[0].name, "跑一下集成测试并修复失败用例")
+    }
+
+    t.test("Codex 会话索引流式跨过 64KB，并以 session_index 标题为最高优先级") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory
+            .appendingPathComponent("eureka-cxidx-large-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let root = base.appendingPathComponent("sessions", isDirectory: true)
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let dayDir = root
+            .appendingPathComponent(String(format: "%04d", parts.year!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", parts.month!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", parts.day!), isDirectory: true)
+        try fm.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        let file = dayDir.appendingPathComponent("rollout-large-index.jsonl")
+        func line(_ object: [String: Any]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        let lines = [
+            try line([
+                "timestamp": "2026-07-21T08:00:00.000Z", "type": "session_meta",
+                "payload": [
+                    "id": "large-index", "cwd": "/Users/me/work/deep",
+                    "base_instructions": String(repeating: "z", count: 96 * 1024),
+                ],
+            ]),
+            try line([
+                "timestamp": "2026-07-21T08:00:01.000Z", "type": "event_msg",
+                "payload": ["type": "user_message", "message": "跨过固定窗口仍能读取的标题"],
+            ]),
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(
+            to: file, atomically: true, encoding: .utf8)
+
+        let missingIndex = base.appendingPathComponent("missing-index.jsonl")
+        var sessions = CodexSessionIndexer.index(
+            sessionsRoot: root, threadNameIndexURL: missingIndex)
+        try expectEqual(sessions.count, 1)
+        try expectEqual(sessions[0].id, "large-index")
+        try expectEqual(sessions[0].cwd, "/Users/me/work/deep")
+        try expectEqual(sessions[0].name, "跨过固定窗口仍能读取的标题")
+
+        let indexURL = base.appendingPathComponent("session_index.jsonl")
+        try line(["id": "large-index", "thread_name": "官方 Codex 会话标题"])
+            .write(to: indexURL, atomically: true, encoding: .utf8)
+        sessions = CodexSessionIndexer.index(
+            sessionsRoot: root, threadNameIndexURL: indexURL)
+        try expectEqual(sessions[0].name, "官方 Codex 会话标题")
     }
 }
 

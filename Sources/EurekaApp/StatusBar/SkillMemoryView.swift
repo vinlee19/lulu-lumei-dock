@@ -109,7 +109,9 @@ struct SkillMemoryView: View {
                     Button("Kimi 技能") { startCreate(.kimi, isSkill: true, "Kimi 技能") }
                 } else {
                     Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
-                    Button("Codex 记忆") { startCreate(.codex, isSkill: false, "Codex 记忆") }
+                    Button("Codex 指令（AGENTS.md）") {
+                        service.createMemory(source: .codex, name: "AGENTS")
+                    }
                     Button("Grok 记忆") { startCreate(.grok, isSkill: false, "Grok 记忆") }
                     // kimi 记忆 = 单一全局 AGENTS.md，无需命名 → 直接创建并刷新
                     Button("Kimi 记忆（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
@@ -340,7 +342,11 @@ struct SkillMemoryView: View {
     private func memoryRow(_ memory: MemoryEntry) -> some View {
         MemoryRow(
             memory: memory, service: service,
-            onEdit: { openEditor(path: memory.path, title: memory.scope, isSkill: false) },
+            onEdit: {
+                openEditor(
+                    path: memory.path, title: memory.scope,
+                    isSkill: false, isEditable: memory.isEditable)
+            },
             onDelete: { deleting = .memory(memory) })
     }
 
@@ -369,6 +375,10 @@ struct SkillMemoryView: View {
     @ViewBuilder
     private func memoryEmptyRow(_ source: AgentSource) -> some View {
         switch source {
+        case .codex:
+            emptySourceRow(text: "未创建 AGENTS.md", actionTitle: "创建 AGENTS.md") {
+                service.createMemory(source: .codex, name: "AGENTS")
+            }
         case .kimi:
             emptySourceRow(text: "未创建 AGENTS.md", actionTitle: "创建 AGENTS.md") {
                 service.createMemory(source: .kimi, name: "AGENTS")
@@ -406,8 +416,12 @@ struct SkillMemoryView: View {
         creating = CreateTarget(source: source, isSkill: isSkill, label: label)
     }
 
-    private func openEditor(path: String, title: String, isSkill: Bool) {
-        editor = EditorTarget(id: path, title: title, path: path, isSkill: isSkill)
+    private func openEditor(
+        path: String, title: String, isSkill: Bool, isEditable: Bool = true
+    ) {
+        editor = EditorTarget(
+            id: path, title: title, path: path,
+            isSkill: isSkill, isEditable: isEditable)
     }
 
     private var creatingBinding: Binding<Bool> {
@@ -425,6 +439,7 @@ struct EditorTarget: Identifiable {
     var title: String
     var path: String
     var isSkill: Bool
+    var isEditable: Bool = true
 }
 
 private struct CreateTarget: Identifiable {
@@ -584,12 +599,19 @@ private struct MemoryRow: View {
                     .font(.system(size: 10).monospaced())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                if memory.kind == .generated {
+                    Text("Codex 生成记忆 · 只读")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                }
             }
             Spacer(minLength: 6)
             Text(formatBytes(memory.sizeBytes))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.tertiary)
-            rowMenu(path: memory.path, onEdit: onEdit, onDelete: onDelete, service: service)
+            rowMenu(
+                path: memory.path, onEdit: onEdit, onDelete: onDelete,
+                service: service, canEdit: memory.isEditable, canDelete: memory.isDeletable)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -601,14 +623,18 @@ private struct MemoryRow: View {
 @ViewBuilder
 private func rowMenu(
     path: String, onEdit: @escaping () -> Void, onDelete: @escaping () -> Void,
-    service: SkillMemoryService
+    service: SkillMemoryService, canEdit: Bool = true, canDelete: Bool = true
 ) -> some View {
     Menu {
-        Button("编辑") { onEdit() }
-        Button("用默认编辑器打开") { service.openInEditor(path: path) }
+        Button(canEdit ? "编辑" : "查看") { onEdit() }
+        if canEdit {
+            Button("用默认编辑器打开") { service.openInEditor(path: path) }
+        }
         Button("在 Finder 中显示") { service.reveal(path: path) }
-        Divider()
-        Button("删除", role: .destructive) { onDelete() }
+        if canDelete {
+            Divider()
+            Button("删除", role: .destructive) { onDelete() }
+        }
     } label: {
         Image(systemName: "ellipsis")
             .font(.system(size: 12))
@@ -640,21 +666,25 @@ struct EditorSheet: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
-                Picker("", selection: $editing) {
-                    Text("预览").tag(false)
-                    Text("编辑").tag(true)
+                if target.isEditable {
+                    Picker("", selection: $editing) {
+                        Text("预览").tag(false)
+                        Text("编辑").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 120)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 120)
                 Button { service.reveal(path: target.path) } label: {
                     Image(systemName: "folder")
                 }
                 .help("在 Finder 中显示")
-                Button { service.openInEditor(path: target.path) } label: {
-                    Image(systemName: "square.and.pencil")
+                if target.isEditable {
+                    Button { service.openInEditor(path: target.path) } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .help("用默认编辑器打开")
                 }
-                .help("用默认编辑器打开")
             }
             .buttonStyle(.borderless)
             .padding(10)
@@ -676,20 +706,22 @@ struct EditorSheet: View {
 
             Divider()
             HStack {
-                Text(target.path)
+                Text(target.isEditable ? target.path : "Codex 生成状态（只读） · \(target.path)")
                     .font(.system(size: 9).monospaced())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
-                Button("取消") { dismiss() }
-                Button(saved ? "已保存" : "保存") {
-                    service.save(path: target.path, content: text) { _ in }
-                    saved = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
+                Button(target.isEditable ? "取消" : "关闭") { dismiss() }
+                if target.isEditable {
+                    Button(saved ? "已保存" : "保存") {
+                        service.save(path: target.path, content: text) { _ in }
+                        saved = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
+                    }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .buttonStyle(.borderedProminent)
                 }
-                .keyboardShortcut("s", modifiers: .command)
-                .buttonStyle(.borderedProminent)
             }
             .padding(10)
         }

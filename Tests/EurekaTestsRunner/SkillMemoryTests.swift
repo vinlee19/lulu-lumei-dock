@@ -79,6 +79,68 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expect(memories.contains { $0.source == .codex && $0.scope == "全局" }, "缺 Codex AGENTS.md")
     }
 
+    t.test("Codex 记忆语义：override 优先、目录链指令可见、生成 memory 只读") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory
+            .appendingPathComponent("eureka-codex-memory-\(UUID())", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let codexHome = base.appendingPathComponent("codex", isDirectory: true)
+        let generatedDir = codexHome.appendingPathComponent("memories", isDirectory: true)
+        let repo = base.appendingPathComponent("repo", isDirectory: true)
+        let nested = repo.appendingPathComponent("Sources/Feature", isDirectory: true)
+        try fm.createDirectory(at: generatedDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+        try "# 标准全局".write(
+            to: codexHome.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+        try "# 覆盖全局".write(
+            to: codexHome.appendingPathComponent("AGENTS.override.md"), atomically: true, encoding: .utf8)
+        try "# generated".write(
+            to: generatedDir.appendingPathComponent("raw_memories.md"),
+            atomically: true, encoding: .utf8)
+        try "# 项目标准".write(
+            to: repo.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+        try "# 项目覆盖".write(
+            to: repo.appendingPathComponent("AGENTS.override.md"), atomically: true, encoding: .utf8)
+        try "# 深层指令".write(
+            to: nested.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+
+        let memories = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude", isDirectory: true),
+            codexHome: codexHome,
+            opencodeHome: base.appendingPathComponent("opencode", isDirectory: true),
+            claudeProjectsRoot: base.appendingPathComponent("projects", isDirectory: true),
+            projectRoots: [(root: repo, name: "repo")],
+            codexInstructionScopes: [
+                (directory: repo, projectName: "repo", scope: "repo"),
+                (directory: repo.appendingPathComponent("Sources"),
+                 projectName: "repo", scope: "repo/Sources"),
+                (directory: nested, projectName: "repo", scope: "repo/Sources/Feature"),
+            ])
+
+        let codex = memories.filter { $0.source == .codex }
+        try expect(codex.contains {
+            $0.path.hasSuffix("codex/AGENTS.override.md") && $0.kind == .instructions
+                && $0.isEditable && $0.isDeletable
+        }, "全局 override 应作为有效指令")
+        try expect(!codex.contains { $0.path.hasSuffix("codex/AGENTS.md") },
+                   "同级存在 override 时不应重复展示 AGENTS.md")
+        try expect(codex.contains {
+            $0.path.hasSuffix("repo/AGENTS.override.md") && $0.scope == "repo"
+        }, "项目根 override 应优先")
+        try expect(!codex.contains { $0.path.hasSuffix("repo/AGENTS.md") },
+                   "项目根标准指令应被 override 遮蔽")
+        try expect(codex.contains {
+            $0.path.hasSuffix("Sources/Feature/AGENTS.md")
+                && $0.scope == "repo/Sources/Feature" && $0.kind == .instructions
+        }, "近期 cwd 的嵌套指令应可见")
+        guard let generated = codex.first(where: { $0.kind == .generated }) else {
+            throw ExpectationError(description: "缺 Codex 生成 memory")
+        }
+        try expect(generated.path.hasSuffix("memories/raw_memories.md"))
+        try expect(!generated.isEditable && !generated.isDeletable,
+                   "Codex 后台生成 memory 必须只读且不可删除")
+    }
+
     t.test("记忆三源覆盖：opencode 全局 AGENTS.md + 项目根 CLAUDE.md/AGENTS.md") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("eureka-mem3src", isDirectory: true)
