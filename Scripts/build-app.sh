@@ -8,17 +8,25 @@ readonly APP_PATH="dist/${PRODUCT_NAME}.app"
 readonly REPOSITORY_VERSION="$(tr -d '[:space:]' < VERSION)"
 readonly APP_VERSION="${LULU_APP_VERSION:-$REPOSITORY_VERSION}"
 readonly SIGNING_IDENTITY="${LULU_CODE_SIGN_IDENTITY:--}"
+SWIFT_BUILD_ARGS=(-c release)
 
 if [[ ! "$APP_VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
   echo "✗ 版本号必须是纯数字点分格式（如 0.1.5），收到：$APP_VERSION" >&2
   exit 1
 fi
-
-if [[ "${LULU_SKIP_BUILD:-0}" != "1" ]]; then
-  swift build -c release
+if [[ -n "${LULU_SWIFT_JOBS:-}" ]]; then
+  if [[ ! "$LULU_SWIFT_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "✗ LULU_SWIFT_JOBS 必须是正整数" >&2
+    exit 1
+  fi
+  SWIFT_BUILD_ARGS+=(--jobs "$LULU_SWIFT_JOBS")
 fi
 
-BUILD_PATH="$(swift build -c release --show-bin-path)"
+if [[ "${LULU_SKIP_BUILD:-0}" != "1" ]]; then
+  swift build "${SWIFT_BUILD_ARGS[@]}"
+fi
+
+BUILD_PATH="$(swift build "${SWIFT_BUILD_ARGS[@]}" --show-bin-path)"
 readonly BUILD_PATH
 readonly APP_BUNDLE="$BUILD_PATH/eureka_eureka.bundle"
 readonly SPARKLE_SOURCE=".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"

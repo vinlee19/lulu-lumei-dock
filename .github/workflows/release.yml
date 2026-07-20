@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      # 标准 arm64 runner 内存为 7GB；限制 SwiftPM 并行编译，避免编译结束时测试进程被 SIGKILL。
+      LULU_SWIFT_JOBS: "2"
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
@@ -26,7 +29,7 @@ jobs:
           [[ "$GITHUB_REF_NAME" == "v$repository_version" ]]
 
       - name: Run all tests
-        run: swift run eureka-tests
+        run: swift run --jobs "$LULU_SWIFT_JOBS" eureka-tests
 
       - name: Build and verify signed release assets
         env:
