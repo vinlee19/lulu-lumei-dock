@@ -25,7 +25,7 @@ final class CLIToolsService: ObservableObject {
         Tool(id: "codex", name: "Codex CLI", source: .codex,
              command: "codex", npmPackage: "@openai/codex",
              installCommand: "npm install -g @openai/codex"),
-        Tool(id: "opencode", name: "opencode", source: .opencode,
+        Tool(id: "opencode", name: "OpenCode", source: .opencode,
              command: "opencode", npmPackage: "opencode-ai",
              installCommand: "npm install -g opencode-ai"),
         Tool(id: "grok", name: "Grok CLI", source: .grok,

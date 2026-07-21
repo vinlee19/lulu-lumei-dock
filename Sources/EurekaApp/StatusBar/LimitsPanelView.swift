@@ -34,7 +34,7 @@ struct LimitsPanelView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。opencode / Antigravity / Kimi 无本地限额数据源（Kimi 配额仅官网会员页可见），故不显示。")
+                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。OpenCode / Antigravity / Kimi 无本地限额数据源（Kimi 配额仅官网会员页可见），故不显示。")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

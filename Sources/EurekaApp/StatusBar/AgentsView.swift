@@ -76,7 +76,7 @@ struct AgentsView: View {
                 .font(.system(size: 11))
             Menu {
                 Button("Claude Agent") { newAgentName = ""; creatingKind = .claude; creatingAgent = true }
-                Button("opencode Agent") { newAgentName = ""; creatingKind = .opencode; creatingAgent = true }
+                Button("OpenCode Agent") { newAgentName = ""; creatingKind = .opencode; creatingAgent = true }
                 Button("Grok Agent") { newAgentName = ""; creatingKind = .grok; creatingAgent = true }
                 Button("Codex Profile") {
                     profileEditor = ProfileEditTarget(
@@ -114,7 +114,7 @@ struct AgentsView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     if !service.isSearching {
-                        Text("点右上角 + 新建 Claude / opencode Agent 或 Codex Profile")
+                        Text("点右上角 + 新建 Claude / OpenCode Agent 或 Codex Profile")
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                     }
@@ -200,7 +200,7 @@ struct AgentsView: View {
     private var createAlertTitle: String {
         switch creatingKind {
         case .claude: return "新建 Claude Agent"
-        case .opencode: return "新建 opencode Agent"
+        case .opencode: return "新建 OpenCode Agent"
         case .grok: return "新建 Grok Agent"
         }
     }

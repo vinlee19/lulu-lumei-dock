@@ -116,7 +116,7 @@ final class UsageService: ObservableObject {
 
     private static let claudeHealthName = "用量扫描 Claude"
     private static let codexHealthName = "用量扫描 Codex"
-    private static let opencodeHealthName = "用量扫描 opencode"
+    private static let opencodeHealthName = "用量扫描 OpenCode"
     private static let grokHealthName = "用量扫描 Grok"
     private static let kimiHealthName = "用量扫描 Kimi"
 

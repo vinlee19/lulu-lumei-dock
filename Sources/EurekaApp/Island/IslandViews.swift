@@ -171,7 +171,12 @@ extension AgentSource {
         switch self {
         case .claude: return Color(red: 0.855, green: 0.467, blue: 0.337)  // Anthropic 橙 #DA7756
         case .codex: return Color(red: 0.08, green: 0.62, blue: 0.56)      // OpenAI 青绿
-        case .opencode: return Color(red: 0.45, green: 0.42, blue: 0.90)   // opencode 靛紫
+        // OpenCode 官方 logo 为黑白单色 → 动态色：浅色模式近黑 #211E1E，深色模式浅灰（岛上可见）
+        case .opencode: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.85, green: 0.85, blue: 0.85, alpha: 1)
+                : NSColor(srgbRed: 0.129, green: 0.118, blue: 0.118, alpha: 1)
+        }))
         case .grok: return Color(red: 0.129, green: 0.588, blue: 0.953)    // xAI Dodger 蓝 #2196F3
         case .antigravity: return Color(red: 0.898, green: 0.298, blue: 0.612)  // 品红/玫 #E54C9C
         case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot 蔚蓝 #1783FF
@@ -230,29 +235,37 @@ struct CodexMarkShape: Shape {
     }
 }
 
-/// opencode 标记：圆角方框内嵌一个「>」终端提示符，呼应其终端 agent 气质
+/// OpenCode 标记：官方 logo——竖长实心方框内挖窗口（32×40 视箱），窗口下 2/3 由
+/// OpencodeWindowShape 以半透明补上，单色演绎黑框灰窗的原版配色。eoFill 填充。
 struct OpencodeMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
-        let side = min(rect.width, rect.height)
-        let box = CGRect(
-            x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
+        let box = Self.logoBox(in: rect)
         var path = Path()
-        // 外框（圆角方）
-        path.addRoundedRect(in: box, cornerSize: CGSize(width: side * 0.24, height: side * 0.24))
-        // 内挖一个略小的方，形成描边环
-        let innerInset = side * 0.16
-        let inner = box.insetBy(dx: innerInset, dy: innerInset)
-        path.addRoundedRect(in: inner, cornerSize: CGSize(width: side * 0.14, height: side * 0.14))
-        // 中间的「>」：两段折线组成的箭头
-        let cx = box.midX - side * 0.06
-        let cy = box.midY
-        let arm = side * 0.16
-        var caret = Path()
-        caret.move(to: CGPoint(x: cx - arm, y: cy - arm))
-        caret.addLine(to: CGPoint(x: cx + arm, y: cy))
-        caret.addLine(to: CGPoint(x: cx - arm, y: cy + arm))
-        path.addPath(caret.strokedPath(.init(lineWidth: side * 0.11, lineCap: .round, lineJoin: .round)))
+        path.addRect(box)
+        // 窗口洞：x 8→24 / 32，y 8→32 / 40
+        path.addRect(CGRect(
+            x: box.minX + box.width * 0.25, y: box.minY + box.height * 0.2,
+            width: box.width * 0.5, height: box.height * 0.6))
         return path
+    }
+
+    /// 32×40 视箱按比例内接居中
+    static func logoBox(in rect: CGRect) -> CGRect {
+        let height = min(rect.height, rect.width / 0.8)
+        let width = height * 0.8
+        return CGRect(
+            x: rect.midX - width / 2, y: rect.midY - height / 2,
+            width: width, height: height)
+    }
+}
+
+/// OpenCode 窗口下半格（原版 #BCBBBB 灰）：y 16→32 / 40
+struct OpencodeWindowShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let box = OpencodeMarkShape.logoBox(in: rect)
+        return Path(CGRect(
+            x: box.minX + box.width * 0.25, y: box.minY + box.height * 0.4,
+            width: box.width * 0.5, height: box.height * 0.4))
     }
 }
 
@@ -326,38 +339,83 @@ struct AntigravityMarkShape: Shape {
     }
 }
 
-/// 来源徽标：Claude = 橙色八芒星；Codex = 青绿五瓣风车；opencode = 靛紫终端方框；
+/// 官方 logo 资产（Resources/source-logos/*.svg，macOS 14 NSImage 原生渲染矢量）。
+/// Grok 官方标为纯黑 → 深色环境用白色变体；OpenCode 用代码绘制（见 OpencodeMarkShape）。
+enum SourceLogo {
+    private static var cache: [String: NSImage] = [:]
+    private static let lock = NSLock()
+
+    static func image(for source: AgentSource, dark: Bool) -> NSImage? {
+        let name: String
+        switch source {
+        case .claude: name = "logo-claude"
+        case .codex: name = "logo-codex"
+        case .grok: name = dark ? "logo-grok-dark" : "logo-grok"
+        case .antigravity: name = "logo-antigravity"
+        case .kimi: name = "logo-kimi"
+        case .opencode: return nil
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cache[name] { return cached }
+        guard let url = AppResources.bundle.url(
+            forResource: name, withExtension: "svg", subdirectory: "source-logos"),
+            let image = NSImage(contentsOf: url)
+        else { return nil }
+        cache[name] = image
+        return image
+    }
+}
+
+/// 来源徽标：官方 logo（SVG 矢量）；OpenCode 为官方几何形状的代码绘制；
+/// 资产缺失时回退旧的品牌色形状。旧注释：Claude = 橙色八芒星；Codex = 青绿五瓣风车；
 /// Grok = 蓝色斜杠方；Antigravity = 品红上升人字
 struct SourceBadge: View {
     let source: AgentSource
     var size: CGFloat = 12
+    /// 强制按深色环境取 logo 变体（灵动岛永远深底，不跟系统外观走）
+    var onDark: Bool?
+
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        if source == .opencode {
+            ZStack {
+                OpencodeWindowShape()
+                    .fill(source.brandColor.opacity(0.45))
+                OpencodeMarkShape()
+                    .fill(source.brandColor, style: FillStyle(eoFill: true))
+            }
+            .frame(width: size, height: size)
+        } else if let image = SourceLogo.image(
+            for: source, dark: onDark ?? (colorScheme == .dark)) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            fallbackShape
+                .frame(width: size, height: size)
+        }
+    }
+
+    /// 资产缺失兜底：沿用旧的品牌色几何标记
+    @ViewBuilder
+    private var fallbackShape: some View {
         switch source {
         case .claude:
-            ClaudeMarkShape()
-                .fill(source.brandColor)
-                .frame(width: size, height: size)
+            ClaudeMarkShape().fill(source.brandColor)
         case .codex:
-            CodexMarkShape()
-                .fill(source.brandColor)
-                .frame(width: size, height: size)
-        case .opencode:
-            OpencodeMarkShape()
-                .fill(source.brandColor, style: FillStyle(eoFill: true))
-                .frame(width: size, height: size)
+            CodexMarkShape().fill(source.brandColor)
         case .grok:
-            GrokMarkShape()
-                .fill(source.brandColor, style: FillStyle(eoFill: true))
-                .frame(width: size, height: size)
+            GrokMarkShape().fill(source.brandColor, style: FillStyle(eoFill: true))
         case .antigravity:
-            AntigravityMarkShape()
-                .fill(source.brandColor)
-                .frame(width: size, height: size)
+            AntigravityMarkShape().fill(source.brandColor)
         case .kimi:
-            KimiMarkShape()
-                .fill(source.brandColor)
-                .frame(width: size, height: size)
+            KimiMarkShape().fill(source.brandColor)
+        case .opencode:
+            EmptyView()
         }
     }
 }
@@ -369,7 +427,7 @@ struct SourceLabelBadge: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            SourceBadge(source: source, size: size)
+            SourceBadge(source: source, size: size, onDark: true)
             Text(source.rawValue)  // rawValue 即 "claude"/"codex"
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(source.brandColor)
@@ -393,7 +451,7 @@ struct PulsingSourceBadges: View {
                 if sources.count == 1 {
                     SourceLabelBadge(source: source, size: 13 * scale)
                 } else {
-                    SourceBadge(source: source, size: 13 * scale)
+                    SourceBadge(source: source, size: 13 * scale, onDark: true)
                 }
             }
         }
@@ -802,3 +860,4 @@ func formatDuration(_ seconds: TimeInterval) -> String {
     let h = total / 3600, m = (total % 3600) / 60
     return m == 0 ? "\(h) 小时" : "\(h) 小时 \(m) 分"
 }
+

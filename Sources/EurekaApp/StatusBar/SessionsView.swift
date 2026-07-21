@@ -370,7 +370,7 @@ private struct SessionRow: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(session.source == .opencode)
-                .help(session.source == .opencode ? "opencode 会话不支持删除" : "")
+                .help(session.source == .opencode ? "OpenCode 会话不支持删除" : "")
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {

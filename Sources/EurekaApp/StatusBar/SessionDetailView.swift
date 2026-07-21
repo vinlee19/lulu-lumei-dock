@@ -127,7 +127,7 @@ struct SessionDetailView: View {
                 .tint(.red)
                 .disabled(session.source == .opencode)
                 .help(session.source == .opencode
-                    ? "opencode 会话存于共享数据库，暂不支持删除" : "移入废纸篓，可恢复")
+                    ? "OpenCode 会话存于共享数据库，暂不支持删除" : "移入废纸篓，可恢复")
                 Menu {
                     Button("复制为 Markdown") { copyMarkdown(session) }
                     Button("导出为 .md 文件…") { exportMarkdown(session) }

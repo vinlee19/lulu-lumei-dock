@@ -167,7 +167,7 @@ enum EurekaCLI {
             let newGrok = try grok.scanOnce()  // grok 无 token，仅入工具调用计数
             let newKimi = try kimi.scanOnce()
             FileHandle.standardError.write(Data(
-                "扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，opencode +\(newOpencode) 条，grok 工具 +\(newGrok)，kimi +\(newKimi) 条\n".utf8))
+                "扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，grok 工具 +\(newGrok)，kimi +\(newKimi) 条\n".utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(

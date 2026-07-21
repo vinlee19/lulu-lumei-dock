@@ -13,7 +13,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         switch self {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
-        case .opencode: return "opencode"
+        case .opencode: return "OpenCode"
         case .grok: return "Grok"
         case .antigravity: return "Antigravity"
         case .kimi: return "Kimi"

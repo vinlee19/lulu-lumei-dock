@@ -38,6 +38,7 @@ let package = Package(
                 .copy("Resources/pricing.json"),
                 .copy("Resources/AppIcon.icns"),
                 .copy("Resources/mascots"),
+                .copy("Resources/source-logos"),
             ],
             linkerSettings: [
                 // 手工组装 .app 时从 Contents/Frameworks 加载 Sparkle.framework。

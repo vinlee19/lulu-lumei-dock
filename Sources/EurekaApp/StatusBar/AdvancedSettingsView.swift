@@ -23,7 +23,7 @@ struct AdvancedSettingsView: View {
             CollapsibleCard(
                 icon: "folder.badge.gearshape", tint: Theme.brand,
                 title: "配置文件目录",
-                subtitle: "Claude、Codex、opencode 与 lulu-lumei-dock 的数据存储路径"
+                subtitle: "Claude、Codex、OpenCode 与 lulu-lumei-dock 的数据存储路径"
             ) {
                 pathsContent
             }
@@ -97,7 +97,7 @@ struct AdvancedSettingsView: View {
         let home = FileManager.default.homeDirectoryForCurrentUser
         pathRow("Claude", home.appendingPathComponent(".claude"))
         pathRow("Codex", home.appendingPathComponent(".codex"))
-        pathRow("opencode", home.appendingPathComponent(".config/opencode"))
+        pathRow("OpenCode", home.appendingPathComponent(".config/opencode"))
         pathRow("lulu-lumei-dock 数据", SpoolPaths.root())
     }
 
