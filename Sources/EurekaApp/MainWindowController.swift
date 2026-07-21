@@ -29,8 +29,14 @@ final class MainWindowController: NSWindowController {
         self.limitsService = limitsService
         self.navigation = navigation
 
+        // 默认尺寸：屏幕可见区域的 75%，上限 1440×900、下限 840×540（= minSize）
+        let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        let defaultSize = NSSize(
+            width: min(max(visible.width * 0.75, 840), 1440),
+            height: min(max(visible.height * 0.75, 540), 900))
+
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            contentRect: NSRect(origin: .zero, size: defaultSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
@@ -60,13 +66,14 @@ final class MainWindowController: NSWindowController {
         hosting.sizingOptions = []
         window.contentViewController = hosting
         // contentViewController 赋值会把窗口缩到内容 fitting 尺寸，这里再钉回默认尺寸
-        window.setContentSize(NSSize(width: 900, height: 620))
-        window.setFrameAutosaveName("EurekaMainWindow")
+        window.setContentSize(defaultSize)
+        // key 带 2：v0.1.8 前的 shrink-bug 会把压缩后的小窗存进旧 key，换名一次性抛弃脏数据
+        window.setFrameAutosaveName("EurekaMainWindow2")
         // 有已存 frame 则恢复，否则居中首开
-        if !window.setFrameUsingName("EurekaMainWindow") {
+        if !window.setFrameUsingName("EurekaMainWindow2") {
             window.center()
         } else if window.frame.width < 840 || window.frame.height < 540 {
-            // 旧版本曾把被 SwiftUI 压缩的小窗存进 autosave；恢复时钳回最小尺寸
+            // 恢复到低于最小尺寸的 frame 时钳回（防外部写入的异常值）
             var frame = window.frame
             frame.size.width = max(frame.size.width, 840)
             frame.size.height = max(frame.size.height, 540)
