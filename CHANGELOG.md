@@ -4,6 +4,16 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-07-21
+
+### Added
+
+- **Weekly vibe-coding report.** A new "weekly" sub-tab in the usage dashboard
+  summarizes any week at a glance: active hours, total tokens and estimated
+  cost, per-source / model / project rankings, the three priciest sessions,
+  task success/error/interrupted counts, a skill leaderboard, and late-night
+  coding days. Flip between weeks and export the report as Markdown.
+
 ## [0.2.1] - 2026-07-21
 
 ### Added
@@ -183,6 +193,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.2.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.2
 [0.2.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.1
 [0.2.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.0
 [0.1.9]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.9
