@@ -198,6 +198,7 @@ public enum SkillMemoryIndexer {
         opencodeSkillsRoot: URL? = nil,
         grokSkillsRoot: URL? = nil,
         kimiSkillsRoot: URL? = nil,
+        geminiSkillsRoot: URL? = nil,
         antigravitySkillsRoots: [URL] = [],
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
@@ -228,7 +229,15 @@ public enum SkillMemoryIndexer {
             result += scanSkillRoot(
                 disabledRoot(for: kimiSkillsRoot), source: .kimi, enabled: false, scope: .system)
         }
-        // antigravity：用户 ~/.gemini/skills + 内置 builtin/skills（各含停用区）
+        // gemini：~/.gemini/skills（SKILL.md 与 Claude 同构；该目录同时被 Antigravity 共用，
+        // 归 Gemini 一次避免双源重复列出）
+        if let geminiSkillsRoot {
+            result += scanSkillRoot(
+                geminiSkillsRoot, source: .gemini, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: geminiSkillsRoot), source: .gemini, enabled: false, scope: .system)
+        }
+        // antigravity：内置 builtin/skills（用户级 ~/.gemini/skills 已归 gemini）
         for root in antigravitySkillsRoots {
             result += scanSkillRoot(root, source: .antigravity, enabled: true, scope: .system)
             result += scanSkillRoot(
@@ -294,6 +303,7 @@ public enum SkillMemoryIndexer {
         claudeProjectsRoot: URL,
         grokMemoryRoot: URL? = nil,
         kimiHome: URL? = nil,
+        geminiHome: URL? = nil,
         projectRoots: [(root: URL, name: String)] = [],
         codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
     ) -> [MemoryEntry] {
@@ -379,11 +389,19 @@ public enum SkillMemoryIndexer {
                 scope: "全局", kind: .instructions)
         }
 
-        // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、
+        // gemini 全局记忆 ~/.gemini/GEMINI.md（GEMINI.md-first）
+        if let geminiHome {
+            add(geminiHome.appendingPathComponent("GEMINI.md"), source: .gemini,
+                scope: "全局", kind: .instructions)
+        }
+
+        // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、GEMINI.md→Gemini、
         // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
         // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
         for (root, name) in projectRoots {
             add(root.appendingPathComponent("CLAUDE.md"), source: .claude,
+                scope: name, projectName: name, kind: .instructions)
+            add(root.appendingPathComponent("GEMINI.md"), source: .gemini,
                 scope: name, projectName: name, kind: .instructions)
             add(root.appendingPathComponent(".kimi-code/AGENTS.md"),
                 source: .kimi, scope: name, projectName: name, kind: .instructions)

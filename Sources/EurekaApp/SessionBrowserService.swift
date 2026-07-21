@@ -130,6 +130,8 @@ final class SessionBrowserService: ObservableObject {
             indexed += AntigravitySessionIndexer.index(
                 conversationsRoot: AntigravityPaths.conversationsRoot())
             indexed += KimiSessionIndexer.index(sessionsRoot: KimiPaths.sessionsRoot())
+            indexed += GeminiSessionIndexer.index(
+                tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
 
             // 会话级费用：逐会话×模型聚合后按价格表折算
             var costMap: [String: SessionCost] = [:]
@@ -353,6 +355,7 @@ final class SessionBrowserService: ObservableObject {
         case .grok: resume = "grok --resume \(session.id)"
         case .antigravity: resume = "agy --conversation \(session.id)"
         case .kimi: resume = "kimi --session \(session.id)"
+        case .gemini: resume = "gemini --resume \(session.id)"
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume

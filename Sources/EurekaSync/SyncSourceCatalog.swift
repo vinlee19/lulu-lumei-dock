@@ -39,6 +39,9 @@ public struct SyncRoots {
     public var grokSessions: URL     // ~/.grok/sessions（events/chat_history *.jsonl）
     public var kimiSkills: URL       // ~/.kimi-code/skills
     public var kimiSessions: URL     // ~/.kimi-code/sessions（wire.jsonl + state.json）
+    public var geminiHome: URL       // ~/.gemini（GEMINI.md + projects.json）
+    public var geminiSessions: URL   // ~/.gemini/tmp（chats/session-*.jsonl）
+    public var geminiSkills: URL     // ~/.gemini/skills
     public var claudePlans: URL      // ~/.claude/plans（Claude 计划，本就是 .md）
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
@@ -50,6 +53,7 @@ public struct SyncRoots {
         opencodeSkills: URL, opencodeDB: URL,
         grokSkills: URL, grokMemory: URL, grokSessions: URL,
         kimiSkills: URL, kimiSessions: URL,
+        geminiHome: URL, geminiSessions: URL, geminiSkills: URL,
         claudePlans: URL, plansStaging: URL
     ) {
         self.claudeHome = claudeHome
@@ -65,6 +69,9 @@ public struct SyncRoots {
         self.grokSessions = grokSessions
         self.kimiSkills = kimiSkills
         self.kimiSessions = kimiSessions
+        self.geminiHome = geminiHome
+        self.geminiSessions = geminiSessions
+        self.geminiSkills = geminiSkills
         self.claudePlans = claudePlans
         self.plansStaging = plansStaging
     }
@@ -172,6 +179,16 @@ public enum SyncSourceCatalog {
         walk(root: roots.kimiSkills, category: "kimi/skills", priority: 0, include: always)
         walk(root: disabledSibling(of: roots.kimiSkills),
              category: "kimi/skills.eureka-disabled", priority: 0, include: always)
+
+        // gemini：全局 GEMINI.md + projects.json + 会话 chats + skills（含停用区）
+        add(roots.geminiHome.appendingPathComponent("GEMINI.md"),
+            category: "gemini", relativePath: "GEMINI.md", priority: 0)
+        add(roots.geminiHome.appendingPathComponent("projects.json"),
+            category: "gemini", relativePath: "projects.json", priority: 0)
+        walk(root: roots.geminiSessions, category: "gemini/sessions", priority: 1, include: jsonlOnly)
+        walk(root: roots.geminiSkills, category: "gemini/skills", priority: 0, include: always)
+        walk(root: disabledSibling(of: roots.geminiSkills),
+             category: "gemini/skills.eureka-disabled", priority: 0, include: always)
 
         // 计划（.md 首类工件）：Claude 直接文件；Codex/opencode 由 PlanMaterializer 物化到暂存
         walk(root: roots.claudePlans, category: "claude/plans", priority: 0, include: markdownOnly)

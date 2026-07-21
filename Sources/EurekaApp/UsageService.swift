@@ -111,6 +111,7 @@ final class UsageService: ObservableObject {
     private var opencodeScanner: OpencodeUsageScanner?
     private var grokScanner: GrokUsageScanner?
     private var kimiScanner: KimiUsageScanner?
+    private var geminiScanner: GeminiUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
     private var pricing = PricingTable(models: [])
 
@@ -119,6 +120,7 @@ final class UsageService: ObservableObject {
     private static let opencodeHealthName = "用量扫描 OpenCode"
     private static let grokHealthName = "用量扫描 Grok"
     private static let kimiHealthName = "用量扫描 Kimi"
+    private static let geminiHealthName = "用量扫描 Gemini"
 
     func start() {
         HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
@@ -126,6 +128,7 @@ final class UsageService: ObservableObject {
         HealthRegistry.shared.register(Self.opencodeHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.grokHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.kimiHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.geminiHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -141,6 +144,9 @@ final class UsageService: ObservableObject {
                     sessionsRoot: GrokPaths.sessionsRoot(), store: store)
                 self.kimiScanner = KimiUsageScanner(
                     sessionsRoot: KimiPaths.sessionsRoot(), store: store)
+                self.geminiScanner = GeminiUsageScanner(
+                    tmpRoot: GeminiPaths.tmpRoot(),
+                    projectsFile: GeminiPaths.projectsFile(), store: store)
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
@@ -429,6 +435,9 @@ final class UsageService: ObservableObject {
             let kimiNew = try kimiScanner?.scanOnce() ?? 0
             HealthRegistry.shared.beat(Self.kimiHealthName)
             if kimiNew > 0 { HealthRegistry.shared.event(Self.kimiHealthName) }
+            let geminiNew = try geminiScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.geminiHealthName)
+            if geminiNew > 0 { HealthRegistry.shared.event(Self.geminiHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             // 全文索引与用量同节奏增量跑（指纹无变化时近零开销）；开关默认开

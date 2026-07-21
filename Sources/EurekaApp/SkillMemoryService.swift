@@ -48,7 +48,7 @@ final class SkillMemoryService: ObservableObject {
                     source: .grok, projectName: name))
                 projectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".gemini/skills", isDirectory: true),
-                    source: .antigravity, projectName: name))
+                    source: .gemini, projectName: name))
                 projectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".kimi-code/skills", isDirectory: true),
                     source: .kimi, projectName: name))
@@ -72,7 +72,8 @@ final class SkillMemoryService: ObservableObject {
                 opencodeSkillsRoot: OpencodePaths.skillsRoot(),
                 grokSkillsRoot: GrokPaths.skillsRoot(),
                 kimiSkillsRoot: KimiPaths.skillsRoot(),
-                antigravitySkillsRoots: [AntigravityPaths.userSkillsRoot()],
+                geminiSkillsRoot: GeminiPaths.skillsRoot(),
+                antigravitySkillsRoots: [],
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
             let memories = SkillMemoryIndexer.indexMemory(
@@ -82,6 +83,7 @@ final class SkillMemoryService: ObservableObject {
                 claudeProjectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
                 grokMemoryRoot: GrokPaths.memoryRoot(),
                 kimiHome: KimiPaths.configHome(),
+                geminiHome: GeminiPaths.configHome(),
                 projectRoots: repoRoots,
                 codexInstructionScopes: codexInstructionScopes)
             DispatchQueue.main.async {
@@ -180,6 +182,7 @@ final class SkillMemoryService: ObservableObject {
             case .grok: root = GrokPaths.skillsRoot()
             case .antigravity: root = AntigravityPaths.userSkillsRoot()
             case .kimi: root = KimiPaths.skillsRoot()
+            case .gemini: root = GeminiPaths.skillsRoot()
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -243,6 +246,23 @@ final class SkillMemoryService: ObservableObject {
                         at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                     if !FileManager.default.fileExists(atPath: file.path) {
                         try "# AGENTS.md\n\n".write(to: file, atomically: true, encoding: .utf8)
+                    }
+                    ok = true
+                } catch {
+                    self?.report(error)
+                }
+                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                return
+            case .gemini:
+                // gemini 记忆 = 全局 GEMINI.md（GEMINI.md-first，无 memories 目录概念）：
+                // 直接创建 ~/.gemini/GEMINI.md（name 参数忽略），已存在则不覆盖
+                let file = GeminiPaths.globalGeminiMd()
+                var ok = false
+                do {
+                    try FileManager.default.createDirectory(
+                        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if !FileManager.default.fileExists(atPath: file.path) {
+                        try "# GEMINI.md\n\n".write(to: file, atomically: true, encoding: .utf8)
                     }
                     ok = true
                 } catch {

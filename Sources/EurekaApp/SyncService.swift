@@ -280,6 +280,9 @@ final class SyncService: ObservableObject {
             grokSessions: GrokPaths.sessionsRoot(),
             kimiSkills: KimiPaths.skillsRoot(),
             kimiSessions: KimiPaths.sessionsRoot(),
+            geminiHome: GeminiPaths.configHome(),
+            geminiSessions: GeminiPaths.tmpRoot(),
+            geminiSkills: GeminiPaths.skillsRoot(),
             claudePlans: PlanMaterializer.defaultClaudePlansDir(),
             plansStaging: PlanMaterializer.defaultStagingRoot())
     }

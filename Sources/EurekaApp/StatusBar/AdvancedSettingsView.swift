@@ -98,6 +98,7 @@ struct AdvancedSettingsView: View {
         pathRow("Claude", home.appendingPathComponent(".claude"))
         pathRow("Codex", home.appendingPathComponent(".codex"))
         pathRow("OpenCode", home.appendingPathComponent(".config/opencode"))
+        pathRow("Gemini", home.appendingPathComponent(".gemini"))
         pathRow("lulu-lumei-dock 数据", SpoolPaths.root())
     }
 

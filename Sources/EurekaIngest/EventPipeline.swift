@@ -19,6 +19,7 @@ public final class EventPipeline {
     private var grokTailer: GrokRolloutTailer?
     private var antigravityTailer: AntigravityActivityTailer?
     private var kimiTailer: KimiWireTailer?
+    private var geminiTailer: GeminiChatTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -35,6 +36,8 @@ public final class EventPipeline {
         grokSessionsRoot: URL = GrokPaths.sessionsRoot(),
         antigravityConversationsRoot: URL = AntigravityPaths.conversationsRoot(),
         kimiSessionsRoot: URL = KimiPaths.sessionsRoot(),
+        geminiTmpRoot: URL = GeminiPaths.tmpRoot(),
+        geminiProjectsFile: URL = GeminiPaths.projectsFile(),
         auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -89,6 +92,12 @@ public final class EventPipeline {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // gemini 无 hook/notify，尾随 tmp/*/chats/session-*.jsonl 做实时
+        geminiTailer = GeminiChatTailer(
+            tmpRoot: geminiTmpRoot, projectsFile: geminiProjectsFile) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -98,6 +107,7 @@ public final class EventPipeline {
         grokTailer?.start(pollInterval: 2)
         antigravityTailer?.start(pollInterval: 2)
         kimiTailer?.start(pollInterval: 2)
+        geminiTailer?.start(pollInterval: 2)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -115,6 +125,7 @@ public final class EventPipeline {
         grokTailer?.stop()
         antigravityTailer?.stop()
         kimiTailer?.stop()
+        geminiTailer?.stop()
         claudeWatcher?.stop()
     }
 

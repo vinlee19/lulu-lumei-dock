@@ -64,7 +64,47 @@ public enum TranscriptReader {
             return loadAntigravity()
         case .kimi:
             return loadKimi(path: session.transcriptPath, maxMessages: maxMessages)
+        case .gemini:
+            return loadGemini(path: session.transcriptPath, maxMessages: maxMessages)
         }
+    }
+
+    // MARK: - Gemini（chats/session-*.jsonl；$set 补丁行与注入的 session_context 跳过）
+
+    public static func loadGemini(path: String, maxMessages: Int) -> Result {
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+        // CLI 流式写入会把同一消息行重复写（真实观测）→ 按消息 id 去重
+        var seenIds = Set<String>()
+
+        forEachJSONLine(path: path) { root in
+            guard messages.count < maxMessages else {
+                truncated = true
+                return false
+            }
+            guard let message = GeminiChatDecoder.parseMessage(root) else { return true }
+            if let id = message.id, !seenIds.insert(id).inserted { return true }
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return true }
+            switch message.type {
+            case "user" where !GeminiChatDecoder.isSessionContext(message.text):
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .user, text: text,
+                    timestamp: message.timestamp))
+            case "gemini":
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .assistant, text: text,
+                    timestamp: message.timestamp))
+            case "error":
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .error, text: text,
+                    timestamp: message.timestamp))
+            default:
+                break  // info / session_context 注入不进对话流
+            }
+            return true
+        }
+        return Result(messages: messages, truncated: truncated)
     }
 
     // MARK: - Antigravity（conversations/<uuid>.db，内容为私有二进制 protobuf）

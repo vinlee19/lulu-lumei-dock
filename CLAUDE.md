@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI** task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
+Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI**（以及 OpenCode/Grok/Antigravity/Kimi/Gemini）task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
 
 ## Commands
 

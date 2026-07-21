@@ -180,6 +180,7 @@ extension AgentSource {
         case .grok: return Color(red: 0.129, green: 0.588, blue: 0.953)    // xAI Dodger 蓝 #2196F3
         case .antigravity: return Color(red: 0.898, green: 0.298, blue: 0.612)  // 品红/玫 #E54C9C
         case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot 蔚蓝 #1783FF
+        case .gemini: return Color(red: 0.259, green: 0.522, blue: 0.957)  // Google 蓝 #4285F4
         }
     }
 }
@@ -353,6 +354,7 @@ enum SourceLogo {
         case .grok: name = dark ? "logo-grok-dark" : "logo-grok"
         case .antigravity: name = "logo-antigravity"
         case .kimi: name = "logo-kimi"
+        case .gemini: name = "logo-gemini"
         case .opencode: return nil
         }
         lock.lock()
@@ -414,9 +416,33 @@ struct SourceBadge: View {
             AntigravityMarkShape().fill(source.brandColor)
         case .kimi:
             KimiMarkShape().fill(source.brandColor)
+        case .gemini:
+            GeminiMarkShape().fill(source.brandColor)
         case .opencode:
             EmptyView()
         }
+    }
+}
+
+/// Gemini 兜底标记：四角星（官方 spark 的极简几何近似，仅资产缺失时使用）
+struct GeminiMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let cx = rect.midX, cy = rect.midY
+        let r = side / 2
+        let inner = r * 0.28
+        var path = Path()
+        path.move(to: CGPoint(x: cx, y: cy - r))
+        path.addQuadCurve(
+            to: CGPoint(x: cx + r, y: cy), control: CGPoint(x: cx + inner, y: cy - inner))
+        path.addQuadCurve(
+            to: CGPoint(x: cx, y: cy + r), control: CGPoint(x: cx + inner, y: cy + inner))
+        path.addQuadCurve(
+            to: CGPoint(x: cx - r, y: cy), control: CGPoint(x: cx - inner, y: cy + inner))
+        path.addQuadCurve(
+            to: CGPoint(x: cx, y: cy - r), control: CGPoint(x: cx - inner, y: cy - inner))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -860,4 +886,5 @@ func formatDuration(_ seconds: TimeInterval) -> String {
     let h = total / 3600, m = (total % 3600) / 60
     return m == 0 ? "\(h) 小时" : "\(h) 小时 \(m) 分"
 }
+
 

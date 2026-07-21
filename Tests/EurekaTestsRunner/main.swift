@@ -69,5 +69,6 @@ claudeAuditDecoderTests(t)
 searchIndexTests(t)
 limitForecasterTests(t)
 weeklyReportTests(t)
+geminiIngestTests(t)
 
 t.finish()

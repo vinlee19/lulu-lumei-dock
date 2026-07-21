@@ -24,6 +24,8 @@ public final class TranscriptSearchIndexer {
             sessionsRoot: CodexRolloutTailer.defaultSessionsRoot())
         sessions += GrokSessionIndexer.index(sessionsRoot: GrokPaths.sessionsRoot())
         sessions += KimiSessionIndexer.index(sessionsRoot: KimiPaths.sessionsRoot())
+        sessions += GeminiSessionIndexer.index(
+            tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
         return indexOnce(sessions: sessions)
     }
 

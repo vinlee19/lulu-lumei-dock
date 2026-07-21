@@ -8,6 +8,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case grok
     case antigravity
     case kimi
+    case gemini
 
     public var displayName: String {
         switch self {
@@ -17,6 +18,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         case .grok: return "Grok"
         case .antigravity: return "Antigravity"
         case .kimi: return "Kimi"
+        case .gemini: return "Gemini CLI"
         }
     }
 }

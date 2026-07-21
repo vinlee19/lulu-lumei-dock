@@ -37,6 +37,9 @@ final class CLIToolsService: ObservableObject {
         Tool(id: "kimi", name: "Kimi Code CLI", source: .kimi,
              command: "kimi", npmPackage: "@moonshot-ai/kimi-code",
              installCommand: "npm install -g @moonshot-ai/kimi-code"),
+        Tool(id: "gemini", name: "Gemini CLI", source: .gemini,
+             command: "gemini", npmPackage: "@google/gemini-cli",
+             installCommand: "npm install -g @google/gemini-cli"),
     ]
     @Published private(set) var detected = false
 
