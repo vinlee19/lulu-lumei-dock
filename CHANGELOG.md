@@ -4,6 +4,36 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.1.8] - 2026-07-21
+
+### Changed
+
+- **Sidebar navigation.** The eleven top capsule tabs are replaced by a fixed
+  left sidebar with nine entries (brand-tinted selection, version footer).
+  Backup and audit are no longer top-level tabs: both now live as sections
+  inside Settings, and the audit config card moved from General to sit above
+  the audit event list.
+- **Chat-style session transcript.** User prompts render as right-aligned,
+  content-hugging brand-tinted bubbles; assistant replies as plain flowing
+  markdown. The persistent role/timestamp row is gone — hovering a message
+  reveals a floating chip with the timestamp and a copy button. Markdown body
+  scaled up to 13 pt with wider spacing, transcript margins narrowed to sit
+  closer to the flanking panes, search hits highlighted in gold, and tool-trail
+  rows recolored to the brand accent.
+- **Purple-gold app icon.** The app icon is repainted as an indigo gradient
+  plate with a gold-gradient "Lu" mark, using the same color values as
+  `Theme.brand` / `Theme.gold`, replacing the old teal palette that no longer
+  matched the panel theme.
+
+### Fixed
+
+- **Main window no longer opens squeezed.** The SwiftUI hosting controller
+  used to drive the freshly opened window down to its minimum size, causing
+  overlapping text until the user resized it manually. The window now opens at
+  its intended 900×620 (or the saved frame, clamped to the new 840×540 floor).
+- Long markdown paragraphs could truncate to a single line with an ellipsis in
+  tight layouts; transcript, list, and quote text now always wraps.
+
 ## [0.1.7] - 2026-07-21
 
 ### Changed
@@ -111,6 +141,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.1.8]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.8
 [0.1.7]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.7
 [0.1.6]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.5
