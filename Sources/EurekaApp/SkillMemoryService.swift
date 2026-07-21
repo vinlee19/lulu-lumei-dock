@@ -52,6 +52,9 @@ final class SkillMemoryService: ObservableObject {
                 projectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".kimi-code/skills", isDirectory: true),
                     source: .kimi, projectName: name))
+                projectRoots.append(ProjectScopedRoot(
+                    root: root.appendingPathComponent(".qwen/skills", isDirectory: true),
+                    source: .qwen, projectName: name))
             }
             // 内置/携带技能根（只读，供详情矩阵与跨源判定；不进列表）
             var bundledRoots: [(root: URL, source: AgentSource)] = []
@@ -73,6 +76,7 @@ final class SkillMemoryService: ObservableObject {
                 grokSkillsRoot: GrokPaths.skillsRoot(),
                 kimiSkillsRoot: KimiPaths.skillsRoot(),
                 geminiSkillsRoot: GeminiPaths.skillsRoot(),
+                qwenSkillsRoot: QwenPaths.skillsRoot(),
                 antigravitySkillsRoots: [],
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
@@ -84,6 +88,7 @@ final class SkillMemoryService: ObservableObject {
                 grokMemoryRoot: GrokPaths.memoryRoot(),
                 kimiHome: KimiPaths.configHome(),
                 geminiHome: GeminiPaths.configHome(),
+                qwenHome: QwenPaths.configHome(),
                 projectRoots: repoRoots,
                 codexInstructionScopes: codexInstructionScopes)
             DispatchQueue.main.async {
@@ -183,6 +188,7 @@ final class SkillMemoryService: ObservableObject {
             case .antigravity: root = AntigravityPaths.userSkillsRoot()
             case .kimi: root = KimiPaths.skillsRoot()
             case .gemini: root = GeminiPaths.skillsRoot()
+            case .qwen: root = QwenPaths.skillsRoot()
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -253,6 +259,8 @@ final class SkillMemoryService: ObservableObject {
                 }
                 DispatchQueue.main.async { completion?(ok); self?.refresh() }
                 return
+            case .qwen:
+                dir = QwenPaths.memoriesRoot()
             case .gemini:
                 // gemini 记忆 = 全局 GEMINI.md（GEMINI.md-first，无 memories 目录概念）：
                 // 直接创建 ~/.gemini/GEMINI.md（name 参数忽略），已存在则不覆盖

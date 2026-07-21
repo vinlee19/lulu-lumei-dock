@@ -283,6 +283,9 @@ final class SyncService: ObservableObject {
             geminiHome: GeminiPaths.configHome(),
             geminiSessions: GeminiPaths.tmpRoot(),
             geminiSkills: GeminiPaths.skillsRoot(),
+            qwenProjects: QwenPaths.projectsRoot(),
+            qwenMemories: QwenPaths.memoriesRoot(),
+            qwenSkills: QwenPaths.skillsRoot(),
             claudePlans: PlanMaterializer.defaultClaudePlansDir(),
             plansStaging: PlanMaterializer.defaultStagingRoot())
     }

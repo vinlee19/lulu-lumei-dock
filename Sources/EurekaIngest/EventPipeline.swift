@@ -20,6 +20,7 @@ public final class EventPipeline {
     private var antigravityTailer: AntigravityActivityTailer?
     private var kimiTailer: KimiWireTailer?
     private var geminiTailer: GeminiChatTailer?
+    private var qwenTailer: QwenChatTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -38,6 +39,7 @@ public final class EventPipeline {
         kimiSessionsRoot: URL = KimiPaths.sessionsRoot(),
         geminiTmpRoot: URL = GeminiPaths.tmpRoot(),
         geminiProjectsFile: URL = GeminiPaths.projectsFile(),
+        qwenProjectsRoot: URL = QwenPaths.projectsRoot(),
         auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -98,6 +100,11 @@ public final class EventPipeline {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // qwen 无 hook/notify，尾随 projects/*/chats/*.jsonl 做实时
+        qwenTailer = QwenChatTailer(projectsRoot: qwenProjectsRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -108,6 +115,7 @@ public final class EventPipeline {
         antigravityTailer?.start(pollInterval: 2)
         kimiTailer?.start(pollInterval: 2)
         geminiTailer?.start(pollInterval: 2)
+        qwenTailer?.start(pollInterval: 2)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -126,6 +134,7 @@ public final class EventPipeline {
         antigravityTailer?.stop()
         kimiTailer?.stop()
         geminiTailer?.stop()
+        qwenTailer?.stop()
         claudeWatcher?.stop()
     }
 

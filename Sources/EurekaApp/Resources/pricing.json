@@ -19,6 +19,9 @@
     { "match": "gemini-3.5-pro", "inputPerM": 1.25, "outputPerM": 10, "cacheReadPerM": 0.31 },
     { "match": "gemini-2.5-flash", "inputPerM": 0.3, "outputPerM": 2.5, "cacheReadPerM": 0.075 },
     { "match": "gemini-2.5-pro", "inputPerM": 1.25, "outputPerM": 10, "cacheReadPerM": 0.31 },
-    { "match": "gemini", "unknown": true }
+    { "match": "gemini", "unknown": true },
+    { "match": "qwen3.7-max", "inputPerM": 1.6, "outputPerM": 6.4, "cacheReadPerM": 0.4 },
+    { "match": "qwen3.6-plus", "inputPerM": 0.4, "outputPerM": 1.2, "cacheReadPerM": 0.1 },
+    { "match": "qwen", "unknown": true }
   ]
 }

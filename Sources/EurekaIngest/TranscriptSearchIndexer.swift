@@ -26,6 +26,7 @@ public final class TranscriptSearchIndexer {
         sessions += KimiSessionIndexer.index(sessionsRoot: KimiPaths.sessionsRoot())
         sessions += GeminiSessionIndexer.index(
             tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
+        sessions += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
         return indexOnce(sessions: sessions)
     }
 

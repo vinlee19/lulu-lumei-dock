@@ -48,6 +48,11 @@ final class PlansService: ObservableObject {
                 sessionsRoot: GrokPaths.sessionsRoot(), into: staging)
             PlanMaterializer.materializeKimi(
                 sessionsRoot: KimiPaths.sessionsRoot(), into: staging)
+            PlanMaterializer.materializeGemini(
+                tmpRoot: GeminiPaths.tmpRoot(),
+                projectsFile: GeminiPaths.projectsFile(), into: staging)
+            PlanMaterializer.materializeQwen(
+                projectsRoot: QwenPaths.projectsRoot(), into: staging)
             var entries = PlanMaterializer.index(
                 claudePlansDir: PlanMaterializer.defaultClaudePlansDir(), stagingRoot: staging)
             entries += PlanMaterializer.indexProjectPlans(

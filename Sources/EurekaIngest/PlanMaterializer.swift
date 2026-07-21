@@ -449,7 +449,86 @@ public enum PlanMaterializer {
                 source: .grok, into: &result)
         collect(dir: stagingRoot.appendingPathComponent("kimi", isDirectory: true),
                 source: .kimi, into: &result)
+        collect(dir: stagingRoot.appendingPathComponent("gemini", isDirectory: true),
+                source: .gemini, into: &result)
+        collect(dir: stagingRoot.appendingPathComponent("qwen", isDirectory: true),
+                source: .qwen, into: &result)
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    // MARK: - Gemini / Qwen：无显式 plan 产物 → 启发式提取（保守：只认任务清单）
+
+    /// 助手消息"像一份工作清单"的保守判定：≥3 条任务清单行（- [ ] / - [x] / - [~]）
+    static func looksLikeChecklistPlan(_ text: String) -> Bool {
+        var count = 0
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            for marker in ["- [ ]", "- [x]", "- [X]", "- [~]"] where trimmed.hasPrefix(marker) {
+                count += 1
+                break
+            }
+            if count >= 3 { return true }
+        }
+        return false
+    }
+
+    /// Gemini：每会话取最后一条"像清单"的助手消息（与 Codex 取最后一次 update_plan 同语义）
+    @discardableResult
+    public static func materializeGemini(
+        tmpRoot: URL, projectsFile: URL, into stagingRoot: URL
+    ) -> Int {
+        let outDir = stagingRoot.appendingPathComponent("gemini", isDirectory: true)
+        var changed = 0
+        var expected = Set<String>()
+        for session in GeminiSessionIndexer.index(
+            tmpRoot: tmpRoot, projectsFile: projectsFile, maxSessions: 1000) {
+            let result = TranscriptReader.loadGemini(
+                path: session.transcriptPath, maxMessages: 2000)
+            guard let plan = result.messages.last(where: {
+                $0.role == .assistant && looksLikeChecklistPlan($0.text)
+            }) else { continue }
+            let name = "gemini-\(session.id.prefix(8)).md"
+            expected.insert(name)
+            let title = summarizeTitle(session.name ?? "") ?? "Gemini 计划"
+            let markdown = "# \(title)\n\n> Gemini 工作清单（启发式提取，只读物化副本） · 会话 \(session.id)\n\n\(plan.text)\n"
+            if writeIfChanged(markdown, to: outDir.appendingPathComponent(name)) { changed += 1 }
+        }
+        changed += removeStale(in: outDir, keeping: expected)
+        return changed
+    }
+
+    /// Qwen：同 Gemini 的启发式
+    @discardableResult
+    public static func materializeQwen(projectsRoot: URL, into stagingRoot: URL) -> Int {
+        let outDir = stagingRoot.appendingPathComponent("qwen", isDirectory: true)
+        var changed = 0
+        var expected = Set<String>()
+        for session in QwenSessionIndexer.index(projectsRoot: projectsRoot, maxSessions: 1000) {
+            let result = TranscriptReader.loadQwen(
+                path: session.transcriptPath, maxMessages: 2000)
+            guard let plan = result.messages.last(where: {
+                $0.role == .assistant && looksLikeChecklistPlan($0.text)
+            }) else { continue }
+            let name = "qwen-\(session.id.prefix(8)).md"
+            expected.insert(name)
+            let title = summarizeTitle(session.name ?? "") ?? "Qwen 计划"
+            let markdown = "# \(title)\n\n> Qwen 工作清单（启发式提取，只读物化副本） · 会话 \(session.id)\n\n\(plan.text)\n"
+            if writeIfChanged(markdown, to: outDir.appendingPathComponent(name)) { changed += 1 }
+        }
+        changed += removeStale(in: outDir, keeping: expected)
+        return changed
+    }
+
+    /// 清理不再对应任何会话的陈旧物化副本
+    private static func removeStale(in outDir: URL, keeping expected: Set<String>) -> Int {
+        let fm = FileManager.default
+        var removed = 0
+        let staged = (try? fm.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)) ?? []
+        for file in staged
+        where file.pathExtension.lowercased() == "md" && !expected.contains(file.lastPathComponent) {
+            if (try? fm.removeItem(at: file)) != nil { removed += 1 }
+        }
+        return removed
     }
 
     /// 项目仓库内的 plan 文档：`<root>/plans/` + `<root>/docs` 子树内名为 `plans` 的目录（深度 ≤4）。

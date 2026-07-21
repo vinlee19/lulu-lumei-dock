@@ -40,6 +40,9 @@ final class CLIToolsService: ObservableObject {
         Tool(id: "gemini", name: "Gemini CLI", source: .gemini,
              command: "gemini", npmPackage: "@google/gemini-cli",
              installCommand: "npm install -g @google/gemini-cli"),
+        Tool(id: "qwen", name: "Qwen Code CLI", source: .qwen,
+             command: "qwen", npmPackage: "@qwen-code/qwen-code",
+             installCommand: "npm install -g @qwen-code/qwen-code"),
     ]
     @Published private(set) var detected = false
 

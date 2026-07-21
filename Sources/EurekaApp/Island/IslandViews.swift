@@ -181,6 +181,7 @@ extension AgentSource {
         case .antigravity: return Color(red: 0.898, green: 0.298, blue: 0.612)  // 品红/玫 #E54C9C
         case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot 蔚蓝 #1783FF
         case .gemini: return Color(red: 0.259, green: 0.522, blue: 0.957)  // Google 蓝 #4285F4
+        case .qwen: return Color(red: 0.38, green: 0.36, blue: 0.93)       // 通义紫 #615CED
         }
     }
 }
@@ -355,6 +356,7 @@ enum SourceLogo {
         case .antigravity: name = "logo-antigravity"
         case .kimi: name = "logo-kimi"
         case .gemini: name = "logo-gemini"
+        case .qwen: name = "logo-qwen"
         case .opencode: return nil
         }
         lock.lock()
@@ -418,6 +420,8 @@ struct SourceBadge: View {
             KimiMarkShape().fill(source.brandColor)
         case .gemini:
             GeminiMarkShape().fill(source.brandColor)
+        case .qwen:
+            GeminiMarkShape().fill(source.brandColor)  // 兜底同用四角星（仅资产缺失时）
         case .opencode:
             EmptyView()
         }

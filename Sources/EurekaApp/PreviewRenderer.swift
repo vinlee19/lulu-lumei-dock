@@ -223,3 +223,38 @@ private struct MascotPreviewCard: View {
         .padding(8)
     }
 }
+
+// MARK: - 来源徽标一览（新增 agent 源后离屏核对 logo 渲染用）
+
+@MainActor
+enum BadgeSheetRenderer {
+    static func render(to path: String) {
+        func row(dark: Bool) -> some View {
+            HStack(spacing: 18) {
+                ForEach(AgentSource.allCases, id: \.self) { source in
+                    VStack(spacing: 6) {
+                        SourceBadge(source: source, size: 28, onDark: dark)
+                        Text(source.displayName).font(.system(size: 10))
+                            .foregroundStyle(dark ? .white : .black)
+                    }
+                }
+            }
+            .padding(20)
+            .background(dark ? Color.black : Color.white)
+            .environment(\.colorScheme, dark ? .dark : .light)
+        }
+        let renderer = ImageRenderer(content: VStack(spacing: 0) {
+            row(dark: false)
+            row(dark: true)
+        })
+        renderer.scale = 2
+        guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            print("徽标渲染失败")
+            exit(1)
+        }
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("已渲染 \(path)")
+    }
+}

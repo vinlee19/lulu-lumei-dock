@@ -14,6 +14,12 @@ public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
     public var sizeBytes: UInt64
     public var transcriptPath: String
 
+    /// 展示名：name 空白时回退「会话 <id前8>」（空串 name 会渲染成空行，统一在此兜底）
+    public var displayName: String {
+        let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "会话 \(id.prefix(8))" : trimmed
+    }
+
     /// 会话跨度：首次 → 最后活跃；startedAt 缺失时 nil
     public var duration: TimeInterval? {
         startedAt.map { lastActiveAt.timeIntervalSince($0) }.map { max(0, $0) }

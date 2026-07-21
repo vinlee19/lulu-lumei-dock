@@ -70,5 +70,6 @@ searchIndexTests(t)
 limitForecasterTests(t)
 weeklyReportTests(t)
 geminiIngestTests(t)
+qwenIngestTests(t)
 
 t.finish()

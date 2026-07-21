@@ -66,7 +66,47 @@ public enum TranscriptReader {
             return loadKimi(path: session.transcriptPath, maxMessages: maxMessages)
         case .gemini:
             return loadGemini(path: session.transcriptPath, maxMessages: maxMessages)
+        case .qwen:
+            return loadQwen(path: session.transcriptPath, maxMessages: maxMessages)
         }
+    }
+
+    // MARK: - Qwen（projects/<encoded>/chats/<uuid>.jsonl；thought parts 跳过、functionCall → toolNote）
+
+    public static func loadQwen(path: String, maxMessages: Int) -> Result {
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+        var seenIds = Set<String>()  // 防会话恢复整写文件产生的重复行
+
+        forEachJSONLine(path: path) { root in
+            guard messages.count < maxMessages else {
+                truncated = true
+                return false
+            }
+            guard let message = QwenChatDecoder.parseMessage(root) else { return true }
+            if let id = message.uuid, !seenIds.insert(id).inserted { return true }
+            switch message.type {
+            case "user" where !message.text.isEmpty:
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .user, text: message.text,
+                    timestamp: message.timestamp))
+            case "assistant":
+                for tool in message.toolCalls {
+                    messages.append(TranscriptMessage(
+                        id: messages.count, role: .toolNote,
+                        text: "🔧 \(tool)", timestamp: message.timestamp))
+                }
+                if !message.text.isEmpty {
+                    messages.append(TranscriptMessage(
+                        id: messages.count, role: .assistant, text: message.text,
+                        timestamp: message.timestamp))
+                }
+            default:
+                break  // system（注入/telemetry）不进对话流
+            }
+            return true
+        }
+        return Result(messages: messages, truncated: truncated)
     }
 
     // MARK: - Gemini（chats/session-*.jsonl；$set 补丁行与注入的 session_context 跳过）

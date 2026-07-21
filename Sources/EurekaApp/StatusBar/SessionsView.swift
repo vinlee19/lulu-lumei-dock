@@ -375,7 +375,7 @@ private struct SessionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     SourceBadge(source: session.source, size: 11)
-                    Text(session.name ?? "会话 \(session.id.prefix(8))")
+                    Text(session.displayName)
                         .font(.system(size: 12.5))
                         .lineLimit(1)
                 }

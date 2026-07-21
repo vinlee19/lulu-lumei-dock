@@ -102,7 +102,7 @@ struct SessionDetailView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 SourceBadge(source: session.source, size: 14)
-                Text(session.name ?? "会话 \(session.id.prefix(8))")
+                Text(session.displayName)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
                 Spacer(minLength: 8)

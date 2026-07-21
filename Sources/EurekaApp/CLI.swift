@@ -57,6 +57,9 @@ enum EurekaCLI {
             let src = args.count > 1 ? args[1] : "Sources/EurekaApp/Resources/mascots/lulu"
             let dst = args.count > 2 ? args[2] : "/tmp/lulu-cut"
             MascotAssetPrep.run(srcDir: src, dstDir: dst)
+        case "--render-badges":
+            let badgesPath = args.count > 1 ? args[1] : "/tmp/eureka-badges.png"
+            MainActor.assumeIsolated { BadgeSheetRenderer.render(to: badgesPath) }
         case "--render-icon":
             let path = args.count > 1 ? args[1] : "/tmp/eureka-icon-1024.png"
             MainActor.assumeIsolated {

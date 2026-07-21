@@ -42,6 +42,9 @@ public struct SyncRoots {
     public var geminiHome: URL       // ~/.gemini（GEMINI.md + projects.json）
     public var geminiSessions: URL   // ~/.gemini/tmp（chats/session-*.jsonl）
     public var geminiSkills: URL     // ~/.gemini/skills
+    public var qwenProjects: URL     // ~/.qwen/projects（chats/*.jsonl + runtime.json + memory）
+    public var qwenMemories: URL     // ~/.qwen/memories
+    public var qwenSkills: URL       // ~/.qwen/skills（⚠️ settings.json 含密钥，绝不纳入）
     public var claudePlans: URL      // ~/.claude/plans（Claude 计划，本就是 .md）
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
@@ -54,6 +57,7 @@ public struct SyncRoots {
         grokSkills: URL, grokMemory: URL, grokSessions: URL,
         kimiSkills: URL, kimiSessions: URL,
         geminiHome: URL, geminiSessions: URL, geminiSkills: URL,
+        qwenProjects: URL, qwenMemories: URL, qwenSkills: URL,
         claudePlans: URL, plansStaging: URL
     ) {
         self.claudeHome = claudeHome
@@ -72,6 +76,9 @@ public struct SyncRoots {
         self.geminiHome = geminiHome
         self.geminiSessions = geminiSessions
         self.geminiSkills = geminiSkills
+        self.qwenProjects = qwenProjects
+        self.qwenMemories = qwenMemories
+        self.qwenSkills = qwenSkills
         self.claudePlans = claudePlans
         self.plansStaging = plansStaging
     }
@@ -189,6 +196,17 @@ public enum SyncSourceCatalog {
         walk(root: roots.geminiSkills, category: "gemini/skills", priority: 0, include: always)
         walk(root: disabledSibling(of: roots.geminiSkills),
              category: "gemini/skills.eureka-disabled", priority: 0, include: always)
+
+        // qwen：projects 下会话 jsonl + runtime.json + 项目记忆 md、全局 memories、skills。
+        // ⚠️ ~/.qwen/settings.json 含 API key，绝不纳入备份范围。
+        walk(root: roots.qwenProjects, category: "qwen/projects", priority: 1) { rel in
+            rel.lowercased().hasSuffix(".jsonl") || rel.hasSuffix("runtime.json")
+                || rel.lowercased().hasSuffix(".md")
+        }
+        walk(root: roots.qwenMemories, category: "qwen/memories", priority: 0, include: markdownOnly)
+        walk(root: roots.qwenSkills, category: "qwen/skills", priority: 0, include: always)
+        walk(root: disabledSibling(of: roots.qwenSkills),
+             category: "qwen/skills.eureka-disabled", priority: 0, include: always)
 
         // 计划（.md 首类工件）：Claude 直接文件；Codex/opencode 由 PlanMaterializer 物化到暂存
         walk(root: roots.claudePlans, category: "claude/plans", priority: 0, include: markdownOnly)

@@ -11,7 +11,7 @@ struct PlansView: View {
     @State private var detail: PlanMaterializer.PlanEntry?
     @State private var deleting: PlanMaterializer.PlanEntry?
 
-    private let sources: [AgentSource] = [.claude, .codex, .opencode, .grok, .kimi]
+    private let sources: [AgentSource] = [.claude, .codex, .opencode, .grok, .kimi, .gemini, .qwen]
 
     var body: some View {
         Group {

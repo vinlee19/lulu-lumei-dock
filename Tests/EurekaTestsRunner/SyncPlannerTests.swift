@@ -117,6 +117,9 @@ func syncPlannerTests(_ t: TestRunner) {
             geminiHome: base.appendingPathComponent("gemini"),
             geminiSessions: base.appendingPathComponent("gemini/tmp"),
             geminiSkills: base.appendingPathComponent("gemini/skills"),
+            qwenProjects: base.appendingPathComponent("qwen/projects"),
+            qwenMemories: base.appendingPathComponent("qwen/memories"),
+            qwenSkills: base.appendingPathComponent("qwen/skills"),
             claudePlans: base.appendingPathComponent("claude/plans"),
             plansStaging: base.appendingPathComponent("plans-staging"))
         roots.customDirs = [(
@@ -184,6 +187,9 @@ func syncPlannerTests(_ t: TestRunner) {
             geminiHome: base.appendingPathComponent("nope"),
             geminiSessions: base.appendingPathComponent("nope"),
             geminiSkills: base.appendingPathComponent("nope"),
+            qwenProjects: base.appendingPathComponent("nope"),
+            qwenMemories: base.appendingPathComponent("nope"),
+            qwenSkills: base.appendingPathComponent("nope"),
             claudePlans: base.appendingPathComponent("nope"),
             plansStaging: base.appendingPathComponent("nope"))
         let result = SyncSourceCatalog.enumerate(

@@ -199,6 +199,7 @@ public enum SkillMemoryIndexer {
         grokSkillsRoot: URL? = nil,
         kimiSkillsRoot: URL? = nil,
         geminiSkillsRoot: URL? = nil,
+        qwenSkillsRoot: URL? = nil,
         antigravitySkillsRoots: [URL] = [],
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
@@ -236,6 +237,13 @@ public enum SkillMemoryIndexer {
                 geminiSkillsRoot, source: .gemini, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: geminiSkillsRoot), source: .gemini, enabled: false, scope: .system)
+        }
+        // qwen：~/.qwen/skills（SKILL.md 与 Claude 同构）
+        if let qwenSkillsRoot {
+            result += scanSkillRoot(
+                qwenSkillsRoot, source: .qwen, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: qwenSkillsRoot), source: .qwen, enabled: false, scope: .system)
         }
         // antigravity：内置 builtin/skills（用户级 ~/.gemini/skills 已归 gemini）
         for root in antigravitySkillsRoots {
@@ -304,6 +312,7 @@ public enum SkillMemoryIndexer {
         grokMemoryRoot: URL? = nil,
         kimiHome: URL? = nil,
         geminiHome: URL? = nil,
+        qwenHome: URL? = nil,
         projectRoots: [(root: URL, name: String)] = [],
         codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
     ) -> [MemoryEntry] {
@@ -395,6 +404,25 @@ public enum SkillMemoryIndexer {
                 scope: "全局", kind: .instructions)
         }
 
+        // qwen：全局 memories/*.md + 项目级 projects/<encoded>/memory/**/*.md（Claude 式布局）
+        if let qwenHome {
+            for file in enumerateMarkdown(
+                qwenHome.appendingPathComponent("memories", isDirectory: true)) {
+                add(file, source: .qwen, scope: file.deletingPathExtension().lastPathComponent)
+            }
+            let qwenProjects = (try? fm.contentsOfDirectory(
+                at: qwenHome.appendingPathComponent("projects", isDirectory: true),
+                includingPropertiesForKeys: nil)) ?? []
+            for proj in qwenProjects {
+                let memDir = proj.appendingPathComponent("memory", isDirectory: true)
+                guard fm.fileExists(atPath: memDir.path) else { continue }
+                let projName = friendlyProject(fromEncoded: proj.lastPathComponent)
+                for file in enumerateMarkdown(memDir) {
+                    add(file, source: .qwen, scope: projName, projectName: projName)
+                }
+            }
+        }
+
         // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、GEMINI.md→Gemini、
         // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
         // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
@@ -402,6 +430,8 @@ public enum SkillMemoryIndexer {
             add(root.appendingPathComponent("CLAUDE.md"), source: .claude,
                 scope: name, projectName: name, kind: .instructions)
             add(root.appendingPathComponent("GEMINI.md"), source: .gemini,
+                scope: name, projectName: name, kind: .instructions)
+            add(root.appendingPathComponent("QWEN.md"), source: .qwen,
                 scope: name, projectName: name, kind: .instructions)
             add(root.appendingPathComponent(".kimi-code/AGENTS.md"),
                 source: .kimi, scope: name, projectName: name, kind: .instructions)

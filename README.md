@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -52,8 +52,8 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with seven agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, and Gemini CLI** — and needs **no network** for its core features: everything is
+It works with eight agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
+Antigravity, Kimi Code, Gemini CLI, and Qwen Code** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
@@ -133,6 +133,7 @@ many concurrent sessions, or late‑night runs.
 | **Antigravity** | ✅ | activity only¹ | — | ✅ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅ (skills) |
 | **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
+| **Qwen Code** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
