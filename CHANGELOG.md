@@ -4,6 +4,18 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-07-21
+
+### Added
+
+- **Rate-limit exhaustion forecast.** Every limits refresh now records a local
+  usage-percent sample; a least-squares fit over the current window's tail
+  projects when the window will hit 100%. When that moment is actionable
+  (≥50% used, rising, less than 90 minutes away) the island shows a one-time
+  warning card per source and window cycle, and the limits panel displays the
+  projected fill time next to each gauge. Toggle in general settings
+  (default on). Zero network — samples come from the existing local snapshots.
+
 ## [0.2.0] - 2026-07-21
 
 ### Added
@@ -171,6 +183,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.2.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.1
 [0.2.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.0
 [0.1.9]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.9
 [0.1.8]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.8
