@@ -33,8 +33,6 @@ struct PopoverRootView: View {
         case agents = "Agent"
         case usage = "用量"
         case limits = "限额"
-        case audit = "审计"
-        case backup = "备份"
         case settings = "设置"
 
         /// 页签图标（SF Symbol）
@@ -48,68 +46,24 @@ struct PopoverRootView: View {
             case .agents: return "person.2.fill"
             case .usage: return "chart.bar.fill"
             case .limits: return "gauge.with.dots.needle.67percent"
-            case .audit: return "checkmark.shield.fill"
-            case .backup: return "icloud.and.arrow.up.fill"
             case .settings: return "gearshape.fill"
             }
         }
 
     }
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            // 灰底托盘 + 品牌色选中胶囊（分段控件不支持逐段着色，用自定义胶囊条）
-            CapsuleTabTray {
-                ForEach(Tab.allCases, id: \.self) { tab in
-                    CapsuleTabButton(
-                        title: tab.rawValue, icon: tab.icon,
-                        isSelected: navigation.tab == tab
-                    ) {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            navigation.tab = tab
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
-
+        HStack(spacing: 0) {
+            sidebar
             Divider()
-
-            switch navigation.tab {
-            case .history:
-                HistoryView(tasks: usageService.recentHistory, settings: settings)
-            case .sessions:
-                SessionsView(service: sessionBrowser, settings: settings)
-            case .skills:
-                SkillMemoryView(
-                    service: skillMemoryService, mode: .skills, usageService: usageService)
-            case .memory:
-                SkillMemoryView(
-                    service: skillMemoryService, mode: .memory, usageService: usageService)
-            case .plans:
-                PlansView(service: plansService)
-            case .agents:
-                AgentsView(service: agentConfigService)
-            case .usage:
-                UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
-            case .limits:
-                LimitsPanelView(service: limitsService)
-            case .audit:
-                AuditView(service: auditService, installer: installer)
-            case .backup:
-                BackupView(service: syncService, settings: settings)
-            case .settings:
-                SettingsView(
-                    settings: settings, installer: installer,
-                    usageService: usageService, sessionBrowser: sessionBrowser,
-                    cliTools: cliToolsService, notificationService: notificationService,
-                    updateService: updateService)
-            }
+            content
         }
-        // 主窗口可缩放：填满窗口，但不小于原 popover 尺寸
-        .frame(minWidth: 380, maxWidth: .infinity, minHeight: 460, maxHeight: .infinity)
+        // 主窗口可缩放：填满窗口；最小尺寸与 MainWindowController.minSize 对齐（避免两处打架）
+        .frame(minWidth: 840, maxWidth: .infinity, minHeight: 540, maxHeight: .infinity)
         // 用量"按会话"排行 → 会话页签并选中（select 幂等，单实例前提；见 AppDelegate 只建一个 PopoverRootView）
         .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealSession)) { note in
             guard let sessionId = note.object as? String else { return }
@@ -117,6 +71,66 @@ struct PopoverRootView: View {
                 navigation.tab = .sessions
             }
             sessionBrowser.reveal(sessionId: sessionId)
+        }
+    }
+
+    // MARK: - 左侧边栏（Claude Code 桌面版式：竖排图标+文字，品牌色选中胶囊）
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Tab.allCases, id: \.self) { tab in
+                SidebarNavButton(
+                    title: tab.rawValue, icon: tab.icon,
+                    isSelected: navigation.tab == tab
+                ) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        navigation.tab = tab
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            Text("v\(appVersion)")
+                .font(.system(size: 9.5).monospacedDigit())
+                .foregroundStyle(.quaternary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 12)
+        .frame(width: 150)
+        .background(Theme.surfaceSecondary)
+    }
+
+    // MARK: - 内容区
+
+    @ViewBuilder
+    private var content: some View {
+        switch navigation.tab {
+        case .history:
+            HistoryView(tasks: usageService.recentHistory, settings: settings)
+        case .sessions:
+            SessionsView(service: sessionBrowser, settings: settings)
+        case .skills:
+            SkillMemoryView(
+                service: skillMemoryService, mode: .skills, usageService: usageService)
+        case .memory:
+            SkillMemoryView(
+                service: skillMemoryService, mode: .memory, usageService: usageService)
+        case .plans:
+            PlansView(service: plansService)
+        case .agents:
+            AgentsView(service: agentConfigService)
+        case .usage:
+            UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
+        case .limits:
+            LimitsPanelView(service: limitsService)
+        case .settings:
+            SettingsView(
+                settings: settings, installer: installer,
+                usageService: usageService, sessionBrowser: sessionBrowser,
+                cliTools: cliToolsService, notificationService: notificationService,
+                updateService: updateService,
+                syncService: syncService, auditService: auditService)
         }
     }
 }

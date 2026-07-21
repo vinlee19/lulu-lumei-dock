@@ -2,7 +2,7 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// 设置页：四个子栏目（通用 / 使用统计 / 高级 / 关于），仿参考设计的胶囊子页签条。
+/// 设置页：六个子栏目（通用 / 备份 / 审计 / 使用统计 / 高级 / 关于），仿参考设计的胶囊子页签条。
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var installer: InstallerService
@@ -11,11 +11,15 @@ struct SettingsView: View {
     @ObservedObject var cliTools: CLIToolsService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var updateService: UpdateService
+    @ObservedObject var syncService: SyncService
+    @ObservedObject var auditService: AuditService
 
     @State private var section: SettingsSection = .general
 
     enum SettingsSection: String, CaseIterable {
         case general = "通用"
+        case backup = "备份"
+        case audit = "审计"
         case stats = "使用统计"
         case advanced = "高级"
         case about = "关于"
@@ -25,25 +29,45 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             sectionBar
             Divider()
-            ScrollView {
-                Group {
-                    switch section {
-                    case .general: generalSection
-                    case .stats: UsageDashboardView(
-                        usageService: usageService, sessionBrowser: sessionBrowser)
-                        .padding(-12)  // 仪表盘自带 padding，抵消外层
-                    case .advanced: AdvancedSettingsView(
-                        installer: installer, usageService: usageService)
-                    case .about: AboutView(cliTools: cliTools, updateService: updateService)
+            switch section {
+            case .backup:
+                // 备份/审计面板自带滚动与留白，不套外层 ScrollView
+                BackupView(service: syncService, settings: settings)
+            case .audit:
+                auditSection
+            default:
+                ScrollView {
+                    Group {
+                        switch section {
+                        case .general: generalSection
+                        case .stats: UsageDashboardView(
+                            usageService: usageService, sessionBrowser: sessionBrowser)
+                            .padding(-12)  // 仪表盘自带 padding，抵消外层
+                        case .advanced: AdvancedSettingsView(
+                            installer: installer, usageService: usageService)
+                        case .about: AboutView(cliTools: cliTools, updateService: updateService)
+                        default: EmptyView()
+                        }
                     }
+                    .padding(Theme.spacing.page)
                 }
-                .padding(Theme.spacing.page)
             }
         }
         .toggleStyle(.switch)
         .controlSize(.small)
         .font(.system(size: 11.5))
         .onAppear { notificationService.refresh() }
+    }
+
+    // MARK: - 审计子栏目（配置卡 + 流水列表）
+
+    private var auditSection: some View {
+        VStack(spacing: 0) {
+            auditCard
+                .padding(Theme.spacing.page)
+            Divider()
+            AuditView(service: auditService, installer: installer)
+        }
     }
 
     // MARK: - 子页签条（灰底托盘 + 品牌色选中胶囊）
@@ -142,23 +166,26 @@ struct SettingsView: View {
                 }
             }
 
-            settingCard("健康提示") {
-                Toggle("vibe coding 过久 / 会话过多 / 深夜时给我贴心提醒", isOn: $settings.wellnessEnabled)
-                if settings.wellnessEnabled {
-                    HStack {
-                        Text("连续活跃")
-                        Slider(value: $settings.wellnessThresholdHours, in: 1...4, step: 0.5)
-                        Text(String(format: "%.1f 小时", settings.wellnessThresholdHours))
-                            .font(.system(size: 11).monospacedDigit())
-                            .frame(width: 52, alignment: .trailing)
-                    }
-                    Text("提醒后每小时最多再提醒一次；并发 ≥5 个会话、23 点后还在跑任务也会轻声提示。")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                }
-            }
+            healthCard
+        }
+    }
 
-            auditCard
+    @ViewBuilder
+    private var healthCard: some View {
+        settingCard("健康提示") {
+            Toggle("vibe coding 过久 / 会话过多 / 深夜时给我贴心提醒", isOn: $settings.wellnessEnabled)
+            if settings.wellnessEnabled {
+                HStack {
+                    Text("连续活跃")
+                    Slider(value: $settings.wellnessThresholdHours, in: 1...4, step: 0.5)
+                    Text(String(format: "%.1f 小时", settings.wellnessThresholdHours))
+                        .font(.system(size: 11).monospacedDigit())
+                        .frame(width: 52, alignment: .trailing)
+                }
+                Text("提醒后每小时最多再提醒一次；并发 ≥5 个会话、23 点后还在跑任务也会轻声提示。")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
@@ -194,7 +221,7 @@ struct SettingsView: View {
                     .frame(maxWidth: 120)
                 }
                 Text("高危规则为启发式提示（sudo / rm -rf 绝对路径 / 管道执行下载脚本 / 读写密钥等），"
-                    + "非沙箱拦截；命中会去重节流。到「审计」页可筛选、搜索、导出与清空。")
+                    + "非沙箱拦截；命中会去重节流。下方流水可筛选、搜索、导出与清空。")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             }

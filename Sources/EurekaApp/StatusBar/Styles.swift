@@ -84,3 +84,39 @@ struct CapsuleTabTray<Content: View>: View {
             .background(RoundedRectangle(cornerRadius: 11).fill(Theme.surfaceSecondary))
     }
 }
+
+/// 侧边栏导航条目：选中 = 品牌色圆角胶囊白字；未选中 = 灰字、悬停微高亮（主窗口左侧边栏用）。
+struct SidebarNavButton: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8).fill(
+                    isSelected
+                        ? AnyShapeStyle(Theme.brand.gradient)
+                        : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
