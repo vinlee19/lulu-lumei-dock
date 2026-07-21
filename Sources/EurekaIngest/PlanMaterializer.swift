@@ -12,12 +12,14 @@ public enum PlanMaterializer {
         case finalPlan
         case workingChecklist
         case document
+        case projectDocument
 
         public var displayName: String {
             switch self {
             case .finalPlan: return "最终方案"
             case .workingChecklist: return "工作清单"
             case .document: return "计划文档"
+            case .projectDocument: return "项目文档"
             }
         }
     }
@@ -31,11 +33,14 @@ public enum PlanMaterializer {
         public var path: String
         public var sizeBytes: UInt64
         public var modifiedAt: Date
+        /// 项目内 plan 文档 = 所属项目名；agent 计划 = nil
+        public var project: String?
 
         public init(
             source: AgentSource, title: String, path: String,
             kind: PlanKind = .document,
-            sizeBytes: UInt64, modifiedAt: Date
+            sizeBytes: UInt64, modifiedAt: Date,
+            project: String? = nil
         ) {
             self.source = source
             self.title = title
@@ -43,6 +48,7 @@ public enum PlanMaterializer {
             self.path = path
             self.sizeBytes = sizeBytes
             self.modifiedAt = modifiedAt
+            self.project = project
         }
     }
 
@@ -80,6 +86,21 @@ public enum PlanMaterializer {
         var content: CodexPlanContent
     }
 
+    /// Codex 物化增量指纹（staging/codex/.scan-state.json）：
+    /// rollout 路径 → size+mtime + 产物名 + 会话/标题（线程改名时失效重渲）。
+    /// 全量解析 rollouts 是 O(GB) 级成本，指纹跳过是 Plans 页刷新速度的关键。
+    private struct CodexScanState: Codable {
+        struct Entry: Codable {
+            var size: Int64
+            var mtime: Double
+            /// 该 rollout 的物化产物文件名；nil = 已解析过且不含计划（同样跳过重解析）
+            var output: String?
+            var sessionId: String?
+            var title: String?
+        }
+        var files: [String: Entry] = [:]
+    }
+
     @discardableResult
     public static func materializeCodex(
         sessionsRoot: URL,
@@ -91,6 +112,10 @@ public enum PlanMaterializer {
         guard let enumerator = fm.enumerator(atPath: sessionsRoot.path) else { return 0 }
         let threadNames = CodexThreadNameIndex.load(
             threadNameIndexURL ?? CodexThreadNameIndex.resolvedURL(for: sessionsRoot))
+        let stateURL = outDir.appendingPathComponent(".scan-state.json")
+        let oldState = (try? JSONDecoder().decode(
+            CodexScanState.self, from: Data(contentsOf: stateURL))) ?? CodexScanState()
+        var newState = CodexScanState()
         var changed = 0
         var expected = Set<String>()
         for case let rel as String in enumerator {
@@ -98,8 +123,28 @@ public enum PlanMaterializer {
             guard name.hasPrefix("rollout-"), name.hasSuffix(".jsonl") else { continue }
             let fileURL = sessionsRoot.appendingPathComponent(rel)
             let stem = fileURL.deletingPathExtension().lastPathComponent
+            let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
+            let size = (attrs?[.size] as? NSNumber)?.int64Value ?? -1
+            let mtime = ((attrs?[.modificationDate] as? Date) ?? .distantPast)
+                .timeIntervalSince1970
+
+            // 指纹未变且线程名未变 → 跳过全文解析，沿用缓存产物。
+            // mtime 比较带 1ms 容差：Double 经 JSON 往返有精度漂移，精确相等会跨进程全量失配
+            if let cached = oldState.files[fileURL.path],
+               cached.size == size, abs(cached.mtime - mtime) < 0.001,
+               !titleChanged(cached, threadNames: threadNames) {
+                newState.files[fileURL.path] = cached
+                if let output = cached.output { expected.insert(output) }
+                continue
+            }
+
             guard let artifact = extractCodexPlan(
-                fileURL, stem: stem, threadNames: threadNames) else { continue }
+                fileURL, stem: stem, threadNames: threadNames) else {
+                // 不含计划也记指纹，避免每轮反复重解析
+                newState.files[fileURL.path] = .init(
+                    size: size, mtime: mtime, output: nil, sessionId: nil, title: nil)
+                continue
+            }
             let outputName = stem + ".md"
             expected.insert(outputName)
             let markdown: String
@@ -112,6 +157,9 @@ public enum PlanMaterializer {
             if writeIfChanged(markdown, to: outDir.appendingPathComponent(outputName)) {
                 changed += 1
             }
+            newState.files[fileURL.path] = .init(
+                size: size, mtime: mtime, output: outputName,
+                sessionId: artifact.sessionId, title: artifact.title)
         }
 
         // 来源会话被删除、或最后已不再含计划时，移除陈旧物化副本。
@@ -120,7 +168,21 @@ public enum PlanMaterializer {
         where file.pathExtension.lowercased() == "md" && !expected.contains(file.lastPathComponent) {
             if (try? fm.removeItem(at: file)) != nil { changed += 1 }
         }
+
+        if let data = try? JSONEncoder().encode(newState) {
+            try? fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+            try? data.write(to: stateURL, options: .atomic)
+        }
         return changed
+    }
+
+    /// 线程被改名 → 缓存标题失效需重渲；索引里查不到名字（用兜底标题）不算变
+    private static func titleChanged(
+        _ cached: CodexScanState.Entry, threadNames: [String: String]
+    ) -> Bool {
+        guard let sessionId = cached.sessionId,
+              let current = threadNames[sessionId] else { return false }
+        return current != cached.title
     }
 
     private static func extractCodexPlan(
@@ -387,6 +449,58 @@ public enum PlanMaterializer {
                 source: .grok, into: &result)
         collect(dir: stagingRoot.appendingPathComponent("kimi", isDirectory: true),
                 source: .kimi, into: &result)
+        return result.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    /// 项目仓库内的 plan 文档：`<root>/plans/` + `<root>/docs` 子树内名为 `plans` 的目录（深度 ≤4）。
+    /// 收 *.md（忽略 README.md），每项目上限 200 条防大仓库失控。
+    public static func indexProjectPlans(
+        roots: [(root: URL, name: String)]
+    ) -> [PlanEntry] {
+        let fm = FileManager.default
+        var result: [PlanEntry] = []
+        for (root, projectName) in roots {
+            var planDirs: [URL] = [root.appendingPathComponent("plans", isDirectory: true)]
+            let docsRoot = root.appendingPathComponent("docs", isDirectory: true)
+            if let enumerator = fm.enumerator(
+                at: docsRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                for case let url as URL in enumerator {
+                    // docs 下深度 ≤4 内名为 plans 的目录
+                    if enumerator.level > 4 { enumerator.skipDescendants(); continue }
+                    guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?
+                        .isDirectory == true else { continue }
+                    if url.lastPathComponent == "plans" {
+                        planDirs.append(url)
+                        enumerator.skipDescendants()
+                    }
+                }
+            }
+            var count = 0
+            for dir in planDirs {
+                let items = (try? fm.contentsOfDirectory(
+                    at: dir,
+                    includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? []
+                for url in items
+                where url.pathExtension.lowercased() == "md"
+                    && url.lastPathComponent.lowercased() != "readme.md" {
+                    guard count < 200 else { break }
+                    count += 1
+                    let values = try? url.resourceValues(
+                        forKeys: [.contentModificationDateKey, .fileSizeKey])
+                    result.append(PlanEntry(
+                        source: .claude,  // 占位：项目文档以 kind/project 区分，不按 source 展示
+                        title: planTitle(url),
+                        path: url.path,
+                        kind: .projectDocument,
+                        sizeBytes: UInt64(values?.fileSize ?? 0),
+                        modifiedAt: values?.contentModificationDate ?? .distantPast,
+                        project: projectName))
+                }
+            }
+        }
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 

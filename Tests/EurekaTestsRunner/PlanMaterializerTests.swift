@@ -231,4 +231,72 @@ func planMaterializerTests(_ t: TestRunner) {
         // 重复运行内容未变 → 不重写（mtime 稳定）
         try expectEqual(PlanMaterializer.materializeGrok(sessionsRoot: sessions, into: staging), 0)
     }
+
+    t.test("Codex 增量：指纹跳过未变文件；追加内容重物化；删 rollout 清产物") {
+        let fm = FileManager.default
+        let base = temp("codex-incr")
+        defer { try? fm.removeItem(at: base) }
+        let sessionsRoot = base.appendingPathComponent("sessions", isDirectory: true)
+        let sessions = sessionsRoot.appendingPathComponent("2025/11/17", isDirectory: true)
+        let staging = base.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let rollout = sessions.appendingPathComponent("rollout-2025-11-17T10-00-00-aaa.jsonl")
+        let planLine = #"{"type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"status\":\"pending\",\"step\":\"步骤一\"}]}"}}"#
+        try planLine.write(to: rollout, atomically: true, encoding: .utf8)
+
+        try expectEqual(
+            PlanMaterializer.materializeCodex(sessionsRoot: sessionsRoot, into: staging), 1)
+        let stateURL = staging.appendingPathComponent("codex/.scan-state.json")
+        try expect(fm.fileExists(atPath: stateURL.path), "应写指纹侧车")
+
+        // 二跑：指纹未变 → 0 改动（走跳过路径，产物仍受保护不被清理）
+        try expectEqual(
+            PlanMaterializer.materializeCodex(sessionsRoot: sessionsRoot, into: staging), 0)
+        let out = staging.appendingPathComponent("codex/rollout-2025-11-17T10-00-00-aaa.md")
+        try expect(fm.fileExists(atPath: out.path), "跳过解析时产物不应被误清")
+
+        // 追加新 update_plan（size 变化）→ 重物化,产物更新
+        let newer = planLine.replacingOccurrences(of: "步骤一", with: "步骤二更长的")
+        try (planLine + "\n" + newer).write(to: rollout, atomically: true, encoding: .utf8)
+        try expectEqual(
+            PlanMaterializer.materializeCodex(sessionsRoot: sessionsRoot, into: staging), 1)
+        let content = try String(contentsOf: out, encoding: .utf8)
+        try expect(content.contains("步骤二更长的"), "变更文件应重物化")
+
+        // 删除 rollout → 产物被清理
+        try fm.removeItem(at: rollout)
+        try expectEqual(
+            PlanMaterializer.materializeCodex(sessionsRoot: sessionsRoot, into: staging), 1)
+        try expect(!fm.fileExists(atPath: out.path), "来源删除后产物应清理")
+    }
+
+    t.test("项目计划：扫 plans/ 与 docs/**/plans，忽略 README，带项目名与 kind") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("eureka-projplans-\(UUID())", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        func write(_ rel: String, _ content: String) throws {
+            let url = root.appendingPathComponent(rel)
+            try fm.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try write("plans/top.md", "# 顶层方案\n正文")
+        try write("docs/plans/a.md", "# 字段映射方案\n正文")
+        try write("docs/superpowers/plans/b.md", "无标题正文")
+        try write("docs/plans/README.md", "# 说明")             // 忽略
+        try write("docs/plans/notes.txt", "非 markdown")        // 忽略
+        try write("docs/a/b/c/d/plans/deep.md", "# 超深")       // 深度 >4 忽略
+
+        let entries = PlanMaterializer.indexProjectPlans(roots: [(root, "my-proj")])
+        try expectEqual(entries.count, 3)
+        try expect(entries.allSatisfy { $0.kind == .projectDocument })
+        try expect(entries.allSatisfy { $0.project == "my-proj" })
+        let titles = Set(entries.map(\.title))
+        try expect(titles.contains("顶层方案"))
+        try expect(titles.contains("字段映射方案"))
+        try expect(titles.contains("b"), "无 # 标题回退文件名")
+    }
 }
