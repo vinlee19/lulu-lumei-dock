@@ -42,42 +42,72 @@ struct MarkdownRichText: View {
                     .textSelection(.enabled)
             }
         case .heading(let level, let text):
-            Text(Self.inline(text))
-                .font(.system(
-                    size: level == 1 ? 15 : (level == 2 ? 14 : 13.5),
-                    weight: .semibold))
-                .padding(.top, 4)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(Self.inline(text))
+                    .font(.system(
+                        size: level == 1 ? 17 : (level == 2 ? 15 : 13.5),
+                        weight: .semibold))
+                    .textSelection(.enabled)
+                if level <= 2 {
+                    Rectangle().fill(Theme.hairline).frame(height: 1)
+                }
+            }
+            .padding(.top, level == 1 ? 10 : (level == 2 ? 8 : 6))
         case .codeBlock(let language, let code):
             CodeBlockView(language: language, code: code)
-        case .listItem(let ordered, let index, let text, let indent):
-            HStack(alignment: .top, spacing: 5) {
-                Text(ordered ? "\(index)." : "•")
-                    .font(.system(size: 12.5).monospacedDigit())
-                    .foregroundStyle(Theme.brand.opacity(0.8))
+        case .listItem(let ordered, let index, let text, let indent, let check):
+            HStack(alignment: .top, spacing: 6) {
+                if let check {
+                    Image(systemName: Self.checkIcon(check))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Self.checkColor(check))
+                        .padding(.top, 1.5)
+                } else {
+                    Text(ordered ? "\(index)." : "•")
+                        .font(.system(size: 12.5).monospacedDigit())
+                        .foregroundStyle(Theme.brand.opacity(0.8))
+                }
                 Text(Self.inline(text))
                     .font(.system(size: 13))
                     .lineSpacing(2.5)
                     .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(check == .done ? AnyShapeStyle(.secondary)
+                                                    : AnyShapeStyle(.primary))
                     .textSelection(.enabled)
             }
-            .padding(.leading, CGFloat(indent) * 12)
+            .padding(.leading, CGFloat(indent) * 14)
         case .quote(let text):
-            HStack(alignment: .top, spacing: 7) {
+            HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(Theme.brand.opacity(0.4))
-                    .frame(width: 2.5)
+                    .frame(width: 3)
                 Text(Self.inline(text))
                     .font(.system(size: 12.5))
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary.opacity(0.8))
                     .textSelection(.enabled)
             }
         case .divider:
-            Divider()
+            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 4)
         case .table(let header, let rows):
             tableView(header: header, rows: rows)
+        }
+    }
+
+    private static func checkIcon(_ check: MarkdownBlock.TaskCheck) -> String {
+        switch check {
+        case .todo: return "square"
+        case .inProgress: return "square.lefthalf.filled"
+        case .done: return "checkmark.square.fill"
+        }
+    }
+
+    private static func checkColor(_ check: MarkdownBlock.TaskCheck) -> Color {
+        switch check {
+        case .todo: return .secondary
+        case .inProgress: return .orange
+        case .done: return .green
         }
     }
 
@@ -111,13 +141,25 @@ struct MarkdownRichText: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
     }
 
-    /// 行内 Markdown（粗体/斜体/行内代码/链接）；解析失败回退纯文本
+    /// 行内 Markdown（粗体/斜体/行内代码/链接）；解析失败回退纯文本。
+    /// 行内代码 → 等宽 + 淡底 chip；链接 → 品牌色下划线。
     static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(
+        var attributed = (try? AttributedString(
             markdown: text,
             options: AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+        for run in attributed.runs {
+            if let intent = run.inlinePresentationIntent, intent.contains(.code) {
+                attributed[run.range].font = .system(size: 12, design: .monospaced)
+                attributed[run.range].backgroundColor = Color.primary.opacity(0.07)
+            }
+            if run.link != nil {
+                attributed[run.range].foregroundColor = Theme.brand
+                attributed[run.range].underlineStyle = .single
+            }
+        }
+        return attributed
     }
 }
 

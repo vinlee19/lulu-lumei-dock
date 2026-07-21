@@ -46,11 +46,29 @@ func markdownBlockTests(_ t: TestRunner) {
         2) 第二
           - 缩进一级
         """)
-        try expectEqual(blocks[0], .listItem(ordered: false, index: 0, text: "甲", indent: 0))
-        try expectEqual(blocks[1], .listItem(ordered: false, index: 0, text: "乙", indent: 0))
-        try expectEqual(blocks[2], .listItem(ordered: true, index: 1, text: "第一", indent: 0))
-        try expectEqual(blocks[3], .listItem(ordered: true, index: 2, text: "第二", indent: 0))
-        try expectEqual(blocks[4], .listItem(ordered: false, index: 0, text: "缩进一级", indent: 1))
+        try expectEqual(blocks[0], .listItem(ordered: false, index: 0, text: "甲", indent: 0, check: nil))
+        try expectEqual(blocks[1], .listItem(ordered: false, index: 0, text: "乙", indent: 0, check: nil))
+        try expectEqual(blocks[2], .listItem(ordered: true, index: 1, text: "第一", indent: 0, check: nil))
+        try expectEqual(blocks[3], .listItem(ordered: true, index: 2, text: "第二", indent: 0, check: nil))
+        try expectEqual(blocks[4], .listItem(ordered: false, index: 0, text: "缩进一级", indent: 1, check: nil))
+    }
+
+    t.test("任务清单：[ ] / [x] / [X] / [~] 与普通项混排") {
+        let blocks = MarkdownBlockParser.parse("""
+        - [ ] 待办
+        - [x] 已完成
+        - [X] 大写也算完成
+        - [~] 进行中
+        - [链接](https://a.b) 不是任务标记
+        - 普通项
+        """)
+        try expectEqual(blocks[0], .listItem(ordered: false, index: 0, text: "待办", indent: 0, check: .todo))
+        try expectEqual(blocks[1], .listItem(ordered: false, index: 0, text: "已完成", indent: 0, check: .done))
+        try expectEqual(blocks[2], .listItem(ordered: false, index: 0, text: "大写也算完成", indent: 0, check: .done))
+        try expectEqual(blocks[3], .listItem(ordered: false, index: 0, text: "进行中", indent: 0, check: .inProgress))
+        try expectEqual(blocks[4], .listItem(
+            ordered: false, index: 0, text: "[链接](https://a.b) 不是任务标记", indent: 0, check: nil))
+        try expectEqual(blocks[5], .listItem(ordered: false, index: 0, text: "普通项", indent: 0, check: nil))
     }
 
     t.test("引用合并 + 分隔线 + 段落换行保留") {

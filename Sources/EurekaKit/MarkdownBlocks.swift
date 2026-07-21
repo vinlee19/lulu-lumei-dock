@@ -7,10 +7,17 @@ public enum MarkdownBlock: Equatable, Sendable {
     case paragraph(String)
     case heading(level: Int, text: String)
     case codeBlock(language: String?, code: String)
-    case listItem(ordered: Bool, index: Int, text: String, indent: Int)
+    case listItem(ordered: Bool, index: Int, text: String, indent: Int, check: TaskCheck?)
     case quote(String)
     case divider
     case table(header: [String], rows: [[String]])
+
+    /// GFM 任务清单状态：`- [ ]` / `- [~]` / `- [x]`（[~] 为进行中，Codex 工作清单约定）
+    public enum TaskCheck: Equatable, Sendable {
+        case todo
+        case inProgress
+        case done
+    }
 }
 
 public enum MarkdownBlockParser {
@@ -180,10 +187,13 @@ public enum MarkdownBlockParser {
         // 无序：- / * / + 后接空格
         for marker in ["- ", "* ", "+ "] {
             if trimmed.hasPrefix(marker) {
-                let text = String(trimmed.dropFirst(2))
+                let raw = String(trimmed.dropFirst(2))
                     .trimmingCharacters(in: .whitespaces)
+                guard !raw.isEmpty else { return nil }
+                let (text, check) = splitTaskCheck(raw)
                 guard !text.isEmpty else { return nil }
-                return .listItem(ordered: false, index: 0, text: text, indent: indent)
+                return .listItem(
+                    ordered: false, index: 0, text: text, indent: indent, check: check)
             }
         }
         // 有序：N. 或 N) 后接空格
@@ -192,12 +202,28 @@ public enum MarkdownBlockParser {
            let number = Int(digits) {
             let rest = trimmed.dropFirst(digits.count)
             if rest.hasPrefix(". ") || rest.hasPrefix(") ") {
-                let text = String(rest.dropFirst(2))
+                let raw = String(rest.dropFirst(2))
                     .trimmingCharacters(in: .whitespaces)
+                guard !raw.isEmpty else { return nil }
+                let (text, check) = splitTaskCheck(raw)
                 guard !text.isEmpty else { return nil }
-                return .listItem(ordered: true, index: number, text: text, indent: indent)
+                return .listItem(
+                    ordered: true, index: number, text: text, indent: indent, check: check)
             }
         }
         return nil
+    }
+
+    /// 任务清单标记：`[ ] xxx` / `[x] xxx` / `[X] xxx` / `[~] xxx` → (正文, 状态)；无标记 → (原文, nil)
+    private static func splitTaskCheck(_ raw: String) -> (String, MarkdownBlock.TaskCheck?) {
+        let markers: [(String, MarkdownBlock.TaskCheck)] = [
+            ("[ ]", .todo), ("[x]", .done), ("[X]", .done), ("[~]", .inProgress),
+        ]
+        for (marker, check) in markers where raw.hasPrefix(marker) {
+            let rest = raw.dropFirst(marker.count)
+            guard rest.isEmpty || rest.hasPrefix(" ") else { continue }
+            return (rest.trimmingCharacters(in: .whitespaces), check)
+        }
+        return (raw, nil)
     }
 }
