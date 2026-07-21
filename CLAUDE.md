@@ -82,4 +82,4 @@ App data lives in `~/Library/Application Support/Eureka/`: `eureka.sqlite` (hist
 
 ## Further reading
 
-`docs/design.md` — full design doc (verified data-source formats for Claude transcript / Codex rollout / hooks, key decisions, milestones). `README.md` — feature tour, interaction cheatsheet, known boundaries.
+`AGENTS.md` — commit message / PR title / release conventions (all English; read before committing or releasing). `docs/design.md` — full design doc (verified data-source formats for Claude transcript / Codex rollout / hooks, key decisions, milestones). `README.md` — feature tour, interaction cheatsheet, known boundaries.
