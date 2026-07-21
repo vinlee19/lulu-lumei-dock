@@ -4,6 +4,33 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-07-21
+
+### Added
+
+- **Plans tab overhaul.** The row list becomes a card grid grouped into peer
+  sections — repo-local **project plan documents** (scanned from each
+  project's `plans/` and `docs/**/plans/` directories) on top, then each tool
+  source. Stat tiles at the top (total count + size, per-category counts)
+  double as filters, and clicking a card opens an **inline detail page**
+  (back bar, preview/edit for real files, document-card layout) instead of a
+  modal sheet.
+- **Richer markdown rendering** everywhere the app renders markdown
+  (plans, sessions, memory, skills): GFM task lists render as tri-state
+  checkboxes (`[ ]` / `[~]` / `[x]`), headings get a real hierarchy with
+  hairline underlines, inline code becomes chips, links are tinted and
+  underlined.
+- **Official source logos.** Claude, Codex (ChatGPT mark), Grok, Kimi and
+  Antigravity badges now use the official vector logos across the island and
+  every panel, with a white Grok variant for dark contexts. opencode is now
+  written **OpenCode** throughout the UI and uses its official mark.
+
+### Changed
+
+- **Plans scanning is now incremental.** Codex rollouts are fingerprinted, so
+  a steady-state refresh drops from minutes of full parsing to well under a
+  second; the first scan shows a be-patient hint and refreshes are throttled.
+
 ## [0.2.2] - 2026-07-21
 
 ### Added
@@ -193,6 +220,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.2.3]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.3
 [0.2.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.2
 [0.2.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.1
 [0.2.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.0
