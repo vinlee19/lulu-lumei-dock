@@ -2,23 +2,26 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// 全局调色板：页签/领域主题色、语义状态色、卡片底色。
-/// UI 颜色统一从这里取，避免同一语义在各视图各写一套（改版前全仓有 6 处重复的状态色 switch）。
-/// 基调取自 App 图标（靛紫/金/青）与 AgentSource.brandColor（Claude 橙 / Codex 青 / opencode 靛）。
+/// 全局设计令牌：品牌强调色、语义状态色、中性底色、间距。
+/// UI 颜色/间距统一从这里取，避免同一语义在各视图各写一套。
+/// 强调色取自 App 图标（靛紫 + 金），其余一律中性灰阶 + 系统状态色。
 enum Theme {
-    // MARK: - 领域主题色（每个页签一个）
+    // MARK: - 品牌强调色
 
-    static let history = Color.orange
-    static let sessions = Color.blue
-    static let skills = Color.purple
-    static let memory = Color.pink
-    static let plans = Color.mint
-    static let agents = Color.teal
-    static let usage = Color.green
-    static let limits = Color.indigo
-    static let backup = Color.cyan
-    static let audit = Color.red
-    static let settings = Color.gray
+    /// 主强调色：靛紫（取自 App 图标），深色模式自动提亮
+    static let brand = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.55, green: 0.55, blue: 0.96, alpha: 1)
+            : NSColor(srgbRed: 0.36, green: 0.36, blue: 0.89, alpha: 1)
+    }))
+
+    /// 辅助强调色：金（取自 App 图标），用于亮点 / 提示类信息
+    static let gold = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.89, green: 0.74, blue: 0.38, alpha: 1)
+            : NSColor(srgbRed: 0.78, green: 0.62, blue: 0.15, alpha: 1)
+    }))
+
     /// 金额恒蓝（沿用既有约定）
     static let cost = Color.blue
 
@@ -61,13 +64,46 @@ enum Theme {
         }
     }
 
-    // MARK: - 卡片底色
+    // MARK: - 中性底色
 
-    /// 领域色轻染卡片（替代通用的 Color.primary.opacity(0.045)）
-    static func cardFill(_ accent: Color) -> Color {
-        accent.opacity(0.07)
+    /// 卡片底（浅色 = 白，深色 = 深灰；与窗口背景形成 macOS 式层级）
+    static let surface = Color(nsColor: .controlBackgroundColor)
+
+    /// 分组头 / 工具条 / 悬浮底
+    static let surfaceSecondary = Color.primary.opacity(0.05)
+
+    /// 更浅的容器底（表格、日志区）
+    static let surfaceTertiary = Color.primary.opacity(0.03)
+
+    /// 分隔线 / 细描边
+    static let hairline = Color.primary.opacity(0.08)
+
+    /// 品牌色轻染填充（选中态 / 徽标 / 高亮行）
+    static func brandFill(_ opacity: Double = 0.10) -> Color {
+        brand.opacity(opacity)
     }
 
-    /// 中性卡片（无领域归属时用）
-    static let neutralCard = Color.primary.opacity(0.045)
+    // MARK: - 间距（Codex 式宽松留白：模块间大间距，卡片内舒适内边距）
+
+    enum spacing {
+        /// 模块（卡片/分组）之间的间距
+        static let module: CGFloat = 22
+        /// 页面内容边距
+        static let page: CGFloat = 16
+        /// 卡片内边距
+        static let card: CGFloat = 16
+        /// 列表行垂直内边距
+        static let row: CGFloat = 9
+        /// 行内元素间距
+        static let item: CGFloat = 6
+    }
+
+    // MARK: - 圆角（Codex 式大圆角）
+
+    enum radius {
+        /// 卡片 / 大容器
+        static let card: CGFloat = 14
+        /// 小型容器（图标底、内嵌面板）
+        static let container: CGFloat = 10
+    }
 }

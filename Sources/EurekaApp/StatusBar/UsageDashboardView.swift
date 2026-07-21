@@ -44,7 +44,7 @@ struct UsageDashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Theme.spacing.module) {
                 filterRow
                 if let error = usageService.lastError {
                     Text(error)
@@ -72,7 +72,7 @@ struct UsageDashboardView: View {
                         .padding(.top, 60)
                 }
             }
-            .padding(12)
+            .padding(Theme.spacing.page)
         }
         .onAppear {
             usageService.refreshNow()
@@ -186,7 +186,7 @@ struct UsageDashboardView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     private func kindChip(_ kind: String?, _ label: String) -> some View {
@@ -199,8 +199,8 @@ struct UsageDashboardView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(Capsule().fill(
-                    selected ? Theme.usage.opacity(0.18) : Color.primary.opacity(0.05)))
-                .foregroundStyle(selected ? Theme.usage : .secondary)
+                    selected ? Theme.brandFill(0.16) : Color.primary.opacity(0.05)))
+                .foregroundStyle(selected ? Theme.brand : .secondary)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -225,7 +225,7 @@ struct UsageDashboardView: View {
                         Capsule().fill(Color.primary.opacity(0.06))
                         Capsule()
                             .fill(LinearGradient(
-                                colors: [Theme.usage.opacity(0.55), Theme.usage],
+                                colors: [Theme.brand.opacity(0.55), Theme.brand],
                                 startPoint: .leading, endPoint: .trailing))
                             .frame(width: max(3, proxy.size.width
                                 * CGFloat(row.count) / CGFloat(max(1, maxCount))))
@@ -238,11 +238,11 @@ struct UsageDashboardView: View {
                 .foregroundStyle(.tertiary)
             Text("\(row.count)")
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(Theme.usage)
+                .foregroundStyle(Theme.brand)
                 .frame(width: 42, alignment: .trailing)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.vertical, Theme.spacing.row)
     }
 
     // MARK: - 趋势图
@@ -287,8 +287,8 @@ struct UsageDashboardView: View {
             }
             .frame(height: 170)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(Theme.usage)))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     /// 成本轴/标注格式（小额保留 4 位，避免全显示 $0.00）
@@ -462,8 +462,8 @@ struct UsageDashboardView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Capsule().fill(
-                selected ? Theme.usage.opacity(0.18) : Color.primary.opacity(0.05)))
-            .foregroundStyle(selected ? Theme.usage : .secondary)
+                selected ? Theme.brandFill(0.16) : Color.primary.opacity(0.05)))
+            .foregroundStyle(selected ? Theme.brand : .secondary)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -475,9 +475,9 @@ struct UsageDashboardView: View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: "bolt.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(Theme.usage)
+                .foregroundStyle(Theme.brand)
                 .frame(width: 40, height: 40)
-                .background(Circle().fill(Theme.usage.opacity(0.12)))
+                .background(Circle().fill(Theme.brandFill(0.12)))
             VStack(alignment: .leading, spacing: 2) {
                 Text("消耗 Tokens（\(period.rawValue)）")
                     .font(.system(size: 10.5))
@@ -515,21 +515,21 @@ struct UsageDashboardView: View {
                 }
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+            .background(RoundedRectangle(cornerRadius: Theme.radius.container).fill(Theme.surfaceSecondary))
         }
-        .padding(14)
+        .padding(Theme.spacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.cardFill(Theme.usage)))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     // MARK: - 四宫格
 
     private var metricGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             metricCard("新增输入", totalInput, icon: "arrow.down.to.line", tint: .blue)
             metricCard("输出", totalOutput, icon: "arrow.up.to.line", tint: .purple)
             metricCard("缓存创建", totalCacheWrite, icon: "externaldrive.badge.plus", tint: .orange)
-            metricCard("缓存命中", totalCacheRead, icon: "sparkles", tint: Theme.usage)
+            metricCard("缓存命中", totalCacheRead, icon: "sparkles", tint: Theme.brand)
         }
     }
 
@@ -547,8 +547,8 @@ struct UsageDashboardView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     // MARK: - 缓存命中率
@@ -562,47 +562,37 @@ struct UsageDashboardView: View {
                 Spacer()
                 Text(String(format: "%.1f%%", cacheHitRate * 100))
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.usage)
+                    .foregroundStyle(Theme.brand)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
                     Capsule()
                         .fill(LinearGradient(
-                            colors: [Theme.usage.opacity(0.6), Theme.usage],
+                            colors: [Theme.brand.opacity(0.6), Theme.brand],
                             startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(4, proxy.size.width * cacheHitRate))
                 }
             }
             .frame(height: 6)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     // MARK: - 子页签
 
     private var subTabBar: some View {
-        HStack(spacing: 4) {
+        CapsuleTabTray {
             ForEach(SubTab.allCases, id: \.self) { tab in
-                let selected = subTab == tab
-                Button {
+                CapsuleTabButton(
+                    title: tab.rawValue, fillWidth: false, isSelected: subTab == tab
+                ) {
                     subTab = tab
-                } label: {
-                    Text(tab.rawValue)
-                        .font(.system(size: 10.5, weight: selected ? .semibold : .regular))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(
-                            selected ? Theme.usage.opacity(0.15) : .clear))
-                        .foregroundStyle(selected ? Theme.usage : .secondary)
-                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
             }
             Spacer()
         }
-        .padding(.top, 2)
     }
 
     // MARK: - 请求日志（分页表格）
@@ -640,7 +630,7 @@ struct UsageDashboardView: View {
 
             paginationBar
         }
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     private func logRow(_ record: UsageService.RecordDisplay) -> some View {
@@ -681,7 +671,7 @@ struct UsageDashboardView: View {
                 .frame(width: 66, alignment: .trailing)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.vertical, Theme.spacing.row)
     }
 
     private var totalPages: Int {
@@ -790,12 +780,12 @@ struct UsageDashboardView: View {
                             .frame(width: 66, alignment: .trailing)
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, Theme.spacing.row)
                     Divider().opacity(0.4)
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     // MARK: - 按会话统计
@@ -832,7 +822,7 @@ struct UsageDashboardView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
         .onAppear {
             // 会话名来自文件索引；首次进入子页签时索引可能还没建
             if sessionBrowser.sessionsById.isEmpty {
@@ -887,7 +877,7 @@ struct UsageDashboardView: View {
                     .opacity(canJump ? 1 : 0)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.vertical, Theme.spacing.row)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -909,7 +899,7 @@ struct UsageDashboardView: View {
                     HStack {
                         Image(systemName: "folder.fill")
                             .font(.system(size: 9))
-                            .foregroundStyle(Theme.sessions.opacity(0.7))
+                            .foregroundStyle(Theme.brand.opacity(0.7))
                         Text(line.name)
                             .font(.system(size: 11))
                             .lineLimit(1)
@@ -923,12 +913,12 @@ struct UsageDashboardView: View {
                             .frame(width: 66, alignment: .trailing)
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, Theme.spacing.row)
                     Divider().opacity(0.4)
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     // MARK: - 底部

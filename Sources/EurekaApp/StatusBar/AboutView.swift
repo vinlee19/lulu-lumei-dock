@@ -14,10 +14,10 @@ struct AboutView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Theme.spacing.module) {
             appCard
             toolsHeader
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(cliTools.tools) { tool in
                     toolCard(tool)
                 }
@@ -38,9 +38,10 @@ struct AboutView: View {
                 Image(systemName: "sparkle")
                     .font(.system(size: 22))
                     .foregroundStyle(LinearGradient(
-                        colors: [.indigo, .purple], startPoint: .top, endPoint: .bottom))
+                        colors: [Theme.brand, Theme.gold], startPoint: .top, endPoint: .bottom))
                     .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.1)))
+                    .background(RoundedRectangle(cornerRadius: Theme.radius.container)
+                        .fill(Theme.brandFill(0.1)))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("lulu-lumei-dock")
                         .font(.system(size: 14, weight: .semibold))
@@ -80,8 +81,8 @@ struct AboutView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.neutralCard))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     // MARK: - CLI 工具
@@ -138,8 +139,8 @@ struct AboutView: View {
                 .controlSize(.small)
             }
         }
-        .padding(11)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.neutralCard))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     private func statusIcon(_ tool: CLIToolsService.Tool) -> some View {

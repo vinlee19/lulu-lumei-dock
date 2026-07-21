@@ -195,7 +195,7 @@ struct AuditView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture {
             if isExpanded { expanded.remove(event.opId) } else { expanded.insert(event.opId) }
@@ -212,7 +212,7 @@ struct AuditView: View {
             if service.riskTotal > 0 {
                 Text("· 风险 \(service.riskTotal)")
                     .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(Theme.audit)
+                    .foregroundStyle(.red)
             }
             if let msg = service.exportMessage {
                 Text(msg)
@@ -247,7 +247,7 @@ struct AuditView: View {
         VStack(spacing: 10) {
             Image(systemName: "checkmark.shield")
                 .font(.system(size: 34))
-                .foregroundStyle(Theme.audit.opacity(0.5))
+                .foregroundStyle(Theme.brand.opacity(0.5))
             Text(riskOnly || !keyword.isEmpty || sourceFilter != nil || kindFilter != nil
                 ? "当前筛选无匹配记录"
                 : "暂无审计记录。agent 执行命令 / 读写文件后会出现在这里。")

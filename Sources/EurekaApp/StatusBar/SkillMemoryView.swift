@@ -172,8 +172,7 @@ struct SkillMemoryView: View {
             } else {
                 Image(systemName: mode == .skills ? "wand.and.stars" : "brain.fill")
                     .font(.system(size: 28))
-                    .foregroundStyle(
-                        (mode == .skills ? Theme.skills : Theme.memory).opacity(0.45))
+                    .foregroundStyle(Theme.brand.opacity(0.45))
                 Text(service.isSearching ? "没有匹配项" : (mode == .skills ? "没有技能" : "没有记忆"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -186,7 +185,7 @@ struct SkillMemoryView: View {
     @ViewBuilder
     private var skillsSections: some View {
         if !systemSkills.isEmpty || !service.isSearching {
-            sectionHeader("系统技能 \(systemSkills.count)", icon: "wand.and.stars", tint: Theme.skills)
+            sectionHeader("系统技能 \(systemSkills.count)", icon: "wand.and.stars", tint: Theme.brand)
             ForEach(systemSkillsBySource, id: \.0) { source, group in
                 let isExpanded = !collapsedSkillSources.contains(source.rawValue)
                 SkillSourceHeader(
@@ -233,7 +232,7 @@ struct SkillMemoryView: View {
     @ViewBuilder
     private var memorySections: some View {
         if !systemMemories.isEmpty || !service.isSearching {
-            sectionHeader("系统记忆 \(systemMemories.count)", icon: "brain.fill", tint: Theme.memory)
+            sectionHeader("系统记忆 \(systemMemories.count)", icon: "brain.fill", tint: Theme.brand)
             ForEach(systemMemoriesBySource, id: \.0) { source, group in
                 let isExpanded = !collapsedMemorySources.contains(source.rawValue)
                 SkillSourceHeader(
@@ -492,11 +491,11 @@ private struct SkillSourceHeader: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.vertical, Theme.spacing.row)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isExpanded ? Color.primary.opacity(0.03) : .clear)
+        .background(isExpanded ? Theme.surfaceSecondary : .clear)
     }
 }
 
@@ -516,7 +515,7 @@ private struct SkillProjectHeader: View {
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 Image(systemName: "folder.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.sessions.opacity(0.8))
+                    .foregroundStyle(Theme.brand.opacity(0.8))
                 Text(name)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
@@ -526,11 +525,11 @@ private struct SkillProjectHeader: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.vertical, Theme.spacing.row)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isExpanded ? Color.primary.opacity(0.03) : .clear)
+        .background(isExpanded ? Theme.surfaceSecondary : .clear)
     }
 }
 
@@ -576,7 +575,7 @@ private struct SkillRow: View {
             rowMenu(path: skill.path, onEdit: onEdit, onDelete: onDelete, service: service)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture { onOpenDetail() }
     }
@@ -614,7 +613,7 @@ private struct MemoryRow: View {
                 service: service, canEdit: memory.isEditable, canDelete: memory.isDeletable)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture { onEdit() }
     }

@@ -53,7 +53,7 @@ struct SessionDetailView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
                         .font(.system(size: 32))
-                        .foregroundStyle(Theme.sessions.opacity(0.4))
+                        .foregroundStyle(Theme.brand.opacity(0.4))
                     Text("选择左侧会话查看对话记录")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -107,7 +107,7 @@ struct SessionDetailView: View {
                 }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
-                .tint(Theme.sessions)
+                .tint(Theme.brand)
                 .help("在 Terminal 中执行恢复命令")
                 Button {
                     confirmingDelete = true
@@ -329,8 +329,8 @@ struct SessionDetailView: View {
                     .font(.system(size: 10).monospacedDigit())
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
-                    .background(Capsule().fill(Theme.sessions.opacity(0.12)))
-                    .foregroundStyle(Theme.sessions)
+                    .background(Capsule().fill(Theme.brand.opacity(0.12)))
+                    .foregroundStyle(Theme.brand)
                 if service.transcriptTruncated {
                     Text("仅显示前 \(service.transcript.count) 条")
                         .font(.system(size: 9.5))
@@ -403,9 +403,9 @@ struct SessionDetailView: View {
                             HStack(alignment: .top, spacing: 6) {
                                 Text("\(index + 1)")
                                     .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                                    .foregroundStyle(Theme.sessions)
+                                    .foregroundStyle(Theme.brand)
                                     .frame(width: 16, height: 16)
-                                    .background(Circle().fill(Theme.sessions.opacity(0.1)))
+                                    .background(Circle().fill(Theme.brand.opacity(0.1)))
                                 VStack(alignment: .leading, spacing: 1) {
                                     if let ts = message.timestamp {
                                         Text(ts, format: .dateTime.month(.twoDigits).day(.twoDigits)
@@ -491,7 +491,7 @@ private struct MessageRowView: View {
             .padding(9)
             .background(RoundedRectangle(cornerRadius: 8).fill(
                 message.role == .user
-                    ? Theme.sessions.opacity(0.07)
+                    ? Theme.brand.opacity(0.07)
                     : Color.primary.opacity(0.035)))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
@@ -528,7 +528,7 @@ private struct MessageRowView: View {
 
     private var roleColor: Color {
         switch message.role {
-        case .user: return Theme.sessions
+        case .user: return Theme.brand
         case .assistant: return .secondary
         case .error: return .red
         case .toolNote, .turnTrail: return .purple

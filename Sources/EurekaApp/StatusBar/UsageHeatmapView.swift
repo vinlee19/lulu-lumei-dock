@@ -56,8 +56,8 @@ struct UsageHeatmapView: View {
                 legend
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(Theme.usage)))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     private var grid: some View {
@@ -98,7 +98,7 @@ struct UsageHeatmapView: View {
     private func color(_ value: Int, maxValue: Int) -> Color {
         guard value > 0 else { return Color.primary.opacity(0.04) }
         let normalized = (Double(value) / Double(maxValue)).squareRoot()
-        return Theme.usage.opacity(0.15 + 0.85 * normalized)
+        return Theme.brand.opacity(0.15 + 0.85 * normalized)
     }
 
     private func helpText(weekday: Int, hour: Int, cell: UsageRepo.HeatmapCell?) -> String {
@@ -117,7 +117,7 @@ struct UsageHeatmapView: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(step == 0
                         ? Color.primary.opacity(0.04)
-                        : Theme.usage.opacity(0.15 + 0.85 * Double(step) / 4))
+                        : Theme.brand.opacity(0.15 + 0.85 * Double(step) / 4))
                     .frame(width: 13, height: 10)
             }
             Text("多")

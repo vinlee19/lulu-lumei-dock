@@ -100,7 +100,7 @@ struct PlansView: View {
         VStack(spacing: 10) {
             Image(systemName: "list.bullet.clipboard")
                 .font(.system(size: 34))
-                .foregroundStyle(Theme.plans.opacity(0.5))
+                .foregroundStyle(Theme.brand.opacity(0.5))
             Text(service.isSearching ? "没有匹配的计划" : "还没有计划记录")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -147,11 +147,11 @@ private struct PlanSourceHeader: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.vertical, Theme.spacing.row)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isExpanded ? Color.primary.opacity(0.03) : .clear)
+        .background(isExpanded ? Theme.surfaceSecondary : .clear)
     }
 }
 
@@ -165,7 +165,7 @@ private struct PlanRow: View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text")
                 .font(.system(size: 12))
-                .foregroundStyle(Theme.plans.opacity(0.8))
+                .foregroundStyle(Theme.brand.opacity(0.8))
             VStack(alignment: .leading, spacing: 2) {
                 Text(plan.title)
                     .font(.system(size: 12, weight: .medium))
@@ -205,7 +205,7 @@ private struct PlanRow: View {
             .fixedSize()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
     }

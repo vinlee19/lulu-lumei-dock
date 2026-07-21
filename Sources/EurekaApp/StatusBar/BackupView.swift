@@ -22,7 +22,7 @@ struct BackupView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Theme.spacing.module) {
                 statusCard
                 if settings.cloudBackupEnabled {
                     if service.progress != nil || service.syncing {
@@ -36,7 +36,7 @@ struct BackupView: View {
                     emptyState
                 }
             }
-            .padding(12)
+            .padding(Theme.spacing.page)
         }
         .onAppear {
             service.refreshCredentialStatus()
@@ -51,7 +51,7 @@ struct BackupView: View {
     // MARK: - 状态卡
 
     private var statusCard: some View {
-        card("备份状态", accent: Theme.backup) {
+        card("备份状态") {
             HStack {
                 Toggle("自动备份（增量上传，无变化自动跳过）", isOn: $settings.cloudBackupEnabled)
                     .toggleStyle(.switch)
@@ -108,7 +108,7 @@ struct BackupView: View {
     // MARK: - 进度卡
 
     private var progressCard: some View {
-        card("同步进行中", accent: Theme.backup) {
+        card("同步进行中") {
             if let progress = service.progress {
                 ProgressView(value: progress.fraction)
                     .progressViewStyle(.linear)
@@ -142,7 +142,7 @@ struct BackupView: View {
     // MARK: - 统计卡
 
     private var statsCard: some View {
-        card("备份统计", accent: Theme.backup) {
+        card("备份统计") {
             HStack(spacing: 18) {
                 stat("已备份文件", service.stats.map { "\($0.fileCount)" } ?? "—")
                 stat("总大小", service.stats.map { formatBytes(UInt64(max(0, $0.totalBytes))) } ?? "—")
@@ -173,7 +173,7 @@ struct BackupView: View {
                             } else {
                                 Image(systemName: "folder.fill")
                                     .font(.system(size: 8))
-                                    .foregroundStyle(Theme.backup.opacity(0.7))
+                                    .foregroundStyle(Theme.brand.opacity(0.7))
                             }
                             Text("\(key) \(value.count)")
                                 .font(.system(size: 9.5, weight: .medium).monospacedDigit())
@@ -197,7 +197,7 @@ struct BackupView: View {
     }
 
     private var historyCard: some View {
-        card("同步历史（共 \(service.runsTotal) 轮）", accent: Theme.backup) {
+        card("同步历史（共 \(service.runsTotal) 轮）") {
             ForEach(service.runs) { run in
                 runRow(run)
                 Divider().opacity(0.35)
@@ -282,7 +282,7 @@ struct BackupView: View {
                         } else {
                             Image(systemName: "folder.fill")
                                 .font(.system(size: 8))
-                                .foregroundStyle(Theme.backup.opacity(0.7))
+                                .foregroundStyle(Theme.brand.opacity(0.7))
                         }
                         Text("\(group.source) · \(group.files.count) 个 · \(formatBytes(UInt64(max(0, group.bytes))))")
                             .font(.system(size: 9.5, weight: .semibold))
@@ -335,7 +335,7 @@ struct BackupView: View {
         VStack(spacing: 10) {
             Image(systemName: "icloud.and.arrow.up")
                 .font(.system(size: 34))
-                .foregroundStyle(Theme.backup.opacity(0.5))
+                .foregroundStyle(Theme.brand.opacity(0.5))
             Text("开启自动备份后，技能、记忆、计划与全部会话记录会增量上传到你的云端存储")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -374,16 +374,9 @@ struct BackupView: View {
     }
 
     private func card(
-        _ title: String, accent: Color, @ViewBuilder content: () -> some View
+        _ title: String, @ViewBuilder content: () -> some View
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-            VStack(alignment: .leading, spacing: 7, content: content)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(accent)))
-        }
+        SectionCard(title, content: content)
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
@@ -396,7 +389,7 @@ struct BackupView: View {
         }
     }
 
-    private func summaryBadge(_ text: String, color: Color = Theme.backup) -> some View {
+    private func summaryBadge(_ text: String, color: Color = Theme.brand) -> some View {
         Text(text)
             .font(.system(size: 9.5, weight: .medium))
             .padding(.horizontal, 6)
@@ -599,7 +592,7 @@ private struct BackupConfigSheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
                         .font(.system(size: 10))
-                        .foregroundStyle(Theme.backup.opacity(0.8))
+                        .foregroundStyle(Theme.brand.opacity(0.8))
                     Text(folder.path)
                         .font(.system(size: 10).monospaced())
                         .lineLimit(1)

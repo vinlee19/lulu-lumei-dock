@@ -7,7 +7,7 @@ struct LimitsPanelView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Theme.spacing.module) {
                 if let codex = service.codex {
                     LimitCard(snapshot: codex)
                 }
@@ -38,7 +38,7 @@ struct LimitsPanelView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-            .padding(12)
+            .padding(Theme.spacing.page)
         }
         .onAppear { service.refresh() }
     }
@@ -57,8 +57,8 @@ private struct LimitCard: View {
                         .font(.system(size: 9, weight: .medium))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Theme.limits.opacity(0.15)))
-                        .foregroundStyle(Theme.limits)
+                        .background(Capsule().fill(Theme.brandFill(0.14)))
+                        .foregroundStyle(Theme.brand)
                 }
                 Spacer()
                 if snapshot.isStale {
@@ -78,8 +78,8 @@ private struct LimitCard: View {
                     window: secondary)
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(Theme.limits)))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
     /// 窗口时长 → 中文标签（Codex 5h/周；Grok 周/月单窗）
@@ -148,7 +148,7 @@ private struct ClaudeOptInCard: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cardFill(Theme.limits)))
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 }

@@ -37,7 +37,7 @@ struct SettingsView: View {
                     case .about: AboutView(cliTools: cliTools, updateService: updateService)
                     }
                 }
-                .padding(12)
+                .padding(Theme.spacing.page)
             }
         }
         .toggleStyle(.switch)
@@ -46,32 +46,18 @@ struct SettingsView: View {
         .onAppear { notificationService.refresh() }
     }
 
-    // MARK: - 子页签条（仿参考设计：圆角容器 + 蓝色选中胶囊）
+    // MARK: - 子页签条（灰底托盘 + 品牌色选中胶囊）
 
     private var sectionBar: some View {
-        HStack(spacing: 3) {
+        CapsuleTabTray {
             ForEach(SettingsSection.allCases, id: \.self) { item in
-                let selected = section == item
-                Button {
+                CapsuleTabButton(title: item.rawValue, isSelected: section == item) {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                         section = item
                     }
-                } label: {
-                    Text(item.rawValue)
-                        .font(.system(size: 11, weight: selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? .white : .secondary)
-                        .padding(.vertical, 5)
-                        .frame(maxWidth: .infinity)
-                        .background(Capsule().fill(
-                            selected ? AnyShapeStyle(Color.accentColor.gradient)
-                                     : AnyShapeStyle(Color.clear)))
-                        .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
             }
         }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05)))
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
@@ -80,7 +66,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var generalSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Theme.spacing.module) {
             settingCard("外观主题") {
                 Text("选择应用的外观主题，立即生效。")
                     .font(.system(size: 10))
@@ -91,7 +77,7 @@ struct SettingsView: View {
                     appearanceOption("system", "跟随系统", icon: "display")
                 }
                 .padding(3)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))
                 .fixedSize()
             }
 
@@ -242,7 +228,7 @@ struct SettingsView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(Capsule().fill(
-                selected ? AnyShapeStyle(Color.accentColor.gradient)
+                selected ? AnyShapeStyle(Theme.brand.gradient)
                          : AnyShapeStyle(Color.clear)))
             .contentShape(Capsule())
         }
@@ -250,13 +236,6 @@ struct SettingsView: View {
     }
 
     private func settingCard(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-            VStack(alignment: .leading, spacing: 7, content: content)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.neutralCard))
-        }
+        SectionCard(title, content: content)
     }
 }

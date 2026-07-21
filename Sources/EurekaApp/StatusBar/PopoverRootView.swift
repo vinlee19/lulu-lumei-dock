@@ -54,31 +54,16 @@ struct PopoverRootView: View {
             }
         }
 
-        /// 页签主题色
-        var accent: Color {
-            switch self {
-            case .history: return Theme.history
-            case .sessions: return Theme.sessions
-            case .skills: return Theme.skills
-            case .memory: return Theme.memory
-            case .plans: return Theme.plans
-            case .agents: return Theme.agents
-            case .usage: return Theme.usage
-            case .limits: return Theme.limits
-            case .audit: return Theme.audit
-            case .backup: return Theme.backup
-            case .settings: return Theme.settings
-            }
-        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // 自定义彩色页签条（分段控件不支持逐段着色）
-            HStack(spacing: 3) {
+            // 灰底托盘 + 品牌色选中胶囊（分段控件不支持逐段着色，用自定义胶囊条）
+            CapsuleTabTray {
                 ForEach(Tab.allCases, id: \.self) { tab in
-                    TabButton(
-                        tab: tab, isSelected: navigation.tab == tab
+                    CapsuleTabButton(
+                        title: tab.rawValue, icon: tab.icon,
+                        isSelected: navigation.tab == tab
                     ) {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                             navigation.tab = tab
@@ -86,8 +71,9 @@ struct PopoverRootView: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
 
             Divider()
 
@@ -132,40 +118,6 @@ struct PopoverRootView: View {
             }
             sessionBrowser.reveal(sessionId: sessionId)
         }
-    }
-}
-
-/// 彩色页签按钮：选中 = 主题色胶囊 + 白字；未选中 = 灰字、悬停微高亮
-private struct TabButton: View {
-    let tab: PopoverRootView.Tab
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 4) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(tab.rawValue)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity)
-            .background(
-                Capsule().fill(
-                    isSelected
-                        ? AnyShapeStyle(tab.accent.gradient)
-                        : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
-            )
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
 

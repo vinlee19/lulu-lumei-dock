@@ -11,30 +11,30 @@ struct AdvancedSettingsView: View {
     @ObservedObject var usageService: UsageService
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Theme.spacing.module) {
             CollapsibleCard(
-                icon: "link.badge.plus", tint: Theme.agents,
+                icon: "link.badge.plus", tint: Theme.brand,
                 title: "接入状态",
                 subtitle: "Claude Code hooks 与 Codex notify 的安装与更新"
             ) {
                 installContent
             }
             CollapsibleCard(
-                icon: "folder.badge.gearshape", tint: Theme.sessions,
+                icon: "folder.badge.gearshape", tint: Theme.brand,
                 title: "配置文件目录",
                 subtitle: "Claude、Codex、opencode 与 lulu-lumei-dock 的数据存储路径"
             ) {
                 pathsContent
             }
             CollapsibleCard(
-                icon: "externaldrive", tint: Theme.usage,
+                icon: "externaldrive", tint: Theme.brand,
                 title: "数据管理",
                 subtitle: "导出用量 CSV、查看本地数据库"
             ) {
                 dataContent
             }
             CollapsibleCard(
-                icon: "waveform.path.ecg", tint: Theme.limits,
+                icon: "waveform.path.ecg", tint: Theme.brand,
                 title: "数据健康",
                 subtitle: "各数据源心跳 / 产出 / 失败一览"
             ) {
@@ -271,6 +271,6 @@ struct CollapsibleCard<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.neutralCard))
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 }

@@ -49,7 +49,7 @@ struct MarkdownRichText: View {
             HStack(alignment: .top, spacing: 5) {
                 Text(ordered ? "\(index)." : "•")
                     .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(Theme.sessions.opacity(0.8))
+                    .foregroundStyle(Theme.brand.opacity(0.8))
                 Text(Self.inline(text))
                     .font(.system(size: 11.5))
                     .textSelection(.enabled)
@@ -58,7 +58,7 @@ struct MarkdownRichText: View {
         case .quote(let text):
             HStack(alignment: .top, spacing: 7) {
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.sessions.opacity(0.4))
+                    .fill(Theme.brand.opacity(0.4))
                     .frame(width: 2.5)
                 Text(Self.inline(text))
                     .font(.system(size: 11))

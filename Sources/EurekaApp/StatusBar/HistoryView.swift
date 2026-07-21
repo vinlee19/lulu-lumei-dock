@@ -36,7 +36,7 @@ struct HistoryView: View {
             VStack(spacing: 8) {
                 Image(systemName: "tray")
                     .font(.system(size: 28))
-                    .foregroundStyle(Theme.history.opacity(0.45))
+                    .foregroundStyle(Theme.brand.opacity(0.45))
                 Text("还没有任务记录")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -127,7 +127,7 @@ private struct HistoryRow: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, Theme.spacing.row)
     }
 
     private var iconName: String {

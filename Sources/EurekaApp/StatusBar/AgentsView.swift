@@ -109,7 +109,7 @@ struct AgentsView: View {
                 } else {
                     Image(systemName: "person.2.badge.gearshape")
                         .font(.system(size: 28))
-                        .foregroundStyle(Theme.agents.opacity(0.45))
+                        .foregroundStyle(Theme.brand.opacity(0.45))
                     Text(service.isSearching ? "没有匹配项" : "还没有 agent / profile")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -230,12 +230,12 @@ struct AgentsView: View {
         let system = agents.filter { !$0.scope.isProject }
         let projectNames = Array(Set(agents.compactMap { $0.scope.projectName })).sorted()
         if !system.isEmpty {
-            sectionHeader("系统 \(system.count)", icon: "laptopcomputer", tint: Theme.agents)
+            sectionHeader("系统 \(system.count)", icon: "laptopcomputer", tint: Theme.brand)
             ForEach(system) { agentRow($0) }
         }
         ForEach(projectNames, id: \.self) { name in
             let group = agents.filter { $0.scope.projectName == name }
-            sectionHeader("项目 · \(name)  \(group.count)", icon: "folder.fill", tint: Theme.sessions)
+            sectionHeader("项目 · \(name)  \(group.count)", icon: "folder.fill", tint: Theme.brand)
             ForEach(group) { agentRow($0) }
         }
     }
@@ -245,7 +245,7 @@ struct AgentsView: View {
     private var codexProfileSection: some View {
         if !service.codexProfiles.isEmpty {
             sectionHeader("Profile \(service.codexProfiles.count)",
-                          icon: "slider.horizontal.3", tint: Theme.agents)
+                          icon: "slider.horizontal.3", tint: Theme.brand)
             ForEach(service.codexProfiles) { profile in
                 ProfileRow(
                     profile: profile,
@@ -273,7 +273,7 @@ struct AgentsView: View {
         ForEach(names, id: \.self) { name in
             let group = service.pluginAgents.filter { $0.pluginName == name }
             sectionHeader("插件 · \(name)  \(group.count)",
-                          icon: "puzzlepiece.extension.fill", tint: Theme.skills)
+                          icon: "puzzlepiece.extension.fill", tint: Theme.brand)
             ForEach(group) { systemAgentRow($0) }
         }
     }
@@ -283,7 +283,7 @@ struct AgentsView: View {
     private var builtinSection: some View {
         if !service.builtinAgents.isEmpty {
             sectionHeader("内置（Claude Code） \(service.builtinAgents.count)",
-                          icon: "shippingbox.fill", tint: Theme.history)
+                          icon: "shippingbox.fill", tint: Theme.brand)
             ForEach(service.builtinAgents) { systemAgentRow($0) }
         }
     }
@@ -293,7 +293,7 @@ struct AgentsView: View {
     private var kimiBuiltinSection: some View {
         if !service.kimiBuiltinAgents.isEmpty {
             sectionHeader("内置（Kimi Code，只读） \(service.kimiBuiltinAgents.count)",
-                          icon: "shippingbox.fill", tint: Theme.history)
+                          icon: "shippingbox.fill", tint: Theme.brand)
             ForEach(service.kimiBuiltinAgents) { systemAgentRow($0) }
         }
     }
@@ -411,7 +411,7 @@ private struct AgentRow: View {
             agentMenu(path: agent.path, onEdit: onEdit, onDelete: onDelete, service: service)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture { onEdit() }
     }
@@ -422,7 +422,7 @@ private struct AgentRow: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Theme.agents.opacity(0.08), in: Capsule())
+            .background(Theme.brandFill(0.08), in: Capsule())
     }
 }
 
@@ -449,11 +449,11 @@ private struct AgentSourceHeader: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.vertical, Theme.spacing.row)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isExpanded ? Color.primary.opacity(0.04) : .clear)
+        .background(isExpanded ? Theme.surfaceSecondary : .clear)
     }
 }
 
@@ -516,7 +516,7 @@ private struct SystemAgentRow: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture { if hasFile { onView() } }
     }
@@ -527,7 +527,7 @@ private struct SystemAgentRow: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Theme.agents.opacity(0.08), in: Capsule())
+            .background(Theme.brandFill(0.08), in: Capsule())
     }
 }
 
@@ -574,7 +574,7 @@ private struct ProfileRow: View {
             .fixedSize()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, Theme.spacing.row)
         .contentShape(Rectangle())
         .onTapGesture { onEdit() }
     }

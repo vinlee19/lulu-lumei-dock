@@ -369,7 +369,7 @@ struct SkillAnalyticsView: View {
                     .foregroundStyle(.tertiary)
                 Text("\(row.count)")
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.skills)
+                    .foregroundStyle(Theme.brand)
                     .frame(width: 44, alignment: .trailing)
             }
             .padding(.horizontal, 12)
@@ -383,7 +383,7 @@ struct SkillAnalyticsView: View {
         VStack(spacing: 8) {
             Image(systemName: "chart.bar.xaxis")
                 .font(.system(size: 26))
-                .foregroundStyle(Theme.skills.opacity(0.4))
+                .foregroundStyle(Theme.brand.opacity(0.4))
             Text("暂无技能调用数据")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)

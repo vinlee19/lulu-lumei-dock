@@ -138,7 +138,7 @@ struct SessionsView: View {
                     Image(systemName: multiSelect
                         ? "checkmark.circle.fill" : "checkmark.circle")
                         .font(.system(size: 11))
-                        .foregroundStyle(multiSelect ? Theme.sessions : .secondary)
+                        .foregroundStyle(multiSelect ? Theme.brand : .secondary)
                 }
                 .buttonStyle(.borderless)
                 .help("多选模式（批量删除）")
@@ -177,7 +177,7 @@ struct SessionsView: View {
                     } else {
                         Image(systemName: "tray")
                             .font(.system(size: 28))
-                            .foregroundStyle(Theme.sessions.opacity(0.45))
+                            .foregroundStyle(Theme.brand.opacity(0.45))
                         Text(service.isSearching ? "没有匹配的会话" : "近 30 天没有会话")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
@@ -231,7 +231,7 @@ struct SessionsView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .background(Color.primary.opacity(0.03))
+                    .background(Theme.surfaceSecondary)
                 }
             }
         }
@@ -261,7 +261,7 @@ private struct ProjectHeaderRow: View {
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 Image(systemName: "folder.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.sessions.opacity(0.8))
+                    .foregroundStyle(Theme.brand.opacity(0.8))
                 Text(group.name)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
@@ -279,11 +279,11 @@ private struct ProjectHeaderRow: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isExpanded ? Color.primary.opacity(0.04) : .clear)
+        .background(isExpanded ? Theme.surfaceSecondary : .clear)
     }
 }
 
@@ -308,7 +308,7 @@ private struct SessionRow: View {
                         .font(.system(size: 12))
                         .foregroundStyle(session.source == .opencode
                             ? AnyShapeStyle(.tertiary)
-                            : (isChecked ? AnyShapeStyle(Theme.sessions) : AnyShapeStyle(.secondary)))
+                            : (isChecked ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.secondary)))
                 }
                 .buttonStyle(.borderless)
                 .disabled(session.source == .opencode)
@@ -352,9 +352,18 @@ private struct SessionRow: View {
             .help("拷贝恢复命令")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(
-            isSelected ? Theme.sessions.opacity(0.1) : .clear))
+        .padding(.vertical, Theme.spacing.row)
+        .background(
+            ZStack(alignment: .leading) {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 6).fill(Theme.brandFill(0.08))
+                    // 左侧品牌色指示条（Activity Monitor 式选中态）
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Theme.brand)
+                        .frame(width: 3)
+                        .padding(.vertical, 4)
+                }
+            })
         .contentShape(Rectangle())
         .onTapGesture {
             if multiSelect {
