@@ -54,6 +54,10 @@ final class AppSettings: ObservableObject {
     @Published var fullTextSearchEnabled: Bool {
         didSet { defaults.set(fullTextSearchEnabled, forKey: "fullTextSearchEnabled") }
     }
+    /// 限额临近打满预警岛卡（RateLimitsService 告警时读同一 key）
+    @Published var limitAlertsEnabled: Bool {
+        didSet { defaults.set(limitAlertsEnabled, forKey: "limitAlertsEnabled") }
+    }
     @Published var sessionDisplayLimit: Int {
         didSet { defaults.set(sessionDisplayLimit, forKey: "sessionDisplayLimit") }
     }
@@ -152,6 +156,7 @@ final class AppSettings: ObservableObject {
         wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
         fullTextSearchEnabled = defaults.object(forKey: "fullTextSearchEnabled") as? Bool ?? true
+        limitAlertsEnabled = defaults.object(forKey: "limitAlertsEnabled") as? Bool ?? true
         sessionDisplayLimit = defaults.object(forKey: "sessionDisplayLimit") as? Int ?? 10
         historySortMode = defaults.string(forKey: "historySortMode") ?? "active"
         sessionSortMode = defaults.string(forKey: "sessionSortMode") ?? "time"

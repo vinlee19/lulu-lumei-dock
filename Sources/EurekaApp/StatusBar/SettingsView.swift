@@ -119,6 +119,7 @@ struct SettingsView: View {
                 }
                 Toggle("显示任务开始时间（而非已持续时长）", isOn: $settings.showStartTime)
                 Toggle("菜单栏显示限额百分比", isOn: $settings.menuBarShowsLimit)
+                Toggle("限额临近打满时提前预警（按最近用量速度外推）", isOn: $settings.limitAlertsEnabled)
             }
 
             settingCard("灵动岛位置") {

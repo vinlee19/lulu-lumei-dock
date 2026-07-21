@@ -1,6 +1,7 @@
 import Foundation
 
 enum Schema {
+    /// v14：新增 limit_samples（限额百分比采样，预测打满时间用；观测数据不可重推导，升级不 DROP）
     /// v13：新增全文搜索三件套 transcript_fts（FTS5 trigram）/ fts_docs / fts_files（派生表，升级重建全量重索引）
     /// v12：tool_calls 增列 last_ts（最近调用时间）+ tokens（触发时 token，仅 Claude 有值），派生表升级重建
     /// v11：新增 audit_events（agent 操作审计流水，非派生表，升级不 DROP）
@@ -9,7 +10,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 13
+    static let version: Int64 = 14
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -168,6 +169,17 @@ enum Schema {
             size INTEGER NOT NULL,
             mtime REAL NOT NULL
         );
+
+        -- 限额百分比采样（每次限额刷新一行；预测"何时打满"用）。
+        -- 观测数据不可本地重推导 → 升级不 DROP；保留 14 天由服务定期清理。
+        CREATE TABLE IF NOT EXISTS limit_samples (
+            ts REAL NOT NULL,
+            source TEXT NOT NULL,
+            window TEXT NOT NULL,
+            percent REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_limit_samples
+            ON limit_samples(source, window, ts);
         """)
 
         // task_history 不参与 drop/重建（真实历史），旧库补列走幂等 ALTER

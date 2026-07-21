@@ -67,5 +67,6 @@ auditRepoTests(t)
 codexAuditScannerTests(t)
 claudeAuditDecoderTests(t)
 searchIndexTests(t)
+limitForecasterTests(t)
 
 t.finish()

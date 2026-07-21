@@ -174,6 +174,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mascot?.viewModel.showNotice(notice.headline)
         }
         wellness.start()
+
+        // 限额打满预测告警 → 岛卡（每源每窗口期一次，节流在服务内）
+        limitsService.onAlert = { [weak island] notice in
+            island?.viewModel.enqueueNotice(notice)
+        }
         wellnessMonitor = wellness
 
         // 首次启动：引导到设置页一键安装（窗口已显示，这里只切页签）

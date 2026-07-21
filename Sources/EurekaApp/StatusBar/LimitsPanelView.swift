@@ -9,15 +9,15 @@ struct LimitsPanelView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.spacing.module) {
                 if let codex = service.codex {
-                    LimitCard(snapshot: codex)
+                    LimitCard(snapshot: codex, forecasts: service.forecasts)
                 }
                 if let grok = service.grok {
-                    LimitCard(snapshot: grok)
+                    LimitCard(snapshot: grok, forecasts: service.forecasts)
                 }
 
                 if service.claudeEnabled {
                     if let claude = service.claude {
-                        LimitCard(snapshot: claude)
+                        LimitCard(snapshot: claude, forecasts: service.forecasts)
                     }
                     if let hint = service.claudeFailureHint {
                         Text(hint)
@@ -46,6 +46,8 @@ struct LimitsPanelView: View {
 
 private struct LimitCard: View {
     let snapshot: RateLimitSnapshot
+    /// 预计打满时刻（key = "source#primary/secondary"，见 RateLimitsService.forecasts）
+    var forecasts: [String: Date] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -70,12 +72,14 @@ private struct LimitCard: View {
             if let primary = snapshot.primary {
                 WindowGauge(
                     label: Self.windowLabel(primary.windowMinutes, fallback: "5 小时窗口"),
-                    window: primary)
+                    window: primary,
+                    fullAt: forecasts["\(snapshot.source.rawValue)#primary"])
             }
             if let secondary = snapshot.secondary {
                 WindowGauge(
                     label: Self.windowLabel(secondary.windowMinutes, fallback: "每周窗口"),
-                    window: secondary)
+                    window: secondary,
+                    fullAt: forecasts["\(snapshot.source.rawValue)#secondary"])
             }
         }
         .padding(Theme.spacing.card)
@@ -96,6 +100,8 @@ private struct LimitCard: View {
 private struct WindowGauge: View {
     let label: String
     let window: RateLimitWindow
+    /// 按最近用量速度外推的预计打满时刻（无风险 = nil，不显示）
+    var fullAt: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -103,6 +109,11 @@ private struct WindowGauge: View {
                 Text(label)
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
+                if let fullAt {
+                    Text("⏳ 预计 \(fullAt, format: .dateTime.hour().minute()) 打满")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.orange)
+                }
                 Spacer()
                 Text("\(Int(window.usedPercent.rounded()))%")
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
