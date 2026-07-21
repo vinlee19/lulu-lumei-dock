@@ -4,6 +4,20 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-07-21
+
+### Added
+
+- **Cross-session full-text search.** The sessions tab search box now also
+  searches the *content* of every conversation (Claude / Codex / Grok / Kimi):
+  message-level hits appear below the session list with snippets, and clicking
+  one opens the session and scrolls straight to the message. The index is a
+  local SQLite FTS5 trigram index — CJK and English substring queries both
+  work — built incrementally alongside the usage scan (a few minutes once,
+  then near-zero cost). Advanced settings gain a toggle (default on) and a
+  "clear index" button. opencode (shared database) and Antigravity (protobuf)
+  transcripts are not indexed.
+
 ## [0.1.9] - 2026-07-21
 
 ### Changed
@@ -157,6 +171,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.2.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.0
 [0.1.9]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.9
 [0.1.8]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.8
 [0.1.7]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.7
