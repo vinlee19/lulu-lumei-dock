@@ -4,6 +4,27 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-21
+
+### Added
+
+- **Qwen Code CLI support** — the eighth agent source, covered across every
+  module: session browsing with transcript rendering (thinking parts hidden,
+  tool calls shown as notes), a per-request token ledger from the CLI's
+  telemetry events (deduped by response id; cached input split out), live
+  island tasks, skills / global and per-project memory including repo-root
+  `QWEN.md`, cloud backup (which deliberately excludes `settings.json` since
+  it holds an API key), full-text search, resume/delete, Qwen model pricing
+  and the official logo.
+- **Plans for Gemini and Qwen.** Neither CLI persists plan artifacts, so the
+  plans tab now heuristically materializes the last assistant message that
+  contains three or more task-list items as a read-only working checklist.
+
+### Fixed
+
+- Sessions with blank titles no longer render as empty rows in the session
+  list — they fall back to a short session-id label.
+
 ## [0.3.0] - 2026-07-21
 
 ### Added
@@ -236,6 +257,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.4.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.4.0
 [0.3.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.3.0
 [0.2.3]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.3
 [0.2.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.2
