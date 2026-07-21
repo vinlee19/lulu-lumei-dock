@@ -4,6 +4,22 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-07-21
+
+### Added
+
+- **Gemini CLI support** — the seventh agent source, covered across every
+  module: session browsing with transcript rendering and full-text search
+  (chat files under `~/.gemini/tmp`, project attribution via
+  `projects.json`), a per-message token usage ledger (cached input split out,
+  thinking tokens billed as output; duplicate streamed lines and
+  resume-rewritten files are deduped), live island tasks via a chat-file
+  tailer, skills (`~/.gemini/skills`, now attributed to Gemini rather than
+  Antigravity, which shares the same home) and global/per-project `GEMINI.md`
+  memory, cloud backup, CLI tool card, and the official Gemini spark logo.
+  No local rate-limit or plan-artifact conventions exist, so those two
+  modules are intentionally skipped.
+
 ## [0.2.3] - 2026-07-21
 
 ### Added
@@ -220,6 +236,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.3.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.3.0
 [0.2.3]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.3
 [0.2.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.2
 [0.2.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.1
