@@ -4,6 +4,22 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.1.9] - 2026-07-21
+
+### Changed
+
+- **Richer sidebar, System Settings style.** Every nav entry now has its own
+  colored rounded icon tile with neutral labels; entries are grouped
+  (activity / knowledge / usage / settings) with inset dividers, topped by a
+  header with a mini purple-gold "Lu" logo tile. The limits entry shows a live
+  max-usage percent badge colored by the 60/85 thresholds. Selection keeps the
+  brand capsule.
+- **Bigger default window.** The main window now opens at 75% of the screen's
+  visible area (capped at 1440×900) instead of a fixed 900×620. The frame
+  autosave key was renamed to discard sizes polluted by the pre-0.1.8 shrink
+  bug, so existing installs also get the new roomy default once; manual
+  resizes are remembered from then on.
+
 ## [0.1.8] - 2026-07-21
 
 ### Changed
@@ -141,6 +157,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.1.9]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.9
 [0.1.8]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.8
 [0.1.7]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.7
 [0.1.6]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.1.6
