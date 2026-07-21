@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 应用图标：海青色（Codex 同色系）圆角方 + 白色「Lu」抽象字母组（黄金比例构造），呼应 lulu-lumei-dock。
+/// 应用图标：靛紫渐变圆角方 + 金色「Lu」抽象字母组（黄金比例构造），呼应 lulu-lumei-dock 的紫金品牌色（Theme.brand / Theme.gold 同源）。
 /// 用 SwiftUI 离屏渲染 1024px 母版（Scripts/make-icns.sh 据此生成 .icns）。
 @MainActor
 enum IconRenderer {
@@ -31,7 +31,7 @@ enum IconRenderer {
 }
 
 /// 1024×1024 母版。遵循 macOS 图标网格：可见圆角方块 824px 居中，四周透明留白（阴影画在留白里）。
-/// 海青色圆角方（锚定 Codex 青绿 #14A08F）+ 白色「Lu」抽象字母组（黄金比例构造）。
+/// 靛紫渐变圆角方（锚定 Theme.brand 靛紫）+ 金色「Lu」抽象字母组（锚定 Theme.gold，黄金比例构造）。
 struct AppIconView: View {
     private let canvas: CGFloat = 1024
     private let plate: CGFloat = 824
@@ -41,14 +41,14 @@ struct AppIconView: View {
 
     var body: some View {
         ZStack {
-            // 底板：海青色渐变（左上亮青 → 右下深青）+ 左上高光描边 + 投影
+            // 底板：靛紫渐变（左上亮紫 → 右下深紫）+ 左上高光描边 + 投影
             RoundedRectangle(cornerRadius: plate * 0.2237, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.17, green: 0.82, blue: 0.72),
-                            Color(red: 0.08, green: 0.62, blue: 0.56),
-                            Color(red: 0.03, green: 0.35, blue: 0.35),
+                            Color(red: 0.55, green: 0.55, blue: 0.96),
+                            Color(red: 0.36, green: 0.36, blue: 0.89),
+                            Color(red: 0.16, green: 0.13, blue: 0.45),
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -66,26 +66,30 @@ struct AppIconView: View {
                 .frame(width: plate, height: plate)
                 .shadow(color: .black.opacity(0.32), radius: 28, y: 14)
 
-            // 中心柔光，托起白色字母
+            // 中心暖金柔光，托起金色字母
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [.white.opacity(0.16), .clear],
+                        colors: [Color(red: 1.0, green: 0.9, blue: 0.6).opacity(0.18), .clear],
                         center: .center, startRadius: 0, endRadius: 300))
                 .frame(width: 640, height: 640)
 
-            // 「Lu」抽象字母组（圆头笔画，黄金比例）
+            // 「Lu」抽象字母组（圆头笔画，黄金比例）：金色渐变（亮金 → 琥珀）
             LuluMark()
                 .stroke(
                     LinearGradient(
-                        colors: [.white, Color(red: 0.88, green: 1.0, blue: 0.96)],
+                        colors: [
+                            Color(red: 0.98, green: 0.87, blue: 0.55),
+                            Color(red: 0.89, green: 0.74, blue: 0.38),
+                            Color(red: 0.76, green: 0.58, blue: 0.18),
+                        ],
                         startPoint: .top, endPoint: .bottom),
                     style: StrokeStyle(
                         lineWidth: glyphHeight / (Self.phi * Self.phi * Self.phi),
                         lineCap: .round, lineJoin: .round)
                 )
                 .frame(width: plate, height: glyphHeight)
-                .shadow(color: Color(red: 0.0, green: 0.16, blue: 0.15).opacity(0.35),
+                .shadow(color: Color(red: 0.10, green: 0.07, blue: 0.30).opacity(0.45),
                         radius: 10, y: 8)
         }
         .frame(width: canvas, height: canvas)
