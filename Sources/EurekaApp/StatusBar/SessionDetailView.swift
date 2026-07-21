@@ -65,6 +65,13 @@ struct SessionDetailView: View {
         .onChange(of: service.selected?.id) { _, _ in
             expandedTrails = []
         }
+        // 全文命中跳转：transcript 加载完成后滚到目标消息（延迟一拍等 LazyVStack 布局）
+        .onChange(of: service.transcriptLoading) { _, loading in
+            guard !loading, let pending = service.consumePendingJump() else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NotificationCenter.default.post(name: .eurekaJumpToMessage, object: pending)
+            }
+        }
     }
 
     private var userMessages: [TranscriptMessage] {

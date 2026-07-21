@@ -50,6 +50,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(wellnessThresholdHours, forKey: "wellnessThresholdHours") }
     }
     /// 会话面板按时间最多展示多少个会话（0 = 全部）
+    /// 跨会话全文搜索索引（关闭后索引冻结不再更新；UsageService 扫描循环读同一 key）
+    @Published var fullTextSearchEnabled: Bool {
+        didSet { defaults.set(fullTextSearchEnabled, forKey: "fullTextSearchEnabled") }
+    }
     @Published var sessionDisplayLimit: Int {
         didSet { defaults.set(sessionDisplayLimit, forKey: "sessionDisplayLimit") }
     }
@@ -147,6 +151,7 @@ final class AppSettings: ObservableObject {
         menuBarShowsLimit = defaults.object(forKey: "menuBarShowsLimit") as? Bool ?? true
         wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
+        fullTextSearchEnabled = defaults.object(forKey: "fullTextSearchEnabled") as? Bool ?? true
         sessionDisplayLimit = defaults.object(forKey: "sessionDisplayLimit") as? Int ?? 10
         historySortMode = defaults.string(forKey: "historySortMode") ?? "active"
         sessionSortMode = defaults.string(forKey: "sessionSortMode") ?? "time"

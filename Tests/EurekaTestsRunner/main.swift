@@ -66,5 +66,6 @@ auditExtractorTests(t)
 auditRepoTests(t)
 codexAuditScannerTests(t)
 claudeAuditDecoderTests(t)
+searchIndexTests(t)
 
 t.finish()

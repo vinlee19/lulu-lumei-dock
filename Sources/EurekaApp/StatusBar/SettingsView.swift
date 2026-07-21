@@ -44,7 +44,8 @@ struct SettingsView: View {
                             usageService: usageService, sessionBrowser: sessionBrowser)
                             .padding(-12)  // 仪表盘自带 padding，抵消外层
                         case .advanced: AdvancedSettingsView(
-                            installer: installer, usageService: usageService)
+                            installer: installer, usageService: usageService,
+                            settings: settings)
                         case .about: AboutView(cliTools: cliTools, updateService: updateService)
                         default: EmptyView()
                         }

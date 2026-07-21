@@ -109,6 +109,7 @@ final class UsageService: ObservableObject {
     private var opencodeScanner: OpencodeUsageScanner?
     private var grokScanner: GrokUsageScanner?
     private var kimiScanner: KimiUsageScanner?
+    private var searchIndexer: TranscriptSearchIndexer?
     private var pricing = PricingTable(models: [])
 
     private static let claudeHealthName = "用量扫描 Claude"
@@ -138,6 +139,7 @@ final class UsageService: ObservableObject {
                     sessionsRoot: GrokPaths.sessionsRoot(), store: store)
                 self.kimiScanner = KimiUsageScanner(
                     sessionsRoot: KimiPaths.sessionsRoot(), store: store)
+                self.searchIndexer = TranscriptSearchIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
                     overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
@@ -152,6 +154,13 @@ final class UsageService: ObservableObject {
         timer.setEventHandler { [weak self] in self?.scanAndPublish() }
         timer.resume()
         self.timer = timer
+    }
+
+    /// 清空全文索引（设置页「清空全文索引」；下轮扫描按开关状态自动重建）
+    func clearSearchIndex() {
+        queue.async { [weak self] in
+            try? self?.store?.search.clearAll()
+        }
     }
 
     /// 任务完成 → 写历史（状态机副作用，主线程调用）
@@ -409,6 +418,10 @@ final class UsageService: ObservableObject {
             if kimiNew > 0 { HealthRegistry.shared.event(Self.kimiHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
+            // 全文索引与用量同节奏增量跑（指纹无变化时近零开销）；开关默认开
+            if UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
+                searchIndexer?.indexOnce()
+            }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             publish { $0.summary = summary }
             publishHistory(store: store)

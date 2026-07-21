@@ -46,6 +46,18 @@ final class SessionBrowserService: ObservableObject {
         var totalCostUSD: Double?
     }
 
+    /// 全文搜索命中（消息级）：snippet 已按查询词就近裁剪
+    struct FullTextHit: Identifiable, Equatable {
+        var id: Int64
+        var source: AgentSource
+        var sessionId: String
+        var sessionName: String?
+        var messageIdx: Int
+        var role: String
+        var ts: Date?
+        var snippet: String
+    }
+
     @Published private(set) var groups: [ProjectGroup] = []
     @Published private(set) var summary = Summary()
     /// id → 会话索引信息（用量"按会话"排行 join 会话名 + 跨页签跳转用），refresh 完成时填充
@@ -63,8 +75,15 @@ final class SessionBrowserService: ObservableObject {
         didSet { rebuild() }
     }
     @Published var searchText = "" {
-        didSet { rebuild() }
+        didSet {
+            rebuild()
+            scheduleFullTextSearch()
+        }
     }
+    /// 全文搜索命中（搜索词 ≥2 字符时异步填充）
+    @Published private(set) var fullTextHits: [FullTextHit] = []
+    /// 全文命中点击后待跳转的消息 id（transcript 加载完成后由详情页消费）
+    @Published private(set) var pendingJumpMessageId: Int?
     /// 来源筛选（nil = 全部）
     @Published var sourceFilter: AgentSource? {
         didSet { rebuild() }
@@ -79,23 +98,29 @@ final class SessionBrowserService: ObservableObject {
     private var sessions: [AgentSessionInfo] = []
     /// 待跳转的会话 id（索引未就绪时记下，refresh 完成后消费）
     private var pendingRevealId: String?
+    /// 全文搜索防抖
+    private var searchWorkItem: DispatchWorkItem?
     // 以下仅 queue 上访问
     private var store: EurekaStore?
     private var pricing = PricingTable(models: [])
     private var storeLoaded = false
+
+    /// 惰性打开只读 store 连接（refresh / 全文搜索共用，仅 queue 上调用）
+    private func loadStoreIfNeeded() {
+        guard !storeLoaded else { return }
+        storeLoaded = true
+        store = try? EurekaStore(path: EurekaStore.defaultURL())
+        pricing = PricingTable.load(
+            bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
+            overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
+    }
 
     func refresh() {
         guard !scanning else { return }
         scanning = true
         queue.async { [weak self] in
             guard let self else { return }
-            if !self.storeLoaded {
-                self.storeLoaded = true
-                self.store = try? EurekaStore(path: EurekaStore.defaultURL())
-                self.pricing = PricingTable.load(
-                    bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
-                    overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
-            }
+            self.loadStoreIfNeeded()
             var indexed = ClaudeSessionIndexer.index(
                 projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot())
             indexed += CodexSessionIndexer.index(
@@ -215,6 +240,75 @@ final class SessionBrowserService: ObservableObject {
 
     var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    // MARK: - 全文搜索
+
+    /// 防抖 250ms 后在后台查 FTS 索引；查询 <2 字符直接清空结果
+    private func scheduleFullTextSearch() {
+        searchWorkItem?.cancel()
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard query.count >= 2 else {
+            fullTextHits = []
+            return
+        }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.loadStoreIfNeeded()
+            let hits = (try? self.store?.search.search(query, limit: 50)) ?? []
+            let mapped = hits.map { hit in
+                FullTextHit(
+                    id: hit.docId,
+                    source: AgentSource(rawValue: hit.source) ?? .claude,
+                    sessionId: hit.sessionId,
+                    sessionName: nil,
+                    messageIdx: hit.messageIdx,
+                    role: hit.role,
+                    ts: hit.ts,
+                    snippet: Self.snippet(around: query, in: hit.text))
+            }
+            DispatchQueue.main.async {
+                // 结果落地前查询又变了 → 丢弃过期结果
+                guard self.searchText.trimmingCharacters(in: .whitespaces) == query else { return }
+                self.fullTextHits = mapped.map { hit in
+                    var enriched = hit
+                    enriched.sessionName = self.sessionsById[hit.sessionId]?.name
+                    return enriched
+                }
+            }
+        }
+        searchWorkItem = item
+        queue.asyncAfter(deadline: .now() + 0.25, execute: item)
+    }
+
+    /// 就近裁剪命中片段：命中词前后各留 radius 字符，越界加省略号
+    static func snippet(around query: String, in text: String, radius: Int = 40) -> String {
+        let collapsed = text.replacingOccurrences(of: "\n", with: " ")
+        guard let range = collapsed.range(of: query, options: [.caseInsensitive]) else {
+            return String(collapsed.prefix(radius * 2))
+        }
+        let start = collapsed.index(
+            range.lowerBound, offsetBy: -radius, limitedBy: collapsed.startIndex)
+            ?? collapsed.startIndex
+        let end = collapsed.index(
+            range.upperBound, offsetBy: radius, limitedBy: collapsed.endIndex)
+            ?? collapsed.endIndex
+        var result = String(collapsed[start..<end])
+        if start > collapsed.startIndex { result = "…" + result }
+        if end < collapsed.endIndex { result += "…" }
+        return result
+    }
+
+    /// 全文命中点击：选中会话并记录待跳转消息（transcript 加载完成后由详情页消费）
+    func revealMessage(sessionId: String, messageIdx: Int) {
+        pendingJumpMessageId = messageIdx
+        reveal(sessionId: sessionId)
+    }
+
+    /// 详情页 transcript 加载完成后取走待跳转消息 id（取即清）
+    func consumePendingJump() -> Int? {
+        defer { pendingJumpMessageId = nil }
+        return pendingJumpMessageId
     }
 
     // MARK: - 选中与对话记录

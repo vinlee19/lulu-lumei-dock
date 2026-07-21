@@ -1,6 +1,7 @@
 import Foundation
 
 enum Schema {
+    /// v13：新增全文搜索三件套 transcript_fts（FTS5 trigram）/ fts_docs / fts_files（派生表，升级重建全量重索引）
     /// v12：tool_calls 增列 last_ts（最近调用时间）+ tokens（触发时 token，仅 Claude 有值），派生表升级重建
     /// v11：新增 audit_events（agent 操作审计流水，非派生表，升级不 DROP）
     /// v10：新增 tool_calls（技能/插件/子代理/工具调用计数，派生表，升级重建全量重扫）
@@ -8,7 +9,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 12
+    static let version: Int64 = 13
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -21,6 +22,9 @@ enum Schema {
             DROP TABLE IF EXISTS usage_records;
             DROP TABLE IF EXISTS session_stats;
             DROP TABLE IF EXISTS tool_calls;
+            DROP TABLE IF EXISTS transcript_fts;
+            DROP TABLE IF EXISTS fts_docs;
+            DROP TABLE IF EXISTS fts_files;
             """)
         }
         try db.execute("""
@@ -142,6 +146,28 @@ enum Schema {
         CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts DESC);
         CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id);
         CREATE INDEX IF NOT EXISTS idx_audit_risk ON audit_events(risk_level) WHERE risk_level > 0;
+
+        -- 跨会话全文搜索（派生表，可由 transcript 重扫恢复，升级重建）。
+        -- trigram 分词：中文/英文都按子串匹配（unicode61 不切 CJK，中文查询会失效）。
+        -- transcript_fts.rowid == fts_docs.id（写入两表时对齐）。
+        CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(text, tokenize='trigram');
+        CREATE TABLE IF NOT EXISTS fts_docs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            message_idx INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            ts REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_fts_docs_path ON fts_docs(path);
+
+        -- 已索引文件指纹（size+mtime 变更即整文件重建 docs；截断/改写天然覆盖）
+        CREATE TABLE IF NOT EXISTS fts_files (
+            path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime REAL NOT NULL
+        );
         """)
 
         // task_history 不参与 drop/重建（真实历史），旧库补列走幂等 ALTER

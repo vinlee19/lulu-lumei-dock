@@ -9,6 +9,7 @@ import SwiftUI
 struct AdvancedSettingsView: View {
     @ObservedObject var installer: InstallerService
     @ObservedObject var usageService: UsageService
+    @ObservedObject var settings: AppSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.module) {
@@ -148,6 +149,14 @@ struct AdvancedSettingsView: View {
         Text("relay 稳定路径：~/Library/Application Support/Eureka/bin/eureka-relay（升级 app 自动重同步，hooks 不断链）")
             .font(.system(size: 9.5))
             .foregroundStyle(.tertiary)
+        Divider()
+        Toggle("跨会话全文搜索索引", isOn: $settings.fullTextSearchEnabled)
+        Text("在本地为 Claude / Codex / Grok / Kimi 的对话内容建索引，会话页搜索时可直达消息；"
+            + "索引随用量扫描增量更新，全程本地。关闭后索引冻结不再更新。")
+            .font(.system(size: 9.5))
+            .foregroundStyle(.tertiary)
+        Button("清空全文索引") { usageService.clearSearchIndex() }
+            .controlSize(.small)
     }
 }
 

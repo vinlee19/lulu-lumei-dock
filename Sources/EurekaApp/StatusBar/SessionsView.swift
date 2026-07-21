@@ -170,7 +170,7 @@ struct SessionsView: View {
 
             Divider()
 
-            if service.groups.isEmpty {
+            if service.groups.isEmpty && service.fullTextHits.isEmpty {
                 VStack(spacing: 8) {
                     if service.scanning {
                         ProgressView("正在索引会话…")
@@ -215,6 +215,9 @@ struct SessionsView: View {
                                 Divider().padding(.leading, 12)
                             }
                         }
+                        if service.isSearching && !service.fullTextHits.isEmpty {
+                            fullTextSection
+                        }
                     }
                 }
                 if multiSelect {
@@ -242,6 +245,61 @@ struct SessionsView: View {
             checkedIds.remove(session.id)
         } else {
             checkedIds.insert(session.id)
+        }
+    }
+
+    // MARK: - 全文命中区（对话内容级搜索结果，点击直达消息）
+
+    private var fullTextSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.magnifyingglass")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.gold)
+                Text("对话内容命中")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("\(service.fullTextHits.count)")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Theme.surfaceSecondary)
+            ForEach(service.fullTextHits) { hit in
+                Button {
+                    service.revealMessage(sessionId: hit.sessionId, messageIdx: hit.messageIdx)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 5) {
+                            SourceBadge(source: hit.source, size: 10)
+                            Text(hit.sessionName ?? "会话 \(hit.sessionId.prefix(8))")
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(hit.role == "user" ? "用户" : "助手")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                            if let ts = hit.ts {
+                                Text(relativeFormatter.localizedString(for: ts, relativeTo: Date()))
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        Text(hit.snippet)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider().padding(.leading, 12).opacity(0.5)
+            }
         }
     }
 }
