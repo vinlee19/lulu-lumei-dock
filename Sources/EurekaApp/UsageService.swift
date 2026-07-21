@@ -24,6 +24,8 @@ final class UsageService: ObservableObject {
     @Published private(set) var toolCallTotals: [ToolCallsRepo.ToolCallTotal] = []
     /// 技能全时累计统计（Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）
     @Published private(set) var skillStats: [ToolCallsRepo.SkillUsageStat] = []
+    /// vibe coding 周报（loadWeeklyReport 填充；nil = 未加载）
+    @Published private(set) var weeklyReport: WeeklyReport?
     /// 项目统计（选中区间）
     @Published private(set) var projectTotals: [ProjectTotal] = []
     /// 按会话用量排行（选中区间/来源，token 降序 Top 50）
@@ -154,6 +156,17 @@ final class UsageService: ObservableObject {
         timer.setEventHandler { [weak self] in self?.scanAndPublish() }
         timer.resume()
         self.timer = timer
+    }
+
+    /// 聚合一周报告（[weekStart, weekEnd)），完成后发布到 weeklyReport
+    func loadWeeklyReport(weekStart: Date, weekEnd: Date) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let report = try? WeeklyReportBuilder.build(
+                store: store, pricing: self.pricing,
+                weekStart: weekStart, weekEnd: weekEnd)
+            self.publish { $0.weeklyReport = report }
+        }
     }
 
     /// 清空全文索引（设置页「清空全文索引」；下轮扫描按开关状态自动重建）

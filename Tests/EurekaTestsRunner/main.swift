@@ -68,5 +68,6 @@ codexAuditScannerTests(t)
 claudeAuditDecoderTests(t)
 searchIndexTests(t)
 limitForecasterTests(t)
+weeklyReportTests(t)
 
 t.finish()

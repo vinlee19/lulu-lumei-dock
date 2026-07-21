@@ -28,7 +28,12 @@ struct UsageDashboardView: View {
         case projects = "项目统计"
         case sessions = "按会话"
         case tools = "技能/插件"
+        case weekly = "周报"
     }
+
+    /// 周报周偏移：0 = 本周，1 = 上周…
+    @State private var weekOffset = 0
+    @State private var weeklyExportNote: String?
 
     private enum TrendMode: String, CaseIterable {
         case byDate = "按日期"
@@ -64,6 +69,7 @@ struct UsageDashboardView: View {
                     case .projects: projectStats
                     case .sessions: sessionStats
                     case .tools: toolStats
+                    case .weekly: weeklySection
                     }
                     footerRow
                 } else {
@@ -592,6 +598,193 @@ struct UsageDashboardView: View {
                 }
             }
             Spacer()
+        }
+    }
+
+    // MARK: - 周报
+
+    /// 周区间：[周一零点, 下周一零点)，weekOffset 往回翻
+    private func weekRange(offset: Int) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let interval = calendar.dateInterval(of: .weekOfYear, for: Date())
+            ?? DateInterval(start: Date(), duration: 7 * 86400)
+        let start = calendar.date(
+            byAdding: .weekOfYear, value: -offset, to: interval.start) ?? interval.start
+        let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start)
+            ?? start.addingTimeInterval(7 * 86400)
+        return (start, end)
+    }
+
+    private var weeklySection: some View {
+        let range = weekRange(offset: weekOffset)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    weekOffset += 1
+                    loadWeekly()
+                } label: { Image(systemName: "chevron.left").font(.system(size: 10)) }
+                .buttonStyle(.borderless)
+                Text(weekOffset == 0 ? "本周" : (weekOffset == 1 ? "上周" : "\(weekOffset) 周前"))
+                    .font(.system(size: 12, weight: .semibold))
+                Text("\(range.start, format: .dateTime.month().day()) – \(range.end.addingTimeInterval(-1), format: .dateTime.month().day())")
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Button {
+                    weekOffset = max(0, weekOffset - 1)
+                    loadWeekly()
+                } label: { Image(systemName: "chevron.right").font(.system(size: 10)) }
+                .buttonStyle(.borderless)
+                .disabled(weekOffset == 0)
+                Spacer()
+                if let note = weeklyExportNote {
+                    Text(note)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                }
+                Button("导出 Markdown") { exportWeekly() }
+                    .controlSize(.small)
+                    .disabled(usageService.weeklyReport?.isEmpty ?? true)
+            }
+
+            if let report = usageService.weeklyReport, !report.isEmpty {
+                weeklyStats(report)
+            } else {
+                Text("该周没有活动记录")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            }
+        }
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .onAppear { loadWeekly() }
+    }
+
+    @ViewBuilder
+    private func weeklyStats(_ report: WeeklyReport) -> some View {
+        // 概览行
+        HStack(spacing: 16) {
+            weeklyStat("活跃时长", "≈\(report.activeHours) 小时")
+            weeklyStat("消耗", formatTokens(report.totalTokens))
+            weeklyStat("费用", formatCost(report.totalCostUSD ?? 0), color: Theme.cost)
+            let total = report.successCount + report.errorCount + report.interruptedCount
+            if total > 0 {
+                weeklyStat("任务", "\(total) 个 · 成功 \(report.successCount)")
+            }
+            if report.lateNightDays > 0 {
+                weeklyStat("深夜编码", "\(report.lateNightDays) 天", color: .orange)
+            }
+            Spacer(minLength: 0)
+        }
+        Divider()
+        HStack(alignment: .top, spacing: 18) {
+            weeklyRankColumn("按来源", report.bySource)
+            weeklyRankColumn("模型 Top", report.byModel)
+            weeklyRankColumn("项目 Top", report.byProject)
+        }
+        if !report.topSessions.isEmpty {
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Text("最贵会话")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(report.topSessions) { entry in
+                    HStack(spacing: 6) {
+                        Text(sessionBrowser.sessionsById[entry.sessionId]?.name
+                            ?? "会话 \(entry.sessionId.prefix(8))")
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        if let project = entry.project {
+                            Text(project)
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 6)
+                        Text(formatTokens(entry.tokens))
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Text(formatCost(entry.costUSD ?? 0))
+                            .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                            .foregroundStyle(Theme.cost)
+                    }
+                }
+            }
+        }
+        if !report.topSkills.isEmpty {
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Text("技能调用 Top")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(report.topSkills, id: \.name) { skill in
+                    HStack {
+                        Text(skill.name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text("\(skill.count) 次")
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func weeklyStat(_ label: String, _ value: String, color: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .foregroundStyle(color)
+        }
+    }
+
+    private func weeklyRankColumn(_ title: String, _ entries: [WeeklyReport.Entry]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            if entries.isEmpty {
+                Text("—").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
+            ForEach(entries) { entry in
+                HStack(spacing: 6) {
+                    Text(entry.name)
+                        .font(.system(size: 10.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Text(formatCost(entry.costUSD ?? 0))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(Theme.cost)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func loadWeekly() {
+        let range = weekRange(offset: weekOffset)
+        usageService.loadWeeklyReport(weekStart: range.start, weekEnd: range.end)
+    }
+
+    private func exportWeekly() {
+        guard let report = usageService.weeklyReport else { return }
+        let names = sessionBrowser.sessionsById.compactMapValues(\.name)
+        let md = WeeklyReportBuilder.markdown(report, sessionNames: names)
+        let panel = NSSavePanel()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        panel.nameFieldStringValue = "vibe-weekly-\(formatter.string(from: report.weekStart)).md"
+        panel.allowedContentTypes = [.plainText]
+        if panel.runModal() == .OK, let url = panel.url {
+            try? Data(md.utf8).write(to: url)
+            weeklyExportNote = "已导出 \(url.lastPathComponent)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { weeklyExportNote = nil }
         }
     }
 

@@ -65,6 +65,18 @@ public final class TaskHistoryRepo {
         ])
     }
 
+    /// 区间内任务结局计数（finished_at 落区间；周报成功/失败/中断率用）
+    public func outcomeCounts(from: Date, to: Date) throws -> [String: Int] {
+        let rows = try db.query("""
+        SELECT outcome, COUNT(*) FROM task_history
+        WHERE finished_at >= ? AND finished_at < ?
+        GROUP BY outcome
+        """, [.date(from), .date(to)]) { row in
+            (row.text(0) ?? "", Int(row.int(1)))
+        }
+        return Dictionary(uniqueKeysWithValues: rows)
+    }
+
     public func recent(limit: Int = 50) throws -> [FinishedTask] {
         try db.query("""
         SELECT source, session_id, title, cwd, started_at, session_started_at,
@@ -390,6 +402,18 @@ public final class UsageRepo {
     }
 
     /// 时间区间内按 (source, model) 聚合
+    /// 区间内有请求的（本地日期, 小时）去重桶：周报"活跃时长 / 深夜天数"口径（与热力图同源）
+    public func activeHourBuckets(from: Date, to: Date) throws -> [(day: String, hour: Int)] {
+        try db.query("""
+        SELECT DISTINCT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime'),
+               CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER)
+        FROM usage_records
+        WHERE ts >= ? AND ts < ?
+        """, [.date(from), .date(to)]) { row in
+            (day: row.text(0) ?? "", hour: Int(row.int(1)))
+        }
+    }
+
     public func totalsByModel(from: Date, to: Date) throws -> [UsageTotals] {
         try db.query("""
         SELECT source, model,
