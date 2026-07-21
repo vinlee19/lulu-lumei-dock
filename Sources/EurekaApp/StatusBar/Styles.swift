@@ -85,10 +85,16 @@ struct CapsuleTabTray<Content: View>: View {
     }
 }
 
-/// 侧边栏导航条目：选中 = 品牌色圆角胶囊白字；未选中 = 灰字、悬停微高亮（主窗口左侧边栏用）。
+/// 侧边栏导航条目（macOS 系统设置式）：左侧彩色圆角小方块图标 + 中性文字；
+/// 选中 = 品牌色圆角胶囊白字（图标块颜色保持）；未选中 = 灰字、悬停微高亮。
 struct SidebarNavButton: View {
     let title: String
     let icon: String
+    /// 图标块底色（每个条目一色，系统设置式）
+    let tileColor: Color
+    /// 尾部小徽标（如限额百分比），nil 不显示
+    var badge: String?
+    var badgeColor: Color = .secondary
     let isSelected: Bool
     let onTap: () -> Void
 
@@ -97,17 +103,28 @@ struct SidebarNavButton: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 16)
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(tileColor.gradient)
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Image(systemName: icon)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white)
+                    )
                 Text(title)
                     .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.9))
+                                                    : AnyShapeStyle(badgeColor))
+                }
             }
             .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 8).fill(
                     isSelected
