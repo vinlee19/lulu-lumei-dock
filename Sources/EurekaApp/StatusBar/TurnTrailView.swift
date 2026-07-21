@@ -29,18 +29,20 @@ struct TurnTrailRowView: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    Image(systemName: "wrench.adjustable")
+                        .font(.system(size: 8.5))
                     Text("本轮轨迹（\(message.steps.count) 步）")
-                        .font(.system(size: 9.5, weight: .medium))
+                        .font(.system(size: 10, weight: .medium))
                     Text(kindSummary)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.purple.opacity(0.55))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Theme.brand.opacity(0.5))
                         .lineLimit(1)
                     if errorCount > 0 {
                         HStack(spacing: 2) {
                             Image(systemName: "exclamationmark.circle")
                                 .font(.system(size: 8.5))
                             Text("\(errorCount) 失败")
-                                .font(.system(size: 9))
+                                .font(.system(size: 9.5))
                         }
                         .foregroundStyle(.red.opacity(0.8))
                     }
@@ -49,7 +51,7 @@ struct TurnTrailRowView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.purple.opacity(0.75))
+            .foregroundStyle(Theme.brand.opacity(0.7))
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 2.5) {
@@ -65,7 +67,7 @@ struct TurnTrailRowView: View {
         .padding(.trailing, 4)
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(isMatch ? Color.yellow.opacity(0.9) : .clear, lineWidth: 1.5))
+                .strokeBorder(isMatch ? Theme.gold.opacity(0.85) : .clear, lineWidth: 1.5))
     }
 
     private func stepRow(_ step: ToolStep) -> some View {
@@ -73,14 +75,14 @@ struct TurnTrailRowView: View {
             Image(systemName: step.kind.icon)
                 .font(.system(size: 8.5))
                 .frame(width: 12)
-                .foregroundStyle(step.isError ? Color.red.opacity(0.8) : .purple.opacity(0.6))
+                .foregroundStyle(step.isError ? Color.red.opacity(0.8) : Theme.brand.opacity(0.55))
             Text(step.name)
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(step.isError ? Color.red.opacity(0.9) : .purple.opacity(0.8))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(step.isError ? Color.red.opacity(0.9) : Theme.brand.opacity(0.75))
                 .lineLimit(1)
             if !step.detail.isEmpty {
                 Text(step.detail)
-                    .font(.system(size: 9.5))
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)

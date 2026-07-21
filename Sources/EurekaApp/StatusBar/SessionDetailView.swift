@@ -353,7 +353,8 @@ struct SessionDetailView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        // 聊天式排版：消息间距拉开；左右两侧本就有列表/目录夹着，不再限宽居中
+                        LazyVStack(alignment: .leading, spacing: 18) {
                             ForEach(displayMessages) { message in
                                 MessageRowView(
                                     message: message,
@@ -362,7 +363,8 @@ struct SessionDetailView: View {
                                     .id(message.id)
                             }
                         }
-                        .padding(10)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 16)
                     }
                     .onReceive(NotificationCenter.default.publisher(
                         for: .eurekaJumpToMessage)) { note in
@@ -442,6 +444,8 @@ extension Notification.Name {
 
 // MARK: - 消息行
 
+/// 聊天式消息行：用户提问 = 右对齐、紧贴内容宽的品牌色气泡；助手回复 = 靠左无边框正文直排；
+/// 时间戳 + 复制按钮不常驻，hover 时浮出在消息块右上角（overlay 不占布局）。
 private struct MessageRowView: View {
     let message: TranscriptMessage
     var isMatch = false
@@ -455,83 +459,91 @@ private struct MessageRowView: View {
         case .toolNote:
             HStack(spacing: 5) {
                 Text(message.text)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.purple.opacity(0.75))
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.brand.opacity(0.65))
                 Spacer(minLength: 0)
             }
             .padding(.leading, 8)
         case .turnTrail:
             TurnTrailRowView(
                 message: message, isMatch: isMatch, expandedTrails: $expandedTrails)
-        case .user, .assistant, .error:
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(roleLabel)
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(roleColor)
-                    if let timestamp = message.timestamp {
-                        Text(timestamp, format: .dateTime.month(.twoDigits).day(.twoDigits)
-                            .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
-                            .font(.system(size: 9).monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
-                    Spacer(minLength: 0)
-                    copyButton
-                }
-                if message.role == .error {
-                    Text(message.text)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    MarkdownRichText(text: message.text)
-                }
+        case .user:
+            HStack(spacing: 0) {
+                // 左侧至少留 ~15% 空，气泡宽度由内容决定、靠右
+                Spacer(minLength: 56)
+                MarkdownRichText(text: message.text, fillWidth: false)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.brandFill(0.10)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(
+                                isMatch ? Theme.gold.opacity(0.85) : Theme.hairline,
+                                lineWidth: isMatch ? 1.5 : 0.5))
             }
-            .padding(9)
-            .background(RoundedRectangle(cornerRadius: 8).fill(
-                message.role == .user
-                    ? Theme.brand.opacity(0.07)
-                    : Color.primary.opacity(0.035)))
+            .overlay(alignment: .topTrailing) { hoverMeta }
+            .onHover { hovering = $0 }
+        case .assistant:
+            MarkdownRichText(text: message.text)
+                .padding(.horizontal, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isMatch ? Theme.gold.opacity(0.12) : .clear)
+                        .padding(-6))
+                .overlay(alignment: .topTrailing) { hoverMeta }
+                .onHover { hovering = $0 }
+        case .error:
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.red.opacity(0.8))
+                    .frame(width: 3)
+                Text(message.text)
+                    .font(.system(size: 12.5))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.06)))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isMatch ? Color.yellow.opacity(0.9) : .clear, lineWidth: 1.5))
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(isMatch ? Theme.gold.opacity(0.85) : .clear, lineWidth: 1.5))
+            .overlay(alignment: .topTrailing) { hoverMeta }
             .onHover { hovering = $0 }
         }
     }
 
-    /// 复制整条消息原文（hover 显示；opacity 控制显隐避免标题行布局跳动）
-    private var copyButton: some View {
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(message.text, forType: .string)
-            copied = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
-        } label: {
-            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.borderless)
-        .opacity(hovering || copied ? 1 : 0)
-        .help("复制消息原文")
-    }
-
-    private var roleLabel: String {
-        switch message.role {
-        case .user: return "用户"
-        case .assistant: return "助手"
-        case .error: return "错误"
-        case .toolNote, .turnTrail: return ""
-        }
-    }
-
-    private var roleColor: Color {
-        switch message.role {
-        case .user: return Theme.brand
-        case .assistant: return .secondary
-        case .error: return .red
-        case .toolNote, .turnTrail: return .purple
+    /// hover 浮出的时间戳 + 复制胶囊：悬在消息块右上角外侧，不参与布局
+    @ViewBuilder
+    private var hoverMeta: some View {
+        if hovering || copied {
+            HStack(spacing: 5) {
+                if let timestamp = message.timestamp {
+                    Text(timestamp, format: .dateTime.month(.twoDigits).day(.twoDigits)
+                        .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
+                        .font(.system(size: 9).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(message.text, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("复制消息原文")
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(Theme.surface)
+                    .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.10), radius: 3, y: 1))
+            .offset(y: -11)
         }
     }
 }

@@ -8,18 +8,21 @@ import SwiftUI
 /// 行内样式（粗体/行内代码/链接）走 AttributedString(markdown:)。
 struct MarkdownRichText: View {
     let blocks: [MarkdownBlock]
+    /// false = 宽度紧贴内容（聊天气泡用）；true = 撑满可用宽度（正文/文档页用）
+    let fillWidth: Bool
 
-    init(text: String) {
+    init(text: String, fillWidth: Bool = true) {
         blocks = MarkdownBlockParser.parse(text)
+        self.fillWidth = fillWidth
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
     }
 
     @ViewBuilder
@@ -29,29 +32,33 @@ struct MarkdownRichText: View {
             if text.hasPrefix("|") {
                 // 表格降级：等宽渲染保持列对齐
                 Text(text)
-                    .font(.system(size: 10.5).monospaced())
+                    .font(.system(size: 11.5).monospaced())
                     .textSelection(.enabled)
             } else {
                 Text(Self.inline(text))
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 13))
+                    .lineSpacing(2.5)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
         case .heading(let level, let text):
             Text(Self.inline(text))
                 .font(.system(
-                    size: level == 1 ? 13.5 : (level == 2 ? 12.8 : 12),
+                    size: level == 1 ? 15 : (level == 2 ? 14 : 13.5),
                     weight: .semibold))
-                .padding(.top, 3)
+                .padding(.top, 4)
                 .textSelection(.enabled)
         case .codeBlock(let language, let code):
             CodeBlockView(language: language, code: code)
         case .listItem(let ordered, let index, let text, let indent):
             HStack(alignment: .top, spacing: 5) {
                 Text(ordered ? "\(index)." : "•")
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(.system(size: 12.5).monospacedDigit())
                     .foregroundStyle(Theme.brand.opacity(0.8))
                 Text(Self.inline(text))
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 13))
+                    .lineSpacing(2.5)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
             .padding(.leading, CGFloat(indent) * 12)
@@ -61,7 +68,9 @@ struct MarkdownRichText: View {
                     .fill(Theme.brand.opacity(0.4))
                     .frame(width: 2.5)
                 Text(Self.inline(text))
-                    .font(.system(size: 11))
+                    .font(.system(size: 12.5))
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -80,7 +89,7 @@ struct MarkdownRichText: View {
                 GridRow {
                     ForEach(0..<columns, id: \.self) { col in
                         Text(Self.inline(col < header.count ? header[col] : ""))
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -89,7 +98,7 @@ struct MarkdownRichText: View {
                     GridRow {
                         ForEach(0..<columns, id: \.self) { col in
                             Text(Self.inline(col < row.count ? row[col] : ""))
-                                .font(.system(size: 11))
+                                .font(.system(size: 12))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -145,7 +154,7 @@ struct CodeBlockView: View {
             .padding(.vertical, 4)
             Divider().opacity(0.5)
             Text(code)
-                .font(.system(size: 10.5).monospaced())
+                .font(.system(size: 11.5).monospaced())
                 .textSelection(.enabled)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)

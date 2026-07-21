@@ -314,11 +314,11 @@ private struct SessionRow: View {
                 .disabled(session.source == .opencode)
                 .help(session.source == .opencode ? "opencode 会话不支持删除" : "")
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     SourceBadge(source: session.source, size: 11)
                     Text(session.name ?? "会话 \(session.id.prefix(8))")
-                        .font(.system(size: 12))
+                        .font(.system(size: 12.5))
                         .lineLimit(1)
                 }
                 HStack(spacing: 4) {
@@ -352,7 +352,7 @@ private struct SessionRow: View {
             .help("拷贝恢复命令")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, Theme.spacing.row)
+        .padding(.vertical, 10)
         .background(
             ZStack(alignment: .leading) {
                 if isSelected {
