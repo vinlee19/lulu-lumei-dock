@@ -4,6 +4,23 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-07-22
+
+### Changed
+
+- **Sessions toolbar redesign.** The search field and source filter fuse into
+  one rounded panel with an always-on purple-gold gradient border (brighter
+  when focused, with a clear-text button); the source picker is now a custom
+  popover — real CLI logos inside and out, per-source session counts, a
+  brand-tinted selected row, and it no longer spills past the pane divider
+  the way the old system menu did.
+- **Colored control icons** in the sidebar-tile style: the sort tabs (active /
+  disk / duration / project, renamed from 最近活跃/大小/时长) each get a
+  colored icon tile, and the multi-select and refresh buttons become colored
+  tile buttons (multi-select lights up with a brand ring when armed).
+- The display-limit dropdown and the whole toolbar adopt the same rounded
+  capsule language as the rest of the app.
+
 ## [0.5.1] - 2026-07-22
 
 ### Fixed
@@ -303,6 +320,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.5.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.2
 [0.5.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.1
 [0.5.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.0
 [0.4.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.4.0
