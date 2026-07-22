@@ -4,6 +4,15 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-07-22
+
+### Fixed
+
+- Selecting a CLI in the sessions source dropdown flooded the whole left
+  pane with a giant source logo: macOS re-hosts `Menu` label content, and
+  shape/resizable-image views escape their frame constraints there. The
+  dropdown label now uses text only (brand-tinted when a filter is active).
+
 ## [0.5.0] - 2026-07-22
 
 ### Changed
@@ -294,6 +303,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.5.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.1
 [0.5.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.0
 [0.4.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.4.0
 [0.3.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.3.0
