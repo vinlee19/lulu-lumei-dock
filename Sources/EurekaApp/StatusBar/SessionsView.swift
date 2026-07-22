@@ -13,6 +13,10 @@ struct SessionsView: View {
     @State private var multiSelect = false
     @State private var checkedIds: Set<String> = []
     @State private var confirmingBatchDelete = false
+    /// 搜索框聚焦态（驱动紫金渐变描边）
+    @FocusState private var searchFocused: Bool
+    /// 来源选择 popover 开关
+    @State private var showSourcePicker = false
 
     private var limitLabel: String {
         settings.sessionDisplayLimit == 0 ? "全部" : "最近 \(settings.sessionDisplayLimit)"
@@ -70,80 +74,89 @@ struct SessionsView: View {
             HStack(spacing: 6) {
                 Text("共 \(service.summary.sessionCount) 个会话")
                     .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .fixedSize()
                 Text("·").foregroundStyle(.tertiary)
                 Text(formatBytes(service.summary.totalBytes))
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
                 if let cost = service.summary.totalCostUSD {
                     Text("·").foregroundStyle(.tertiary)
                     Text("≈\(formatCost(cost))")
                         .font(.system(size: 11, weight: .medium).monospacedDigit())
                         .foregroundStyle(Theme.cost)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 6)
+                // 展示数量下拉（胶囊盒，同来源下拉风格）
                 Menu {
                     ForEach([10, 20, 50], id: \.self) { n in
                         Button("最近 \(n) 个") { settings.sessionDisplayLimit = n }
                     }
                     Button("全部") { settings.sessionDisplayLimit = 0 }
                 } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
+                    HStack(spacing: 4) {
+                        Image(systemName: "line.3.horizontal.decrease")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Text(limitLabel)
                             .font(.system(size: 10))
-                        Text(limitLabel).font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundStyle(.tertiary)
                     }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .background(Capsule().fill(Color.primary.opacity(0.05)))
+                    .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
+                    .contentShape(Capsule())
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
+                .help("最多展示多少个会话")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .padding(.bottom, 2)
 
-            // 搜索 + 工具条
+            // 搜索面板（来源筛选内嵌右端；聚焦时紫金渐变描边）+ 圆形工具按钮
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                TextField("搜索会话 / 项目 / id", text: $service.searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11))
-                sourceDropdown
-                // 多选模式
-                Button {
+                searchPanel
+                toolButton(
+                    icon: "checkmark",
+                    tint: .green,
+                    active: multiSelect,
+                    help: "多选模式（批量删除）"
+                ) {
                     multiSelect.toggle()
                     if !multiSelect { checkedIds = [] }
-                } label: {
-                    Image(systemName: multiSelect
-                        ? "checkmark.circle.fill" : "checkmark.circle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(multiSelect ? Theme.brand : .secondary)
                 }
-                .buttonStyle(.borderless)
-                .help("多选模式（批量删除）")
-                // 刷新
-                Button {
+                toolButton(icon: "arrow.clockwise", tint: .teal, help: "重新索引会话") {
                     service.refresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
-                .help("重新索引会话")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
 
-            // 排序 / 视图（前三档扁平列表，「项目」按项目分组）
-            Picker("", selection: $service.sortMode) {
-                ForEach(SessionBrowserService.SortMode.allCases, id: \.self) {
-                    Text($0.label)
+            // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签 + 侧边栏式彩色图标块
+            CapsuleTabTray {
+                ForEach(SessionBrowserService.SortMode.allCases, id: \.self) { mode in
+                    CapsuleTabButton(
+                        title: mode.label,
+                        icon: mode.icon,
+                        tileColor: sortTileColor(mode),
+                        isSelected: service.sortMode == mode
+                    ) {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            service.sortMode = mode
+                        }
+                    }
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.mini)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
 
@@ -216,29 +229,108 @@ struct SessionsView: View {
         }
     }
 
-    /// 来源筛选下拉框：显示当前选中 CLI（未筛选 = 全部来源），点开列出各 CLI + 计数
-    private var sourceDropdown: some View {
-        Menu {
-            Button("全部来源（\(service.summary.sessionCount)）") {
-                service.sourceFilter = nil
-            }
-            Divider()
-            ForEach(AgentSource.allCases, id: \.self) { source in
-                if let count = service.sourceCounts[source], count > 0 {
-                    Button("\(source.displayName)（\(count)）") {
-                        service.sourceFilter = source
-                    }
+    /// 排序页签图标块底色（同侧边栏调色板）
+    private func sortTileColor(_ mode: SessionBrowserService.SortMode) -> Color {
+        switch mode {
+        case .time: return .blue
+        case .size: return .orange
+        case .duration: return .indigo
+        case .project: return Theme.gold
+        }
+    }
+
+    /// 搜索面板：搜索框与来源筛选融合为一体（筛选内嵌右端，细分隔线隔开）；
+    /// 常驻淡紫金渐变描边区分层次，聚焦时描边点亮 + 品牌色放大镜
+    private var searchPanel: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(searchFocused ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.tertiary))
+            TextField("搜索会话 / 项目 / id", text: $service.searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .focused($searchFocused)
+            if !service.searchText.isEmpty {
+                Button {
+                    service.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
                 }
+                .buttonStyle(.plain)
+                .help("清空搜索")
             }
+            Divider().frame(height: 12)
+            sourcePickerButton
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4.5)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Theme.surface))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Theme.brand.opacity(searchFocused ? 1 : 0.45),
+                                 Theme.gold.opacity(searchFocused ? 1 : 0.45)],
+                        startPoint: .leading, endPoint: .trailing),
+                    lineWidth: searchFocused ? 1.2 : 0.8))
+        .shadow(color: searchFocused ? Theme.brand.opacity(0.12) : .clear, radius: 4, y: 1)
+        .animation(.easeOut(duration: 0.15), value: searchFocused)
+        .popover(isPresented: $showSourcePicker, arrowEdge: .bottom) {
+            sourcePickerPopover
+        }
+    }
+
+    /// 彩色工具按钮：侧边栏式彩色圆角图标块；active（多选开启）= 品牌色描边点亮
+    private func toolButton(
+        icon: String, tint: Color, active: Bool = false,
+        help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tint.gradient)
+                .frame(width: 22, height: 22)
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(.white))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(
+                            active ? Theme.brand : .clear, lineWidth: 1.5))
+                .shadow(color: active ? Theme.brand.opacity(0.3) : .clear, radius: 3)
+                .opacity(active ? 1 : 0.88)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// 来源筛选入口（内嵌在搜索面板右端）：彩色筛选图标块 / 选中 CLI 的真实徽标 + 名称。
+    /// 点开的是自定义 popover（非 NSMenu），可控样式且不越过左栏分隔线。
+    private var sourcePickerButton: some View {
+        Button {
+            showSourcePicker.toggle()
         } label: {
-            // 注意：label 内不能放 SourceBadge——macOS 的 Menu label 会重新托管内容，
-            // Shape/resizable Image 会逃出 frame 约束撑满整栏（纯文本 + SF symbol 安全）
             HStack(spacing: 4) {
                 if let filter = service.sourceFilter {
+                    SourceBadge(source: filter, size: 12)
                     Text(filter.displayName)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.brand)
+                        .lineLimit(1)
+                        .fixedSize()
                 } else {
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(Theme.brand.gradient)
+                        .frame(width: 14, height: 14)
+                        .overlay(
+                            Image(systemName: "line.3.horizontal.decrease")
+                                .font(.system(size: 7, weight: .semibold))
+                                .foregroundStyle(.white))
                     Text("全部来源")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -247,20 +339,72 @@ struct SessionsView: View {
                     .font(.system(size: 7, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3.5)
-            .background(Capsule().fill(
-                service.sourceFilter == nil
-                    ? Color.primary.opacity(0.05) : Theme.brandFill(0.12)))
-            .overlay(Capsule().strokeBorder(
-                service.sourceFilter == nil ? Theme.hairline : Theme.brand.opacity(0.4),
-                lineWidth: 0.5))
-            .contentShape(Capsule())
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.plain)
         .help("按 CLI 来源筛选会话")
+    }
+
+    /// 来源选择 popover：真实徽标 + 名称 + 计数，选中行品牌底 + 对勾；淡紫金渐变洗底
+    private var sourcePickerPopover: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            sourcePickerRow(nil, name: "全部来源", count: service.summary.sessionCount)
+            Divider().padding(.vertical, 2)
+            ForEach(AgentSource.allCases, id: \.self) { source in
+                if let count = service.sourceCounts[source], count > 0 {
+                    sourcePickerRow(source, name: source.displayName, count: count)
+                }
+            }
+        }
+        .padding(8)
+        .frame(width: 210)
+        .background(
+            LinearGradient(
+                colors: [Theme.brand.opacity(0.06), Theme.gold.opacity(0.05)],
+                startPoint: .topLeading, endPoint: .bottomTrailing))
+    }
+
+    private func sourcePickerRow(
+        _ source: AgentSource?, name: String, count: Int
+    ) -> some View {
+        let selected = service.sourceFilter == source
+        return Button {
+            service.sourceFilter = source
+            showSourcePicker = false
+        } label: {
+            HStack(spacing: 7) {
+                if let source {
+                    SourceBadge(source: source, size: 14)
+                } else {
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(Theme.brand.gradient)
+                        .frame(width: 14, height: 14)
+                        .overlay(
+                            Image(systemName: "line.3.horizontal.decrease")
+                                .font(.system(size: 7, weight: .semibold))
+                                .foregroundStyle(.white))
+                }
+                Text(name)
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                Spacer(minLength: 8)
+                Text("\(count)")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(selected ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.tertiary))
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Theme.brand)
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4.5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Theme.brandFill(0.12) : .clear))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func sessionRow(_ session: AgentSessionInfo) -> some View {

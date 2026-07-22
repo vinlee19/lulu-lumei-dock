@@ -34,10 +34,20 @@ final class SessionBrowserService: ObservableObject {
 
         var label: String {
             switch self {
-            case .time: return "最近活跃"
-            case .size: return "大小"
-            case .duration: return "时长"
+            case .time: return "活跃"      // 最近活跃时间
+            case .size: return "占用"      // transcript 磁盘占用
+            case .duration: return "耗时"  // 会话首末活动跨度
             case .project: return "项目"
+            }
+        }
+
+        /// 页签图标（SF Symbol，同侧边栏/设置页的胶囊页签风格）
+        var icon: String {
+            switch self {
+            case .time: return "clock.fill"
+            case .size: return "internaldrive.fill"
+            case .duration: return "hourglass"
+            case .project: return "folder.fill"
             }
         }
     }

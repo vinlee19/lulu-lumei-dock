@@ -40,6 +40,8 @@ struct SectionCard<Content: View>: View {
 struct CapsuleTabButton: View {
     let title: String
     var icon: String?
+    /// 图标块底色（侧边栏式彩色小方块；nil = 图标随文字色）
+    var tileColor: Color?
     /// true = 均分填满父容器（主窗口页签条）；false = 自适应内容宽度（子页签条）
     var fillWidth = true
     let isSelected: Bool
@@ -51,8 +53,18 @@ struct CapsuleTabButton: View {
         Button(action: onTap) {
             HStack(spacing: 4) {
                 if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 10, weight: .semibold))
+                    if let tileColor {
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .fill(tileColor.gradient)
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Image(systemName: icon)
+                                    .font(.system(size: 7.5, weight: .semibold))
+                                    .foregroundStyle(.white))
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
                 }
                 Text(title)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
