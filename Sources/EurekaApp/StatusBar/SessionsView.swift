@@ -231,11 +231,13 @@ struct SessionsView: View {
                 }
             }
         } label: {
+            // 注意：label 内不能放 SourceBadge——macOS 的 Menu label 会重新托管内容，
+            // Shape/resizable Image 会逃出 frame 约束撑满整栏（纯文本 + SF symbol 安全）
             HStack(spacing: 4) {
                 if let filter = service.sourceFilter {
-                    SourceBadge(source: filter, size: 10)
                     Text(filter.displayName)
                         .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.brand)
                 } else {
                     Text("全部来源")
                         .font(.system(size: 10))
@@ -247,8 +249,12 @@ struct SessionsView: View {
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 3.5)
-            .background(Capsule().fill(Color.primary.opacity(0.05)))
-            .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
+            .background(Capsule().fill(
+                service.sourceFilter == nil
+                    ? Color.primary.opacity(0.05) : Theme.brandFill(0.12)))
+            .overlay(Capsule().strokeBorder(
+                service.sourceFilter == nil ? Theme.hairline : Theme.brand.opacity(0.4),
+                lineWidth: 0.5))
             .contentShape(Capsule())
         }
         .menuStyle(.borderlessButton)
