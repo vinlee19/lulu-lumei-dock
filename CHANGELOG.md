@@ -4,6 +4,43 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-22
+
+### Changed
+
+- **Unified page design.** Skills, Memory and Agents now share the Plans-style
+  interaction language: equal-width stat tiles on top (click a CLI tile to
+  filter), card grids per source, and inline detail pages (back bar,
+  preview/edit toggle, document-card markdown rendering) replacing every
+  modal sheet — including the Codex profile form. Skill and agent cards carry
+  a green/grey status square that toggles enablement in place.
+- **Skills list and analytics merged into one page.** The list/stats
+  segmented tabs are gone; a "Top skills" ranking card (rank, source badge,
+  proportion bar, last-active time, call count) sits above the card grid,
+  with today / this week / this month / all-time / custom date ranges, and
+  clicking a ranking row opens the inline skill detail.
+- **Sessions pane redesign.** The left list is flat by default, sorted by
+  recent activity, size or duration; a fourth "project" segment restores
+  project grouping (expanded by default). Source filtering moved from a
+  hidden icon menu to a visible dropdown listing every CLI with its session
+  count.
+- The usage dashboard gained an **all-time** period alongside
+  today / week / month / custom.
+- The Memory tab now shows only global and user-created memories;
+  project-scoped files (repo-root `CLAUDE.md` / `GEMINI.md` / `QWEN.md`,
+  per-project memory dirs) are no longer listed there. Indexing is
+  unchanged, so cloud backup still covers them.
+- Settings dropped the "usage stats" sub-tab — the top-level Usage module
+  already covers it.
+
+### Fixed
+
+- Large blank gaps between rows in the session list: structural
+  expand/collapse animation inside the lazy list left ghost space, and
+  duplicate session ids could render as empty rows. The flat list removes
+  the structure, project grouping no longer animates, and indexing dedupes
+  by session id.
+
 ## [0.4.0] - 2026-07-21
 
 ### Added
@@ -257,6 +294,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.5.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.0
 [0.4.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.4.0
 [0.3.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.3.0
 [0.2.3]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.2.3
