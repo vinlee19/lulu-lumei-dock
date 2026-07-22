@@ -104,16 +104,18 @@ final class SkillMemoryService: ObservableObject {
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         // 列表只展示用户自建/安装技能；内置(bundled) 仅供详情矩阵与跨源判定
         let userSkills = allSkills.filter { $0.origin == .user }
+        // 记忆页只展示系统级记忆（全局 + 用户自建）；项目级记忆归属项目上下文，不进本页
+        let systemMemories = allMemories.filter { $0.projectName == nil }
         guard !query.isEmpty else {
             skills = userSkills
-            memories = allMemories
+            memories = systemMemories
             return
         }
         skills = userSkills.filter {
             [$0.name, $0.description, $0.path]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)
         }
-        memories = allMemories.filter {
+        memories = systemMemories.filter {
             "\($0.scope) \($0.path)".lowercased().contains(query)
         }
     }

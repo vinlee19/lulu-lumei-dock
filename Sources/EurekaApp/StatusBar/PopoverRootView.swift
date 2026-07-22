@@ -194,7 +194,7 @@ struct PopoverRootView: View {
         case .settings:
             SettingsView(
                 settings: settings, installer: installer,
-                usageService: usageService, sessionBrowser: sessionBrowser,
+                usageService: usageService,
                 cliTools: cliToolsService, notificationService: notificationService,
                 updateService: updateService,
                 syncService: syncService, auditService: auditService)

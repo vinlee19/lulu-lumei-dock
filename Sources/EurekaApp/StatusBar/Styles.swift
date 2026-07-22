@@ -1,3 +1,4 @@
+import EurekaKit
 import SwiftUI
 
 /// 统一区块卡片：可选标题 + 中性底圆角容器（主窗口各页签共用）。
@@ -132,6 +133,70 @@ struct SidebarNavButton: View {
                         : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
             )
             .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - 统计瓦片（Skills / Memory / Plans / Agents 页共用，点击即筛选）
+
+/// 顶部统计瓦片：大数字 + 来源徽标/图标 + 标签。放在 HStack 中等宽均分，
+/// 保证各 CLI 的瓦片在 UI 上一样大小；选中态品牌描边 + 品牌浅底。
+struct StatTile: View {
+    let value: String
+    var sub: String?
+    let label: String
+    var icon: String?
+    var source: AgentSource?
+    let tint: Color
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(value)
+                        .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                    if let sub {
+                        Text(sub)
+                            .font(.system(size: 9.5).monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                HStack(spacing: 4) {
+                    if let icon {
+                        Image(systemName: icon)
+                            .font(.system(size: 9))
+                            .foregroundStyle(tint)
+                    }
+                    if let source {
+                        SourceBadge(source: source, size: 10)
+                    }
+                    Text(label)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            // 等宽均分：内容撑满分配宽度，HStack 中每片一样大
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container)
+                    .fill(isSelected ? Theme.brandFill(0.10) : Theme.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.container)
+                    .strokeBorder(
+                        isSelected ? Theme.brand.opacity(0.7)
+                                   : (hovering ? Theme.brand.opacity(0.35) : Theme.hairline),
+                        lineWidth: isSelected ? 1 : 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

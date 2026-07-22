@@ -920,13 +920,27 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// 全时累计技能统计（kind='skill'），按累计次数降序。不带日期窗——用于"累计次数/最近活跃"。
-    public func skillStats(source: AgentSource? = nil) throws -> [SkillUsageStat] {
+    /// 技能调用统计（kind='skill'），按累计次数降序。
+    /// from/to 缺省 = 全时累计（"累计次数/最近活跃"口径）；传入则按 day 日期窗过滤（Top 排行口径）。
+    public func skillStats(
+        source: AgentSource? = nil, from: Date? = nil, to: Date? = nil
+    ) throws -> [SkillUsageStat] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         var conditions = ["kind = 'skill'"]
         var bindings: [SQLiteValue] = []
         if let source {
             conditions.append("source = ?")
             bindings.append(.text(source.rawValue))
+        }
+        if let from {
+            conditions.append("day >= ?")
+            bindings.append(.text(formatter.string(from: from)))
+        }
+        if let to {
+            conditions.append("day <= ?")
+            bindings.append(.text(formatter.string(from: to)))
         }
         let whereClause = "WHERE " + conditions.joined(separator: " AND ")
         return try db.query("""

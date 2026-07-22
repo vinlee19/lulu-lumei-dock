@@ -2,12 +2,12 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// 设置页：六个子栏目（通用 / 备份 / 审计 / 使用统计 / 高级 / 关于），仿参考设计的胶囊子页签条。
+/// 设置页：五个子栏目（通用 / 备份 / 审计 / 高级 / 关于），仿参考设计的胶囊子页签条。
+/// 使用统计不在此页——顶级「用量」模块已完整覆盖。
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var installer: InstallerService
     @ObservedObject var usageService: UsageService
-    @ObservedObject var sessionBrowser: SessionBrowserService
     @ObservedObject var cliTools: CLIToolsService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var updateService: UpdateService
@@ -20,7 +20,6 @@ struct SettingsView: View {
         case general = "通用"
         case backup = "备份"
         case audit = "审计"
-        case stats = "使用统计"
         case advanced = "高级"
         case about = "关于"
     }
@@ -40,9 +39,6 @@ struct SettingsView: View {
                     Group {
                         switch section {
                         case .general: generalSection
-                        case .stats: UsageDashboardView(
-                            usageService: usageService, sessionBrowser: sessionBrowser)
-                            .padding(-12)  // 仪表盘自带 padding，抵消外层
                         case .advanced: AdvancedSettingsView(
                             installer: installer, usageService: usageService,
                             settings: settings)

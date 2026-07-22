@@ -24,6 +24,8 @@ final class UsageService: ObservableObject {
     @Published private(set) var toolCallTotals: [ToolCallsRepo.ToolCallTotal] = []
     /// 技能全时累计统计（Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）
     @Published private(set) var skillStats: [ToolCallsRepo.SkillUsageStat] = []
+    /// Top 技能排行（Skills 页分析卡，按所选时间档过滤）
+    @Published private(set) var skillRanking: [ToolCallsRepo.SkillUsageStat] = []
     /// vibe coding 周报（loadWeeklyReport 填充；nil = 未加载）
     @Published private(set) var weeklyReport: WeeklyReport?
     /// 项目统计（选中区间）
@@ -61,11 +63,12 @@ final class UsageService: ObservableObject {
         var costUSD: Double?
     }
 
-    /// 仪表盘时间段（口径与 UsageAggregator 一致：日=当天零点、周=周一、月=月初）
+    /// 仪表盘时间段（口径与 UsageAggregator 一致：日=当天零点、周=周一、月=月初、全部=全时累计）
     enum DashboardPeriod: String, CaseIterable {
         case today = "今日"
         case week = "本周"
         case month = "本月"
+        case all = "全部"
         case custom = "自定义"
 
         /// 固定档起点（custom 由视图用自选日期决定，此处返回今日零点兜底）
@@ -83,6 +86,8 @@ final class UsageService: ObservableObject {
             case .month:
                 let components = calendar.dateComponents([.year, .month], from: now)
                 return calendar.date(from: components) ?? calendar.startOfDay(for: now)
+            case .all:
+                return Date(timeIntervalSince1970: 0)
             }
         }
     }
@@ -318,12 +323,22 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 技能全时累计统计（Skills 分析视图；kind='skill'，累计次数降序）
+    /// 技能全时累计统计（技能卡片"最近活跃"与详情页匹配；kind='skill'，累计次数降序）
     func loadSkillStats(source: AgentSource? = nil) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
             let stats = (try? store.toolCalls.skillStats(source: source)) ?? []
             self.publish { $0.skillStats = stats }
+        }
+    }
+
+    /// Top 技能排行（Skills 页分析卡）：按时间档 + 来源筛选的日期窗口径
+    func loadSkillRanking(source: AgentSource? = nil, from: Date, to: Date) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let stats = (try? store.toolCalls.skillStats(
+                source: source, from: from, to: to)) ?? []
+            self.publish { $0.skillRanking = stats }
         }
     }
 

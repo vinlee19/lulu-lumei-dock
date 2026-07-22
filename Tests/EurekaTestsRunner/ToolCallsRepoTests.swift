@@ -93,4 +93,39 @@ func toolCallsRepoTests(_ t: TestRunner) {
         try expectEqual(series.count, 2)              // 两天各一条
         try expectEqual(series.map(\.count), [1, 1])
     }
+
+    t.test("skillStats 日期窗：窗内计数、窗外排除、缺省全时") {
+        let path = tempStorePath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let store = try EurekaStore(path: path)
+
+        try store.toolCalls.bump(
+            day: "2026-07-05", source: .claude, kind: "skill", name: "dataviz", by: 2)
+        try store.toolCalls.bump(
+            day: "2026-07-10", source: .claude, kind: "skill", name: "dataviz", by: 3)
+        try store.toolCalls.bump(
+            day: "2026-07-10", source: .claude, kind: "skill", name: "review", by: 1)
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        let day5 = formatter.date(from: "2026-07-05")!
+        let day9 = formatter.date(from: "2026-07-09")!
+
+        // 窗口只含 07-05：dataviz=2，review 排除
+        let windowed = try store.toolCalls.skillStats(from: day5, to: day9)
+        try expectEqual(windowed.count, 1)
+        try expectEqual(windowed[0].name, "dataviz")
+        try expectEqual(windowed[0].count, 2)
+
+        // 缺省 = 全时：dataviz=5 > review=1
+        let allTime = try store.toolCalls.skillStats()
+        try expectEqual(allTime.map(\.name), ["dataviz", "review"])
+        try expectEqual(allTime[0].count, 5)
+
+        // 只给起点：07-09 起 → 排除 07-05 的 2 次
+        let openEnded = try store.toolCalls.skillStats(from: day9)
+        try expectEqual(openEnded.first(where: { $0.name == "dataviz" })?.count, 3)
+    }
 }

@@ -96,7 +96,6 @@ struct PlansView: View {
                     isSelected: service.filter == .source(source)
                 ) { service.filter = .source(source) }
             }
-            Spacer(minLength: 0)
         }
     }
 
@@ -290,64 +289,6 @@ private struct PlanCard: View {
                 Button("删除", role: .destructive) { onDelete() }
             }
         }
-    }
-}
-
-// MARK: - 统计瓦片（点击即筛选）
-
-private struct StatTile: View {
-    let value: String
-    var sub: String?
-    let label: String
-    var icon: String?
-    var source: AgentSource?
-    let tint: Color
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(value)
-                        .font(.system(size: 17, weight: .semibold).monospacedDigit())
-                    if let sub {
-                        Text(sub)
-                            .font(.system(size: 9.5).monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                HStack(spacing: 4) {
-                    if let icon {
-                        Image(systemName: icon)
-                            .font(.system(size: 9))
-                            .foregroundStyle(tint)
-                    }
-                    if let source {
-                        SourceBadge(source: source, size: 10)
-                    }
-                    Text(label)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .fill(isSelected ? Theme.brandFill(0.10) : Theme.surface))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .strokeBorder(
-                        isSelected ? Theme.brand.opacity(0.7)
-                                   : (hovering ? Theme.brand.opacity(0.35) : Theme.hairline),
-                        lineWidth: isSelected ? 1 : 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
 
