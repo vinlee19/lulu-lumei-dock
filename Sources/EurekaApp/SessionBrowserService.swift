@@ -24,17 +24,20 @@ final class SessionBrowserService: ObservableObject {
         var totalDuration: TimeInterval
     }
 
-    /// rawValue 为稳定持久化 token；label 为界面展示文案（解耦，改文案不动存档）
+    /// rawValue 为稳定持久化 token；label 为界面展示文案（解耦，改文案不动存档）。
+    /// 前三档为扁平列表排序维度；「项目」为按项目分组视图。
     enum SortMode: String, CaseIterable {
         case time
         case size
         case duration
+        case project
 
         var label: String {
             switch self {
             case .time: return "最近活跃"
-            case .size: return "按大小"
-            case .duration: return "按时长"
+            case .size: return "大小"
+            case .duration: return "时长"
+            case .project: return "项目"
             }
         }
     }
@@ -59,6 +62,10 @@ final class SessionBrowserService: ObservableObject {
     }
 
     @Published private(set) var groups: [ProjectGroup] = []
+    /// 扁平列表（time/size/duration 三档；project 档时为空，走 groups）
+    @Published private(set) var flatSessions: [AgentSessionInfo] = []
+    /// 各来源会话数（全集口径，来源 chips 计数用；不受搜索/筛选影响）
+    @Published private(set) var sourceCounts: [AgentSource: Int] = [:]
     @Published private(set) var summary = Summary()
     /// id → 会话索引信息（用量"按会话"排行 join 会话名 + 跨页签跳转用），refresh 完成时填充
     @Published private(set) var sessionsById: [String: AgentSessionInfo] = [:]
@@ -133,6 +140,10 @@ final class SessionBrowserService: ObservableObject {
             indexed += GeminiSessionIndexer.index(
                 tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
             indexed += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
+            // 按 id 去重（Claude 嵌套子代理目录等可能重复索引同一会话；
+            // ForEach 重复 id 会导致列表渲染出空白行）
+            var seenIds = Set<String>()
+            indexed = indexed.filter { seenIds.insert($0.id).inserted }
 
             // 会话级费用：逐会话×模型聚合后按价格表折算
             var costMap: [String: SessionCost] = [:]
@@ -181,6 +192,7 @@ final class SessionBrowserService: ObservableObject {
             totalBytes: sessions.reduce(0) { $0 + $1.sizeBytes },
             sessionCount: sessions.count,
             totalCostUSD: allCosts.isEmpty ? nil : allCosts.reduce(0, +))
+        sourceCounts = sessions.reduce(into: [:]) { $0[$1.source, default: 0] += 1 }
 
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         var visible = sessions
@@ -195,16 +207,30 @@ final class SessionBrowserService: ObservableObject {
                 ].compactMap { $0?.lowercased() }.joined(separator: " ")
                 return haystack.contains(query)
             }
-        } else if displayLimit > 0 {
-            // 非搜索态：按当前排序维度取最近/最大/最久的前 N 个会话
+        }
+
+        // 扁平三档：排序 + 截断，不做项目分组
+        if sortMode != .project {
             switch sortMode {
             case .time: visible.sort { $0.lastActiveAt > $1.lastActiveAt }
             case .size: visible.sort { $0.sizeBytes > $1.sizeBytes }
             case .duration: visible.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
+            case .project: break
             }
-            visible = Array(visible.prefix(displayLimit))
+            if query.isEmpty, displayLimit > 0 {
+                visible = Array(visible.prefix(displayLimit))
+            }
+            flatSessions = visible
+            groups = []
+            return
         }
 
+        // 项目档：按项目分组（组间按最近活跃排，组内按最近活跃排）；
+        // 非搜索态按最近活跃截断到 displayLimit 后再分组
+        if query.isEmpty, displayLimit > 0 {
+            visible.sort { $0.lastActiveAt > $1.lastActiveAt }
+            visible = Array(visible.prefix(displayLimit))
+        }
         var byProject: [String: [AgentSessionInfo]] = [:]
         for session in visible {
             let name = resolver.projectName(forCwd: session.cwd) ?? "（未知项目）"
@@ -214,30 +240,15 @@ final class SessionBrowserService: ObservableObject {
             let groupCosts = sessions.compactMap { costs[$0.id]?.costUSD }
             return ProjectGroup(
                 name: name,
-                sessions: sessions,
+                sessions: sessions.sorted { $0.lastActiveAt > $1.lastActiveAt },
                 totalBytes: sessions.reduce(0) { $0 + $1.sizeBytes },
                 latestActiveAt: sessions.map(\.lastActiveAt).max() ?? .distantPast,
                 totalCostUSD: groupCosts.isEmpty ? nil : groupCosts.reduce(0, +),
                 totalDuration: sessions.reduce(0) { $0 + ($1.duration ?? 0) }
             )
         }
-        switch sortMode {
-        case .time:
-            result.sort { $0.latestActiveAt > $1.latestActiveAt }
-            for index in result.indices {
-                result[index].sessions.sort { $0.lastActiveAt > $1.lastActiveAt }
-            }
-        case .size:
-            result.sort { $0.totalBytes > $1.totalBytes }
-            for index in result.indices {
-                result[index].sessions.sort { $0.sizeBytes > $1.sizeBytes }
-            }
-        case .duration:
-            result.sort { $0.totalDuration > $1.totalDuration }
-            for index in result.indices {
-                result[index].sessions.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
-            }
-        }
+        result.sort { $0.latestActiveAt > $1.latestActiveAt }
+        flatSessions = []
         groups = result
     }
 

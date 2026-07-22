@@ -2,12 +2,13 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 会话管理三栏：左 = 项目分组列表（搜索/来源筛选/多选/刷新），
+/// 会话管理两栏：左 = 会话列表（搜索/来源 chips/排序：扁平三档 + 项目分组视图/多选/刷新），
 /// 右 = 会话详情（对话记录 + 对话目录，见 SessionDetailView）。
 struct SessionsView: View {
     @ObservedObject var service: SessionBrowserService
     @ObservedObject var settings: AppSettings
-    @State private var expanded: Set<String> = []
+    /// 项目视图中手动收起的分组（默认全展开）
+    @State private var collapsed: Set<String> = []
     /// 多选模式与选中集合（存 session id）
     @State private var multiSelect = false
     @State private var checkedIds: Set<String> = []
@@ -58,7 +59,7 @@ struct SessionsView: View {
     }
 
     private var allVisibleSessions: [AgentSessionInfo] {
-        service.groups.flatMap(\.sessions)
+        service.flatSessions + service.groups.flatMap(\.sessions)
     }
 
     // MARK: - 左栏
@@ -107,29 +108,7 @@ struct SessionsView: View {
                 TextField("搜索会话 / 项目 / id", text: $service.searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11))
-                // 来源筛选
-                Menu {
-                    Button("全部来源") { service.sourceFilter = nil }
-                    Divider()
-                    ForEach(AgentSource.allCases, id: \.self) { source in
-                        Button(source.displayName) { service.sourceFilter = source }
-                    }
-                } label: {
-                    HStack(spacing: 2) {
-                        if let filter = service.sourceFilter {
-                            SourceBadge(source: filter, size: 10)
-                        } else {
-                            Image(systemName: "line.3.horizontal.decrease")
-                                .font(.system(size: 9))
-                        }
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 7))
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("按来源筛选")
+                sourceDropdown
                 // 多选模式
                 Button {
                     multiSelect.toggle()
@@ -156,7 +135,7 @@ struct SessionsView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
 
-            // 排序
+            // 排序 / 视图（前三档扁平列表，「项目」按项目分组）
             Picker("", selection: $service.sortMode) {
                 ForEach(SessionBrowserService.SortMode.allCases, id: \.self) {
                     Text($0.label)
@@ -170,7 +149,8 @@ struct SessionsView: View {
 
             Divider()
 
-            if service.groups.isEmpty && service.fullTextHits.isEmpty {
+            if service.flatSessions.isEmpty && service.groups.isEmpty
+                && service.fullTextHits.isEmpty {
                 VStack(spacing: 8) {
                     if service.scanning {
                         ProgressView("正在索引会话…")
@@ -187,30 +167,26 @@ struct SessionsView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        // 扁平列表（最近活跃 / 大小 / 时长）：无项目属性
+                        ForEach(service.flatSessions) { session in
+                            sessionRow(session)
+                            Divider().padding(.leading, 12).opacity(0.4)
+                        }
+                        // 项目视图：分组头 + 组内会话（默认全展开；折叠不做结构动画，
+                        // LazyVStack 内结构性 withAnimation 会残留幽灵空白）
                         ForEach(service.groups) { group in
-                            let isOpen = service.isSearching || expanded.contains(group.id)
+                            let isOpen = service.isSearching || !collapsed.contains(group.id)
                             ProjectHeaderRow(group: group, isExpanded: isOpen) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    if expanded.contains(group.id) {
-                                        expanded.remove(group.id)
-                                    } else {
-                                        expanded.insert(group.id)
-                                    }
+                                if collapsed.contains(group.id) {
+                                    collapsed.remove(group.id)
+                                } else {
+                                    collapsed.insert(group.id)
                                 }
                             }
                             if isOpen {
                                 ForEach(group.sessions) { session in
-                                    SessionRow(
-                                        session: session,
-                                        cost: service.costs[session.id],
-                                        promptCount: service.promptCounts[session.id],
-                                        service: service,
-                                        isSelected: service.selected?.id == session.id,
-                                        multiSelect: multiSelect,
-                                        isChecked: checkedIds.contains(session.id),
-                                        onToggleCheck: { toggleCheck(session) }
-                                    )
-                                    .padding(.leading, 10)
+                                    sessionRow(session)
+                                        .padding(.leading, 10)
                                 }
                                 Divider().padding(.leading, 12)
                             }
@@ -238,6 +214,59 @@ struct SessionsView: View {
                 }
             }
         }
+    }
+
+    /// 来源筛选下拉框：显示当前选中 CLI（未筛选 = 全部来源），点开列出各 CLI + 计数
+    private var sourceDropdown: some View {
+        Menu {
+            Button("全部来源（\(service.summary.sessionCount)）") {
+                service.sourceFilter = nil
+            }
+            Divider()
+            ForEach(AgentSource.allCases, id: \.self) { source in
+                if let count = service.sourceCounts[source], count > 0 {
+                    Button("\(source.displayName)（\(count)）") {
+                        service.sourceFilter = source
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if let filter = service.sourceFilter {
+                    SourceBadge(source: filter, size: 10)
+                    Text(filter.displayName)
+                        .font(.system(size: 10, weight: .medium))
+                } else {
+                    Text("全部来源")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 7, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3.5)
+            .background(Capsule().fill(Color.primary.opacity(0.05)))
+            .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("按 CLI 来源筛选会话")
+    }
+
+    private func sessionRow(_ session: AgentSessionInfo) -> some View {
+        SessionRow(
+            session: session,
+            cost: service.costs[session.id],
+            promptCount: service.promptCounts[session.id],
+            service: service,
+            isSelected: service.selected?.id == session.id,
+            multiSelect: multiSelect,
+            isChecked: checkedIds.contains(session.id),
+            onToggleCheck: { toggleCheck(session) })
     }
 
     private func toggleCheck(_ session: AgentSessionInfo) {
