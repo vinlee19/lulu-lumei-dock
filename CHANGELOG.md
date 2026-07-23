@@ -4,6 +4,30 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-07-23
+
+### Added
+
+- **Project-scoped skills are now backed up.** Cloud backup previously covered
+  only global skills (`~/.claude/skills` etc.); it now also uploads per-project
+  skills (`<repo>/.claude/skills`, `.codex/skills`, …) discovered from recent
+  sessions, under keys `<host>/<source>/skills/project/<project>/…`. The Skills
+  page and the backup engine share one project-discovery path.
+- **One-click CLI update.** Each installed tool in Settings → About shows an
+  「更新」button — only when a newer version is available — that runs the tool's
+  own updater in a visible Terminal (`claude update`, `opencode upgrade`,
+  `grok update`, `agy update`, or `npm i -g <pkg>@latest` for the rest). The
+  「可更新 / 已就绪」badge now uses a semver comparison and the latest version is
+  checked automatically when the page opens.
+
+### Changed
+
+- **Brand logo shown in more places.** A shared purple-gold「Lu」mark now sits in
+  the sidebar bottom-left next to the version, and replaces the generic icon on
+  the Settings → About app card (the sidebar header reuses it too).
+- **Settings sub-tabs are icon-led.** 通用 / 备份 / 审计 / 高级 / 关于 each gain a
+  leading icon, matching the rest of the app's navigation.
+
 ## [0.6.1] - 2026-07-23
 
 ### Added
@@ -370,6 +394,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.6.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.2
 [0.6.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.0
 [0.5.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.2
