@@ -10,6 +10,10 @@ struct PlansView: View {
     /// 内嵌详情页当前展示的计划（nil = 列表）
     @State private var detail: PlanMaterializer.PlanEntry?
     @State private var deleting: PlanMaterializer.PlanEntry?
+    /// 折叠的分区（key：来源 rawValue；项目计划组用 "projects"）
+    @State private var collapsedSections: Set<String> = []
+    /// 管理区布局：卡片网格 / 列表
+    @State private var layout: KnowledgeLayout = .cards
 
     private let sources: [AgentSource] = [.claude, .codex, .opencode, .grok, .kimi, .gemini, .qwen]
 
@@ -50,15 +54,8 @@ struct PlansView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            TextField("搜索计划 / 项目", text: $service.searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11))
-            if service.scanning {
-                ProgressView().controlSize(.mini)
-            }
+            SearchField(placeholder: "搜索计划 / 项目", text: $service.searchText, scanning: service.scanning)
+            LayoutToggle(layout: $layout)
             Button { service.refresh(force: true) } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 11))
             }
@@ -72,7 +69,7 @@ struct PlansView: View {
     // MARK: - 统计瓦片（总量 + 各类计数，点击即筛选）
 
     private var statsTiles: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             StatTile(
                 value: "\(service.totalCount)",
                 sub: formatBytes(service.totalBytes),
@@ -101,12 +98,12 @@ struct PlansView: View {
 
     // MARK: - 主体（分区 + 卡片网格）
 
-    private let gridColumns = [GridItem(.adaptive(minimum: 170), spacing: 10)]
+    private let gridColumns = [GridItem(.adaptive(minimum: 290), spacing: 14)]
 
     @ViewBuilder
     private var content: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 statsTiles
                 if service.plans.isEmpty {
                     emptyState
@@ -114,15 +111,24 @@ struct PlansView: View {
                 } else {
                     let projectItems = service.projectPlans
                     if !projectItems.isEmpty {
-                        sectionHeader(icon: "folder.fill", title: "项目计划",
-                                      count: projectItems.count)
-                        grid(projectItems)
+                        // 单项目时组头带项目名（设计稿：项目计划 aftership-semantic-layer 41）
+                        let projects = Set(projectItems.compactMap(\.project))
+                        sectionHeader(
+                            key: "projects", icon: "folder.fill", title: "项目计划",
+                            subtitle: projects.count == 1 ? projects.first : nil,
+                            count: projectItems.count)
+                        if !collapsedSections.contains("projects") {
+                            // 每张卡/行都带上所属项目标签（用户偏好：一眼可见 plan 属于哪个项目）
+                            itemsView(projectItems)
+                        }
                     }
                     ForEach(sources, id: \.self) { source in
                         let items = service.plans(for: source)
                         if !items.isEmpty {
-                            sectionHeader(source: source, count: items.count)
-                            grid(items)
+                            sectionHeader(key: source.rawValue, source: source, count: items.count)
+                            if !collapsedSections.contains(source.rawValue) {
+                                itemsView(items)
+                            }
                         }
                     }
                 }
@@ -131,36 +137,56 @@ struct PlansView: View {
         }
     }
 
-    /// 分区头：图标/来源徽标 + 标题 + 计数 + 贯通分隔线
-    private func sectionHeader(
-        icon: String? = nil, source: AgentSource? = nil, title: String? = nil, count: Int
-    ) -> some View {
-        HStack(spacing: 7) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.gold)
-            }
-            if let source {
-                SourceBadge(source: source, size: 12)
-            }
-            Text(title ?? source?.displayName ?? "")
-                .font(.system(size: 12, weight: .semibold))
-            Text("\(count)")
-                .font(.system(size: 10).monospacedDigit())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Theme.brandFill(0.10)))
-                .foregroundStyle(Theme.brand)
-            VStack { Divider() }
+    /// 折叠/展开分区（不做结构动画，避免 LazyVStack 幽灵空白）
+    private func toggleSection(_ key: String) {
+        if collapsedSections.contains(key) {
+            collapsedSections.remove(key)
+        } else {
+            collapsedSections.insert(key)
         }
     }
 
-    private func grid(_ items: [PlanMaterializer.PlanEntry]) -> some View {
-        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 10) {
+    /// 分区头：统一 SourceSectionHeader（折叠箭头 + 图标/徽标 + 标题 + 可选副标题 + 中性计数）
+    private func sectionHeader(
+        key: String, icon: String? = nil, source: AgentSource? = nil,
+        title: String? = nil, subtitle: String? = nil, count: Int
+    ) -> some View {
+        SourceSectionHeader(
+            source: source,
+            icon: icon,
+            title: title ?? source?.displayName ?? "",
+            subtitle: subtitle,
+            count: count,
+            collapsed: collapsedSections.contains(key),
+            onToggle: { toggleSection(key) })
+    }
+
+    /// 按当前布局出卡片网格或通栏列表
+    @ViewBuilder
+    private func itemsView(_ items: [PlanMaterializer.PlanEntry], showProject: Bool = true) -> some View {
+        switch layout {
+        case .cards:
+            grid(items, showProject: showProject)
+        case .list:
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, plan in
+                    PlanRow(
+                        plan: plan, service: service, showProject: showProject,
+                        onOpen: { open(plan) },
+                        onDelete: { deleting = plan })
+                    if index < items.count - 1 {
+                        Divider().opacity(0.4).padding(.leading, 12)
+                    }
+                }
+            }
+        }
+    }
+
+    private func grid(_ items: [PlanMaterializer.PlanEntry], showProject: Bool = true) -> some View {
+        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
             ForEach(items) { plan in
                 PlanCard(
-                    plan: plan, service: service,
+                    plan: plan, service: service, showProject: showProject,
                     onOpen: { open(plan) },
                     onDelete: { deleting = plan })
             }
@@ -189,73 +215,65 @@ struct PlansView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            VStack(spacing: 10) {
-                Image(systemName: "list.bullet.clipboard")
-                    .font(.system(size: 34))
-                    .foregroundStyle(Theme.brand.opacity(0.5))
-                Text(service.isSearching ? "没有匹配的计划" : "还没有计划记录")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                if !service.isSearching {
-                    Text("Claude 计划来自 ~/.claude/plans；Codex / OpenCode 计划从会话记录提取生成；"
+            EmptyStateView(
+                icon: "list.bullet.clipboard",
+                title: service.isSearching ? "没有匹配的计划" : "还没有计划记录",
+                hint: service.isSearching
+                    ? nil
+                    : "Claude 计划来自 ~/.claude/plans；Codex / OpenCode 计划从会话记录提取生成；"
                         + "项目计划来自各仓库的 plans/ 与 docs/**/plans/ 目录")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 30)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
 
-/// 计划卡片：标题 + 底部 meta（项目名 / kind 标签 · 相对时间 · 大小），hover 品牌色描边
+/// 计划卡片：金色图标小块 + 标题（2 行）+ 项目 chip / kind + meta（时间 · 大小）；悬停浮现动作
 private struct PlanCard: View {
     let plan: PlanMaterializer.PlanEntry
     let service: PlansService
+    var showProject = true
     let onOpen: () -> Void
     let onDelete: () -> Void
-
-    @State private var hovering = false
 
     /// 真实文件（Claude 计划 / 项目文档）可编辑可删除；物化副本只读
     private var isRealFile: Bool {
         plan.source == .claude || plan.kind == .projectDocument
     }
 
+    private var actions: [CardAction] {
+        var acts: [CardAction] = [
+            CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: plan.path) },
+            CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: plan.path) },
+        ]
+        if isRealFile {
+            acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+        }
+        return acts
+    }
+
     var body: some View {
-        Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: plan.kind == .projectDocument
-                        ? "folder.fill" : "doc.text")
-                        .font(.system(size: 11))
-                        .foregroundStyle(plan.kind == .projectDocument
-                            ? AnyShapeStyle(Theme.gold)
-                            : AnyShapeStyle(Theme.brand.opacity(0.8)))
-                        .padding(.top, 1)
+        KnowledgeCard(height: 140, actions: actions, onOpen: onOpen) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    PlanIconTile(kind: plan.kind, size: 32)
                     Text(plan.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 14, weight: .semibold))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
                 HStack(spacing: 5) {
-                    if let project = plan.project {
-                        Text(project)
-                            .font(.system(size: 9, weight: .medium))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(Capsule().fill(Theme.gold.opacity(0.15)))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
+                    if showProject, let project = plan.project {
+                        TagChip(project)
                     } else if plan.source == .codex, plan.kind != .document {
                         Text(plan.kind.displayName)
                             .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
                     }
+                    Spacer(minLength: 0)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 5) {
                     Text(plan.modifiedAt, formatter: relativeFormatter)
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
@@ -265,22 +283,7 @@ private struct PlanCard: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(10)
-            .frame(height: 76)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .fill(Theme.surface))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .strokeBorder(
-                        hovering ? Theme.brand.opacity(0.6) : Theme.hairline,
-                        lineWidth: hovering ? 1 : 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .contextMenu {
+        } menu: {
             Button(isRealFile ? "查看 / 编辑" : "查看") { onOpen() }
             Button("用默认编辑器打开") { service.openInEditor(path: plan.path) }
             Button("在 Finder 中显示") { service.reveal(path: plan.path) }
@@ -289,6 +292,85 @@ private struct PlanCard: View {
                 Button("删除", role: .destructive) { onDelete() }
             }
         }
+    }
+}
+
+/// 计划列表行：图标 + 标题/项目·kind 两行 + 时间 · 大小；悬停浮现动作
+private struct PlanRow: View {
+    let plan: PlanMaterializer.PlanEntry
+    let service: PlansService
+    var showProject = true
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    private var isRealFile: Bool {
+        plan.source == .claude || plan.kind == .projectDocument
+    }
+
+    private var actions: [CardAction] {
+        var acts: [CardAction] = [
+            CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: plan.path) },
+            CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: plan.path) },
+        ]
+        if isRealFile {
+            acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+        }
+        return acts
+    }
+
+    var body: some View {
+        KnowledgeRow(actions: actions, onOpen: onOpen) {
+            HStack(spacing: 10) {
+                PlanIconTile(kind: plan.kind, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(plan.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if showProject, let project = plan.project {
+                        TagChip(project)
+                    } else if plan.source == .codex, plan.kind != .document {
+                        Text(plan.kind.displayName)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(plan.modifiedAt, formatter: relativeFormatter)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                Text(formatBytes(plan.sizeBytes))
+                    .font(.system(size: 9.5).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        } menu: {
+            Button(isRealFile ? "查看 / 编辑" : "查看") { onOpen() }
+            Button("用默认编辑器打开") { service.openInEditor(path: plan.path) }
+            Button("在 Finder 中显示") { service.reveal(path: plan.path) }
+            if isRealFile {
+                Divider()
+                Button("删除", role: .destructive) { onDelete() }
+            }
+        }
+    }
+}
+
+/// 计划卡片 / 详情工具条的金色图标小块（项目文档 = folder，其他 = doc.text）
+private struct PlanIconTile: View {
+    let kind: PlanMaterializer.PlanKind
+    var size: CGFloat = 26
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+            .fill(TileSpec.fill(Theme.gold))
+            .frame(width: size, height: size)
+            .overlay(
+                RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+                    .strokeBorder(TileSpec.border(Theme.gold), lineWidth: 0.5))
+            .overlay(
+                Image(systemName: kind == .projectDocument ? "folder.fill" : "doc.text")
+                    .font(.system(size: size * 0.42))
+                    .foregroundStyle(Theme.gold))
     }
 }
 
@@ -329,20 +411,7 @@ private struct PlanDetailView: View {
                     .font(.system(size: 12).monospaced())
                     .padding(8)
             } else {
-                ScrollView {
-                    // 文档卡：限宽居中 + 宽松内边距，接近正式文档排版
-                    MarkdownRichText(text: text)
-                        .padding(24)
-                        .frame(maxWidth: 720, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.radius.card)
-                                .fill(Theme.surface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: Theme.radius.card)
-                                        .strokeBorder(Theme.hairline, lineWidth: 0.5)))
-                        .frame(maxWidth: .infinity)
-                        .padding(Theme.spacing.page)
-                }
+                MarkdownDocumentCard(text: text)
             }
             Divider()
             footer
@@ -359,33 +428,29 @@ private struct PlanDetailView: View {
             }
             .buttonStyle(.borderless)
             if plan.kind == .projectDocument {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.gold)
+                PlanIconTile(kind: plan.kind)
             } else {
-                SourceBadge(source: plan.source, size: 12)
+                SourceBadge(source: plan.source, size: 14)
             }
             Text(plan.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 15, weight: .bold))
                 .lineLimit(1)
             if let project = plan.project {
-                Text(project)
-                    .font(.system(size: 9, weight: .medium))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1.5)
-                    .background(Capsule().fill(Theme.gold.opacity(0.15)))
-                    .foregroundStyle(Theme.gold)
+                TagChip(project)
             }
             Spacer(minLength: 8)
             if editable {
-                Picker("", selection: $editing) {
-                    Text("预览").tag(false)
-                    Text("编辑").tag(true)
+                // 分段「预览 / 编辑」：选中紫底白字
+                CapsuleTabTray {
+                    CapsuleTabButton(
+                        title: "预览", fillWidth: false,
+                        isSelected: !editing
+                    ) { editing = false }
+                    CapsuleTabButton(
+                        title: "编辑", fillWidth: false,
+                        isSelected: editing
+                    ) { editing = true }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 110)
             }
             Button { service.openInEditor(path: plan.path) } label: {
                 Image(systemName: "square.and.pencil").font(.system(size: 11))

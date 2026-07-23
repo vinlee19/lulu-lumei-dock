@@ -142,13 +142,12 @@ struct SessionsView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
 
-            // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签 + 侧边栏式彩色图标块
+            // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签，选中紫底白字
             CapsuleTabTray {
                 ForEach(SessionBrowserService.SortMode.allCases, id: \.self) { mode in
                     CapsuleTabButton(
                         title: mode.label,
                         icon: mode.icon,
-                        tileColor: sortTileColor(mode),
                         isSelected: service.sortMode == mode
                     ) {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -226,16 +225,6 @@ struct SessionsView: View {
                     .background(Theme.surfaceSecondary)
                 }
             }
-        }
-    }
-
-    /// 排序页签图标块底色（同侧边栏调色板）
-    private func sortTileColor(_ mode: SessionBrowserService.SortMode) -> Color {
-        switch mode {
-        case .time: return .blue
-        case .size: return .orange
-        case .duration: return .indigo
-        case .project: return Theme.gold
         }
     }
 

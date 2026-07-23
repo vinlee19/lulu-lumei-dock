@@ -25,17 +25,18 @@ struct TurnTrailRowView: View {
                     }
                 }
             } label: {
+                // 金色浅底 pill（设计稿：轨迹折叠条去紫色，与全局强调区分）
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     Image(systemName: "wrench.adjustable")
                         .font(.system(size: 8.5))
-                    Text("本轮轨迹（\(message.steps.count) 步）")
+                    Text("本轮轨迹 · \(message.steps.count) 步")
                         .font(.system(size: 10, weight: .medium))
                     Text(kindSummary)
                         .font(.system(size: 9.5))
-                        .foregroundStyle(Theme.brand.opacity(0.5))
+                        .foregroundStyle(Theme.gold.opacity(0.75))
                         .lineLimit(1)
                     if errorCount > 0 {
                         HStack(spacing: 2) {
@@ -44,14 +45,16 @@ struct TurnTrailRowView: View {
                             Text("\(errorCount) 失败")
                                 .font(.system(size: 9.5))
                         }
-                        .foregroundStyle(.red.opacity(0.8))
+                        .foregroundStyle(Theme.failureRed)
                     }
-                    Spacer(minLength: 0)
                 }
-                .contentShape(Rectangle())
+                .foregroundStyle(Theme.gold)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3.5)
+                .background(Capsule().fill(Theme.gold.opacity(0.15)))
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Theme.brand.opacity(0.7))
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 2.5) {

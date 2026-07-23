@@ -50,27 +50,11 @@ struct PopoverRootView: View {
             }
         }
 
-        /// 侧边栏图标块底色（每项一色，macOS 系统设置式）
-        var tileColor: Color {
-            switch self {
-            case .history: return .blue
-            case .sessions: return Theme.brand
-            case .skills: return .orange
-            case .memory: return .green
-            case .plans: return Theme.gold
-            case .agents: return .red
-            case .usage: return .teal
-            case .limits: return .indigo
-            case .settings: return .gray
-            }
-        }
-
-        /// 侧边栏分组（组间插入分隔线）：活动 / 知识库 / 用量 / 设置
-        static let sidebarGroups: [[Tab]] = [
-            [.history, .sessions],
-            [.skills, .memory, .plans, .agents],
-            [.usage, .limits],
-            [.settings],
+        /// 侧边栏分组（标签 + 条目）：活动 / 知识库 / 用量；设置单独沉底
+        static let sidebarGroups: [(label: String, tabs: [Tab])] = [
+            ("活动", [.history, .sessions]),
+            ("知识库", [.skills, .memory, .plans, .agents]),
+            ("用量", [.usage, .limits]),
         ]
     }
 
@@ -109,14 +93,17 @@ struct PopoverRootView: View {
         VStack(alignment: .leading, spacing: 2) {
             sidebarHeader
             Divider().padding(.vertical, 6).padding(.horizontal, 2)
-            ForEach(Array(Tab.sidebarGroups.enumerated()), id: \.offset) { index, group in
-                if index > 0 {
-                    Divider().padding(.vertical, 5).padding(.horizontal, 2)
-                }
-                ForEach(group, id: \.self) { tab in
+            ForEach(Array(Tab.sidebarGroups.enumerated()), id: \.offset) { _, group in
+                // 分组标签（小写灰强调，替代单纯分隔线）
+                Text(group.label)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+                ForEach(group.tabs, id: \.self) { tab in
                     SidebarNavButton(
                         title: tab.rawValue, icon: tab.icon,
-                        tileColor: tab.tileColor,
                         badge: tab == .limits ? limitsBadge?.text : nil,
                         badgeColor: (tab == .limits ? limitsBadge?.color : nil) ?? .secondary,
                         isSelected: navigation.tab == tab
@@ -128,6 +115,15 @@ struct PopoverRootView: View {
                 }
             }
             Spacer(minLength: 0)
+            // 设置沉底
+            SidebarNavButton(
+                title: Tab.settings.rawValue, icon: Tab.settings.icon,
+                isSelected: navigation.tab == .settings
+            ) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                    navigation.tab = .settings
+                }
+            }
             Text("v\(appVersion)")
                 .font(.system(size: 9.5).monospacedDigit())
                 .foregroundStyle(.quaternary)

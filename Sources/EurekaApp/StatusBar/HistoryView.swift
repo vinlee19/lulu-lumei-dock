@@ -1,7 +1,8 @@
 import EurekaKit
 import SwiftUI
 
-/// 最近任务历史列表：显示对话开始时间，支持「最近活跃 / 开始时间」排序
+/// 任务历史：按天分组的任务时间线（今天 / 更早），状态一眼可辨；
+/// 支持「最近活跃 / 开始时间」排序。成功绿圈✓ / 失败红圈✕ / 自动清理灰圈—。
 struct HistoryView: View {
     let tasks: [FinishedTask]
     @ObservedObject var settings: AppSettings
@@ -31,6 +32,29 @@ struct HistoryView: View {
         task.sessionStartedAt ?? task.startedAt ?? task.finishedAt
     }
 
+    /// 分组键（跟随当前排序依据的日期）
+    private func groupKey(_ task: FinishedTask) -> Date {
+        sortMode == .active ? task.finishedAt : startKey(task)
+    }
+
+    /// 按天分组：今天 / 更早（sortedTasks 已按时间倒序，组内保持该顺序）
+    private var dayGroups: [(title: String, tasks: [FinishedTask])] {
+        let cal = Calendar.current
+        var today: [FinishedTask] = []
+        var earlier: [FinishedTask] = []
+        for task in sortedTasks {
+            if cal.isDateInToday(groupKey(task)) {
+                today.append(task)
+            } else {
+                earlier.append(task)
+            }
+        }
+        var groups: [(String, [FinishedTask])] = []
+        if !today.isEmpty { groups.append(("今天", today)) }
+        if !earlier.isEmpty { groups.append(("更早", earlier)) }
+        return groups
+    }
+
     var body: some View {
         if tasks.isEmpty {
             VStack(spacing: 8) {
@@ -47,31 +71,46 @@ struct HistoryView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
+                // 顶栏：标题 + 排序分段（选中紫底白字）
                 HStack {
+                    Text("任务历史")
+                        .font(Theme.font.pageTitle)
+                    Text("共 \(tasks.count) 条")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
                     Spacer()
-                    Picker("", selection: Binding(
-                        get: { sortMode },
-                        set: { settings.historySortMode = $0.rawValue }
-                    )) {
-                        ForEach(SortMode.allCases, id: \.self) { Text($0.label) }
+                    CapsuleTabTray {
+                        ForEach(SortMode.allCases, id: \.self) { mode in
+                            CapsuleTabButton(
+                                title: mode.label,
+                                fillWidth: false,
+                                isSelected: sortMode == mode
+                            ) { settings.historySortMode = mode.rawValue }
+                        }
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 148)
-                    .controlSize(.mini)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
 
                 Divider()
 
                 ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(sortedTasks) { task in
-                            HistoryRow(task: task)
-                            Divider().padding(.leading, 38)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(dayGroups, id: \.title) { group in
+                            // 分组头（小写强调标签）
+                            Text(group.title)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 12)
+                                .padding(.top, 12)
+                                .padding(.bottom, 4)
+                            ForEach(group.tasks) { task in
+                                HistoryRow(task: task)
+                                Divider().padding(.leading, 44).opacity(0.5)
+                            }
                         }
                     }
+                    .padding(.bottom, 8)
                 }
             }
         }
@@ -82,49 +121,53 @@ private struct HistoryRow: View {
     let task: FinishedTask
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
+            // 状态圆：成功绿圈✓ / 失败红圈✕ / 自动清理灰圈—
             Image(systemName: iconName)
-                .font(.system(size: 15))
+                .font(.system(size: 13))
                 .foregroundStyle(iconColor)
-                .frame(width: 18)
-                .padding(.top, 2)
+                .frame(width: 16)
+                .padding(.top, 1)
+
+            SourceBadge(source: task.source, size: 13)
+                .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.title ?? task.projectName ?? task.sessionId)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(2)
                 HStack(spacing: 4) {
-                    Text(task.source.displayName)
                     if let project = task.projectName {
-                        Text("·")
                         Text(project)
                     }
                     if let start = task.sessionStartedAt ?? task.startedAt {
                         Text("·")
-                        Image(systemName: "calendar")
-                            .font(.system(size: 9))
                         Text(formatStartTime(start))
                     }
                     if let duration = task.duration {
                         Text("·")
-                        Text(formatDuration(duration))
+                        Text("时长 \(formatDuration(duration))")
                     }
-                    Text("·")
-                    Text(relativeFormatter.localizedString(
-                        for: task.finishedAt, relativeTo: Date()))
                 }
                 .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
                 .lineLimit(1)
 
+                // 失败红 / 自动清理灰的彩色注释
                 if let detail = task.detail, task.outcome != .success {
                     Text(detail)
                         .font(.system(size: 10.5))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(task.outcome == .error
+                            ? Theme.failureRed : Theme.autoCleanGray)
                         .lineLimit(2)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            // 右端相对时间
+            Text(relativeFormatter.localizedString(for: task.finishedAt, relativeTo: Date()))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, Theme.spacing.row)
@@ -133,12 +176,16 @@ private struct HistoryRow: View {
     private var iconName: String {
         switch task.outcome {
         case .success: return "checkmark.circle.fill"
-        case .error: return "xmark.octagon.fill"
+        case .error: return "xmark.circle.fill"
         case .interrupted: return "minus.circle.fill"
         }
     }
 
     private var iconColor: Color {
-        Theme.outcomeColor(task.outcome)
+        switch task.outcome {
+        case .success: return Theme.enabledGreen
+        case .error: return Theme.failureRed
+        case .interrupted: return Theme.autoCleanGray
+        }
     }
 }

@@ -342,6 +342,26 @@ final class UsageService: ObservableObject {
         }
     }
 
+    /// 某技能本周调用排名（详情页「本周排名 #N」；回调回主线程，不占用列表页排行态）
+    func loadSkillWeeklyRank(
+        source: AgentSource, name: String,
+        completion: @escaping (Int?) -> Void
+    ) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let from = DashboardPeriod.week.startDate
+            let stats = (try? store.toolCalls.skillStats(source: nil, from: from, to: Date())) ?? []
+            let key = SkillMemoryService.normalizeSkillName(name)
+            let rank = stats.firstIndex {
+                $0.source == source && SkillMemoryService.normalizeSkillName($0.name) == key
+            }.map { $0 + 1 }
+            DispatchQueue.main.async { completion(rank) }
+        }
+    }
+
     /// 某技能按天调用序列（详情页趋势图；回调回主线程，避免跨技能发布态串味）
     func loadSkillDailySeries(
         source: AgentSource, name: String, from: Date, to: Date,

@@ -20,6 +20,10 @@ struct SkillMemoryView: View {
     @State private var memoryDetail: MemoryEntry?
     /// 来源筛选（nil = 全部）
     @State private var selectedSource: AgentSource?
+    /// 管理区布局：卡片网格 / 列表
+    @State private var layout: KnowledgeLayout = .cards
+    /// 折叠的来源分区（点击分区头折叠/展开）
+    @State private var collapsedSources: Set<AgentSource> = []
     /// Top 技能排行时间档（今日/本周/本月/全部/自定义）
     @State private var period: UsageService.DashboardPeriod = .week
     @State private var customFrom = Date().addingTimeInterval(-7 * 86400)
@@ -93,23 +97,19 @@ struct SkillMemoryView: View {
     // MARK: - 顶部栏
 
     private var header: some View {
-        searchRow
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+        HStack(spacing: 8) {
+            SearchField(
+                placeholder: mode == .skills ? "搜索技能" : "搜索记忆",
+                text: $service.searchText, scanning: service.scanning)
+            LayoutToggle(layout: $layout)
+            createMenu
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
     }
 
-    private var searchRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            TextField(mode == .skills ? "搜索技能" : "搜索记忆", text: $service.searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11))
-            if service.scanning {
-                ProgressView().controlSize(.mini)
-            }
-            Menu {
+    private var createMenu: some View {
+        Menu {
                 if mode == .skills {
                     Button("Claude 技能") { startCreate(.claude, isSkill: true, "Claude 技能") }
                     Button("Codex 技能") { startCreate(.codex, isSkill: true, "Codex 技能") }
@@ -131,23 +131,35 @@ struct SkillMemoryView: View {
                     Button("Qwen 记忆") { startCreate(.qwen, isSkill: false, "Qwen 记忆") }
                 }
             } label: {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 12))
+                // 紫色描边「新建」按钮（设计稿显性管理动作）
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(mode == .skills ? "新建技能" : "新建记忆")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(Theme.brand)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8).fill(Theme.brandFill(0.06)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Theme.brand.opacity(0.5), lineWidth: 0.8))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-        }
     }
 
     // MARK: - 主体
 
-    private let gridColumns = [GridItem(.adaptive(minimum: 170), spacing: 10)]
+    private let gridColumns = [GridItem(.adaptive(minimum: 290), spacing: 14)]
 
     @ViewBuilder
     private var content: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 statsTiles
                 if mode == .skills {
                     topSkillsCard
@@ -174,7 +186,7 @@ struct SkillMemoryView: View {
     // MARK: - 统计瓦片（总量 + 各 CLI 计数，点击即筛选；等宽均分）
 
     private var statsTiles: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             StatTile(
                 value: "\(totalCount)",
                 label: mode == .skills ? "全部技能" : "全部记忆",
@@ -227,22 +239,14 @@ struct SkillMemoryView: View {
             }
             .frame(maxWidth: .infinity)
         } else {
-            VStack(spacing: 10) {
-                Image(systemName: mode == .skills ? "wand.and.stars" : "brain.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(Theme.brand.opacity(0.5))
-                Text(service.isSearching
+            EmptyStateView(
+                icon: mode == .skills ? "wand.and.stars" : "brain.fill",
+                title: service.isSearching
                     ? "没有匹配项"
-                    : (mode == .skills ? "还没有技能" : "还没有记忆"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                if !service.isSearching {
-                    Text("点右上角 + 新建各 CLI 的" + (mode == .skills ? "技能" : "记忆"))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .frame(maxWidth: .infinity)
+                    : (mode == .skills ? "还没有技能" : "还没有记忆"),
+                hint: service.isSearching
+                    ? nil
+                    : "点右上角「新建」创建各 CLI 的" + (mode == .skills ? "技能" : "记忆"))
         }
     }
 
@@ -319,7 +323,7 @@ struct SkillMemoryView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radius.card)
-                .strokeBorder(Theme.hairline, lineWidth: 0.5))
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5))
     }
 
     /// 排行行：名次 + 徽标 + 名称 + 比例条 + 最近活跃 + 次数；点击进内嵌详情
@@ -390,16 +394,45 @@ struct SkillMemoryView: View {
 
     @ViewBuilder
     private var skillsSections: some View {
-        ForEach(visibleSources, id: \.self) { source in
-            let items = sortedSkills(service.skills(for: source))
-            sectionHeader(source: source, count: items.count)
-            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 10) {
-                ForEach(items) { skill in
-                    SkillCard(
-                        skill: skill, service: service,
-                        lastActive: skillStat(for: skill)?.lastTs,
-                        onOpen: { openSkillDetail(skill) },
-                        onDelete: { deleting = .skill(skill) })
+        switch layout {
+        case .cards:
+            // 单一 LazyVGrid + Section（分区头横跨整行）：
+            // 避免 LazyVGrid 嵌在 LazyVStack 里滚动时高度估算错乱留下空白
+            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
+                ForEach(visibleSources, id: \.self) { source in
+                    let items = sortedSkills(service.skills(for: source))
+                    Section(header: sectionHeader(
+                        source: source, count: items.count,
+                        enabledCount: items.filter(\.enabled).count)) {
+                        if !collapsedSources.contains(source) {
+                            ForEach(items) { skill in
+                                SkillCard(
+                                    skill: skill, service: service,
+                                    lastActive: skillStat(for: skill)?.lastTs,
+                                    onOpen: { openSkillDetail(skill) },
+                                    onDelete: { deleting = .skill(skill) })
+                            }
+                        }
+                    }
+                }
+            }
+        case .list:
+            ForEach(visibleSources, id: \.self) { source in
+                let items = sortedSkills(service.skills(for: source))
+                sectionHeader(
+                    source: source, count: items.count,
+                    enabledCount: items.filter(\.enabled).count)
+                // 列表行轻量，用普通 VStack 即时渲染（规避嵌套 lazy 容器的空白 bug）
+                if !collapsedSources.contains(source) {
+                    VStack(spacing: 8) {
+                        ForEach(items) { skill in
+                            SkillListRow(
+                                skill: skill, service: service,
+                                lastActive: skillStat(for: skill)?.lastTs,
+                                onOpen: { openSkillDetail(skill) },
+                                onDelete: { deleting = .skill(skill) })
+                        }
+                    }
                 }
             }
         }
@@ -441,36 +474,65 @@ struct SkillMemoryView: View {
 
     @ViewBuilder
     private var memorySections: some View {
-        ForEach(visibleSources, id: \.self) { source in
-            let items = service.memories(for: source)
-            sectionHeader(source: source, count: items.count)
-            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 10) {
-                ForEach(items) { memory in
-                    MemoryCard(
-                        memory: memory, service: service,
-                        onOpen: {
-                            withAnimation(.easeOut(duration: 0.15)) { memoryDetail = memory }
-                        },
-                        onDelete: { deleting = .memory(memory) })
+        switch layout {
+        case .cards:
+            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
+                ForEach(visibleSources, id: \.self) { source in
+                    let items = service.memories(for: source)
+                    Section(header: sectionHeader(source: source, count: items.count)) {
+                        if !collapsedSources.contains(source) {
+                            ForEach(items) { memory in
+                                MemoryCard(
+                                    memory: memory, service: service,
+                                    onOpen: {
+                                        withAnimation(.easeOut(duration: 0.15)) { memoryDetail = memory }
+                                    },
+                                    onDelete: { deleting = .memory(memory) })
+                            }
+                        }
+                    }
+                }
+            }
+        case .list:
+            ForEach(visibleSources, id: \.self) { source in
+                let items = service.memories(for: source)
+                sectionHeader(source: source, count: items.count)
+                if !collapsedSources.contains(source) {
+                    VStack(spacing: 8) {
+                        ForEach(items) { memory in
+                            MemoryListRow(
+                                memory: memory, service: service,
+                                onOpen: {
+                                    withAnimation(.easeOut(duration: 0.15)) { memoryDetail = memory }
+                                },
+                                onDelete: { deleting = .memory(memory) })
+                        }
+                    }
                 }
             }
         }
     }
 
-    /// 分区头：来源徽标 + 名称 + 计数 + 贯通分隔线（与计划页一致）
-    private func sectionHeader(source: AgentSource, count: Int) -> some View {
-        HStack(spacing: 7) {
-            SourceBadge(source: source, size: 12)
-            Text(source.displayName)
-                .font(.system(size: 12, weight: .semibold))
-            Text("\(count)")
-                .font(.system(size: 10).monospacedDigit())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Theme.brandFill(0.10)))
-                .foregroundStyle(Theme.brand)
-            VStack { Divider() }
+    /// 折叠/展开来源分区（不做结构动画：LazyVStack 内结构性 withAnimation 会残留幽灵空白）
+    private func toggleSection(_ source: AgentSource) {
+        if collapsedSources.contains(source) {
+            collapsedSources.remove(source)
+        } else {
+            collapsedSources.insert(source)
         }
+    }
+
+    /// 分区头：统一 SourceSectionHeader（折叠箭头 + 徽标 + 名称 + 中性计数 + 可选启停统计）
+    private func sectionHeader(
+        source: AgentSource, count: Int, enabledCount: Int? = nil
+    ) -> some View {
+        SourceSectionHeader(
+            source: source,
+            title: source.displayName,
+            count: count,
+            trailingNote: enabledCount.map { "· \($0) 启用 / \(count - $0) 停用" },
+            collapsed: collapsedSources.contains(source),
+            onToggle: { toggleSection(source) })
     }
 
     // MARK: - 动作
@@ -515,31 +577,9 @@ private enum DeleteTarget {
     }
 }
 
-// MARK: - 启停状态方块（技能卡片 / 技能详情共用）
-
-/// 绿=启用 / 灰=停用，点击直接切换；带悬停提示
-struct SkillStatusSquare: View {
-    let enabled: Bool
-    var size: CGFloat = 12
-    let onToggle: () -> Void
-
-    var body: some View {
-        Button(action: onToggle) {
-            RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
-                .fill(enabled ? Color.green.opacity(0.85) : Color.secondary.opacity(0.35))
-                .frame(width: size, height: size)
-                .overlay(
-                    RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .help(enabled ? "已启用（点击停用）" : "已停用（点击启用）")
-    }
-}
-
 // MARK: - 卡片
 
-/// 技能卡片：名称 + 描述 + meta（项目 chip · 最近活跃），右上角启停状态方块
+/// 技能卡片：logo 小块 + 等宽名 + 启用开关 + 描述 + meta（项目 chip · 最近活跃）；悬停浮现动作
 private struct SkillCard: View {
     let skill: SkillEntry
     let service: SkillMemoryService
@@ -547,69 +587,54 @@ private struct SkillCard: View {
     let onOpen: () -> Void
     let onDelete: () -> Void
 
-    @State private var hovering = false
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 6) {
-                Text(skill.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(skill.enabled ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 4)
-                SkillStatusSquare(enabled: skill.enabled) {
-                    service.setSkillEnabled(skill, !skill.enabled)
-                }
-            }
-            if let desc = skill.description, !desc.isEmpty {
-                Text(desc)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
-            Spacer(minLength: 0)
-            HStack(spacing: 5) {
-                if let project = skill.scope.projectName {
-                    Text(project)
-                        .font(.system(size: 9, weight: .medium))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1.5)
-                        .background(Capsule().fill(Theme.gold.opacity(0.15)))
-                        .foregroundStyle(Theme.gold)
+        KnowledgeCard(
+            enabled: skill.enabled,
+            height: 150,
+            actions: [
+                CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: skill.path) },
+                CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: skill.path) },
+                CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() },
+            ],
+            onOpen: onOpen
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    SourceLogoTile(source: skill.source, size: 32)
+                    Text(skill.name)
+                        .font(Theme.font.monoSkillName(13.5))
+                        .foregroundStyle(skill.enabled ? .primary : .secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    MiniSwitch(isOn: skill.enabled) {
+                        service.setSkillEnabled(skill, !skill.enabled)
+                    }
                 }
-                if let lastActive {
-                    Text(relativeFormatter.localizedString(for: lastActive, relativeTo: Date()))
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                        .help("最近调用时间")
+                if let desc = skill.description, !desc.isEmpty {
+                    Text(desc)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .lineSpacing(1.5)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer(minLength: 0)
-                if !skill.enabled {
-                    Text("已停用")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
+                HStack(spacing: 5) {
+                    if let project = skill.scope.projectName {
+                        TagChip(project)
+                    }
+                    if let lastActive {
+                        Text("最近 " + relativeFormatter.localizedString(for: lastActive, relativeTo: Date()))
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                            .help("最近调用时间")
+                    }
+                    Spacer(minLength: 0)
                 }
             }
-        }
-        .padding(10)
-        .frame(height: 84)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .fill(Theme.surface)
-                .opacity(skill.enabled ? 1 : 0.6))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .strokeBorder(
-                    hovering ? Theme.brand.opacity(0.6) : Theme.hairline,
-                    lineWidth: hovering ? 1 : 0.5))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
-        .onTapGesture { onOpen() }
-        .onHover { hovering = $0 }
-        .contextMenu {
+        } menu: {
             Button("查看详情") { onOpen() }
             Button(skill.enabled ? "停用" : "启用") {
                 service.setSkillEnabled(skill, !skill.enabled)
@@ -622,63 +647,183 @@ private struct SkillCard: View {
     }
 }
 
-/// 记忆卡片：作用域名 + 文件名 + meta（修改时间 · 大小）；Codex 生成记忆带只读标
+/// 技能列表行：logo + 名称/描述两行 + 项目标签 + 最近活跃 + 启用开关；悬停浮现动作（通栏精致行）
+private struct SkillListRow: View {
+    let skill: SkillEntry
+    let service: SkillMemoryService
+    let lastActive: Date?
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        KnowledgeRow(
+            enabled: skill.enabled,
+            actions: [
+                CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: skill.path) },
+                CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: skill.path) },
+                CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() },
+            ],
+            onOpen: onOpen
+        ) {
+            HStack(spacing: 10) {
+                SourceLogoTile(source: skill.source, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(skill.name)
+                            .font(Theme.font.monoSkillName(12.5, weight: .medium))
+                            .foregroundStyle(skill.enabled ? .primary : .secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let project = skill.scope.projectName {
+                            TagChip(project)
+                        }
+                    }
+                    if let desc = skill.description, !desc.isEmpty {
+                        Text(desc)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if let lastActive {
+                    Text("最近 " + relativeFormatter.localizedString(for: lastActive, relativeTo: Date()))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .help("最近调用时间")
+                }
+                MiniSwitch(isOn: skill.enabled) {
+                    service.setSkillEnabled(skill, !skill.enabled)
+                }
+            }
+        } menu: {
+            Button("查看详情") { onOpen() }
+            Button(skill.enabled ? "停用" : "启用") { service.setSkillEnabled(skill, !skill.enabled) }
+            Button("用默认编辑器打开") { service.openInEditor(path: skill.path) }
+            Button("在 Finder 中显示") { service.reveal(path: skill.path) }
+            Divider()
+            Button("删除", role: .destructive) { onDelete() }
+        }
+    }
+}
+
+/// 记忆卡片：logo 小块 + 作用域名 + 「只读」标 + 文件名 + meta（修改时间 · 大小）；悬停浮现动作
 private struct MemoryCard: View {
     let memory: MemoryEntry
     let service: SkillMemoryService
     let onOpen: () -> Void
     let onDelete: () -> Void
 
-    @State private var hovering = false
+    private var actions: [CardAction] {
+        var acts: [CardAction] = []
+        if memory.isEditable {
+            acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") {
+                service.openInEditor(path: memory.path)
+            })
+        }
+        acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") {
+            service.reveal(path: memory.path)
+        })
+        if memory.isDeletable {
+            acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") {
+                onDelete()
+            })
+        }
+        return acts
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 6) {
-                Text(memory.scope)
-                    .font(.system(size: 12, weight: .medium))
+        KnowledgeCard(height: 118, actions: actions, onOpen: onOpen) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    SourceLogoTile(source: memory.source, size: 32)
+                    Text(memory.scope)
+                        .font(Theme.font.monoSkillName(13.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    if memory.kind == .generated {
+                        TagChip("只读", neutral: true)
+                    }
+                }
+                Text(URL(fileURLWithPath: memory.path).lastPathComponent)
+                    .font(.system(size: 10.5).monospaced())
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: 4)
-                if memory.kind == .generated {
-                    Text("只读")
-                        .font(.system(size: 8.5, weight: .medium))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                Spacer(minLength: 0)
+                HStack(spacing: 5) {
+                    Text(memory.modifiedAt, formatter: relativeFormatter)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                    Text(formatBytes(memory.sizeBytes))
+                        .font(.system(size: 9.5).monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
             }
-            Text(URL(fileURLWithPath: memory.path).lastPathComponent)
-                .font(.system(size: 10).monospaced())
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
-            HStack(spacing: 5) {
+        } menu: {
+            Button(memory.isEditable ? "查看 / 编辑" : "查看") { onOpen() }
+            if memory.isEditable {
+                Button("用默认编辑器打开") { service.openInEditor(path: memory.path) }
+            }
+            Button("在 Finder 中显示") { service.reveal(path: memory.path) }
+            if memory.isDeletable {
+                Divider()
+                Button("删除", role: .destructive) { onDelete() }
+            }
+        }
+    }
+}
+
+/// 记忆列表行：logo + 作用域名/文件名两行 + 「只读」标 + 修改时间 · 大小；悬停浮现动作
+private struct MemoryListRow: View {
+    let memory: MemoryEntry
+    let service: SkillMemoryService
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+
+    private var actions: [CardAction] {
+        var acts: [CardAction] = []
+        if memory.isEditable {
+            acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: memory.path) })
+        }
+        acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: memory.path) })
+        if memory.isDeletable {
+            acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+        }
+        return acts
+    }
+
+    var body: some View {
+        KnowledgeRow(actions: actions, onOpen: onOpen) {
+            HStack(spacing: 10) {
+                SourceLogoTile(source: memory.source, size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(memory.scope)
+                            .font(Theme.font.monoSkillName(12.5, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if memory.kind == .generated {
+                            TagChip("只读", neutral: true)
+                        }
+                    }
+                    Text(URL(fileURLWithPath: memory.path).lastPathComponent)
+                        .font(.system(size: 10).monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
                 Text(memory.modifiedAt, formatter: relativeFormatter)
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
                 Text(formatBytes(memory.sizeBytes))
                     .font(.system(size: 9.5).monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
-        }
-        .padding(10)
-        .frame(height: 76)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .fill(Theme.surface))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .strokeBorder(
-                    hovering ? Theme.brand.opacity(0.6) : Theme.hairline,
-                    lineWidth: hovering ? 1 : 0.5))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
-        .onTapGesture { onOpen() }
-        .onHover { hovering = $0 }
-        .contextMenu {
+        } menu: {
             Button(memory.isEditable ? "查看 / 编辑" : "查看") { onOpen() }
             if memory.isEditable {
                 Button("用默认编辑器打开") { service.openInEditor(path: memory.path) }
@@ -725,19 +870,7 @@ private struct MemoryDetailView: View {
                     .font(.system(size: 12).monospaced())
                     .padding(8)
             } else {
-                ScrollView {
-                    MarkdownRichText(text: text)
-                        .padding(24)
-                        .frame(maxWidth: 720, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.radius.card)
-                                .fill(Theme.surface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: Theme.radius.card)
-                                        .strokeBorder(Theme.hairline, lineWidth: 0.5)))
-                        .frame(maxWidth: .infinity)
-                        .padding(Theme.spacing.page)
-                }
+                MarkdownDocumentCard(text: text)
             }
             Divider()
             footer
@@ -759,14 +892,10 @@ private struct MemoryDetailView: View {
                 .lineLimit(1)
             Spacer(minLength: 8)
             if memory.isEditable {
-                Picker("", selection: $editing) {
-                    Text("预览").tag(false)
-                    Text("编辑").tag(true)
+                CapsuleTabTray {
+                    CapsuleTabButton(title: "预览", fillWidth: false, isSelected: !editing) { editing = false }
+                    CapsuleTabButton(title: "编辑", fillWidth: false, isSelected: editing) { editing = true }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 110)
                 Button { service.openInEditor(path: memory.path) } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 11))
                 }

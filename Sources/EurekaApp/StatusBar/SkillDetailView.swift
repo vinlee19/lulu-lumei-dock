@@ -31,6 +31,9 @@ struct SkillDetailView: View {
     @State private var textLoaded = false
     @State private var saveNote: String?
 
+    /// 本周排名（金块；nil = 本周无调用）
+    @State private var weeklyRank: Int?
+
     /// 实时条目：启停会移动技能目录（路径变化），从 service 按
     /// 来源 + 项目 + 目录名回查最新条目，保证开关/编辑始终作用于当前路径。
     private var entry: SkillEntry? {
@@ -68,19 +71,7 @@ struct SkillDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .preview:
-                ScrollView {
-                    MarkdownRichText(text: text)
-                        .padding(24)
-                        .frame(maxWidth: 720, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.radius.card)
-                                .fill(Theme.surface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: Theme.radius.card)
-                                        .strokeBorder(Theme.hairline, lineWidth: 0.5)))
-                        .frame(maxWidth: .infinity)
-                        .padding(Theme.spacing.page)
-                }
+                MarkdownDocumentCard(text: text)
             case .edit:
                 TextEditor(text: $text)
                     .font(.system(size: 12).monospaced())
@@ -94,6 +85,9 @@ struct SkillDetailView: View {
         .onAppear {
             loadSeries()
             loadText()
+            usageService.loadSkillWeeklyRank(
+                source: target.source, name: stat?.name ?? target.name
+            ) { weeklyRank = $0 }
         }
     }
 
@@ -108,33 +102,31 @@ struct SkillDetailView: View {
                 }
             }
             .buttonStyle(.borderless)
-            SourceBadge(source: target.source, size: 14)
+            SourceLogoTile(source: target.source, size: 26)
             Text(entry?.name ?? target.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.monoSkillName(15, weight: .bold))
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let project = entry?.scope.projectName {
-                Text(project)
-                    .font(.system(size: 9, weight: .medium))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1.5)
-                    .background(Capsule().fill(Theme.gold.opacity(0.15)))
-                    .foregroundStyle(Theme.gold)
+                TagChip(project)
             }
             if let entry {
-                SkillStatusSquare(enabled: entry.enabled) {
+                EnableToggle(enabled: entry.enabled) {
                     service.setSkillEnabled(entry, !entry.enabled)
                 }
             }
             Spacer(minLength: 8)
             if let entry {
-                Picker("", selection: $pane) {
-                    ForEach(Pane.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                // 分段「概览 / 预览 / 编辑」：选中紫底白字
+                CapsuleTabTray {
+                    ForEach(Pane.allCases, id: \.self) { item in
+                        CapsuleTabButton(
+                            title: item.rawValue,
+                            fillWidth: false,
+                            isSelected: pane == item
+                        ) { pane = item }
+                    }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 160)
                 Button { service.openInEditor(path: entry.path) } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 11))
                 }
@@ -194,7 +186,8 @@ struct SkillDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 sectionTitle("描述")
                 Text(desc)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13.5))
+                    .lineSpacing(6)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -205,14 +198,20 @@ struct SkillDetailView: View {
 
     private var matrixSection: some View {
         let configs = service.configurations(forName: target.name)
+        let configured = AgentSource.allCases.filter { configs[$0] != nil }.count
         return VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("配置于")
-            HStack(alignment: .top, spacing: 16) {
+            HStack(spacing: 6) {
+                sectionTitle("配置于")
+                Text("\(AgentSource.allCases.count) 个工具中 \(configured) 个可用")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(AgentSource.allCases, id: \.self) { source in
                     let origin = configs[source]
                     VStack(spacing: 4) {
                         SourceBadge(source: source, size: 22)
-                            .opacity(origin == nil ? 0.2 : 1)
+                            .opacity(origin == nil ? 0.28 : 1)
                         Text(source.displayName)
                             .font(.system(size: 9))
                             .foregroundStyle(origin == nil ? .tertiary : .secondary)
@@ -220,9 +219,18 @@ struct SkillDetailView: View {
                             .font(.system(size: 8, weight: .medium))
                             .foregroundStyle(originColor(origin))
                     }
-                    .frame(minWidth: 52)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    // 已配置 = 紫描边紫浅底；未配置 = 灰边
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.radius.container)
+                            .fill(origin != nil ? Theme.brandFill(0.08) : Theme.surface))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.radius.container)
+                            .strokeBorder(
+                                origin != nil ? Theme.brand.opacity(0.5) : Theme.cardBorder,
+                                lineWidth: origin != nil ? 1 : 0.5))
                 }
-                Spacer(minLength: 0)
             }
         }
     }
@@ -249,16 +257,18 @@ struct SkillDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("调用统计")
             if let stat {
-                HStack(alignment: .top, spacing: 18) {
-                    metric("累计调用", "\(stat.count) 次")
+                HStack(spacing: 8) {
+                    metricTile("累计调用", "\(stat.count) 次", valueColor: Theme.brand)
                     if target.source == .claude {
-                        metric("触发时 token", formatTokens(stat.tokens))
+                        metricTile("触发时 token", formatTokens(stat.tokens))
                     }
                     if let last = stat.lastTs {
-                        metric("最近活跃",
+                        metricTile("最近活跃",
                             relativeFormatter.localizedString(for: last, relativeTo: Date()))
                     }
-                    Spacer(minLength: 0)
+                    if let weeklyRank {
+                        metricTile("本周排名", "#\(weeklyRank)", gold: true)
+                    }
                 }
                 if target.source == .claude {
                     Text("触发时 token ≈ 调用当轮上下文规模，非技能整段执行开销")
@@ -293,7 +303,8 @@ struct SkillDetailView: View {
                     BarMark(
                         x: .value("日期", point.day, unit: .day),
                         y: .value("调用", point.count))
-                    .foregroundStyle(target.source.brandColor)
+                    // 全局紫金：图表柱不用 CLI 品牌色
+                    .foregroundStyle(Theme.chartBarGradient)
                 }
                 .frame(height: 120)
                 .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
@@ -327,13 +338,28 @@ struct SkillDetailView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func metric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func metricTile(
+        _ label: String, _ value: String,
+        valueColor: Color = .primary, gold: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(gold ? Theme.gold.opacity(0.9) : Color.primary.opacity(0.35))
             Text(value)
-                .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                .font(Theme.font.statNumber(18))
+                .foregroundStyle(gold ? Theme.gold : valueColor)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        // 本周排名 = 金块；其余 = 白底细描边
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.container)
+                .fill(gold ? Theme.gold.opacity(0.12) : Theme.surface))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radius.container)
+                .strokeBorder(gold ? Theme.gold.opacity(0.4) : Theme.cardBorder,
+                              lineWidth: 0.5))
     }
 }

@@ -478,11 +478,18 @@ private struct MessageRowView: View {
             HStack(spacing: 0) {
                 // 左侧至少留 ~15% 空，气泡宽度由内容决定、靠右
                 Spacer(minLength: 56)
+                // 用户气泡：紫浅底，圆角 14、右下小角（自然聊天形态）
                 MarkdownRichText(text: message.text, fillWidth: false)
                     .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.brandFill(0.10)))
+                    .background(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 14, bottomLeadingRadius: 14,
+                            bottomTrailingRadius: 4, topTrailingRadius: 14)
+                            .fill(Theme.brandFill(0.10)))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 14, bottomLeadingRadius: 14,
+                            bottomTrailingRadius: 4, topTrailingRadius: 14)
                             .strokeBorder(
                                 isMatch ? Theme.gold.opacity(0.85) : Theme.hairline,
                                 lineWidth: isMatch ? 1.5 : 0.5))

@@ -25,7 +25,31 @@ enum Theme {
     /// 金额恒蓝（沿用既有约定）
     static let cost = Color.blue
 
+    /// 紫金渐变：色脊 / 徽标底统一从这里取（勿在各视图手写）
+    static var purpleGoldGradient: LinearGradient {
+        LinearGradient(colors: [brand, gold], startPoint: .top, endPoint: .bottom)
+    }
+
+    /// 图表柱渐变（#8C8CF5 → #5C5CE3，自上而下；近 30 天调用柱状图用）
+    static var chartBarGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(.sRGB, red: 0.55, green: 0.55, blue: 0.96, opacity: 1),
+                Color(.sRGB, red: 0.36, green: 0.36, blue: 0.89, opacity: 1),
+            ],
+            startPoint: .top, endPoint: .bottom)
+    }
+
     // MARK: - 语义状态色（收编全仓重复 switch）
+
+    /// 启用绿
+    static let enabledGreen = Color(.sRGB, red: 0.20, green: 0.78, blue: 0.35, opacity: 1)
+    /// 停用灰
+    static let disabledGray = Color(.sRGB, red: 0.86, green: 0.86, blue: 0.88, opacity: 1)
+    /// 失败红
+    static let failureRed = Color(.sRGB, red: 0.82, green: 0.27, blue: 0.23, opacity: 1)
+    /// 自动清理灰
+    static let autoCleanGray = Color(.sRGB, red: 0.64, green: 0.64, blue: 0.66, opacity: 1)
 
     /// 任务结局：成功绿 / 出错红 / 中断灰
     static func outcomeColor(_ outcome: TaskOutcome) -> Color {
@@ -78,6 +102,13 @@ enum Theme {
     /// 分隔线 / 细描边
     static let hairline = Color.primary.opacity(0.08)
 
+    /// 卡片 / 方块描边（参考稿简约风：可见的浅灰边，替代过浅的 hairline）
+    static let cardBorder = Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.14)
+            : NSColor(srgbRed: 0.89, green: 0.89, blue: 0.91, alpha: 1)  // #E2E2E8
+    }))
+
     /// 品牌色轻染填充（选中态 / 徽标 / 高亮行）
     static func brandFill(_ opacity: Double = 0.10) -> Color {
         brand.opacity(opacity)
@@ -98,12 +129,39 @@ enum Theme {
         static let item: CGFloat = 6
     }
 
-    // MARK: - 圆角（Codex 式大圆角）
+    // MARK: - 圆角（简约两级阶梯：卡片 12 / 容器 10 / 小方块与侧栏项 8）
 
     enum radius {
         /// 卡片 / 大容器
-        static let card: CGFloat = 14
-        /// 小型容器（图标底、内嵌面板）
+        static let card: CGFloat = 12
+        /// 小型容器（统计瓦片、内嵌面板）
         static let container: CGFloat = 10
+        /// 小方块（logo 块 / 图标块）与侧栏导航项
+        static let tile: CGFloat = 8
+        /// 侧栏导航项
+        static let sidebar: CGFloat = 8
+    }
+
+    // MARK: - 字号（设计稿「紫金」规范，统一从这里取）
+
+    enum font {
+        /// 页标题 14/700
+        static let pageTitle = Font.system(size: 14, weight: .bold)
+        /// 卡片标题 13.5/650（技能名等宽场景用 monoSkillName）
+        static let cardTitle = Font.system(size: 13.5, weight: .semibold)
+        /// 技能名等宽（SF Mono）
+        static func monoSkillName(_ size: CGFloat = 13.5, weight: Font.Weight = .semibold) -> Font {
+            .system(size: size, weight: weight, design: .monospaced)
+        }
+        /// 正文 12.5
+        static let body = Font.system(size: 12.5)
+        /// 次要 11
+        static let secondary = Font.system(size: 11)
+        /// 标注 9.5–10
+        static let caption = Font.system(size: 9.5)
+        /// 大数字 18–23/700 等宽数字
+        static func statNumber(_ size: CGFloat = 18) -> Font {
+            .system(size: size, weight: .bold).monospacedDigit()
+        }
     }
 }
