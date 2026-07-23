@@ -4,6 +4,39 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-23
+
+### Added
+
+- **Card / list toggle on every knowledge pane.** Skills, Memory, Plans and
+  Agents now switch between a card grid and a full-width list from one control
+  in the pane toolbar. The list rows mirror the Sessions row — source logo,
+  two-line title/description, a hover-revealed edit / reveal / delete cluster
+  and a left accent bar on hover. Plans and Agents gain a list view for the
+  first time.
+- **Design-token layer** in `Theme`: semantic status colors (enabled /
+  disabled / failure / auto-clean), a visible card border, purple-gold and
+  chart gradients, a radius scale (card 12 / container 10 / tile 8) and a font
+  scale — every pane now pulls the same values instead of hand-rolling them.
+- Skill detail shows the current **weekly call rank**.
+
+### Changed
+
+- **Knowledge-pane cards redesigned.** The left purple-gold spine and the
+  permanent action toolbar are gone; cards are fewer-per-row and larger (bigger
+  source logo, prominent title, up to three description lines), with edit /
+  reveal / delete revealed on hover. Group-header counts are a neutral pill,
+  and the card/list switch moved out of every group header into the toolbar.
+  Shared `KnowledgeCard` / `KnowledgeRow` / `LayoutToggle` / `TagChip` /
+  `StatusDot` / `EmptyStateView` / `SearchField` / `SourceSectionHeader` /
+  `MarkdownDocumentCard` back all four panes.
+- **Sidebar** groups now carry labels (活动 / 知识库 / 用量) with monochrome
+  icons, and Settings is pinned to the bottom.
+- **History** is a day-grouped timeline (today / earlier) with a per-row source
+  badge and colored status circles (green ✓ / red ✕ / gray —).
+- Sessions detail uses natural asymmetric chat bubbles; the turn-trail fold
+  pill is recolored gold to separate it from the purple accent.
+
 ## [0.5.2] - 2026-07-22
 
 ### Changed
@@ -320,6 +353,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.6.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.0
 [0.5.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.2
 [0.5.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.1
 [0.5.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.0
