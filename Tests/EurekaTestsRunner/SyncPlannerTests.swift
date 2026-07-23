@@ -161,6 +161,48 @@ func syncPlannerTests(_ t: TestRunner) {
         }, "自定义目录候选应带 category")
     }
 
+    t.test("Catalog：项目级 skill 收录，键含 skills/project/<名>（.claude 隐藏段不误跳）") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent("eureka-projskill-\(UUID())")
+        defer { try? fm.removeItem(at: base) }
+        // <repo>/.claude/skills/foo/SKILL.md：.claude 是隐藏段，但它在 root 路径里、不在相对路径里
+        let skillsRoot = base.appendingPathComponent("myrepo/.claude/skills")
+        let deep = skillsRoot.appendingPathComponent("foo")
+        try fm.createDirectory(at: deep, withIntermediateDirectories: true)
+        try "x".write(to: deep.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+
+        var roots = SyncRoots(
+            claudeHome: base.appendingPathComponent("nope"),
+            claudeProjects: base.appendingPathComponent("nope"),
+            claudeSkills: base.appendingPathComponent("nope"),
+            codexHome: base.appendingPathComponent("nope"),
+            codexSessions: base.appendingPathComponent("nope"),
+            codexSkills: base.appendingPathComponent("nope"),
+            opencodeSkills: base.appendingPathComponent("nope"),
+            opencodeDB: base.appendingPathComponent("nope/db"),
+            grokSkills: base.appendingPathComponent("nope"),
+            grokMemory: base.appendingPathComponent("nope"),
+            grokSessions: base.appendingPathComponent("nope"),
+            kimiSkills: base.appendingPathComponent("nope"),
+            kimiSessions: base.appendingPathComponent("nope"),
+            geminiHome: base.appendingPathComponent("nope"),
+            geminiSessions: base.appendingPathComponent("nope"),
+            geminiSkills: base.appendingPathComponent("nope"),
+            qwenProjects: base.appendingPathComponent("nope"),
+            qwenMemories: base.appendingPathComponent("nope"),
+            qwenSkills: base.appendingPathComponent("nope"),
+            claudePlans: base.appendingPathComponent("nope"),
+            plansStaging: base.appendingPathComponent("nope"))
+        roots.projectSkills = [(root: skillsRoot, category: "claude/skills/project/myrepo")]
+        let result = SyncSourceCatalog.enumerate(
+            roots: roots, prefix: "eureka", host: "mac", maxFileSize: 1 << 20)
+        let keys = Set(result.candidates.map(\.remoteKey))
+        try expect(keys.contains("eureka/mac/claude/skills/project/myrepo/foo/SKILL.md"),
+                   "项目级 skill 应收录，且 root 路径里的 .claude 隐藏段不应导致跳过")
+        try expect(result.candidates.contains { $0.category == "claude/skills/project/myrepo" },
+                   "项目 skill 候选应带 project 类目")
+    }
+
     t.test("Catalog：超大文件跳过并计数") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("eureka-oversize-\(UUID())")

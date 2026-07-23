@@ -31,31 +31,8 @@ final class SkillMemoryService: ObservableObject {
             let repoRoots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)
             let codexInstructionScopes = ProjectScopeDiscovery.codexInstructionScopes(
                 resolver: self.resolver)
-            // 项目级技能根：各项目仓库根下的 .claude/skills 与 .codex/skills
-            var projectRoots: [ProjectScopedRoot] = []
-            for (root, name) in repoRoots {
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".claude/skills", isDirectory: true),
-                    source: .claude, projectName: name))
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".codex/skills", isDirectory: true),
-                    source: .codex, projectName: name))
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".opencode/skills", isDirectory: true),
-                    source: .opencode, projectName: name))
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".grok/skills", isDirectory: true),
-                    source: .grok, projectName: name))
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".gemini/skills", isDirectory: true),
-                    source: .gemini, projectName: name))
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".kimi-code/skills", isDirectory: true),
-                    source: .kimi, projectName: name))
-                projectRoots.append(ProjectScopedRoot(
-                    root: root.appendingPathComponent(".qwen/skills", isDirectory: true),
-                    source: .qwen, projectName: name))
-            }
+            // 项目级技能根：与云备份共用同一发现口径（见 SkillMemoryIndexer.projectSkillRoots）
+            let projectRoots = SkillMemoryIndexer.projectSkillRoots(repoRoots: repoRoots)
             // 内置/携带技能根（只读，供详情矩阵与跨源判定；不进列表）
             var bundledRoots: [(root: URL, source: AgentSource)] = []
             for root in SkillMemoryIndexer.claudePluginSkillsRoots() {

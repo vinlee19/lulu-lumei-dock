@@ -49,6 +49,9 @@ public struct SyncRoots {
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
     public var customDirs: [(root: URL, category: String)] = []
+    /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
+    /// 默认空；由 app 侧从 ProjectScopeDiscovery 注入，与全局 skill 并列备份。
+    public var projectSkills: [(root: URL, category: String)] = []
 
     public init(
         claudeHome: URL, claudeProjects: URL, claudeSkills: URL,
@@ -222,6 +225,12 @@ public enum SyncSourceCatalog {
         // 用户自定义目录：远端类目由用户指定（custom/<名>），全部常规文件（隐藏文件仍跳过）
         for dir in roots.customDirs {
             walk(root: dir.root, category: dir.category, priority: 1, include: always)
+        }
+
+        // 项目级 skill：远端类目已由 app 侧算好（<source>/skills/project/<项目名>）。
+        // 传入的是已解析的 <repo>/.claude/skills 等，walk 的隐藏段判定基于相对路径 → 不会误跳。
+        for skill in roots.projectSkills {
+            walk(root: skill.root, category: skill.category, priority: 0, include: always)
         }
 
         return Result(candidates: candidates, skippedOversize: oversize)

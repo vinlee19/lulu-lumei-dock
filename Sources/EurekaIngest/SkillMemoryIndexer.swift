@@ -122,6 +122,38 @@ public enum SkillMemoryIndexer {
         return home().appendingPathComponent(".claude/skills", isDirectory: true)
     }
 
+    /// 项目级技能根：各仓库根下 `<root>/<agentDir>/skills`（技能页与云备份共用同一发现口径）。
+    /// 抽自 SkillMemoryService.refresh 的原内联逻辑，供 SyncSourceCatalog 复用、避免漂移。
+    public static func projectSkillRoots(
+        repoRoots: [(root: URL, name: String)]
+    ) -> [ProjectScopedRoot] {
+        var roots: [ProjectScopedRoot] = []
+        for (root, name) in repoRoots {
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".claude/skills", isDirectory: true),
+                source: .claude, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".codex/skills", isDirectory: true),
+                source: .codex, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".opencode/skills", isDirectory: true),
+                source: .opencode, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".grok/skills", isDirectory: true),
+                source: .grok, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".gemini/skills", isDirectory: true),
+                source: .gemini, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".kimi-code/skills", isDirectory: true),
+                source: .kimi, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".qwen/skills", isDirectory: true),
+                source: .qwen, projectName: name))
+        }
+        return roots
+    }
+
     public static func codexSkillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

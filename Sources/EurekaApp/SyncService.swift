@@ -2,6 +2,7 @@ import EurekaIngest
 import EurekaKit
 import EurekaStore
 import EurekaSync
+import EurekaUsage
 import Foundation
 
 /// 云端备份服务：定时（30 分钟）+ 手动触发的增量上传。
@@ -218,6 +219,10 @@ final class SyncService: ObservableObject {
                 (root: URL(fileURLWithPath: folder.path, isDirectory: true),
                  category: folder.remoteCategory)
             }
+        // 项目级 skill 纳入备份（复用 Skills 页的项目发现；分类 <source>/skills/project/<项目名>）
+        roots.projectSkills = SkillMemoryIndexer
+            .projectSkillRoots(repoRoots: ProjectScopeDiscovery.repoRoots(resolver: ProjectResolver()))
+            .map { (root: $0.root, category: "\($0.source.rawValue)/skills/project/\($0.projectName)") }
 
         let engine = SyncEngine(
             client: client, repo: store.syncState, roots: roots,
