@@ -22,6 +22,17 @@ struct SettingsView: View {
         case audit = "审计"
         case advanced = "高级"
         case about = "关于"
+
+        /// 子页签前置图标（与全站导航一致，单色）
+        var icon: String {
+            switch self {
+            case .general: return "gearshape"
+            case .backup: return "icloud.and.arrow.up"
+            case .audit: return "checkmark.shield"
+            case .advanced: return "wrench.and.screwdriver"
+            case .about: return "info.circle"
+            }
+        }
     }
 
     var body: some View {
@@ -72,7 +83,7 @@ struct SettingsView: View {
     private var sectionBar: some View {
         CapsuleTabTray {
             ForEach(SettingsSection.allCases, id: \.self) { item in
-                CapsuleTabButton(title: item.rawValue, isSelected: section == item) {
+                CapsuleTabButton(title: item.rawValue, icon: item.icon, isSelected: section == item) {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                         section = item
                     }

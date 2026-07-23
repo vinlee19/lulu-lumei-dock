@@ -124,11 +124,16 @@ struct PopoverRootView: View {
                     navigation.tab = .settings
                 }
             }
-            Text("v\(appVersion)")
-                .font(.system(size: 9.5).monospacedDigit())
-                .foregroundStyle(.quaternary)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+            // 左下角品牌脚注：真 logo + 版本号
+            HStack(spacing: 5) {
+                LuluLogoTile(size: 13)
+                Text("v\(appVersion)")
+                    .font(.system(size: 9.5).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 2)
+            .padding(.bottom, 8)
         }
         .padding(.horizontal, 8)
         .padding(.top, 12)
@@ -139,22 +144,7 @@ struct PopoverRootView: View {
     /// logo 头部：迷你紫金「Lu」标（与 Dock 图标同源的 LuluMark）+ 应用名
     private var sidebarHeader: some View {
         HStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.55, green: 0.55, blue: 0.96),
-                            Color(red: 0.36, green: 0.36, blue: 0.89),
-                            Color(red: 0.16, green: 0.13, blue: 0.45),
-                        ],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 18, height: 18)
-                .overlay(
-                    LuluMark()
-                        .stroke(Theme.gold, style: StrokeStyle(
-                            lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                        .frame(width: 12, height: 7.5)
-                )
+            LuluLogoTile(size: 18)
             Text("lulu-lumei-dock")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.primary)

@@ -27,7 +27,10 @@ struct AboutView: View {
             Button("退出 lulu-lumei-dock") { NSApp.terminate(nil) }
                 .controlSize(.small)
         }
-        .onAppear { cliTools.detectLocal() }
+        .onAppear {
+            cliTools.detectLocal()
+            cliTools.checkLatest()  // 自动查最新版 → 有新版本才浮现「更新」
+        }
     }
 
     // MARK: - 应用卡
@@ -35,13 +38,7 @@ struct AboutView: View {
     private var appCard: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(LinearGradient(
-                        colors: [Theme.brand, Theme.gold], startPoint: .top, endPoint: .bottom))
-                    .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: Theme.radius.container)
-                        .fill(Theme.brandFill(0.1)))
+                LuluLogoTile(size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("lulu-lumei-dock")
                         .font(.system(size: 14, weight: .semibold))
@@ -115,10 +112,9 @@ struct AboutView: View {
             }
             versionRow("当前版本", tool.detecting ? "检测中…" : (tool.localVersion ?? "未安装"))
             versionRow("最新版本", tool.checkingLatest ? "查询中…" : (tool.latestVersion ?? "—"))
-            HStack {
-                if tool.localVersion != nil {
-                    if let latest = tool.latestVersion, let local = tool.localVersion,
-                       latest != local {
+            HStack(spacing: 6) {
+                if tool.localVersion != nil, tool.latestVersion != nil {
+                    if CLIToolsService.hasUpdate(tool) {
                         Text("可更新")
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.orange)
@@ -137,6 +133,13 @@ struct AboutView: View {
                     }
                 }
                 .controlSize(.small)
+                // 仅在确有新版本时显示「更新」（semver：latest > local），在可见 Terminal 里跑
+                if CLIToolsService.hasUpdate(tool), !tool.updateCommand.isEmpty {
+                    Button("更新") { cliTools.updateTool(tool) }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.brand)
+                }
             }
         }
         .padding(Theme.spacing.card)

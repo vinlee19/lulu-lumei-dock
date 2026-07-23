@@ -671,6 +671,31 @@ struct RefreshButton: View {
     }
 }
 
+/// lulu-lumei-dock 品牌标：紫金渐变圆角块 + 金色「Lu」描边（与 Dock 图标同源的 LuluMark）。
+/// 侧栏头部 / 侧栏底部 / 设置→关于 卡片共用，按 size 等比缩放。
+struct LuluLogoTile: View {
+    var size: CGFloat = 18
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.55, green: 0.55, blue: 0.96),
+                        Color(red: 0.36, green: 0.36, blue: 0.89),
+                        Color(red: 0.16, green: 0.13, blue: 0.45),
+                    ],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: size, height: size)
+            .overlay(
+                LuluMark()
+                    .stroke(Theme.gold, style: StrokeStyle(
+                        lineWidth: max(1, size * 0.1), lineCap: .round, lineJoin: .round))
+                    .frame(width: size * 0.66, height: size * 0.42)
+            )
+    }
+}
+
 // MARK: - 知识库统一列表行（列表模式共用，对标会话页 SessionRow）
 
 /// 通栏精致行：内容槽（左 logo + 两行文字 + 右侧状态）+ 悬停浮现动作；
