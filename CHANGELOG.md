@@ -4,6 +4,23 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-07-23
+
+### Added
+
+- **Manual refresh on every management pane.** Skills, Memory, Plans, Agents
+  and the Usage dashboard now share one refresh control — a purple icon on a
+  light brand-tinted disc — in the toolbar. Skills, Memory and Agents gain a
+  manual refresh for the first time (previously they only re-scanned when the
+  pane was opened).
+
+### Changed
+
+- Plans' plain gray refresh icon and the Usage dashboard's text button are
+  unified to the shared `RefreshButton` so the refresh affordance looks the
+  same everywhere; it sits after the layout toggle and before the "新建"
+  action as a secondary control.
+
 ## [0.6.0] - 2026-07-23
 
 ### Added
@@ -353,6 +370,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.6.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.0
 [0.5.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.2
 [0.5.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.5.1
