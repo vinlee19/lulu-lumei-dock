@@ -56,11 +56,7 @@ struct PlansView: View {
         HStack(spacing: 8) {
             SearchField(placeholder: "搜索计划 / 项目", text: $service.searchText, scanning: service.scanning)
             LayoutToggle(layout: $layout)
-            Button { service.refresh(force: true) } label: {
-                Image(systemName: "arrow.clockwise").font(.system(size: 11))
-            }
-            .buttonStyle(.borderless)
-            .help("刷新（重新物化并索引计划）")
+            RefreshButton(help: "刷新（重新物化并索引计划）") { service.refresh(force: true) }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)

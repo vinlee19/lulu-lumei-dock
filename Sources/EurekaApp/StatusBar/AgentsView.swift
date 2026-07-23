@@ -91,6 +91,7 @@ struct AgentsView: View {
         HStack(spacing: 8) {
             SearchField(placeholder: "搜索 agent / profile", text: $service.searchText, scanning: service.scanning)
             LayoutToggle(layout: $layout)
+            RefreshButton(help: "刷新 agent / profile") { service.refresh() }
             Menu {
                 Button("Claude Agent") { startCreate(.claude) }
                 Button("OpenCode Agent") { startCreate(.opencode) }

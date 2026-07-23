@@ -435,6 +435,12 @@ struct UsageDashboardView: View {
                         id: \.self) { source in
                     sourceChip(source, label: source.displayName)
                 }
+
+                // 手动刷新：增量重扫本地用量 + 重算当前区间聚合（同 onAppear）
+                RefreshButton(help: "刷新统计（重新扫描本地用量）") {
+                    usageService.refreshNow()
+                    reload()
+                }
             }
             if period == .custom {
                 HStack(spacing: 6) {

@@ -102,6 +102,7 @@ struct SkillMemoryView: View {
                 placeholder: mode == .skills ? "搜索技能" : "搜索记忆",
                 text: $service.searchText, scanning: service.scanning)
             LayoutToggle(layout: $layout)
+            RefreshButton(help: mode == .skills ? "刷新技能" : "刷新记忆") { service.refresh() }
             createMenu
         }
         .padding(.horizontal, 12)

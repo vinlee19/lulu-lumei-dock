@@ -647,6 +647,30 @@ struct LayoutToggle: View {
     }
 }
 
+/// 统一刷新按钮：紫图标 + 淡紫圆底（各管理页顶栏共用）。
+/// 明显但紧凑——作为次级动作，不与「新建」文字胶囊抢戏。
+struct RefreshButton: View {
+    var help = "刷新"
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Theme.brandFill(hovering ? 0.18 : 0.10)))
+                .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+    }
+}
+
 // MARK: - 知识库统一列表行（列表模式共用，对标会话页 SessionRow）
 
 /// 通栏精致行：内容槽（左 logo + 两行文字 + 右侧状态）+ 悬停浮现动作；
