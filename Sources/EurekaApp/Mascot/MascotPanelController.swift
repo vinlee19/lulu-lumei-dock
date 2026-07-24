@@ -15,6 +15,8 @@ final class MascotPanelController {
     private let panel: NSPanel
     private var moveSettle: DispatchWorkItem?
     private var isProgrammaticMove = false
+    private var pointerTimer: Timer?
+    private var lastPointerLocation: NSPoint?
 
     init() {
         viewModel = MascotViewModel(pack: MascotPackLoader.builtIn())
@@ -49,6 +51,10 @@ final class MascotPanelController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.updatePointerBehavior() }
+        }
     }
 
     func setVisible(_ visible: Bool) {
@@ -62,6 +68,40 @@ final class MascotPanelController {
 
     func applyPack(id: String) {
         viewModel.setPack(MascotPackLoader.load(packID: id))
+    }
+
+    /// 低频采样鼠标位置：idle 时让双角色自然看向鼠标，睡眠时移动可唤醒。
+    private func updatePointerBehavior() {
+        guard panel.isVisible else {
+            lastPointerLocation = nil
+            viewModel.setLookDirection(nil)
+            return
+        }
+        let pointer = NSEvent.mouseLocation
+        if let previous = lastPointerLocation {
+            let movement = hypot(pointer.x - previous.x, pointer.y - previous.y)
+            if movement > 18, viewModel.state == .sleeping {
+                viewModel.wake()
+            }
+        }
+        lastPointerLocation = pointer
+
+        guard viewModel.state == .idle else {
+            viewModel.setLookDirection(nil)
+            return
+        }
+        let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let dx = pointer.x - center.x
+        let dy = pointer.y - center.y
+        let distance = hypot(dx, dy)
+        guard distance >= 70 else {
+            viewModel.setLookDirection(nil)
+            return
+        }
+        // 000°=上、090°=屏幕右，和 v2 精灵图的顺时针方向契约一致。
+        var degrees = atan2(dx, dy) * 180 / .pi
+        if degrees < 0 { degrees += 360 }
+        viewModel.setLookDirection(Int((degrees / 22.5).rounded()) % 16)
     }
 
     // MARK: - 位置

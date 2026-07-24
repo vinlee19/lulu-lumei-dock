@@ -9,8 +9,10 @@ final class MascotViewModel: ObservableObject {
     @Published private(set) var state: MascotState = .idle
     @Published private(set) var bubble: String?
     @Published private(set) var pack: MascotPack
-    /// 空闲姿势轮换下标(idle 久了在多个姿势间随机切)
-    @Published private(set) var idlePoseIndex = 0
+    /// 当前行为变体 id。变化时驱动视图切换素材。
+    @Published private(set) var variantID = ""
+    /// 0...15 顺时针视线；nil 表示回到普通 idle。
+    @Published private(set) var lookDirection: Int?
     /// 状态切换时 +1,驱动视图播放一次"大动作"过场(旋转/跳/翻等)
     @Published private(set) var transitionTick = 0
     /// 当前过场风格(每次切换选定,视图读取)
@@ -26,13 +28,18 @@ final class MascotViewModel: ObservableObject {
     private var hasRunning = false
     private var hasWaiting = false
     private var ticker: Timer?
-    private var nextIdleSwitchAt: Date?
+    private var currentVariant: MascotVariant?
+    private var nextVariantSwitchAt: Date?
 
     init(pack: MascotPack) {
         self.pack = pack
+        currentVariant = pack.variants(for: .idle).first
+        variantID = currentVariant?.id ?? ""
     }
 
     func start() {
+        // 首次开启伙伴时先展示清醒 idle；不能把“从未记录过活跃”当成无限空闲。
+        if lastActiveAt == nil { lastActiveAt = Date() }
         ticker = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.recompute() }
         }
@@ -41,22 +48,36 @@ final class MascotViewModel: ObservableObject {
 
     func setPack(_ pack: MascotPack) {
         self.pack = pack
-        idlePoseIndex = 0
-        nextIdleSwitchAt = nil
+        currentVariant = pack.variants(for: state).first
+        variantID = currentVariant?.id ?? ""
+        lookDirection = nil
+        nextVariantSwitchAt = nil
     }
 
     /// 当前状态的英文艺术字标语
     var caption: String? {
-        pack.captions[state]
+        // 视线追踪是连续微交互，保持画面干净，避免每次转头都带着旧贴纸文案。
+        if state == .idle, lookDirection != nil { return nil }
+        if let currentVariant { return currentVariant.caption }
+        return pack.captions[state]
     }
 
-    /// 当前动画(随 state/pack/空闲轮换 变)
+    /// 当前动画(随 state/pack/行为变体/视线 变)
     var animation: MascotAnimation? {
-        if state == .idle {
-            let poses = pack.idlePoses
-            if poses.count > 1 { return poses[idlePoseIndex % poses.count] }
+        if state == .idle, let lookDirection,
+           let look = pack.lookAnimation(direction: lookDirection) {
+            return look
         }
-        return pack.animation(for: state)
+        return currentVariant?.animation ?? pack.animation(for: state)
+    }
+
+    var motionProfile: MascotMotionProfile {
+        if state == .idle, lookDirection != nil { return .still }
+        return currentVariant?.motion ?? .stateDefault
+    }
+
+    func variantCount(for state: MascotState) -> Int {
+        pack.variants(for: state).count
     }
 
     // MARK: - 输入
@@ -87,13 +108,29 @@ final class MascotViewModel: ObservableObject {
         pushTransient(.poke, bubble: nil, seconds: 1.2)
     }
 
+    /// 睡眠时检测到用户回来 → 先播放醒来动作，再从清醒 idle 重新计时。
+    func wake() {
+        lastActiveAt = Date()
+        pushTransient(.wake, bubble: nil, seconds: 1.5)
+    }
+
+    /// 面板控制器把鼠标相对方向映射到 16 向视线；近距离或非 idle 时回到普通姿势。
+    func setLookDirection(_ direction: Int?) {
+        let normalized = direction.map { (($0 % 16) + 16) % 16 }
+        let next = state == .idle ? normalized : nil
+        if lookDirection != next { lookDirection = next }
+    }
+
     // MARK: - 内部
 
     private func pushTransient(_ state: MascotState, bubble: String?, seconds: TimeInterval) {
+        let replaySameState = self.state == state
         transientState = state
         transientUntil = Date().addingTimeInterval(seconds)
         pendingBubble = bubble
         apply()
+        // 连续完成/点击时也换一个表演，不重复播放完全相同的片段。
+        if replaySameState { selectVariant(force: true) }
     }
 
     private func recompute() {
@@ -121,31 +158,73 @@ final class MascotViewModel: ObservableObject {
             newState = baseState
             newBubble = nil
         }
+        let stateChanged = newState != state
         // 状态真正改变 → 选一个过场大动作并触发
-        if newState != state {
+        if stateChanged {
             transitionStyle = MascotTransition.choose(from: state, to: newState, tick: transitionTick)
             transitionTick &+= 1
         }
         state = newState
         bubble = newBubble
-        updateIdleRotation()
+        if state != .idle { lookDirection = nil }
+        if stateChanged {
+            nextVariantSwitchAt = nil
+            selectVariant(force: true)
+        }
+        updateVariantRotation()
     }
 
-    /// 空闲态每隔 10–18s 随机换个姿势;离开空闲则复位
-    private func updateIdleRotation() {
-        guard state == .idle, pack.idlePoses.count > 1 else {
-            nextIdleSwitchAt = nil
+    /// 高频态会在多个变体间自然轮换，避免长任务一直重复同一张贴纸。
+    private func updateVariantRotation() {
+        let variants = pack.variants(for: state)
+        guard [.idle, .working, .waiting].contains(state), variants.count > 1 else {
+            nextVariantSwitchAt = nil
             return
         }
         let now = Date()
-        guard let next = nextIdleSwitchAt else {
-            nextIdleSwitchAt = now.addingTimeInterval(Double.random(in: 10...18))
+        guard let next = nextVariantSwitchAt else {
+            nextVariantSwitchAt = now.addingTimeInterval(nextVariantInterval())
             return
         }
         if now >= next {
-            idlePoseIndex = (idlePoseIndex + 1) % pack.idlePoses.count
-            nextIdleSwitchAt = now.addingTimeInterval(Double.random(in: 10...18))
+            selectVariant(force: true)
+            nextVariantSwitchAt = now.addingTimeInterval(nextVariantInterval())
         }
+    }
+
+    private func nextVariantInterval() -> TimeInterval {
+        switch state {
+        case .idle: return Double.random(in: 7...13)
+        case .working: return Double.random(in: 10...18)
+        case .waiting: return Double.random(in: 5...9)
+        default: return 30
+        }
+    }
+
+    /// 按权重随机选择，并在有其他候选时避免连续重复。
+    private func selectVariant(force: Bool) {
+        var candidates = pack.variants(for: state)
+        guard !candidates.isEmpty else {
+            currentVariant = nil
+            variantID = ""
+            return
+        }
+        if force, candidates.count > 1, let currentVariant {
+            let withoutCurrent = candidates.filter { $0.id != currentVariant.id }
+            if !withoutCurrent.isEmpty { candidates = withoutCurrent }
+        }
+        let total = candidates.reduce(0) { $0 + max(1, $1.weight) }
+        var ticket = Int.random(in: 0..<max(1, total))
+        var selected = candidates[0]
+        for candidate in candidates {
+            ticket -= max(1, candidate.weight)
+            if ticket < 0 {
+                selected = candidate
+                break
+            }
+        }
+        currentVariant = selected
+        variantID = selected.id
     }
 }
 
@@ -204,14 +283,12 @@ enum MascotTransition {
 
     static func choose(from: MascotState, to: MascotState, tick: Int) -> MascotTransition {
         switch to {
-        case .success: return .jumpSpin
+        case .success: return .jump
         case .error: return .shake
         case .waiting: return .bounce
         case .sleeping, .night: return .settle
-        case .poke: return [MascotTransition.jump, .spin, .bounce, .pop][abs(tick) % 4]
-        default:
-            let cycle: [MascotTransition] = [.spin, .jump, .flip, .pop]
-            return cycle[abs(tick) % cycle.count]
+        case .poke: return [MascotTransition.jump, .bounce, .pop][abs(tick) % 3]
+        default: return .pop
         }
     }
 }

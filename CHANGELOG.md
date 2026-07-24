@@ -4,6 +4,29 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-07-24
+
+### Added
+
+- **Richer Lulu and Lumei companion animations.** The built-in mascot now ships
+  with a dual-character v2 atlas containing nine animation families and 16
+  clockwise look directions. While idle, both characters naturally follow the
+  pointer; returning movement wakes them, and clicks trigger playful reactions.
+- Five additional transparent scene stickers cover running in, bouncing back,
+  waking up, resting and sleeping.
+
+### Changed
+
+- **High-frequency mascot states now have 18 weighted variants:** six each for
+  idle, working and waiting. Variants rotate at state-specific intervals, with
+  per-variant captions and motion profiles, instead of repeating one fixed
+  sticker indefinitely.
+- Custom mascot manifests may define multiple `variants` per state with their
+  own frames, FPS, caption, motion profile and selection weight. Existing
+  single-animation manifests remain compatible.
+- Sprite-atlas frames are cached after their first decode so continuous pointer
+  tracking does not repeatedly load the full image from disk.
+
 ## [0.6.2] - 2026-07-23
 
 ### Added
@@ -394,6 +417,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.7.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.7.0
 [0.6.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.2
 [0.6.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.1
 [0.6.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.0

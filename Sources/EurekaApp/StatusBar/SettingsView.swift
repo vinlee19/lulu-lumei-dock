@@ -156,8 +156,19 @@ struct SettingsView: View {
                     }
                     Button("打开动画包文件夹") { MascotPackLoader.revealCustomFolder() }
                         .controlSize(.small)
+                    if settings.mascotPack == MascotPackLoader.builtInID {
+                        let builtIn = MascotPackLoader.builtIn()
+                        let idleCount = builtIn.variants(for: .idle).count
+                        let workingCount = builtIn.variants(for: .working).count
+                        let waitingCount = builtIn.variants(for: .waiting).count
+                        Text("高频行为共 \(idleCount + workingCount + waitingCount) 种："
+                            + "空闲 \(idleCount) · 工作 \(workingCount) · 等待 \(waitingCount) · "
+                            + "\(builtIn.lookDirections.count) 向视线")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(Theme.brand)
+                    }
                     Text("自定义包放 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）；"
-                        + "拖动可移动位置，右键可隐藏。")
+                        + "拖动可移动位置，空闲时会看向鼠标，右键可隐藏。")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }

@@ -31,8 +31,14 @@ struct MascotRootView: View {
 
     // 透明浮动角色(无白卡)+ 落地软阴影 + 状态切换大动作过场 + 点击俏皮反应
     private var card: some View {
-        MotionContainer(state: viewModel.state) { mascot }
+        MotionContainer(state: viewModel.state, profile: viewModel.motionProfile) {
+            mascot
+                .id("\(viewModel.variantID)-\(viewModel.lookDirection ?? -1)")
+                .transition(.opacity)
+        }
             .frame(width: cardSize, height: cardSize)
+            .animation(.easeOut(duration: 0.16), value: viewModel.variantID)
+            .animation(.easeOut(duration: 0.12), value: viewModel.lookDirection)
             .phaseAnimator([0, 1, 2, 3], trigger: viewModel.transitionTick) { content, phase in
                 let pose = viewModel.transitionStyle.pose(phase: phase)
                 content
@@ -64,10 +70,85 @@ struct MascotRootView: View {
             FrameAnimator(urls: urls, fps: fps)
         case .animatedImage(let url):
             AnimatedImageView(url: url)
+        case .spriteSequence(let url, let cells, let fps):
+            SpriteSequenceAnimator(url: url, cells: cells, fps: fps)
         case .none:
             Image(systemName: "tortoise.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 从 8×11 v2 精灵图裁出任意帧序列。裁切只做一次，播放期间复用 NSImage。
+private struct SpriteSequenceAnimator: View {
+    let url: URL
+    let cells: [MascotSpriteCell]
+    let fps: Double
+    @State private var images: [NSImage] = []
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 1.0 / max(0.1, fps))) { context in
+            let idx = images.isEmpty
+                ? 0
+                : Int(context.date.timeIntervalSinceReferenceDate * fps) % images.count
+            Group {
+                if images.indices.contains(idx) {
+                    Image(nsImage: images[idx])
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                } else {
+                    Color.clear
+                }
+            }
+        }
+        .onAppear { reload() }
+        .onChange(of: url) { _, _ in reload() }
+        .onChange(of: cells) { _, _ in reload() }
+    }
+
+    private func reload() {
+        images = MascotSpriteCache.frames(url: url, cells: cells)
+    }
+}
+
+/// 鼠标扫过 16 向视线时会频繁换格；缓存整张图和裁切结果，避免反复从磁盘解码 4MB 图集。
+private enum MascotSpriteCache {
+    private static let atlasCache = NSCache<NSURL, NSImage>()
+    private static let frameCache = NSCache<NSString, NSImage>()
+
+    static func frames(url: URL, cells: [MascotSpriteCell]) -> [NSImage] {
+        let source: NSImage
+        if let cached = atlasCache.object(forKey: url as NSURL) {
+            source = cached
+        } else if let loaded = NSImage(contentsOf: url) {
+            atlasCache.setObject(loaded, forKey: url as NSURL)
+            source = loaded
+        } else {
+            return []
+        }
+        guard let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              cg.width >= 8, cg.height >= 11
+        else { return [] }
+
+        let cellWidth = cg.width / 8
+        let cellHeight = cg.height / 11
+        return cells.compactMap { cell in
+            guard (0..<11).contains(cell.row), (0..<8).contains(cell.column) else { return nil }
+            let key = "\(url.path)#\(cell.row)#\(cell.column)" as NSString
+            if let cached = frameCache.object(forKey: key) { return cached }
+            guard let frame = cg.cropping(to: CGRect(
+                x: cell.column * cellWidth,
+                y: cell.row * cellHeight,
+                width: cellWidth,
+                height: cellHeight))
+            else { return nil }
+            let image = NSImage(
+                cgImage: frame,
+                size: NSSize(width: cellWidth, height: cellHeight))
+            frameCache.setObject(image, forKey: key)
+            return image
         }
     }
 }
@@ -124,11 +205,14 @@ private struct AnimatedImageView: NSViewRepresentable {
 /// 给静态贴纸叠加"肢体语言":每状态不同的呼吸/抖动/小跳/摇摆,~30fps。
 private struct MotionContainer<Content: View>: View {
     let state: MascotState
+    let profile: MascotMotionProfile
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            let m = MascotMotion.transform(for: state, t: context.date.timeIntervalSinceReferenceDate)
+            let m = MascotMotion.transform(
+                for: state, profile: profile,
+                t: context.date.timeIntervalSinceReferenceDate)
             content()
                 .scaleEffect(m.scale, anchor: .bottom)
                 .rotationEffect(m.rotation, anchor: .bottom)
@@ -257,10 +341,41 @@ struct ArtTextView: View {
 enum MascotMotion {
     /// 返回某状态在时刻 t 的形变(缩放/旋转/位移),幅度刻意克制以免廉价感。
     static func transform(
-        for state: MascotState, t: Double
+        for state: MascotState, profile: MascotMotionProfile = .stateDefault, t: Double
     ) -> (scale: CGSize, rotation: Angle, offset: CGSize) {
         func wave(_ period: Double) -> Double { sin(t * 2 * .pi / period) }
         let none = CGSize(width: 1, height: 1)
+        switch profile {
+        case .gentle:
+            let b = wave(3.4)
+            return (CGSize(width: 1, height: 1 + 0.012 * b), .degrees(0.5 * b),
+                    CGSize(width: 0, height: -1.2 * b))
+        case .focus:
+            let s = wave(0.28)
+            return (none, .degrees(0.35 * s), CGSize(width: 0.45 * s, height: 0))
+        case .curious:
+            let s = wave(2.6)
+            return (none, .degrees(1.7 * s), CGSize(width: 0, height: -1.2 * abs(s)))
+        case .nudge:
+            let b = abs(wave(0.72))
+            return (none, .degrees(1.4 * wave(0.72)), CGSize(width: 0, height: -3 * b))
+        case .celebrate:
+            let b = abs(wave(0.46))
+            return (CGSize(width: 1 + 0.018 * b, height: 1 + 0.025 * b), .zero,
+                    CGSize(width: 0, height: -5 * b))
+        case .droop:
+            return (none, .degrees(0.8 * wave(0.8)), CGSize(width: 0, height: 1.5))
+        case .sleep:
+            let b = wave(4.2)
+            return (CGSize(width: 1, height: 1 + 0.018 * b), .zero,
+                    CGSize(width: 0, height: -0.8 * b))
+        case .sway:
+            return (none, .degrees(1.8 * wave(3.8)), .zero)
+        case .still:
+            return (none, .zero, .zero)
+        case .stateDefault:
+            break
+        }
         switch state {
         case .idle:  // 慢呼吸 + 轻浮
             let b = wave(3.2)
