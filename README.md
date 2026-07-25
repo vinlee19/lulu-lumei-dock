@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -53,7 +53,7 @@ agents and turns them into a live **Dynamic Island** overlay near the notch, plu
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
 It works with eight agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, Gemini CLI, and Qwen Code** — and needs **no network** for its core features: everything is
+Antigravity, Kimi Code, Gemini CLI, Qwen Code, and Hermes Agent** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
@@ -134,6 +134,7 @@ many concurrent sessions, or late‑night runs.
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅ (skills) |
 | **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 | **Qwen Code** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
+| **Hermes Agent** | ✅² | ✅ | — | ✅ | ✅ (skills/memory/plans) |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
@@ -141,6 +142,17 @@ Kimi Code has no local rate‑limit snapshot and no global memory / on‑disk ag
 convention, so those columns are skipped for it. Gemini CLI has no local rate-limit snapshot
 or agent-definition convention either; its `~/.gemini/skills` directory is shared with
 Antigravity and is attributed to Gemini.
+
+² Hermes Agent keeps sessions, messages, tokens and cost in a single SQLite database
+(`~/.hermes/state.db`) rather than per-session transcript files, so it is read through a
+read-only SQLite reader. Live island cards come from polling that database — its shell hooks
+run synchronously on the agent's own thread and need interactive consent, so they are not
+installed. One consequence: Hermes cannot report "waiting for permission", and a session
+already running when the app launches stays silent (Hermes only writes `ended_at` on a clean
+exit, so treating pre-existing open rows as live would flood the island with phantom cards).
+Full-text search and session deletion are skipped for the same reason as opencode: every
+session shares one database file. Hermes has no named subagent definitions, so the Agents page
+is empty for it.
 
 ## Quick start
 

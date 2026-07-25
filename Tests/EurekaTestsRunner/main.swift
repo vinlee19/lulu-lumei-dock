@@ -73,5 +73,6 @@ limitForecasterTests(t)
 weeklyReportTests(t)
 geminiIngestTests(t)
 qwenIngestTests(t)
+hermesIngestTests(t)
 
 t.finish()
