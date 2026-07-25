@@ -30,6 +30,11 @@ final class AppSettings: ObservableObject {
     @Published var notifyError: Bool {
         didSet { defaults.set(notifyError, forKey: "notifyError") }
     }
+    /// 关键事件（完成/等待/出错）同时发系统通知（锁屏/其他桌面可见）。
+    /// 默认关，opt-in，开启时才请求授权；仍受上方按类型开关门控。
+    @Published var eventSystemNotifyEnabled: Bool {
+        didSet { defaults.set(eventSystemNotifyEnabled, forKey: "eventSystemNotifyEnabled") }
+    }
     @Published var autoDismissSeconds: Double {
         didSet { defaults.set(autoDismissSeconds, forKey: "autoDismissSeconds") }
     }
@@ -169,6 +174,7 @@ final class AppSettings: ObservableObject {
         notifyCompletion = defaults.object(forKey: "notifyCompletion") as? Bool ?? true
         notifyWaiting = defaults.object(forKey: "notifyWaiting") as? Bool ?? true
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
+        eventSystemNotifyEnabled = defaults.bool(forKey: "eventSystemNotifyEnabled")
         autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
         showStartTime = defaults.bool(forKey: "islandShowStartTime")
         menuBarShowsLimit = defaults.object(forKey: "menuBarShowsLimit") as? Bool ?? true
