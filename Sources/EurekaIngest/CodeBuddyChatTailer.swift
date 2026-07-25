@@ -157,28 +157,51 @@ public final class CodeBuddyChatTailer {
         return event
     }
 
-    /// 新发现文件：全文建上下文，只从尾部恢复"最后状态"，不重放历史
+    /// 新发现文件：只读头部 64KB 建上下文（cwd/起始时间/标题多在头部）
+    /// + 尾部 256KB 恢复"最后状态"，不重放历史；小文件（≤320KB）一次读完。
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
         defer { try? handle.close() }
-        guard let data = try? handle.readToEnd() else { return }
+
+        let headLength: UInt64 = 65536
+        let tailLength: UInt64 = 256 * 1024
+        var chunks: [Data] = []
+        if size <= headLength + tailLength {
+            guard let data = try? handle.readToEnd() else { return }
+            chunks = [data]
+        } else {
+            // 头部只用于建上下文，末尾可能的半行直接丢弃
+            guard let head = try? handle.read(upToCount: Int(headLength)) else { return }
+            if let lastNewline = head.lastIndex(of: UInt8(ascii: "\n")) {
+                chunks.append(Data(head[head.startIndex...lastNewline]))
+            }
+            // 尾部起点可能落在半行中间，对齐到第一个换行之后
+            guard (try? handle.seek(toOffset: size - tailLength)) != nil,
+                  let tail = try? handle.readToEnd()
+            else { return }
+            if let firstNewline = tail.firstIndex(of: UInt8(ascii: "\n")) {
+                chunks.append(Data(tail[tail.index(after: firstNewline)...]))
+            }
+        }
 
         var ctx = context(for: url)
         var lastStarted: TaskEvent?
         var lastFinished: TaskEvent?
-        for line in data.split(separator: UInt8(ascii: "\n")) {
-            guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
-                  let root = object as? [String: Any]
-            else { continue }
-            absorb(root, into: &ctx)
-            guard let event = event(from: root, context: ctx) else { continue }
-            switch event.kind {
-            case .taskStarted: lastStarted = event
-            case .taskFinished: lastFinished = event
-            default: break
+        for chunk in chunks {
+            for line in chunk.split(separator: UInt8(ascii: "\n")) {
+                guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
+                      let root = object as? [String: Any]
+                else { continue }
+                absorb(root, into: &ctx)
+                guard let event = event(from: root, context: ctx) else { continue }
+                switch event.kind {
+                case .taskStarted: lastStarted = event
+                case .taskFinished: lastFinished = event
+                default: break
+                }
             }
         }
         contexts[path] = ctx
