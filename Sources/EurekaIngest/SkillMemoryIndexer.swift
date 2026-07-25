@@ -233,6 +233,8 @@ public enum SkillMemoryIndexer {
         geminiSkillsRoot: URL? = nil,
         qwenSkillsRoot: URL? = nil,
         antigravitySkillsRoots: [URL] = [],
+        hermesSkillsRoot: URL? = nil,
+        hermesDisabledSkills: Set<String> = [],
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
     ) -> [SkillEntry] {
@@ -282,6 +284,11 @@ public enum SkillMemoryIndexer {
             result += scanSkillRoot(root, source: .antigravity, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: root), source: .antigravity, enabled: false, scope: .system)
+        }
+        // hermes：分类目录树，启停看 config.yaml 而非目录位置（详见 scanHermesSkillTree）
+        if let hermesSkillsRoot {
+            result += scanHermesSkillTree(
+                hermesSkillsRoot, disabledNames: hermesDisabledSkills)
         }
         // 项目级（各项目 cwd 下的 skills 根 + 停用区）
         for project in projectSkillRoots {
@@ -341,6 +348,59 @@ public enum SkillMemoryIndexer {
         return result
     }
 
+    /// Hermes 技能树扫描：`skills/<分类>/<名>/SKILL.md`，另有 `<分类>/<子类>/<名>/` 与
+    /// 顶层无分类两种深度 —— 故必须**递归**找 SKILL.md（`scanSkillRoot` 只看直属子级，撑不住）。
+    ///
+    /// 启停不看目录：Hermes 用 `config.yaml` 的 `skills.disabled`（按 frontmatter `name` 匹配），
+    /// 目录一动就会破坏它的 `.bundled_manifest` md5 记账 → `disabledNames` 由调用方
+    /// （app 层，能同时用到 EurekaInstall 的 HermesConfigEditor）读出后传进来。
+    static func scanHermesSkillTree(
+        _ root: URL, disabledNames: Set<String> = []
+    ) -> [SkillEntry] {
+        let fm = FileManager.default
+        guard let walker = fm.enumerator(
+            at: root, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
+
+        var result: [SkillEntry] = []
+        for case let url as URL in walker {
+            let name = url.lastPathComponent
+            // 支持目录（技能自带素材）与工具/缓存目录里不会有独立技能，整棵剪掉
+            if Self.hermesPrunedDirs.contains(name) {
+                walker.skipDescendants()
+                continue
+            }
+            guard name == "SKILL.md" else { continue }
+            let dir = url.deletingLastPathComponent()
+            let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let (frontName, desc) = parseFrontmatter(readHead(url) ?? "")
+            let skillName = frontName ?? dir.lastPathComponent
+            result.append(SkillEntry(
+                source: .hermes,
+                name: skillName,
+                description: desc,
+                path: url.path,
+                directory: dir.path,
+                enabled: !disabledNames.contains(skillName),
+                scope: .system,     // Hermes 没有项目级技能（只有 skills.external_dirs）
+                origin: .user,
+                sizeBytes: UInt64(values?.fileSize ?? 0),
+                modifiedAt: values?.contentModificationDate ?? .distantPast))
+        }
+        return result.sorted {
+            ($0.enabled ? 0 : 1, $0.name.lowercased()) < ($1.enabled ? 0 : 1, $1.name.lowercased())
+        }
+    }
+
+    /// 递归时整棵跳过的目录：技能自带素材目录 + 归档/缓存/依赖目录
+    private static let hermesPrunedDirs: Set<String> = [
+        "references", "templates", "assets", "scripts",
+        ".hub", ".archive", ".curator_backups", ".git", ".github",
+        "venv", ".venv", "node_modules", "site-packages",
+        "__pycache__", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ]
+
     // MARK: - 记忆
 
     public static func indexMemory(
@@ -350,6 +410,7 @@ public enum SkillMemoryIndexer {
         kimiHome: URL? = nil,
         geminiHome: URL? = nil,
         qwenHome: URL? = nil,
+        hermesHome: URL? = nil,
         projectRoots: [(root: URL, name: String)] = [],
         codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
     ) -> [MemoryEntry] {
@@ -458,6 +519,20 @@ public enum SkillMemoryIndexer {
                     add(file, source: .qwen, scope: projName, projectName: projName)
                 }
             }
+        }
+
+        // hermes：三份 profile 级指令文件，**无项目级记忆概念**。
+        //   memories/MEMORY.md = agent 自记、memories/USER.md = 用户画像、SOUL.md = 人格身份。
+        // ⚠ MEMORY/USER 正文是「条目以 \n§\n 相连」的扁平格式且有字数上限（2200 / 1375），
+        //   外部改坏格式或超限会触发 Hermes 的漂移保护：它存一份 .bak 后**拒绝后续写入**。
+        if let hermesHome {
+            let memories = hermesHome.appendingPathComponent("memories", isDirectory: true)
+            add(memories.appendingPathComponent("MEMORY.md"), source: .hermes,
+                scope: "MEMORY", kind: .instructions)
+            add(memories.appendingPathComponent("USER.md"), source: .hermes,
+                scope: "USER", kind: .instructions)
+            add(hermesHome.appendingPathComponent("SOUL.md"), source: .hermes,
+                scope: "SOUL", kind: .instructions)
         }
 
         // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、GEMINI.md→Gemini、

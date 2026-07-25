@@ -485,9 +485,17 @@ public enum PlanMaterializer {
 
     // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi
 
-    public static func index(claudePlansDir: URL, stagingRoot: URL) -> [PlanEntry] {
+    /// hermesPlansDirs：Hermes 的计划由 `plan` 技能用 write_file 直接写成 .md
+    /// （项目内 `<repo>/.hermes/plans/`，profile 级 `~/.hermes/plans/` 可选），
+    /// 本就是真文件 → 同 Claude 一样直接索引，**不需要物化**。
+    public static func index(
+        claudePlansDir: URL, stagingRoot: URL, hermesPlansDirs: [URL] = []
+    ) -> [PlanEntry] {
         var result: [PlanEntry] = []
         collect(dir: claudePlansDir, source: .claude, into: &result)
+        for dir in hermesPlansDirs {
+            collect(dir: dir, source: .hermes, into: &result)
+        }
         collect(dir: stagingRoot.appendingPathComponent("codex", isDirectory: true),
                 source: .codex, into: &result)
         collect(dir: stagingRoot.appendingPathComponent("opencode", isDirectory: true),

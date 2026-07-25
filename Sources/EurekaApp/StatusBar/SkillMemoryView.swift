@@ -123,6 +123,7 @@ struct SkillMemoryView: View {
                 Button("Kimi 技能") { startCreate(.kimi, isSkill: true, "Kimi 技能") }
                 Button("Gemini 技能") { startCreate(.gemini, isSkill: true, "Gemini 技能") }
                 Button("Qwen 技能") { startCreate(.qwen, isSkill: true, "Qwen 技能") }
+                Button("Hermes 技能") { startCreate(.hermes, isSkill: true, "Hermes 技能") }
             } else {
                 Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                 Button("Codex 指令（AGENTS.md）") { service.createMemory(source: .codex, name: "AGENTS") }
@@ -130,6 +131,8 @@ struct SkillMemoryView: View {
                 Button("Kimi 记忆（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
                 Button("Gemini 记忆（GEMINI.md）") { service.createMemory(source: .gemini, name: "GEMINI") }
                 Button("Qwen 记忆") { startCreate(.qwen, isSkill: false, "Qwen 记忆") }
+                // hermes 记忆 = 固定 memories/MEMORY.md（name 忽略，见 createMemory）
+                Button("Hermes 记忆（MEMORY.md）") { service.createMemory(source: .hermes, name: "MEMORY") }
             }
         } label: {
             Image(systemName: "plus")

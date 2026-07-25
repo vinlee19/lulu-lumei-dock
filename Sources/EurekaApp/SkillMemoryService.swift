@@ -1,5 +1,6 @@
 import AppKit
 import EurekaIngest
+import EurekaInstall
 import EurekaKit
 import EurekaUsage
 import Foundation
@@ -55,6 +56,11 @@ final class SkillMemoryService: ObservableObject {
                 geminiSkillsRoot: GeminiPaths.skillsRoot(),
                 qwenSkillsRoot: QwenPaths.skillsRoot(),
                 antigravitySkillsRoots: [],
+                hermesSkillsRoot: HermesPaths.skillsRoot(),
+                // Hermes 的启停名单在 config.yaml 里（不是目录位置）；EurekaIngest 不依赖
+                // EurekaInstall，故在 app 层读出来传进去
+                hermesDisabledSkills: HermesConfigEditor.disabledSkills(
+                    from: ConfigFile.read(HermesPaths.configFile())),
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
             let memories = SkillMemoryIndexer.indexMemory(
@@ -66,6 +72,7 @@ final class SkillMemoryService: ObservableObject {
                 kimiHome: KimiPaths.configHome(),
                 geminiHome: GeminiPaths.configHome(),
                 qwenHome: QwenPaths.configHome(),
+                hermesHome: HermesPaths.configHome(),
                 projectRoots: repoRoots,
                 codexInstructionScopes: codexInstructionScopes)
             DispatchQueue.main.async {
@@ -322,6 +329,12 @@ final class SkillMemoryService: ObservableObject {
     /// 从技能自身目录推导所属 skills 根（父目录），因此系统级与项目级技能都适用。
     func setSkillEnabled(_ skill: SkillEntry, _ enabled: Bool, completion: ((Bool) -> Void)? = nil) {
         guard skill.enabled != enabled else { completion?(true); return }
+        // Hermes 的启停是 config.yaml 里的 skills.disabled 名单，**不能挪目录**：
+        // 它用 .bundled_manifest 的 md5 + curator 状态记账内置技能，目录一动就被判成篡改/丢失。
+        if skill.source == .hermes {
+            setHermesSkillEnabled(skill, enabled, completion: completion)
+            return
+        }
         queue.async { [weak self] in
             let dirURL = URL(fileURLWithPath: skill.directory)
             // 当前所在根 = 技能目录的父目录；停用区推导出启用区，反之亦然
@@ -339,6 +352,33 @@ final class SkillMemoryService: ObservableObject {
                 ok = true
             } catch {
                 self?.report(error)
+            }
+            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+        }
+    }
+
+    /// Hermes 技能启停：往 `~/.hermes/config.yaml` 的 `skills.disabled` 增删 frontmatter name。
+    /// 走 ConfigFile.backupThenWrite（写前留 *.bak.eureka.<ts>），与 Codex config.toml 同一套安全网。
+    /// 编辑器是行级手术，注释与键序原样保留；无法安全改写的形态会原样返回 → 视作失败不落盘。
+    private func setHermesSkillEnabled(
+        _ skill: SkillEntry, _ enabled: Bool, completion: ((Bool) -> Void)? = nil
+    ) {
+        queue.async { [weak self] in
+            let configURL = HermesPaths.configFile()
+            let original = ConfigFile.read(configURL)
+            let updated = HermesConfigEditor.setSkillDisabled(
+                skill.name, disabled: !enabled, in: original)
+            var ok = false
+            if updated == original {
+                // 名单已是目标状态，或该 config 形态无法行级改写 —— 两种情况都不写盘
+                ok = HermesConfigEditor.disabledSkills(from: original).contains(skill.name) != enabled
+            } else {
+                do {
+                    try ConfigFile.backupThenWrite(path: configURL, newContent: updated)
+                    ok = true
+                } catch {
+                    self?.report(error)
+                }
             }
             DispatchQueue.main.async { completion?(ok); self?.refresh() }
         }

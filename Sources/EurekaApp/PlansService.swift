@@ -43,10 +43,17 @@ final class PlansService: ObservableObject {
                 projectsFile: GeminiPaths.projectsFile(), into: staging)
             PlanMaterializer.materializeQwen(
                 projectsRoot: QwenPaths.projectsRoot(), into: staging)
+            // Hermes 计划：profile 级 ~/.hermes/plans + 各仓库内 <repo>/.hermes/plans
+            // （`plan` 技能默认写项目内那一份），都是真 .md，无需物化
+            let repoRoots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)
+            var hermesPlansDirs = HermesPaths.allHomes().map {
+                $0.appendingPathComponent("plans", isDirectory: true)
+            }
+            hermesPlansDirs += repoRoots.map { HermesPaths.projectPlansDir(repoRoot: $0.root) }
             var entries = PlanMaterializer.index(
-                claudePlansDir: PlanMaterializer.defaultClaudePlansDir(), stagingRoot: staging)
-            entries += PlanMaterializer.indexProjectPlans(
-                roots: ProjectScopeDiscovery.repoRoots(resolver: self.resolver))
+                claudePlansDir: PlanMaterializer.defaultClaudePlansDir(), stagingRoot: staging,
+                hermesPlansDirs: hermesPlansDirs)
+            entries += PlanMaterializer.indexProjectPlans(roots: repoRoots)
             DispatchQueue.main.async {
                 self.all = entries
                 self.totalCount = entries.count
