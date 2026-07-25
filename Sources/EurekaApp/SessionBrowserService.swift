@@ -150,6 +150,8 @@ final class SessionBrowserService: ObservableObject {
             indexed += GeminiSessionIndexer.index(
                 tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
             indexed += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
+            // hermes：会话全在 state.db（含各 profile 的独立库）
+            indexed += HermesSessionIndexer.indexAll()
             // 按 id 去重（Claude 嵌套子代理目录等可能重复索引同一会话；
             // ForEach 重复 id 会导致列表渲染出空白行）
             var seenIds = Set<String>()
@@ -418,7 +420,10 @@ final class SessionBrowserService: ObservableObject {
     /// Claude 会话若有嵌套子代理目录（<session>/…）一并清理；grok 是整个 <uuid>/ 目录；
     /// antigravity 是 <uuid>.db（连 -wal/-shm）；kimi 是整个 session_<uuid>/ 目录。
     func deleteSessions(_ toDelete: [AgentSessionInfo], completion: ((Int) -> Void)? = nil) {
-        let deletable = toDelete.filter { $0.source != .opencode }
+        // opencode / hermes 的会话是共享 .db 里的一行：删文件会连坐全部会话，
+        // 而往运行中的库写 DELETE 要碰 WAL、外键级联与 FTS 触发器 —— 一律不提供删除，
+        // 交给各自 CLI 自己管（本 app 对外部库始终只读）。
+        let deletable = toDelete.filter { $0.source != .opencode && $0.source != .hermes }
         guard !deletable.isEmpty else {
             completion?(0)
             return

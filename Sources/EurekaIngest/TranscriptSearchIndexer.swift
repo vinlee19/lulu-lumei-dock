@@ -33,8 +33,11 @@ public final class TranscriptSearchIndexer {
     /// 注入会话列表的索引一轮（测试入口；生产走 indexOnce()）
     @discardableResult
     public func indexOnce(sessions: [AgentSessionInfo]) -> Int {
+        // 排除 SQLite 型来源（opencode / hermes）：本索引以 transcriptPath 为主键
+        // （replaceDocs(path:) + prune(keeping:)），而它们所有会话共用同一个 .db 路径，
+        // 后一个会话会把前一个的文档整片覆盖掉。antigravity 无可读 transcript，同样排除。
         let supported = sessions.filter {
-            $0.source != .opencode && $0.source != .antigravity
+            $0.source != .opencode && $0.source != .antigravity && $0.source != .hermes
         }
         guard let fingerprints = try? store.search.fileFingerprints() else { return 0 }
         var rebuilt = 0
