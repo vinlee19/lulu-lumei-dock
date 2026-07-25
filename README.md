@@ -253,7 +253,7 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (atomic JSON write)    ↓         ├─ NSStatusItem + NSPopover
 Codex rollout tail ─┘                    SpoolConsumer   │   (history / sessions / skills / usage / limits / …)
 Claude transcript watch ──────────────→ TaskStore (state machine)
-usage scanners (one per agent, 8 in all) ─────────────→ SQLite (history / usage / tool_calls / audit)
+usage scanners (8 in all — every agent except Antigravity) ──→ SQLite (history / usage / tool_calls / audit)
 ```
 
 - **`eureka-relay`** is a tiny, fully independent binary: it always `exit 0`, keeps stdout silent,

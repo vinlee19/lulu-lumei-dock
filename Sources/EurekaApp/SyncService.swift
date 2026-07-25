@@ -211,7 +211,7 @@ final class SyncService: ObservableObject {
             return
         }
 
-        Self.materializePlans()  // 物化三源计划到暂存，纳入本轮增量上传
+        Self.materializePlans()  // 物化 Codex/opencode/Grok/Kimi 计划到暂存，纳入本轮增量上传
 
         // 重试参数与自定义目录来自配置快照
         var effectiveLimits = limits
@@ -308,7 +308,7 @@ final class SyncService: ObservableObject {
             qoderMemories: QoderPaths.memoriesRoot())
     }
 
-    /// 物化 Codex / opencode 计划到暂存目录（Claude 计划本就是 .md，无需物化）。
+    /// 物化 Codex / opencode / Grok / Kimi 计划到暂存目录（Claude 计划本就是 .md，无需物化）。
     /// 在同步前调用，让本轮就能上传最新计划。
     static func materializePlans() {
         let staging = PlanMaterializer.defaultStagingRoot()

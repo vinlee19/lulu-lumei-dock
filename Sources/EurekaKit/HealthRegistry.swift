@@ -1,7 +1,7 @@
 import Foundation
 
-/// 数据源健康登记：5 个数据源（spool、rollout 监视、transcript 监视、双用量扫描）
-/// 的心跳/产出/失败计数。设置页"数据健康"区据此渲染——
+/// 数据源健康登记：各管线数据源（spool 消费、9 个 agent tailer/watcher、8 个用量扫描、
+/// 审计、云同步，共 20 处注册）的心跳/产出/失败计数。设置页"数据健康"区据此渲染——
 /// 轮询型数据源停摆（如定时器死掉）能被直接看见，不再靠"感觉不对"。
 public final class HealthRegistry: @unchecked Sendable {
     public static let shared = HealthRegistry()
