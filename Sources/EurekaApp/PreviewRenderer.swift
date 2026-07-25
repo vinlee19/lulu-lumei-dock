@@ -154,6 +154,80 @@ enum PreviewRenderer {
         }
     }
 
+    /// 离屏渲染知识库页（Plans/Skills/Memory/Agents × 卡片/列表）做视觉走查。
+    /// 真实服务扫本机数据，等扫描完成后截图；宽度对齐主窗口内容区。
+    @MainActor
+    static func renderKnowledge(to directory: String) {
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let plans = PlansService()
+        let skillMemory = SkillMemoryService()
+        let agents = AgentConfigService()
+        let usage = UsageService()
+        plans.refresh(force: true)
+        skillMemory.refresh()
+        agents.refresh()
+
+        // 等三边扫描完成（CLI 无主 runloop 驱动 → 手动泵；首次全量解析会话可能要几分钟，上限 300s）
+        let deadline = Date().addingTimeInterval(300)
+        while (plans.scanning || skillMemory.scanning || agents.scanning), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        print("扫描结束：plans=\(plans.totalCount) "
+            + "skills=\(skillMemory.skills.count) memories=\(skillMemory.memories.count) "
+            + "claudeAgents=\(agents.claudeAgents.count) codexProfiles=\(agents.codexProfiles.count) "
+            + "scanning=\(plans.scanning)/\(skillMemory.scanning)/\(agents.scanning)")
+
+        // NSHostingView + cacheDisplay 光栅化：ImageRenderer 离屏下 Lazy 容器/ScrollView 不物化、
+        // 动态 NSColor 与 SF Symbol 也会失真；走 AppKit 布局绘制才接近真实窗口观感。
+        @MainActor func snap<V: View>(_ name: String, _ view: V, dark: Bool = false,
+                                      width: CGFloat = 780) {
+            // 垫一层窗口底色：页面 surfaceSecondary 是半透明叠加层，无底色时 PNG 透明区会失真
+            let hosting = NSHostingView(rootView: ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                view
+            })
+            hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            hosting.frame = CGRect(x: 0, y: 0, width: width, height: 980)
+            hosting.layoutSubtreeIfNeeded()
+            guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+            else { print("渲染失败: \(name)"); return }
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:])
+            else { print("编码失败: \(name)"); return }
+            try? png.write(to: dir.appendingPathComponent("\(name).png"))
+            print("已渲染 \(name).png")
+        }
+
+        // 每页列表 + 图标各出一张（默认列表，对齐设计稿）；宽窗核对三列卡片比例；深色抽查一张
+        snap("knowledge-plans-list", PlansView(service: plans, initialLayout: .list))
+        snap("knowledge-plans-cards", PlansView(service: plans, initialLayout: .cards))
+        snap("knowledge-plans-cards-wide", PlansView(service: plans, initialLayout: .cards), width: 1270)
+        snap("knowledge-skills-list",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .list))
+        snap("knowledge-skills-cards",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .cards))
+        snap("knowledge-skills-cards-wide",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .cards),
+             width: 1270)
+        snap("knowledge-memory-list",
+             SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
+                             initialLayout: .list))
+        snap("knowledge-memory-cards",
+             SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
+                             initialLayout: .cards))
+        snap("knowledge-agents-list",
+             AgentsView(service: agents, usageService: usage, initialLayout: .list))
+        snap("knowledge-agents-cards",
+             AgentsView(service: agents, usageService: usage, initialLayout: .cards))
+        snap("knowledge-plans-list-dark",
+             PlansView(service: plans, initialLayout: .list), dark: true)
+    }
+
     /// 离屏渲染桌面吉祥物各状态(取每态首帧 + 贴纸卡 + 气泡)做视觉走查。
     static func renderMascot(to directory: String) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)

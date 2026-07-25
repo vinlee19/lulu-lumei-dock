@@ -53,6 +53,11 @@ enum EurekaCLI {
             MainActor.assumeIsolated {
                 PreviewRenderer.renderMascot(to: dir)
             }
+        case "--render-knowledge":
+            let dir = args.count > 1 ? args[1] : "/tmp/eureka-knowledge"
+            MainActor.assumeIsolated {
+                PreviewRenderer.renderKnowledge(to: dir)
+            }
         case "--prep-mascot-assets":
             let src = args.count > 1 ? args[1] : "Sources/EurekaApp/Resources/mascots/lulu"
             let dst = args.count > 2 ? args[2] : "/tmp/lulu-cut"
