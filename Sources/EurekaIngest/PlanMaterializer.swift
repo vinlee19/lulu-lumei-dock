@@ -658,13 +658,31 @@ public enum PlanMaterializer {
         }
     }
 
-    /// 标题 = 首个 `# ` 标题行，否则文件名
+    /// 物化时的占位标题：会话既没有 thread name、也没有可用的首条用户消息时写入。
+    /// 这类标题信息量为零（本机 110 份 Codex 计划里 45 份都叫「Codex 计划」），索引阶段改用正文首步替代。
+    static let placeholderTitles: Set<String> = [
+        "Codex 计划", "Codex 工作清单", "Gemini 计划", "Qwen 计划", "opencode 计划",
+    ]
+
+    /// 标题 = 首个 `# ` 标题行，否则文件名。两处收紧：
+    ///   1. 占位标题 → 换成正文第一条清单步骤（「这份计划实际要做什么」比「Codex 计划」有用）；
+    ///   2. 整段提示词当标题 → 按句读边界收短，列表里才读得出重点。
     private static func planTitle(body: String, url: URL) -> String {
+        var heading: String?
         for line in body.components(separatedBy: "\n") where line.hasPrefix("# ") {
             let title = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-            if !title.isEmpty { return title }
+            if !title.isEmpty {
+                heading = title
+                break
+            }
         }
-        return url.deletingPathExtension().lastPathComponent
+        if let heading, !placeholderTitles.contains(heading) {
+            return tightenPlanTitle(heading)
+        }
+        if let step = PlanParsing.firstStep(body) {
+            return tightenPlanTitle(step)
+        }
+        return heading ?? url.deletingPathExtension().lastPathComponent
     }
 
     private static func planKind(body: String, source: AgentSource) -> PlanKind {

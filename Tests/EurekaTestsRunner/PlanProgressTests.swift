@@ -60,4 +60,46 @@ func planProgressTests(_ t: TestRunner) {
     t.test("summary：去掉 markdown 修饰与列表符号") {
         try expectEqual(PlanParsing.summary("# T\n\n- **重点** 内容"), "重点 内容")
     }
+
+    t.test("firstStep：取首个清单步骤文字（去列表符/方框/修饰）") {
+        let md = """
+        # Codex 计划
+
+        > 来源：rollout-xxx
+
+        - [x] Remove `REGISTERED_TOOL_COUNT` tracking and simplify helpers.
+        - [x] Adjust health status.
+        """
+        try expectEqual(
+            PlanParsing.firstStep(md),
+            "Remove REGISTERED_TOOL_COUNT tracking and simplify helpers.")
+        try expect(PlanParsing.firstStep("# 纯文档\n\n没有清单") == nil)
+    }
+
+    t.suite("tightenPlanTitle")
+
+    t.test("按句读边界收短：句末标点优先，标题不带句号") {
+        try expectEqual(
+            tightenPlanTitle("请分析一下 Notion 报告的内容。我的想法是把结论放到第 3 章"),
+            "请分析一下 Notion 报告的内容")
+    }
+
+    t.test("无句末标点时退到逗号；太靠前的逗号不算") {
+        try expectEqual(
+            tightenPlanTitle("重构技能页的统计卡，同时把来源筛选换成 chips 并接真实命中数"),
+            "重构技能页的统计卡")
+        // 逗号在第 3 字，过短 → 不按它切
+        try expect(!tightenPlanTitle("先说，然后我们要把整个索引层的去重逻辑重做一遍并补上回归测试用例").hasSuffix("先说"))
+    }
+
+    t.test("已带省略号的硬截断产物先去省略号再重切，不叠加") {
+        let hard = String(repeating: "长", count: 80) + "…"
+        let tightened = tightenPlanTitle(hard)
+        try expect(!tightened.hasSuffix("……"), "不应叠加省略号")
+        try expect(tightened.count <= 47, "应收到 maxLength 内：\(tightened.count)")
+    }
+
+    t.test("短标题原样返回") {
+        try expectEqual(tightenPlanTitle("用量扫描 SQLite 锁修复计划"), "用量扫描 SQLite 锁修复计划")
+    }
 }

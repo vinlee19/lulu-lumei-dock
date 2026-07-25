@@ -188,7 +188,8 @@ func planMaterializerTests(_ t: TestRunner) {
         try fm.createDirectory(at: staging.appendingPathComponent("opencode"), withIntermediateDirectories: true)
         try "# Claude 计划甲\n正文".write(
             to: claudePlans.appendingPathComponent("plan-a.md"), atomically: true, encoding: .utf8)
-        try "# Codex 计划\n- [ ] x".write(
+        // 占位标题「Codex 计划」应在索引阶段被正文首步取代（见下方断言）
+        try "# Codex 计划\n- [ ] 收敛 relay 重试策略".write(
             to: staging.appendingPathComponent("codex/roll.md"), atomically: true, encoding: .utf8)
         try "# 会话标题\n正文".write(
             to: staging.appendingPathComponent("opencode/s1.md"), atomically: true, encoding: .utf8)
@@ -196,7 +197,9 @@ func planMaterializerTests(_ t: TestRunner) {
         let entries = PlanMaterializer.index(claudePlansDir: claudePlans, stagingRoot: staging)
         try expectEqual(entries.count, 3)
         try expect(entries.contains { $0.source == .claude && $0.title == "Claude 计划甲" }, "缺 Claude 项")
-        try expect(entries.contains { $0.source == .codex && $0.title == "Codex 计划" }, "缺 Codex 项")
+        try expect(
+            entries.contains { $0.source == .codex && $0.title == "收敛 relay 重试策略" },
+            "缺 Codex 项，或占位标题未换成正文首步")
         try expect(entries.contains { $0.source == .opencode && $0.title == "会话标题" }, "缺 opencode 项")
     }
 

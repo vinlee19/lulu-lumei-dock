@@ -25,15 +25,28 @@ public enum PlanParsing {
     public static func checklist(_ markdown: String) -> Checklist {
         var done = 0, inProgress = 0, total = 0
         markdown.enumerateLines { line, _ in
-            guard let mark = checkboxMark(line.trimmingCharacters(in: .whitespaces)) else { return }
+            guard let item = checkbox(line.trimmingCharacters(in: .whitespaces)) else { return }
             total += 1
-            switch mark {
+            switch item.mark {
             case "x", "X": done += 1
             case "~", "/": inProgress += 1
             default: break
             }
         }
         return Checklist(done: done, inProgress: inProgress, total: total)
+    }
+
+    /// 首个任务清单项的文字（去掉列表符与方框）。占位标题（如「Codex 计划」）的计划改用它命名——
+    /// 那才是这份计划实际要做的第一件事。
+    public static func firstStep(_ markdown: String) -> String? {
+        var found: String?
+        markdown.enumerateLines { line, stop in
+            guard let item = checkbox(line.trimmingCharacters(in: .whitespaces)),
+                  !item.text.isEmpty else { return }
+            found = item.text
+            stop = true
+        }
+        return found
     }
 
     /// 一句话摘要：首个「非标题(#) / 非引用(>) / 非分隔线 / 非代码围栏 / 非表格 / 非清单项 / 非空」的正文行，
@@ -44,7 +57,7 @@ public enum PlanParsing {
             let t = line.trimmingCharacters(in: .whitespaces)
             if t.isEmpty || t.hasPrefix("#") || t.hasPrefix(">") { return }
             if t.hasPrefix("---") || t.hasPrefix("```") || t.hasPrefix("|") { return }
-            if checkboxMark(t) != nil { return }
+            if checkbox(t) != nil { return }
             let cleaned = t
                 .replacingOccurrences(of: "**", with: "")
                 .replacingOccurrences(of: "`", with: "")
@@ -57,9 +70,9 @@ public enum PlanParsing {
         return found
     }
 
-    /// 匹配 `- [x] …` / `* [ ] …` / `1. [~] …`，返回方框内字符；非清单行返回 nil。
+    /// 匹配 `- [x] …` / `* [ ] …` / `1. [~] …`，返回方框内字符与其后的步骤文字；非清单行返回 nil。
     /// 入参需为已去首部空白的行。
-    private static func checkboxMark(_ trimmed: String) -> Character? {
+    private static func checkbox(_ trimmed: String) -> (mark: Character, text: String)? {
         var s = Substring(trimmed)
         if let first = s.first, first == "-" || first == "*" || first == "+" {
             s = s.dropFirst()
@@ -77,6 +90,10 @@ public enum PlanParsing {
         guard let mark = s.first else { return nil }
         s = s.dropFirst()
         guard s.first == "]" else { return nil }
-        return mark
+        let text = s.dropFirst()
+            .trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+        return (mark, text)
     }
 }
