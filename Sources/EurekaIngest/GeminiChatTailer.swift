@@ -46,7 +46,10 @@ public final class GeminiChatTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 1, repeating: pollInterval)
+        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        let leeway: DispatchTimeInterval = pollInterval >= 2
+            ? .milliseconds(500) : .milliseconds(100)
+        timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
         timer.resume()
         self.timer = timer
@@ -187,30 +190,57 @@ public final class GeminiChatTailer {
         }
     }
 
-    /// 新发现文件：读全文建上下文（header 在首行、标题在头部），只从尾部恢复"最后状态"，
-    /// 不重放历史——仍在进行中（最后 user 晚于最后 gemini/error）补发 running，否则注册空闲。
+    /// 首扫读取上限：头 64KB 建上下文（header/首条真实用户消息在头部），
+    /// 尾 256KB 恢复"最后状态"；更小的文件整读。大转录不再全量载入解析。
+    private static let initialHeadBytes: UInt64 = 64 * 1024
+    private static let initialTailBytes: UInt64 = 256 * 1024
+
+    /// 新发现文件：头 64KB 建上下文（header 在首行、标题在头部），只从尾 256KB
+    /// 恢复"最后状态"，不重放历史——仍在进行中（最后 user 晚于最后 gemini/error）
+    /// 补发 running，否则注册空闲。
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
         defer { try? handle.close() }
-        guard let data = try? handle.readToEnd() else { return }
 
         var ctx = context(for: url)
         var lastStarted: TaskEvent?
         var lastFinished: TaskEvent?
-        for line in data.split(separator: UInt8(ascii: "\n")) {
-            guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
-                  let root = object as? [String: Any]
-            else { continue }
-            absorb(root, into: &ctx)
-            guard let event = event(from: root, context: ctx) else { continue }
-            switch event.kind {
-            case .taskStarted: lastStarted = event
-            case .taskFinished: lastFinished = event
-            default: break
+
+        /// 扫一个数据块（块边界的半行丢弃），建上下文 + 跟踪最后 started/finished
+        func scan(_ data: Data, dropLeadingPartial: Bool, dropTrailingPartial: Bool) {
+            var lines = data.split(separator: UInt8(ascii: "\n"))[...]
+            if dropLeadingPartial, !lines.isEmpty { lines = lines.dropFirst() }
+            if dropTrailingPartial, !lines.isEmpty { lines = lines.dropLast() }
+            for line in lines {
+                guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
+                      let root = object as? [String: Any]
+                else { continue }
+                absorb(root, into: &ctx)
+                guard let event = event(from: root, context: ctx) else { continue }
+                switch event.kind {
+                case .taskStarted: lastStarted = event
+                case .taskFinished: lastFinished = event
+                default: break
+                }
             }
+        }
+
+        if size <= Self.initialHeadBytes + Self.initialTailBytes {
+            // 小文件整读（结尾半行 JSON 解析自然失败，与整读旧行为一致）
+            guard let data = try? handle.readToEnd() else { return }
+            scan(data, dropLeadingPartial: false, dropTrailingPartial: false)
+        } else {
+            guard let head = try? handle.read(upToCount: Int(Self.initialHeadBytes))
+            else { return }
+            scan(head, dropLeadingPartial: false,
+                 dropTrailingPartial: head.last != UInt8(ascii: "\n"))
+            guard (try? handle.seek(toOffset: size - Self.initialTailBytes)) != nil,
+                  let tail = try? handle.readToEnd()
+            else { return }
+            scan(tail, dropLeadingPartial: true, dropTrailingPartial: false)
         }
         contexts[path] = ctx
 

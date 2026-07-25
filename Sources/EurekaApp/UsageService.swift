@@ -183,7 +183,8 @@ final class UsageService: ObservableObject {
         }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 60, repeating: 60)
+        // leeway 让系统合并唤醒省电
+        timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in self?.scanAndPublish() }
         timer.resume()
         self.timer = timer
