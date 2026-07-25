@@ -2,10 +2,13 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 把三源的「计划」物化为可读、可同步的 .md 首类工件。
-///   - Claude Code：`~/.claude/plans/*.md` 本就是文件，直接索引（不物化）。
+/// 把各家 agent 的「计划」物化为可读、可同步的 .md 首类工件。
+/// 物化六源：
 ///   - Codex：Plan Mode 最终 `<proposed_plan>` 优先，`update_plan` 工作清单兜底。
 ///   - opencode：`opencode.db` 中 `mode='plan'` 的 assistant 消息的 text 分片 → `.md`。
+///   - Grok / Kimi：计划本就是 .md（Grok 每会话 `plan.md`；Kimi 每 agent 的 `plans/` 目录），原样拷入暂存。
+///   - Gemini / Qwen：启发式提取最后一条「像清单」的助手消息。
+/// 直接索引（不物化）：Claude（`~/.claude/plans/*.md`）与 Hermes（`plan` 技能写出的真 .md）。
 /// 写前比对，内容不变则不覆盖（保持 mtime 稳定，避免同步每轮重传）。纯 IO、路径入参、可单测。
 public enum PlanMaterializer {
     public enum PlanKind: String, Equatable, Sendable {

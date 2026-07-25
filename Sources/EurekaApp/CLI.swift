@@ -6,7 +6,7 @@ import EurekaUsage
 import Foundation
 
 /// 命令行模式（不起 GUI）：hooks 安装/卸载/状态。
-/// M7 会在设置 UI 里提供同样能力，CLI 先行便于里程碑验证与脚本化。
+/// 设置 UI 亦提供同样能力，CLI 便于脚本化与无 GUI 环境使用。
 enum EurekaCLI {
     static var claudeSettingsURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
