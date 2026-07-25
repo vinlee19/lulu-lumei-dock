@@ -1,18 +1,21 @@
 import EurekaKit
 import Foundation
 
-/// 增量 tail Qwen 会话（~/.qwen/projects/<encoded>/chats/<uuid>.jsonl）。
-/// Qwen 无 hook/notify 回调，这是实时通道（与 gemini/kimi tailer 同理）。
-/// 生命周期映射：user 消息 → taskStarted；assistant 消息 → taskFinished(success)；
-/// api_response status_code ≠ 200 → taskFinished(error)。cwd 从消息行 cwd 字段带出。
-public final class QwenChatTailer {
+/// 增量 tail CodeBuddy 会话（~/.codebuddy/projects/<cwd-slug>/<sessionId>.jsonl）。
+/// CodeBuddy 无 hook/notify 回调，这是实时通道（与 qwen/kimi tailer 同理）。
+/// 只看顶层会话文件，不 tail `<sessionId>/subagents/` 子目录（子代理 token 由
+/// CodeBuddyUsageScanner 归并，事件流以主会话为准）。
+/// 生命周期映射（CodeBuddyTranscriptDecoder）：user 消息（非 skipRun）→ taskStarted；
+/// function_call → activity(工具名)；assistant completed → taskFinished(success)；
+/// ai-title/summary → titleUpdate（只改已有任务标题，不造幻影任务）。
+public final class CodeBuddyChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
     private let projectsRoot: URL
     private let staleThreshold: TimeInterval
     private let recentWindow: TimeInterval
     private let handler: Handler
-    private let queue = DispatchQueue(label: "com.vinlee.eureka.qwen-tailer")
+    private let queue = DispatchQueue(label: "com.vinlee.eureka.codebuddy-tailer")
     private var timer: DispatchSourceTimer?
 
     private var offsets: [String: UInt64] = [:]
@@ -21,13 +24,15 @@ public final class QwenChatTailer {
         var cwd: String?
         var sessionStartedAt: Date?
         var title: String?
+        /// 标题来源优先级：ai-title(2) > summary(1) > 首条 user 文本(0)，高优先级可覆盖
+        var titleRank: Int = -1
     }
     private var contexts: [String: FileContext] = [:]
 
-    static let healthName = "qwen 事件监视"
+    static let healthName = "codebuddy 事件监视"
 
     public init(
-        projectsRoot: URL = QwenPaths.projectsRoot(),
+        projectsRoot: URL = CodeBuddyPaths.projectsRoot(),
         staleThreshold: TimeInterval = 300,
         recentWindow: TimeInterval = 2 * 86400,
         handler: @escaping Handler
@@ -41,10 +46,7 @@ public final class QwenChatTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
-        let leeway: DispatchTimeInterval = pollInterval >= 2
-            ? .milliseconds(500) : .milliseconds(100)
-        timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
+        timer.schedule(deadline: .now() + 1, repeating: pollInterval)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
         timer.resume()
         self.timer = timer
@@ -58,21 +60,21 @@ public final class QwenChatTailer {
     /// 公开供测试与启动时同步调用
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
-        for url in recentChatFiles() {
+        for url in recentSessionFiles() {
             tail(url)
         }
     }
 
-    private func recentChatFiles(now: Date = Date()) -> [URL] {
+    /// projects/<slug>/*.jsonl 顶层文件（不进 <sessionId>/subagents/ 子目录）
+    private func recentSessionFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
         let projectDirs = (try? fm.contentsOfDirectory(
             at: projectsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         for projectDir in projectDirs
         where (try? projectDir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            let chatsDir = projectDir.appendingPathComponent("chats", isDirectory: true)
             let files = (try? fm.contentsOfDirectory(
-                at: chatsDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+                at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
             for file in files where file.pathExtension.lowercased() == "jsonl" {
                 guard let mtime = (try? file.resourceValues(
                     forKeys: [.contentModificationDateKey]))?.contentModificationDate,
@@ -120,51 +122,43 @@ public final class QwenChatTailer {
     }
 
     private func absorb(_ root: [String: Any], into ctx: inout FileContext) {
-        guard let message = QwenChatDecoder.parseMessage(root) else { return }
-        if ctx.cwd == nil { ctx.cwd = message.cwd }
-        if ctx.sessionStartedAt == nil { ctx.sessionStartedAt = message.timestamp }
-        if ctx.title == nil, message.type == "user", !message.text.isEmpty {
-            ctx.title = summarizeTitle(message.text)
+        if ctx.cwd == nil { ctx.cwd = root["cwd"] as? String }
+        if ctx.sessionStartedAt == nil {
+            ctx.sessionStartedAt = CodeBuddyTranscriptDecoder.timestamp(root)
+        }
+        // 标题优先级：ai-title > summary > 首条 user 文本
+        switch root["type"] as? String {
+        case "ai-title", "summary":
+            let rank = root["type"] as? String == "ai-title" ? 2 : 1
+            if rank > ctx.titleRank, let title = CodeBuddyTranscriptDecoder.title(root) {
+                ctx.title = title
+                ctx.titleRank = rank
+            }
+        case "message":
+            if ctx.titleRank < 0, let text = CodeBuddyTranscriptDecoder.userText(root),
+               let title = summarizeTitle(text) {
+                ctx.title = title
+                ctx.titleRank = 0
+            }
+        default:
+            break
         }
     }
 
     private func event(from root: [String: Any], context ctx: FileContext) -> TaskEvent? {
-        // API 错误（status_code ≠ 200）→ 出错收尾
-        if let response = QwenChatDecoder.apiResponse(root),
-           let status = (response["status_code"] as? NSNumber)?.intValue, status != 200 {
-            return TaskEvent(
-                source: .qwen, sessionId: ctx.sessionId,
-                kind: .taskFinished(
-                    outcome: .error, title: ctx.title, detail: "API \(status)"),
-                timestamp: Date(), cwd: ctx.cwd,
-                sessionStartedAt: ctx.sessionStartedAt)
+        guard var event = CodeBuddyTranscriptDecoder.decode(
+            root: root, sessionId: ctx.sessionId, cwd: ctx.cwd)
+        else { return nil }
+        // taskFinished 的标题由上下文补（行内不带标题）
+        if case .taskFinished(let outcome, nil, let detail) = event.kind {
+            event.kind = .taskFinished(outcome: outcome, title: ctx.title, detail: detail)
         }
-        guard let message = QwenChatDecoder.parseMessage(root) else { return nil }
-        let timestamp = message.timestamp ?? Date()
-        switch message.type {
-        case "user" where !message.text.isEmpty:
-            return TaskEvent(
-                source: .qwen, sessionId: ctx.sessionId,
-                kind: .taskStarted(title: summarizeTitle(message.text)),
-                timestamp: timestamp, cwd: ctx.cwd,
-                sessionStartedAt: ctx.sessionStartedAt)
-        case "assistant" where !message.text.isEmpty:
-            return TaskEvent(
-                source: .qwen, sessionId: ctx.sessionId,
-                kind: .taskFinished(outcome: .success, title: ctx.title, detail: nil),
-                timestamp: timestamp, cwd: ctx.cwd,
-                sessionStartedAt: ctx.sessionStartedAt)
-        default:
-            return nil
-        }
+        event.sessionStartedAt = ctx.sessionStartedAt
+        return event
     }
 
-    /// 首扫读取上限：头 64KB 建上下文（cwd/标题/开始时间取自头部消息），
-    /// 尾 256KB 恢复"最后状态"；更小的文件整读。大转录不再全量载入解析。
-    private static let initialHeadBytes: UInt64 = 64 * 1024
-    private static let initialTailBytes: UInt64 = 256 * 1024
-
-    /// 新发现文件：头 64KB 建上下文，只从尾 256KB 恢复"最后状态"，不重放历史
+    /// 新发现文件：只读头部 64KB 建上下文（cwd/起始时间/标题多在头部）
+    /// + 尾部 256KB 恢复"最后状态"，不重放历史；小文件（≤320KB）一次读完。
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
@@ -172,16 +166,32 @@ public final class QwenChatTailer {
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
         defer { try? handle.close() }
 
+        let headLength: UInt64 = 65536
+        let tailLength: UInt64 = 256 * 1024
+        var chunks: [Data] = []
+        if size <= headLength + tailLength {
+            guard let data = try? handle.readToEnd() else { return }
+            chunks = [data]
+        } else {
+            // 头部只用于建上下文，末尾可能的半行直接丢弃
+            guard let head = try? handle.read(upToCount: Int(headLength)) else { return }
+            if let lastNewline = head.lastIndex(of: UInt8(ascii: "\n")) {
+                chunks.append(Data(head[head.startIndex...lastNewline]))
+            }
+            // 尾部起点可能落在半行中间，对齐到第一个换行之后
+            guard (try? handle.seek(toOffset: size - tailLength)) != nil,
+                  let tail = try? handle.readToEnd()
+            else { return }
+            if let firstNewline = tail.firstIndex(of: UInt8(ascii: "\n")) {
+                chunks.append(Data(tail[tail.index(after: firstNewline)...]))
+            }
+        }
+
         var ctx = context(for: url)
         var lastStarted: TaskEvent?
         var lastFinished: TaskEvent?
-
-        /// 扫一个数据块（块边界的半行丢弃），建上下文 + 跟踪最后 started/finished
-        func scan(_ data: Data, dropLeadingPartial: Bool, dropTrailingPartial: Bool) {
-            var lines = data.split(separator: UInt8(ascii: "\n"))[...]
-            if dropLeadingPartial, !lines.isEmpty { lines = lines.dropFirst() }
-            if dropTrailingPartial, !lines.isEmpty { lines = lines.dropLast() }
-            for line in lines {
+        for chunk in chunks {
+            for line in chunk.split(separator: UInt8(ascii: "\n")) {
                 guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
                       let root = object as? [String: Any]
                 else { continue }
@@ -193,21 +203,6 @@ public final class QwenChatTailer {
                 default: break
                 }
             }
-        }
-
-        if size <= Self.initialHeadBytes + Self.initialTailBytes {
-            // 小文件整读（结尾半行 JSON 解析自然失败，与整读旧行为一致）
-            guard let data = try? handle.readToEnd() else { return }
-            scan(data, dropLeadingPartial: false, dropTrailingPartial: false)
-        } else {
-            guard let head = try? handle.read(upToCount: Int(Self.initialHeadBytes))
-            else { return }
-            scan(head, dropLeadingPartial: false,
-                 dropTrailingPartial: head.last != UInt8(ascii: "\n"))
-            guard (try? handle.seek(toOffset: size - Self.initialTailBytes)) != nil,
-                  let tail = try? handle.readToEnd()
-            else { return }
-            scan(tail, dropLeadingPartial: true, dropTrailingPartial: false)
         }
         contexts[path] = ctx
 

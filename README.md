@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -52,8 +52,8 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with nine agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, Gemini CLI, Qwen Code, and Hermes Agent** — and needs **no network** for its core features: everything is
+It works with eleven agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
+Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, and Qoder** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
@@ -138,6 +138,8 @@ many concurrent sessions, or late‑night runs.
 | **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 | **Qwen Code** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 | **Hermes Agent** | ✅² | ✅ | — | ✅ | ✅ (skills/memory/plans) |
+| **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅ (memory) |
+| **Qoder** | ✅ | —³ | — | ✅ | ✅ (memory/plans) |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
@@ -158,6 +160,10 @@ first scan instead of being replayed as a wall of phantom cards.
 Full-text search and session deletion are skipped for the same reason as opencode: every
 session shares one database file. Hermes has no named subagent definitions, so the Agents page
 is empty for it.
+
+³ Qoder's CN backend reports zero token usage in its local logs, so no usage ledger is
+surfaced for it — sessions, live tasks, plans and memory work normally. CodeBuddy carries
+per-request tokens on its transcript `function_call` lines, which the usage scanner tails.
 
 ## Quick start
 

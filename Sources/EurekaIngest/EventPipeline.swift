@@ -22,6 +22,8 @@ public final class EventPipeline {
     private var geminiTailer: GeminiChatTailer?
     private var qwenTailer: QwenChatTailer?
     private var hermesTailer: HermesStateTailer?
+    private var codeBuddyTailer: CodeBuddyChatTailer?
+    private var qoderTailer: QoderChatTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -41,6 +43,8 @@ public final class EventPipeline {
         geminiTmpRoot: URL = GeminiPaths.tmpRoot(),
         geminiProjectsFile: URL = GeminiPaths.projectsFile(),
         qwenProjectsRoot: URL = QwenPaths.projectsRoot(),
+        codeBuddyProjectsRoot: URL = CodeBuddyPaths.projectsRoot(),
+        qoderProjectsRoot: URL = QoderPaths.projectsRoot(),
         auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -111,6 +115,16 @@ public final class EventPipeline {
         hermesTailer = HermesStateTailer { [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // codebuddy 无 hook/notify，尾随 projects/<cwd-slug>/*.jsonl 做实时
+        codeBuddyTailer = CodeBuddyChatTailer(projectsRoot: codeBuddyProjectsRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
+        // qoder 无 hook/notify，尾随 projects/<slug>/*.jsonl 做实时
+        qoderTailer = QoderChatTailer(projectsRoot: qoderProjectsRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -123,6 +137,8 @@ public final class EventPipeline {
         geminiTailer?.start(pollInterval: 2)
         qwenTailer?.start(pollInterval: 2)
         hermesTailer?.start(pollInterval: 5)
+        codeBuddyTailer?.start(pollInterval: 2)
+        qoderTailer?.start(pollInterval: 2)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -143,6 +159,8 @@ public final class EventPipeline {
         geminiTailer?.stop()
         qwenTailer?.stop()
         hermesTailer?.stop()
+        codeBuddyTailer?.stop()
+        qoderTailer?.stop()
         claudeWatcher?.stop()
     }
 

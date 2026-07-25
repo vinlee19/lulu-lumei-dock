@@ -50,7 +50,10 @@ public final class KimiWireTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 1, repeating: pollInterval)
+        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        let leeway: DispatchTimeInterval = pollInterval >= 2
+            ? .milliseconds(500) : .milliseconds(100)
+        timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
         timer.resume()
         self.timer = timer
