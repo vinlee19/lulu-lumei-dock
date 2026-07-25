@@ -132,6 +132,10 @@ func s3ClientTests(_ t: TestRunner) {
             qwenProjects: base.appendingPathComponent("nope"),
             qwenMemories: base.appendingPathComponent("nope"),
             qwenSkills: base.appendingPathComponent("nope"),
+            hermesSkills: base.appendingPathComponent("hermes/skills"),
+            hermesMemories: base.appendingPathComponent("hermes/memories"),
+            hermesHome: base.appendingPathComponent("hermes"),
+            hermesPlans: base.appendingPathComponent("hermes/plans"),
             claudePlans: base.appendingPathComponent("nope"),
             plansStaging: base.appendingPathComponent("nope"))
         let client = S3Client(

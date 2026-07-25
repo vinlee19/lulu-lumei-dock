@@ -45,6 +45,10 @@ public struct SyncRoots {
     public var qwenProjects: URL     // ~/.qwen/projects（chats/*.jsonl + runtime.json + memory）
     public var qwenMemories: URL     // ~/.qwen/memories
     public var qwenSkills: URL       // ~/.qwen/skills（⚠️ settings.json 含密钥，绝不纳入）
+    public var hermesSkills: URL     // ~/.hermes/skills（分类目录树）
+    public var hermesMemories: URL   // ~/.hermes/memories（MEMORY.md / USER.md）
+    public var hermesHome: URL       // ~/.hermes（只取 SOUL.md 单文件，见 enumerate）
+    public var hermesPlans: URL      // ~/.hermes/plans（profile 级，常不存在）
     public var claudePlans: URL      // ~/.claude/plans（Claude 计划，本就是 .md）
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
@@ -61,6 +65,7 @@ public struct SyncRoots {
         kimiSkills: URL, kimiSessions: URL,
         geminiHome: URL, geminiSessions: URL, geminiSkills: URL,
         qwenProjects: URL, qwenMemories: URL, qwenSkills: URL,
+        hermesSkills: URL, hermesMemories: URL, hermesHome: URL, hermesPlans: URL,
         claudePlans: URL, plansStaging: URL
     ) {
         self.claudeHome = claudeHome
@@ -82,6 +87,10 @@ public struct SyncRoots {
         self.qwenProjects = qwenProjects
         self.qwenMemories = qwenMemories
         self.qwenSkills = qwenSkills
+        self.hermesSkills = hermesSkills
+        self.hermesMemories = hermesMemories
+        self.hermesHome = hermesHome
+        self.hermesPlans = hermesPlans
         self.claudePlans = claudePlans
         self.plansStaging = plansStaging
     }
@@ -212,6 +221,17 @@ public enum SyncSourceCatalog {
              category: "qwen/skills.eureka-disabled", priority: 0, include: always)
 
         // 计划（.md 首类工件）：Claude 直接文件；Codex/opencode 由 PlanMaterializer 物化到暂存
+        // hermes：技能树 + 两份全局记忆 + SOUL.md + profile 级计划。
+        // ⚠️ 绝不纳入 ~/.hermes/{.env,auth.json}（凭证）、config.yaml（含 provider base_url）、
+        //    state.db（会话/用量库，体积大且含全文），故此处只列这四个根。
+        // SOUL.md 用 add 单点加入：~/.hermes 下还有 2GB 的 hermes-agent 源码 checkout，
+        // 绝不能对整个 home 做递归 walk
+        add(roots.hermesHome.appendingPathComponent("SOUL.md"),
+            category: "hermes", relativePath: "SOUL.md", priority: 0)
+        walk(root: roots.hermesSkills, category: "hermes/skills", priority: 0, include: always)
+        walk(root: roots.hermesMemories, category: "hermes/memories", priority: 0,
+             include: markdownOnly)
+        walk(root: roots.hermesPlans, category: "hermes/plans", priority: 0, include: markdownOnly)
         walk(root: roots.claudePlans, category: "claude/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("codex", isDirectory: true),
              category: "codex/plans", priority: 0, include: markdownOnly)

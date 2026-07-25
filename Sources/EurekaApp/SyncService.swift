@@ -291,6 +291,10 @@ final class SyncService: ObservableObject {
             qwenProjects: QwenPaths.projectsRoot(),
             qwenMemories: QwenPaths.memoriesRoot(),
             qwenSkills: QwenPaths.skillsRoot(),
+            hermesSkills: HermesPaths.skillsRoot(),
+            hermesMemories: HermesPaths.memoriesRoot(),
+            hermesHome: HermesPaths.configHome(),
+            hermesPlans: HermesPaths.plansRoot(),
             claudePlans: PlanMaterializer.defaultClaudePlansDir(),
             plansStaging: PlanMaterializer.defaultStagingRoot())
     }

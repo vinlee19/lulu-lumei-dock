@@ -120,6 +120,10 @@ func syncPlannerTests(_ t: TestRunner) {
             qwenProjects: base.appendingPathComponent("qwen/projects"),
             qwenMemories: base.appendingPathComponent("qwen/memories"),
             qwenSkills: base.appendingPathComponent("qwen/skills"),
+            hermesSkills: base.appendingPathComponent("hermes/skills"),
+            hermesMemories: base.appendingPathComponent("hermes/memories"),
+            hermesHome: base.appendingPathComponent("hermes"),
+            hermesPlans: base.appendingPathComponent("hermes/plans"),
             claudePlans: base.appendingPathComponent("claude/plans"),
             plansStaging: base.appendingPathComponent("plans-staging"))
         roots.customDirs = [(
@@ -191,6 +195,10 @@ func syncPlannerTests(_ t: TestRunner) {
             qwenProjects: base.appendingPathComponent("nope"),
             qwenMemories: base.appendingPathComponent("nope"),
             qwenSkills: base.appendingPathComponent("nope"),
+            hermesSkills: base.appendingPathComponent("hermes/skills"),
+            hermesMemories: base.appendingPathComponent("hermes/memories"),
+            hermesHome: base.appendingPathComponent("hermes"),
+            hermesPlans: base.appendingPathComponent("hermes/plans"),
             claudePlans: base.appendingPathComponent("nope"),
             plansStaging: base.appendingPathComponent("nope"))
         roots.projectSkills = [(root: skillsRoot, category: "claude/skills/project/myrepo")]
@@ -232,6 +240,10 @@ func syncPlannerTests(_ t: TestRunner) {
             qwenProjects: base.appendingPathComponent("nope"),
             qwenMemories: base.appendingPathComponent("nope"),
             qwenSkills: base.appendingPathComponent("nope"),
+            hermesSkills: base.appendingPathComponent("hermes/skills"),
+            hermesMemories: base.appendingPathComponent("hermes/memories"),
+            hermesHome: base.appendingPathComponent("hermes"),
+            hermesPlans: base.appendingPathComponent("hermes/plans"),
             claudePlans: base.appendingPathComponent("nope"),
             plansStaging: base.appendingPathComponent("nope"))
         let result = SyncSourceCatalog.enumerate(
