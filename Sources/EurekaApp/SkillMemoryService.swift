@@ -81,19 +81,20 @@ final class SkillMemoryService: ObservableObject {
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         // 列表只展示用户自建/安装技能；内置(bundled) 仅供详情矩阵与跨源判定
         let userSkills = allSkills.filter { $0.origin == .user }
-        // 记忆页只展示系统级记忆（全局 + 用户自建）；项目级记忆归属项目上下文，不进本页
-        let systemMemories = allMemories.filter { $0.projectName == nil }
+        // 记忆页展示：全局记忆（任意类型）+ 各项目根的指令文件（CLAUDE.md/AGENTS.md/GEMINI.md…）。
+        // 排除 ~/.claude/projects/<enc>/memory/*.md 之类的会话级自建记忆（数量庞大、非管理对象）。
+        let visibleMemories = allMemories.filter { $0.projectName == nil || $0.kind == .instructions }
         guard !query.isEmpty else {
             skills = userSkills
-            memories = systemMemories
+            memories = visibleMemories
             return
         }
         skills = userSkills.filter {
             [$0.name, $0.description, $0.path]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)
         }
-        memories = systemMemories.filter {
-            "\($0.scope) \($0.path)".lowercased().contains(query)
+        memories = visibleMemories.filter {
+            "\($0.scope) \($0.path) \($0.projectName ?? "")".lowercased().contains(query)
         }
     }
 
