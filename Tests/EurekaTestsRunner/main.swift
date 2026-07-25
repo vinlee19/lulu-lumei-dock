@@ -79,5 +79,6 @@ terminalBindingTests(t)
 toolPendingTests(t)
 compactToolLabelTests(t)
 terminalProberTests(t)
+systemEventNotificationTests(t)
 
 t.finish()
