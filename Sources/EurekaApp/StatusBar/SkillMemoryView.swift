@@ -579,9 +579,9 @@ private struct MemoryCard: View {
     private var isGlobal: Bool { memory.projectName == nil }
 
     var body: some View {
+        // 边框与 Skills / Plans / Agents 完全一致（不加范围色脊）；范围由 ScopeBadge 表达
         KnowledgeCard(
             minHeight: 78,
-            leadingEdge: isGlobal ? Theme.brand : Theme.gold,
             actions: memoryActions(memory, service: service, onDelete: onDelete),
             onOpen: onOpen
         ) {

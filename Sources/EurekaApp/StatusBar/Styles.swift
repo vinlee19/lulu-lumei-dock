@@ -282,8 +282,6 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
     var enabled = true
     /// 最小高度：0 = 随内容自适应（网格同行自动等高），避免固定高度造成中部空洞
     var minHeight: CGFloat = 0
-    /// 左侧色脊（Memory 按范围染色：全局紫 / 项目金）；nil = 无脊（默认）
-    var leadingEdge: Color? = nil
     var actions: [CardAction] = []
     let onOpen: () -> Void
     @ViewBuilder var content: () -> Content
@@ -300,11 +298,6 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .fill(Theme.surface)
                     .opacity(enabled ? 1 : 0.6))
-            .overlay(alignment: .leading) {
-                if let leadingEdge {
-                    Rectangle().fill(leadingEdge).frame(width: 3)
-                }
-            }
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .strokeBorder(
