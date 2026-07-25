@@ -36,6 +36,8 @@ public final class CodexRolloutTailer {
     private var contexts: [String: FileContext] = [:]
     private var threadNames: [String: String] = [:]
     private var loadedThreadNames = false
+    /// session_index.jsonl 的 mtime+size 指纹；未变化则跳过整文件重解析
+    private var sessionIndexFingerprint: (mtime: TimeInterval, size: UInt64)?
 
     public init(
         sessionsRoot: URL,
@@ -78,7 +80,22 @@ public final class CodexRolloutTailer {
     }
 
     /// session_index.jsonl 是正式线程名的 append-only 索引；变化时给活跃任务补 titleUpdate。
+    /// 每秒轮询时先比对 mtime+size 指纹（廉价 stat），只有真正变化才重读整个文件。
     private func refreshThreadNames() {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: sessionIndexURL.path)
+        let fingerprint = attrs.flatMap { dict -> (mtime: TimeInterval, size: UInt64)? in
+            guard let mtime = (dict[.modificationDate] as? Date)?.timeIntervalSince1970,
+                  let size = dict[.size] as? UInt64
+            else { return nil }
+            return (mtime, size)
+        }
+        // 指纹一致（含文件持续不存在）则无需重解析
+        if loadedThreadNames, fingerprint?.mtime == sessionIndexFingerprint?.mtime,
+           fingerprint?.size == sessionIndexFingerprint?.size {
+            return
+        }
+        sessionIndexFingerprint = fingerprint
+
         let latest = CodexThreadNameIndex.load(sessionIndexURL)
         if loadedThreadNames {
             for (sessionId, name) in latest where threadNames[sessionId] != name {
