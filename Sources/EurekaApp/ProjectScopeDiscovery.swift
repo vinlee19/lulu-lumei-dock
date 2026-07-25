@@ -14,11 +14,17 @@ enum ProjectScopeDiscovery {
     }
 
     static func repoRoots(resolver: ProjectResolver) -> [(root: URL, name: String)] {
+        // home 自身不是项目：ProjectResolver 找不到 .git 时回退 cwd，若会话就在 ~ 里跑过，
+        // 回退值即 home——那样 ~/.claude/skills 等系统根会被当成「项目级」再扫一遍，
+        // 同一文件产出两条同 path 条目（计数翻倍 + SwiftUI 网格因重复 id 出现空洞）。
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
         var seen = Set<String>()
         var roots: [(root: URL, name: String)] = []
         for cwd in recentCwds() {
             guard let root = resolver.projectRoot(forCwd: cwd) else { continue }
-            if seen.insert(root.path).inserted {
+            let path = root.standardizedFileURL.path
+            guard path != home, path != "/" else { continue }
+            if seen.insert(path).inserted {
                 roots.append((root, root.lastPathComponent))
             }
         }

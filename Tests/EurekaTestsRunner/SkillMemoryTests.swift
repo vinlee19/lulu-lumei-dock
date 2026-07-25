@@ -50,6 +50,30 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expect(gamma.enabled && gamma.source == .codex)
     }
 
+    t.test("项目根与系统根重合 → 按 path 去重，只留系统级一条") {
+        // 复现真实 bug：会话在 ~ 里跑过时仓库根回退成 home，~/.claude/skills 会作为
+        // 「项目级」再扫一遍，同一 SKILL.md 出两条同 path 条目（id 重复 → 网格空洞）。
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-dedupe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+
+        let claudeSkills = base.appendingPathComponent("claude-skills", isDirectory: true)
+        let codexSkills = base.appendingPathComponent("codex-skills", isDirectory: true)
+        try writeSkill(claudeSkills, dir: "alpha", body: "---\nname: Alpha\n---\n")
+
+        let skills = SkillMemoryIndexer.indexSkills(
+            claudeSkillsRoot: claudeSkills, codexSkillsRoot: codexSkills,
+            // 项目根故意指向同一个系统根
+            projectSkillRoots: [
+                ProjectScopedRoot(root: claudeSkills, source: .claude, projectName: "wl.xiao")
+            ])
+        try expectEqual(skills.count, 1, "同一 path 只应保留一条")
+        try expectEqual(Set(skills.map(\.path)).count, 1, "path 必须唯一（Identifiable id）")
+        let alpha = try requireSkill(skills, named: "Alpha")
+        try expect(alpha.scope.projectName == nil, "系统级先扫应优先保留，不应被标成项目级")
+    }
+
     t.test("记忆扫描：CLAUDE.md 全局 + memories 目录 + Codex AGENTS.md") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("eureka-memtest", isDirectory: true)

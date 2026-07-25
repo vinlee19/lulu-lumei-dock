@@ -297,6 +297,11 @@ public enum SkillMemoryIndexer {
                 bundled.root, source: bundled.source, enabled: true,
                 scope: .system, origin: .bundled)
         }
+        // 同一 path 只留一条（系统级先扫 → 优先保留）：项目根与系统根重合时（例如会话在 ~ 里
+        // 跑过，仓库根回退成 home）同一 SKILL.md 会被扫两次，而 SkillEntry.id = path，
+        // 重复 id 会让 SwiftUI 的 ForEach/LazyVGrid 出现空洞格子。
+        var seenPaths = Set<String>()
+        result = result.filter { seenPaths.insert($0.path).inserted }
         // 启用在前，再按名字
         return result.sorted {
             ($0.enabled ? 0 : 1, $0.name.lowercased()) < ($1.enabled ? 0 : 1, $1.name.lowercased())
@@ -480,6 +485,9 @@ public enum SkillMemoryIndexer {
                 directory: item.directory, scope: item.scope, projectName: item.projectName)
         }
 
+        // 同一 path 只留一条：MemoryEntry.id = path，重复 id 同样会让 SwiftUI 列表/网格错位。
+        var seenPaths = Set<String>()
+        result = result.filter { seenPaths.insert($0.path).inserted }
         return result.sorted {
             ($0.source.rawValue, $0.scope, $0.path) < ($1.source.rawValue, $1.scope, $1.path)
         }

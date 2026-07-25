@@ -107,6 +107,10 @@ public enum AgentDefinitionIndexer {
             result += scanAgentRoot(
                 disabledRoot(for: project.root), source: source, enabled: false, scope: scope)
         }
+        // 同一 path 只留一条（系统级先扫 → 优先）：项目根与系统根重合时同一 .md 会被扫两次，
+        // 而 AgentDefinition.id = path，重复 id 会让 SwiftUI 网格出现空洞格子。
+        var seenPaths = Set<String>()
+        result = result.filter { seenPaths.insert($0.path).inserted }
         return result.sorted {
             ($0.enabled ? 0 : 1, $0.name.lowercased()) < ($1.enabled ? 0 : 1, $1.name.lowercased())
         }
