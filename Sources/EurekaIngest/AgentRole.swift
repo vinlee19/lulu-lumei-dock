@@ -94,6 +94,8 @@ public func normalizeModelName(_ raw: String?) -> String {
     if m.contains("gemini") { return "Gemini" }
     if m.contains("grok") { return "Grok" }
     if m.contains("qwen") { return "Qwen" }
+    if m.hasPrefix("glm") { return "GLM" }       // CodeBuddy（智谱 GLM 系，如 glm-5.2）
+    if m.hasPrefix("qmodel") { return "QModel" } // Qoder（qmodel_*）
     // provider/model 形式（如 anthropic/claude-… 或 openai:…）取末段并首字母大写
     let tail = raw.split(whereSeparator: { $0 == "/" || $0 == ":" }).last.map(String.init) ?? raw
     return tail.prefix(1).uppercased() + tail.dropFirst()

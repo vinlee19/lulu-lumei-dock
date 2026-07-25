@@ -138,4 +138,51 @@ func qwenIngestTests(_ t: TestRunner) {
             startedAt: nil, lastActiveAt: Date(), sizeBytes: 0, transcriptPath: "/tmp/x")
         try expectEqual(named.displayName, "正常标题")
     }
+
+    t.test("首扫大文件只读头 64KB+尾 256KB：上下文取自头部，最后状态取自尾部") {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory
+            .appendingPathComponent("eureka-qwen-big-\(UUID())", isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+        let chats = home.appendingPathComponent(
+            "projects/-work-my-proj/chats", isDirectory: true)
+        try fm.createDirectory(at: chats, withIntermediateDirectories: true)
+        let sessionId = "9dbdf6ce-0000-483c-b510-50e3e4ac4a6d"
+        let chat = chats.appendingPathComponent("\(sessionId).jsonl")
+
+        // 头 = 首条用户消息（cwd/标题/开始时间来源），中间 ~450KB 填充，尾 = 最后状态
+        var lines = [
+            #"{"uuid":"u0","sessionId":"\#(sessionId)","timestamp":"2026-07-21T11:22:00.000Z","type":"user","cwd":"/work/my-proj","message":{"role":"user","parts":[{"text":"头部标题问题"}]}}"#,
+            #"{"uuid":"u1","sessionId":"\#(sessionId)","timestamp":"2026-07-21T11:23:00.000Z","type":"assistant","cwd":"/work/my-proj","message":{"role":"assistant","parts":[{"text":"先答头部。"}]}}"#,
+        ]
+        let filler = String(repeating: "填", count: 1000)  // UTF-8 每行约 3KB
+        for i in 0..<150 {
+            lines.append(
+                #"{"uuid":"f\#(i)","sessionId":"\#(sessionId)","timestamp":"2026-07-21T12:00:00.000Z","type":"assistant","cwd":"/work/my-proj","message":{"role":"assistant","parts":[{"text":"\#(filler)"}]}}"#)
+        }
+        // 尾部最后一条 user → 仍在进行中
+        lines.append(
+            #"{"uuid":"u9","sessionId":"\#(sessionId)","timestamp":"2026-07-21T13:00:00.000Z","type":"user","cwd":"/work/my-proj","message":{"role":"user","parts":[{"text":"尾部新问题"}]}}"#)
+        let content = lines.joined(separator: "\n").appending("\n")
+        try content.write(to: chat, atomically: true, encoding: .utf8)
+        try expect(content.utf8.count > 64 * 1024 + 256 * 1024,
+                   "fixture 必须超过首扫窗口才有意义")
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = QwenChatTailer(
+            projectsRoot: home.appendingPathComponent("projects")
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()
+
+        // 只补发 running + 标题，不重放中间 150 条填充
+        let kinds = events.map(\.0.kind)
+        try expectEqual(events.count, 2, "首扫只发 running + titleUpdate: \(kinds)")
+        try expect(kinds.contains { $0 == .taskStarted(title: "尾部新问题") },
+                   "尾部 user 晚于 assistant → 恢复 running: \(kinds)")
+        try expect(kinds.contains { $0 == .titleUpdate(title: "头部标题问题") },
+                   "标题应取自头部首条用户消息: \(kinds)")
+        try expectEqual(events.first?.0.sessionId, sessionId)
+        try expectEqual(events.first?.0.cwd, "/work/my-proj", "cwd 取自头部消息")
+        try expect(events.first?.0.sessionStartedAt != nil, "开始时间取自头部消息")
+    }
 }

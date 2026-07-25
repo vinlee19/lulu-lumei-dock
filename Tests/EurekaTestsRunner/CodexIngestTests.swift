@@ -243,6 +243,44 @@ func codexRolloutTests(_ t: TestRunner) {
         }, "session_index 追加的新标题应实时送达")
     }
 
+    t.test("session_index 指纹未变时跳过重解析，变化后仍实时更新") {
+        let spool = try makeSessions()
+        let indexURL = spool.root.appendingPathComponent("session_index.jsonl")
+        let sessionId = "codex-fingerprint"
+
+        // 两个标题字节数相同，覆写后 size 不变
+        try append([
+            try jsonLine(["id": sessionId, "thread_name": "标题甲"]),
+        ], to: indexURL)
+        // setAttributes 的 Date→纳秒转换有精度损失，整秒时间戳才能精确往返
+        let fixedMtime = Date(timeIntervalSince1970: 1_784_990_000)
+        try FileManager.default.setAttributes(
+            [.modificationDate: fixedMtime], ofItemAtPath: indexURL.path)
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = CodexRolloutTailer(
+            sessionsRoot: spool.root, sessionIndexURL: indexURL
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()  // 首次加载建立基线
+
+        // 覆写为同 size 内容并把 mtime 改回同一值：指纹不变 → 不应重解析出新标题
+        try Data((try jsonLine(["id": sessionId, "thread_name": "标题乙"]) + "\n").utf8)
+            .write(to: indexURL)
+        try FileManager.default.setAttributes(
+            [.modificationDate: fixedMtime], ofItemAtPath: indexURL.path)
+        tailer.scanOnce()
+        try expect(events.isEmpty, "指纹未变应跳过重解析，不该出现 titleUpdate: \(events)")
+
+        // 真正追加一行：size/mtime 变化 → 应实时送达新标题
+        try append([
+            try jsonLine(["id": sessionId, "thread_name": "标题丙"]),
+        ], to: indexURL)
+        tailer.scanOnce()
+        try expect(events.contains {
+            $0.0.kind == .titleUpdate(title: "标题丙") && $0.0.sessionId == sessionId
+        }, "session_index 变化后新标题应实时送达: \(events)")
+    }
+
     t.test("rollout 内 thread_name_updated 解码为正式标题事件") {
         let line = try jsonLine([
             "timestamp": "2026-07-21T08:00:03.000Z",

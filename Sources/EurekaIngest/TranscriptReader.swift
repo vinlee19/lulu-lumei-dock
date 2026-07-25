@@ -72,7 +72,132 @@ public enum TranscriptReader {
             return loadHermes(
                 dbPath: session.transcriptPath, sessionId: session.id,
                 maxMessages: maxMessages)
+        case .codebuddy:
+            return loadCodeBuddy(path: session.transcriptPath, maxMessages: maxMessages)
+        case .qoder:
+            return loadQoder(path: session.transcriptPath, maxMessages: maxMessages)
         }
+    }
+
+    // MARK: - CodeBuddy（projects/<cwd-slug>/<sessionId>.jsonl；message/function_call 行）
+
+    /// user input_text → 用户消息（skipRun 元行跳过）；assistant output_text → 助手消息；
+    /// function_call → 🔧 工具小注，function_call_result 仅失败（status != completed）记错误注；
+    /// reasoning / file-history-snapshot / ai-title / summary 跳过。
+    public static func loadCodeBuddy(path: String, maxMessages: Int) -> Result {
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+
+        forEachJSONLine(path: path) { root in
+            guard messages.count < maxMessages else {
+                truncated = true
+                return false
+            }
+            let timestamp = CodeBuddyTranscriptDecoder.timestamp(root)
+            if let text = CodeBuddyTranscriptDecoder.userText(root) {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .user, text: text, timestamp: timestamp))
+            } else if let text = CodeBuddyTranscriptDecoder.assistantText(root) {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .assistant, text: text, timestamp: timestamp))
+            } else if let call = CodeBuddyTranscriptDecoder.toolCall(root) {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .toolNote,
+                    text: "🔧 \(call.name)", timestamp: timestamp))
+            } else if root["type"] as? String == "function_call_result",
+                      root["status"] as? String != "completed" {
+                let name = root["name"] as? String ?? "工具"
+                let status = root["status"] as? String ?? "失败"
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .error,
+                    text: "🔧 \(name)：\(status)", timestamp: timestamp))
+            }
+            return true
+        }
+        return Result(messages: messages, truncated: truncated)
+    }
+
+    // MARK: - Qoder（projects/<slug>/<sessionId>.jsonl；Claude 式信封，规则同 loadClaude 裁剪）
+
+    /// 与 loadClaude 同构：human 用户正文（origin.kind=="human"、非 isMeta）→ 用户消息；
+    /// assistant text → 助手消息；tool_use 聚成轮轨迹（tool_result is_error 回填）；
+    /// thinking / runtime-config / workspace-directories / last-prompt / 标题行等跳过。
+    public static func loadQoder(path: String, maxMessages: Int) -> Result {
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+        var trailIndex: Int?
+        var stepAt: [String: (msg: Int, step: Int)] = [:]
+        var stepCount = 0
+        func withinBudget() -> Bool { messages.count + stepCount < maxMessages }
+
+        forEachJSONLine(path: path) { root in
+            guard withinBudget() else {
+                truncated = true
+                return false
+            }
+            let timestamp = QoderTranscriptDecoder.timestamp(root)
+            switch root["type"] as? String {
+            case "user":
+                if let text = QoderTranscriptDecoder.userPromptText(root) {
+                    // 真实用户提问 = 新一轮
+                    trailIndex = nil
+                    messages.append(TranscriptMessage(
+                        id: messages.count, role: .user, text: text, timestamp: timestamp))
+                } else if let message = root["message"] as? [String: Any],
+                          let blocks = message["content"] as? [[String: Any]] {
+                    // 数组 = tool_result：不入正文，仅按 tool_use_id 回填失败标记
+                    for block in blocks where block["type"] as? String == "tool_result" {
+                        guard block["is_error"] as? Bool == true,
+                              let toolUseId = block["tool_use_id"] as? String,
+                              let pos = stepAt[toolUseId]
+                        else { continue }
+                        messages[pos.msg].steps[pos.step].isError = true
+                    }
+                }
+            case "assistant":
+                guard let message = root["message"] as? [String: Any],
+                      let blocks = message["content"] as? [[String: Any]]
+                else { return true }
+                for block in blocks {
+                    guard withinBudget() else {
+                        truncated = true
+                        return false
+                    }
+                    switch block["type"] as? String {
+                    case "text":
+                        guard let text = block["text"] as? String,
+                              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        else { continue }
+                        messages.append(TranscriptMessage(
+                            id: messages.count, role: .assistant,
+                            text: text, timestamp: timestamp))
+                    case "tool_use":
+                        let name = block["name"] as? String ?? "工具"
+                        let step = ToolStepExtractor.claude(
+                            name: name, input: block["input"] as? [String: Any])
+                        if trailIndex == nil {
+                            messages.append(TranscriptMessage(
+                                id: messages.count, role: .turnTrail, text: "",
+                                timestamp: timestamp))
+                            trailIndex = messages.count - 1
+                        }
+                        messages[trailIndex!].steps.append(step)
+                        if let toolUseId = block["id"] as? String {
+                            stepAt[toolUseId] =
+                                (trailIndex!, messages[trailIndex!].steps.count - 1)
+                        }
+                        stepCount += 1
+                    default:
+                        break  // thinking 无可展示
+                    }
+                }
+            default:
+                break  // 标题行 / runtime-config / workspace-directories / system 等跳过
+            }
+            return true
+        }
+        backfillTrailText(&messages)
+        return Result(messages: messages, truncated: truncated)
     }
 
     // MARK: - Hermes（~/.hermes/state.db 的 messages 表；role=tool 转工具注记）
