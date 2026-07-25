@@ -220,6 +220,12 @@ enum PreviewRenderer {
         snap("knowledge-memory-cards",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLayout: .cards))
+        // 搜索态：命中数胶囊 + 圆形清空键（聚焦渐变环需真实键盘焦点，离屏无法呈现）
+        skillMemory.searchText = "arkcli"
+        snap("knowledge-skills-search",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .list))
+        skillMemory.searchText = ""
         snap("knowledge-agents-list",
              AgentsView(service: agents, usageService: usage, initialLayout: .list))
         snap("knowledge-agents-cards",

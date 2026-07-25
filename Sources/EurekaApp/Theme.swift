@@ -31,6 +31,14 @@ enum Theme {
         LinearGradient(colors: [brand, gold], startPoint: .top, endPoint: .bottom)
     }
 
+    /// 品牌小方块渐变（Indigo Light → brand → Indigo Deep，左上→右下）。
+    /// 24pt 级小方块用：紫金竖向渐变在这个尺寸会糊成橄榄色，故小方块只走紫色系，金留给描边环。
+    static var brandTileGradient: LinearGradient {
+        LinearGradient(
+            colors: [Color(hex: "8C8CF5"), brand, Color(hex: "4A45C9")],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
     /// 图表柱渐变（#8C8CF5 → #5C5CE3，自上而下；近 30 天调用柱状图用）
     static var chartBarGradient: LinearGradient {
         LinearGradient(

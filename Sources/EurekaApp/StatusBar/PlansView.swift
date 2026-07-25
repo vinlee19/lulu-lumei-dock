@@ -66,7 +66,10 @@ struct PlansView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Text("Plans").font(.system(size: 15, weight: .bold))
-            SearchField(placeholder: "搜索计划", text: $service.searchText, scanning: service.scanning)
+            SearchField(
+                placeholder: "搜索计划", text: $service.searchText,
+                scanning: service.scanning, resultCount: service.plans.count)
+            Spacer(minLength: 12)
             RefreshButton(help: "刷新（重新物化并索引计划）") { service.refresh(force: true) }
             LayoutToggle(layout: $layout)
         }

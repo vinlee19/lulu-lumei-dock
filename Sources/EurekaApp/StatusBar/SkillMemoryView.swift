@@ -100,7 +100,9 @@ struct SkillMemoryView: View {
             Text(mode == .skills ? "Skills" : "Memory").font(.system(size: 15, weight: .bold))
             SearchField(
                 placeholder: mode == .skills ? "搜索技能" : "搜索记忆",
-                text: $service.searchText, scanning: service.scanning)
+                text: $service.searchText, scanning: service.scanning,
+                resultCount: totalCount)
+            Spacer(minLength: 12)
             createMenu
             RefreshButton(help: mode == .skills ? "刷新技能" : "刷新记忆") { service.refresh() }
             LayoutToggle(layout: $layout)

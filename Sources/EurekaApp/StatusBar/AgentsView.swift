@@ -100,7 +100,10 @@ struct AgentsView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Text("Agents").font(.system(size: 15, weight: .bold))
-            SearchField(placeholder: "搜索子代理", text: $service.searchText, scanning: service.scanning)
+            SearchField(
+                placeholder: "搜索子代理", text: $service.searchText,
+                scanning: service.scanning, resultCount: totalCount)
+            Spacer(minLength: 12)
             createMenu
             RefreshButton(help: "刷新 agent / profile") { service.refresh() }
             LayoutToggle(layout: $layout)

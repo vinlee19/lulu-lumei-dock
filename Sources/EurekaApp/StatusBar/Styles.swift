@@ -406,48 +406,91 @@ struct EmptyStateView: View {
     }
 }
 
-/// 统一搜索框：紫色放大镜 + 清空按钮 + 聚焦时紫金渐变描边（沿用会话页 searchPanel 观感，
-/// 但不含来源选择器——四页来源筛选由统计瓦片行承担）。
+/// 统一搜索框（紫金主张版）：紫金渐变放大镜方块 + 胶囊底 + 聚焦时紫金渐变环与柔光；
+/// 搜索中右侧显示命中数胶囊 + 圆形清空键。四页共用（来源筛选由下方 chips 承担）。
 struct SearchField: View {
     let placeholder: String
     @Binding var text: String
     var scanning = false
+    /// 命中数（搜索时显示在右侧；nil = 不显示）
+    var resultCount: Int?
+    /// 最大宽度：设计稿里搜索框是中等宽度，不铺满整行（nil = 由父容器决定）
+    var maxWidth: CGFloat? = 460
 
     @FocusState private var focused: Bool
+    @State private var hovering = false
+
+    private var searching: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(focused ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.tertiary))
+        HStack(spacing: 9) {
+            glyph
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 11))
+                .font(.system(size: 12.5))
+                .tint(Theme.brand)  // 紫色光标与选区
                 .focused($focused)
             if scanning { ProgressView().controlSize(.mini) }
-            if !text.isEmpty {
-                Button { text = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-                .help("清空搜索")
-            }
+            trailing
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.surface))
+        .padding(.leading, 6)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: maxWidth)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Theme.surface)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .fill(Theme.brandFill(focused ? 0.10 : (hovering ? 0.06 : 0.035)))))
         .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            Capsule(style: .continuous)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [Theme.brand.opacity(focused ? 1 : 0.45),
-                                 Theme.gold.opacity(focused ? 1 : 0.45)],
+                        colors: [Theme.brand.opacity(focused ? 1 : 0.5),
+                                 Theme.gold.opacity(focused ? 1 : 0.5)],
                         startPoint: .leading, endPoint: .trailing),
-                    lineWidth: focused ? 1.2 : 0.8))
-        .shadow(color: focused ? Theme.brand.opacity(0.12) : .clear, radius: 4, y: 1)
-        .animation(.easeOut(duration: 0.15), value: focused)
+                    lineWidth: focused ? 1.8 : 1))
+        .shadow(color: Theme.brand.opacity(focused ? 0.22 : 0), radius: 10, y: 2)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.16), value: focused)
+        .animation(.easeOut(duration: 0.16), value: hovering)
+    }
+
+    /// 品牌渐变放大镜方块（与品牌标 / logo 方块同一套方块语言；金色留给聚焦描边环）
+    private var glyph: some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(Theme.brandTileGradient)
+            .frame(width: 24, height: 24)
+            .overlay(
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.white))
+            .shadow(color: Theme.brand.opacity(focused ? 0.38 : 0.18), radius: 3, y: 1)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if searching {
+            if let resultCount {
+                Text("\(resultCount)")
+                    .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Theme.brand)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Theme.brandFill(0.14)))
+                    .help("匹配项数量")
+            }
+            Button { text = "" } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.brand)
+                    .frame(width: 19, height: 19)
+                    .background(Circle().fill(Theme.brandFill(0.14)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("清空搜索")
+        }
     }
 }
 
