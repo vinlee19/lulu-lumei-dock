@@ -21,6 +21,7 @@ public final class EventPipeline {
     private var kimiTailer: KimiWireTailer?
     private var geminiTailer: GeminiChatTailer?
     private var qwenTailer: QwenChatTailer?
+    private var hermesTailer: HermesStateTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -105,6 +106,11 @@ public final class EventPipeline {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // hermes 的 shell hooks 会同步阻塞 agent 线程且需交互授权 → 轮询 state.db（含各 profile）。
+        // 代价：拿不到「等待授权」态（sessions 表没有该状态），故 Hermes 不出 permission 卡。
+        hermesTailer = HermesStateTailer { [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -116,6 +122,7 @@ public final class EventPipeline {
         kimiTailer?.start(pollInterval: 2)
         geminiTailer?.start(pollInterval: 2)
         qwenTailer?.start(pollInterval: 2)
+        hermesTailer?.start(pollInterval: 5)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -135,6 +142,7 @@ public final class EventPipeline {
         kimiTailer?.stop()
         geminiTailer?.stop()
         qwenTailer?.stop()
+        hermesTailer?.stop()
         claudeWatcher?.stop()
     }
 
