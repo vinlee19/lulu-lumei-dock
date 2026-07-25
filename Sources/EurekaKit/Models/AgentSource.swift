@@ -25,4 +25,17 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         case .hermes: return "Hermes"
         }
     }
+
+    /// 会话是否存在一个**共享数据库文件**里（opencode / hermes 各自只有一个 `.db`）。
+    /// 由此派生两件事：不支持单条删除，且没有「本会话的转录文件」可展示。
+    public var usesSharedSessionDatabase: Bool {
+        self == .opencode || self == .hermes
+    }
+
+    /// 是否支持单条删除会话。共享库的源一律不支持：删文件会连坐全部会话，
+    /// 而往运行中的库写 DELETE 要碰 WAL、外键级联与 FTS 触发器（本 app 对外部库始终只读）。
+    /// 服务层与 UI 的可删判定共用这一处，避免 UI 提供一个删不掉的按钮。
+    public var supportsSessionDeletion: Bool {
+        !usesSharedSessionDatabase
+    }
 }

@@ -125,9 +125,10 @@ struct SessionDetailView: View {
                 .controlSize(.small)
                 .buttonStyle(.bordered)
                 .tint(.red)
-                .disabled(session.source == .opencode)
-                .help(session.source == .opencode
-                    ? "OpenCode 会话存于共享数据库，暂不支持删除" : "移入废纸篓，可恢复")
+                .disabled(!session.source.supportsSessionDeletion)
+                .help(session.source.supportsSessionDeletion
+                    ? "移入废纸篓，可恢复"
+                    : "\(session.source.displayName) 会话存于共享数据库，暂不支持删除")
                 Menu {
                     Button("复制为 Markdown") { copyMarkdown(session) }
                     Button("导出为 .md 文件…") { exportMarkdown(session) }
@@ -160,7 +161,8 @@ struct SessionDetailView: View {
                 if let cwd = session.cwd {
                     metaItem("folder", URL(fileURLWithPath: cwd).lastPathComponent)
                 }
-                if session.source != .opencode {
+                // 共享库的源（opencode / hermes）没有「本会话的转录文件」，展示库名反而误导
+                if !session.source.usesSharedSessionDatabase {
                     metaItem("doc.text",
                              URL(fileURLWithPath: session.transcriptPath).lastPathComponent)
                 }

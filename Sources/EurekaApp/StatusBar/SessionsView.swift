@@ -55,10 +55,10 @@ struct SessionsView: View {
         }
     }
 
-    /// 选中且可删（opencode 不可删）的会话
+    /// 选中且可删（共享库的 opencode / hermes 不可删）的会话
     private var deletableChecked: [AgentSessionInfo] {
         allVisibleSessions.filter {
-            checkedIds.contains($0.id) && $0.source != .opencode
+            checkedIds.contains($0.id) && $0.source.supportsSessionDeletion
         }
     }
 
@@ -532,13 +532,14 @@ private struct SessionRow: View {
                 Button(action: onToggleCheck) {
                     Image(systemName: isChecked ? "checkmark.square.fill" : "square")
                         .font(.system(size: 12))
-                        .foregroundStyle(session.source == .opencode
-                            ? AnyShapeStyle(.tertiary)
-                            : (isChecked ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.secondary)))
+                        .foregroundStyle(session.source.supportsSessionDeletion
+                            ? (isChecked ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.secondary))
+                            : AnyShapeStyle(.tertiary))
                 }
                 .buttonStyle(.borderless)
-                .disabled(session.source == .opencode)
-                .help(session.source == .opencode ? "OpenCode 会话不支持删除" : "")
+                .disabled(!session.source.supportsSessionDeletion)
+                .help(session.source.supportsSessionDeletion
+                    ? "" : "\(session.source.displayName) 会话不支持删除")
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -593,7 +594,7 @@ private struct SessionRow: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if multiSelect {
-                if session.source != .opencode { onToggleCheck() }
+                if session.source.supportsSessionDeletion { onToggleCheck() }
             } else {
                 service.select(session)
             }
