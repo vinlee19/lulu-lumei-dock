@@ -30,7 +30,7 @@ struct PopoverRootView: View {
         case skills = "Skills"
         case memory = "Memory"
         case plans = "Plans"
-        case agents = "Agent"
+        case agents = "Agents"
         case usage = "用量"
         case limits = "限额"
         case settings = "设置"
@@ -43,12 +43,18 @@ struct PopoverRootView: View {
             case .skills: return "wand.and.stars"
             case .memory: return "brain.fill"
             case .plans: return "list.bullet.clipboard.fill"
-            case .agents: return "person.2.fill"
+            case .agents: return "person.crop.rectangle.stack.fill"
             case .usage: return "chart.bar.fill"
             case .limits: return "gauge.with.dots.needle.67percent"
             case .settings: return "gearshape.fill"
             }
         }
+
+        /// 侧边栏图标：紫金稿统一单色中性灰（不再用彩色圆角方块）；选中项由紫色胶囊承载强调
+        var tileColor: Color? { nil }
+
+        /// 侧栏文案（Agents 页在侧栏显示单数「Agent」，与设计稿一致；页内标题仍用 rawValue）
+        var sidebarLabel: String { self == .agents ? "Agent" : rawValue }
 
         /// 侧边栏分组（标签 + 条目）：活动 / 知识库 / 用量；设置单独沉底
         static let sidebarGroups: [(label: String, tabs: [Tab])] = [
@@ -103,7 +109,7 @@ struct PopoverRootView: View {
                     .padding(.bottom, 2)
                 ForEach(group.tabs, id: \.self) { tab in
                     SidebarNavButton(
-                        title: tab.rawValue, icon: tab.icon,
+                        title: tab.sidebarLabel, icon: tab.icon, tileColor: tab.tileColor,
                         badge: tab == .limits ? limitsBadge?.text : nil,
                         badgeColor: (tab == .limits ? limitsBadge?.color : nil) ?? .secondary,
                         isSelected: navigation.tab == tab
@@ -172,7 +178,7 @@ struct PopoverRootView: View {
         case .plans:
             PlansView(service: plansService)
         case .agents:
-            AgentsView(service: agentConfigService)
+            AgentsView(service: agentConfigService, usageService: usageService)
         case .usage:
             UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
         case .limits:

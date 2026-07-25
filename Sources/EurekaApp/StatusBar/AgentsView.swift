@@ -8,6 +8,7 @@ import SwiftUI
 /// Codex 是 config.toml 的 `[profiles.*]` 预设，内嵌表单增删改。
 struct AgentsView: View {
     @ObservedObject var service: AgentConfigService
+    @ObservedObject var usageService: UsageService
 
     /// 内嵌 agent 详情（markdown 预览/编辑；内置 agent 只读概览）
     @State private var detail: AgentDefinition?
@@ -20,10 +21,16 @@ struct AgentsView: View {
     @State private var newAgentName = ""
     @State private var deletingAgent: AgentDefinition?
     @State private var deletingProfile: CodexProfile?
-    /// 折叠的来源分区（点击分区头折叠/展开）
-    @State private var collapsedSources: Set<AgentSource> = []
-    /// 管理区布局：卡片网格 / 列表
-    @State private var layout: KnowledgeLayout = .cards
+    /// 管理区布局：列表 / 图标网格（默认列表，对齐设计稿）
+    @State private var layout: KnowledgeLayout = .list
+
+    /// 离屏渲染/预览专用：指定初始布局（交互时由 LayoutToggle 切换）
+    init(service: AgentConfigService, usageService: UsageService,
+         initialLayout: KnowledgeLayout = .list) {
+        self._service = ObservedObject(wrappedValue: service)
+        self._usageService = ObservedObject(wrappedValue: usageService)
+        self._layout = State(initialValue: initialLayout)
+    }
 
     var body: some View {
         Group {
@@ -47,7 +54,10 @@ struct AgentsView: View {
                 }
             }
         }
-        .onAppear { service.refresh() }
+        .onAppear {
+            service.refresh()
+            usageService.loadAgentStats()
+        }
         .alert(createAlertTitle, isPresented: $creatingAgent) {
             TextField("名称", text: $newAgentName)
             Button("创建") {
@@ -85,30 +95,40 @@ struct AgentsView: View {
         }
     }
 
-    // MARK: - 顶部栏
+    // MARK: - 顶部栏（标题 + 搜索 + 新建 + 刷新 + 布局切换）
 
     private var header: some View {
-        HStack(spacing: 8) {
-            SearchField(placeholder: "搜索 agent / profile", text: $service.searchText, scanning: service.scanning)
-            LayoutToggle(layout: $layout)
+        HStack(spacing: 12) {
+            Text("Agents").font(.system(size: 15, weight: .bold))
+            SearchField(placeholder: "搜索子代理", text: $service.searchText, scanning: service.scanning)
+            createMenu
             RefreshButton(help: "刷新 agent / profile") { service.refresh() }
-            Menu {
-                Button("Claude Agent") { startCreate(.claude) }
-                Button("OpenCode Agent") { startCreate(.opencode) }
-                Button("Grok Agent") { startCreate(.grok) }
-                Button("Codex Profile") {
-                    profileDetail = ProfileEditTarget(
-                        id: "new", profile: CodexProfile(name: ""), isNew: true)
-                }
-            } label: {
-                Image(systemName: "plus.circle").font(.system(size: 12))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            LayoutToggle(layout: $layout)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var createMenu: some View {
+        Menu {
+            Button("Claude Agent") { startCreate(.claude) }
+            Button("OpenCode Agent") { startCreate(.opencode) }
+            Button("Grok Agent") { startCreate(.grok) }
+            Button("Codex Profile") {
+                profileDetail = ProfileEditTarget(id: "new", profile: CodexProfile(name: ""), isNew: true)
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Theme.brandFill(0.10)))
+                .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("新建子代理 / Codex profile")
     }
 
     private var createAlertTitle: String {
@@ -125,234 +145,194 @@ struct AgentsView: View {
         creatingAgent = true
     }
 
-    // MARK: - 计数
+    // MARK: - 统一条目（合并各来源 agent + Codex profile）
 
-    /// Claude 分区条目：用户/项目 agent + 插件 + 内置（一个网格内按此顺序排）
-    private var claudeItems: [AgentDefinition] {
-        sorted(service.claudeAgents) + service.pluginAgents + service.builtinAgents
-    }
-
-    private func items(for source: AgentSource) -> [AgentDefinition] {
-        switch source {
-        case .claude: return claudeItems
-        case .opencode: return sorted(service.opencodeAgents)
-        case .grok: return sorted(service.grokAgents)
-        case .kimi: return service.kimiBuiltinAgents
-        default: return []
+    /// 子代理调用次数映射（Claude/Kimi；键 = 来源:小写名）
+    private var callsByKey: [String: Int] {
+        var map: [String: Int] = [:]
+        for stat in usageService.agentStats {
+            map["\(stat.source.rawValue):\(stat.name.lowercased())"] = stat.count
         }
+        return map
     }
 
-    /// 系统级在前，项目级按项目名归并，同组按名称
-    private func sorted(_ items: [AgentDefinition]) -> [AgentDefinition] {
-        items.sorted {
-            let l = $0.scope.projectName ?? ""
-            let r = $1.scope.projectName ?? ""
-            if l != r { return l < r }
-            return $0.name.lowercased() < $1.name.lowercased()
+    /// 全部子代理（Claude 用户/项目/插件/内置 + OpenCode + Grok + Kimi 内置 + Codex profile）
+    private var allItems: [AgentItem] {
+        let calls = callsByKey
+        func item(_ agent: AgentDefinition) -> AgentItem {
+            AgentItem(
+                id: agent.path.isEmpty ? "\(agent.source.rawValue):builtin:\(agent.name)" : agent.path,
+                source: agent.source, name: agent.name, description: agent.description,
+                role: AgentRole.classify(name: agent.name, description: agent.description),
+                model: normalizeModelName(agent.model),
+                toolCount: agent.tools.count,
+                builtin: agent.builtin, enabled: agent.enabled,
+                canToggle: !agent.builtin && agent.pluginName == nil && !agent.path.isEmpty,
+                calls: calls["\(agent.source.rawValue):\(agent.name.lowercased())"],
+                path: agent.path,
+                deletable: !agent.path.isEmpty && !agent.builtin && agent.pluginName == nil,
+                projectName: agent.scope.projectName, pluginName: agent.pluginName,
+                definition: agent, profile: nil)
         }
+        var items: [AgentItem] = []
+        items += (service.claudeAgents + service.pluginAgents + service.builtinAgents).map(item)
+        items += service.opencodeAgents.map(item)
+        items += service.grokAgents.map(item)
+        items += service.kimiBuiltinAgents.map(item)
+        items += service.codexProfiles.map { profile in
+            AgentItem(
+                id: "codex:\(profile.name)", source: .codex, name: profile.name, description: nil,
+                role: AgentRole.classify(name: profile.name),
+                model: normalizeModelName(profile.model),
+                toolCount: nil, builtin: false, enabled: true, canToggle: false,
+                calls: nil, path: "", deletable: true,
+                projectName: nil, pluginName: nil, definition: nil, profile: profile)
+        }
+        return items
     }
+
+    private var filteredItems: [AgentItem] {
+        allItems
+            .filter { selectedSource == nil || $0.source == selectedSource }
+            .sorted {
+                let lc = $0.calls ?? -1, rc = $1.calls ?? -1
+                if lc != rc { return lc > rc }
+                return $0.name.lowercased() < $1.name.lowercased()
+            }
+    }
+
+    private var totalCount: Int { allItems.count }
 
     private func count(for source: AgentSource) -> Int {
-        source == .codex ? service.codexProfiles.count : items(for: source).count
+        allItems.lazy.filter { $0.source == source }.count
     }
 
-    private var totalCount: Int {
-        tileSources.reduce(0) { $0 + count(for: $1) }
+    private var availableSources: [AgentSource] {
+        var seen = Set<AgentSource>()
+        let distinct = allItems.compactMap { seen.insert($0.source).inserted ? $0.source : nil }
+        return distinct.sorted { count(for: $0) > count(for: $1) }
     }
 
-    /// 瓦片来源：可新建的常显（Claude/OpenCode/Grok/Codex）；Kimi 内置只在有数据时显示
-    private var tileSources: [AgentSource] {
-        var sources: [AgentSource] = [.claude, .opencode, .grok]
-        if !service.kimiBuiltinAgents.isEmpty { sources.append(.kimi) }
-        sources.append(.codex)
-        return sources
-    }
-
-    private var visibleSources: [AgentSource] {
-        if let selected = selectedSource {
-            return tileSources.contains(selected) ? [selected] : []
+    /// 模型分布（统计卡图例；紫色系深浅区分，取前 4 + 其他）
+    private var modelSegments: [StatOverviewCard.Segment] {
+        var counts: [String: Int] = [:]
+        for item in allItems { counts[item.model, default: 0] += 1 }
+        let ranked = counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+        let shades: [Double] = [1.0, 0.78, 0.6, 0.45]
+        var segments: [StatOverviewCard.Segment] = []
+        var other = 0
+        for (index, entry) in ranked.enumerated() {
+            if index < 4 {
+                segments.append(.init(label: entry.key, count: entry.value,
+                                      color: Theme.brand.opacity(shades[index])))
+            } else {
+                other += entry.value
+            }
         }
-        return tileSources
+        if other > 0 {
+            segments.append(.init(label: "其他", count: other, color: Theme.brand.opacity(0.3)))
+        }
+        return segments
     }
 
-    // MARK: - 主体（统计瓦片 + 分区卡片网格）
+    // MARK: - 主体（统计概览卡 + 来源 chips + 扁平列表/网格）
 
-    private let gridColumns = [GridItem(.adaptive(minimum: 290), spacing: 14)]
+    private let gridColumns = [GridItem(.flexible(), spacing: 14),
+                               GridItem(.flexible(), spacing: 14),
+                               GridItem(.flexible(), spacing: 14)]
 
     private var content: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                statsTiles
-                ForEach(visibleSources, id: \.self) { source in
-                    sectionContent(source)
+            VStack(alignment: .leading, spacing: 14) {
+                statsCard
+                SourceFilterBar(
+                    selected: $selectedSource,
+                    allLabel: "全部", allIcon: "person.2.fill",
+                    totalCount: totalCount,
+                    sources: availableSources,
+                    count: { count(for: $0) })
+                if filteredItems.isEmpty {
+                    emptyState.padding(.top, 40)
+                } else if layout == .cards {
+                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
+                        ForEach(filteredItems) { item in
+                            AgentCard(item: item, service: service,
+                                      onOpen: { open(item) }, onToggle: { toggle(item) },
+                                      onDelete: { requestDelete(item) })
+                        }
+                    }
+                } else {
+                    KnowledgeListContainer {
+                        VStack(spacing: 0) {
+                            ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
+                                AgentRow(item: item, service: service,
+                                         onOpen: { open(item) }, onToggle: { toggle(item) },
+                                         onDelete: { requestDelete(item) })
+                                if index < filteredItems.count - 1 {
+                                    Divider().opacity(0.4).padding(.leading, 50)
+                                }
+                            }
+                        }
+                    }
                 }
                 if let error = service.lastError {
-                    Text(error)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
+                    Text(error).font(.system(size: 10)).foregroundStyle(.orange)
                 }
             }
-            .padding(Theme.spacing.page)
+            .padding(22)
         }
+        .background(Theme.surfaceSecondary)
     }
 
-    private var statsTiles: some View {
-        HStack(spacing: 10) {
-            StatTile(
-                value: "\(totalCount)",
-                label: "全部", icon: "person.2.fill",
-                tint: Theme.brand,
-                isSelected: selectedSource == nil
-            ) { selectedSource = nil }
-            ForEach(tileSources, id: \.self) { source in
-                StatTile(
-                    value: "\(count(for: source))",
-                    label: source.displayName, source: source,
-                    tint: Theme.brand,
-                    isSelected: selectedSource == source
-                ) { selectedSource = source }
-            }
-        }
+    private var statsCard: some View {
+        let enabled = allItems.filter(\.enabled).count
+        return StatOverviewCard(
+            value: "\(totalCount)", unit: "子代理",
+            subtitle: "启用 \(enabled) / 停用 \(totalCount - enabled)",
+            distributionTitle: "模型分布",
+            segments: modelSegments,
+            showBar: false)
     }
 
     @ViewBuilder
-    private func sectionContent(_ source: AgentSource) -> some View {
-        let total = count(for: source)
-        // 搜索无命中的分区隐藏；非搜索态空分区常显（带新建占位）
-        if total > 0 || !service.isSearching {
-            sectionHeader(source: source, count: total)
-            if !collapsedSources.contains(source) {
-                if source == .codex {
-                    if service.codexProfiles.isEmpty {
-                        emptySectionRow("暂无 profile", actionTitle: "新建") {
-                            profileDetail = ProfileEditTarget(
-                                id: "new", profile: CodexProfile(name: ""), isNew: true)
-                        }
-                    } else {
-                        profilesView(service.codexProfiles)
-                    }
-                } else {
-                    let group = items(for: source)
-                    if group.isEmpty {
-                        if let kind = createKind(for: source) {
-                            emptySectionRow("暂无 agent", actionTitle: "新建") { startCreate(kind) }
-                        } else {
-                            emptySectionRow("暂无 agent")
-                        }
-                    } else {
-                        agentsView(group)
-                    }
-                }
+    private var emptyState: some View {
+        if service.scanning {
+            VStack(spacing: 8) {
+                ProgressView()
+                Text("正在扫描…").font(.system(size: 12)).foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
+        } else {
+            EmptyStateView(
+                icon: "person.2.fill",
+                title: service.isSearching || selectedSource != nil ? "没有匹配的子代理" : "还没有子代理",
+                hint: service.isSearching || selectedSource != nil
+                    ? nil : "点右上角「＋」新建各 CLI 的子代理或 Codex profile")
         }
     }
 
-    /// 按当前布局出 agent 卡片网格或通栏列表
-    @ViewBuilder
-    private func agentsView(_ group: [AgentDefinition]) -> some View {
-        switch layout {
-        case .cards:
-            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
-                ForEach(group) { agent in
-                    AgentCard(
-                        agent: agent, service: service,
-                        onOpen: { openAgent(agent) },
-                        onDelete: { deletingAgent = agent })
-                }
-            }
-        case .list:
-            VStack(spacing: 0) {
-                ForEach(Array(group.enumerated()), id: \.element.id) { index, agent in
-                    AgentRow(
-                        agent: agent, service: service,
-                        onOpen: { openAgent(agent) },
-                        onDelete: { deletingAgent = agent })
-                    if index < group.count - 1 {
-                        Divider().opacity(0.4).padding(.leading, 12)
-                    }
-                }
-            }
-        }
-    }
+    // MARK: - 动作路由
 
-    /// 按当前布局出 Codex profile 卡片网格或通栏列表
-    @ViewBuilder
-    private func profilesView(_ profiles: [CodexProfile]) -> some View {
-        switch layout {
-        case .cards:
-            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
-                ForEach(profiles) { profile in
-                    ProfileCard(
-                        profile: profile,
-                        onOpen: { openProfile(profile) },
-                        onDelete: { deletingProfile = profile })
-                }
-            }
-        case .list:
-            VStack(spacing: 0) {
-                ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
-                    ProfileRow(
-                        profile: profile,
-                        onOpen: { openProfile(profile) },
-                        onDelete: { deletingProfile = profile })
-                    if index < profiles.count - 1 {
-                        Divider().opacity(0.4).padding(.leading, 12)
-                    }
-                }
-            }
-        }
-    }
-
-    private func openAgent(_ agent: AgentDefinition) {
-        withAnimation(.easeOut(duration: 0.15)) { detail = agent }
-    }
-
-    private func openProfile(_ profile: CodexProfile) {
+    private func open(_ item: AgentItem) {
         withAnimation(.easeOut(duration: 0.15)) {
-            profileDetail = ProfileEditTarget(id: profile.name, profile: profile, isNew: false)
-        }
-    }
-
-    private func createKind(for source: AgentSource) -> AgentCreateKind? {
-        switch source {
-        case .claude: return .claude
-        case .opencode: return .opencode
-        case .grok: return .grok
-        default: return nil
-        }
-    }
-
-    /// 分区头：统一 SourceSectionHeader（折叠箭头 + 徽标 + 名称 + 中性计数，与他页一致）
-    private func sectionHeader(source: AgentSource, count: Int) -> some View {
-        SourceSectionHeader(
-            source: source,
-            title: source.displayName,
-            count: count,
-            collapsed: collapsedSources.contains(source),
-            onToggle: {
-                if collapsedSources.contains(source) {
-                    collapsedSources.remove(source)
-                } else {
-                    collapsedSources.insert(source)
-                }
-            })
-    }
-
-    /// 空分区占位行：小字说明 + 可选内联新建
-    private func emptySectionRow(
-        _ text: String, actionTitle: String? = nil, action: (() -> Void)? = nil
-    ) -> some View {
-        HStack(spacing: 8) {
-            Text(text)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .buttonStyle(.borderless)
-                    .controlSize(.mini)
-                    .font(.system(size: 10))
+            if let profile = item.profile {
+                profileDetail = ProfileEditTarget(id: profile.name, profile: profile, isNew: false)
+            } else if let definition = item.definition {
+                detail = definition
             }
-            Spacer(minLength: 0)
+        }
+    }
+
+    private func toggle(_ item: AgentItem) {
+        guard item.canToggle, let definition = item.definition else { return }
+        service.setAgentEnabled(definition, !definition.enabled)
+    }
+
+    private func requestDelete(_ item: AgentItem) {
+        if let profile = item.profile {
+            deletingProfile = profile
+        } else if let definition = item.definition {
+            deletingAgent = definition
         }
     }
 
@@ -374,279 +354,173 @@ struct ProfileEditTarget: Identifiable {
     var isNew: Bool
 }
 
-// MARK: - 卡片
+// MARK: - 统一条目 + 卡片 / 列表行
 
-/// agent 卡片：名称 + 启停圆点/内置标 + 描述 + meta（项目/插件/model）；悬停浮现动作
-private struct AgentCard: View {
-    let agent: AgentDefinition
-    let service: AgentConfigService
-    let onOpen: () -> Void
-    let onDelete: () -> Void
+/// 统一子代理条目（合并 AgentDefinition 与 CodexProfile，供角色头像/标签/模型统一渲染）
+private struct AgentItem: Identifiable {
+    let id: String
+    let source: AgentSource
+    let name: String
+    let description: String?
+    let role: AgentRole
+    let model: String
+    let toolCount: Int?      // nil = Codex profile；0 = 继承全部工具
+    let builtin: Bool
+    let enabled: Bool
+    let canToggle: Bool
+    let calls: Int?          // 调用次数（Claude/Kimi 有数据，其余 nil）
+    let path: String
+    let deletable: Bool
+    let projectName: String?
+    let pluginName: String?
+    let definition: AgentDefinition?
+    let profile: CodexProfile?
 
-    private var hasFile: Bool { !agent.path.isEmpty }
-    /// 用户自建 agent 才可删（插件文件由 Claude Code 管理；内置无文件）
-    private var deletable: Bool { hasFile && !agent.builtin && agent.pluginName == nil }
-
-    private var actions: [CardAction] {
-        var acts: [CardAction] = []
-        if hasFile {
-            acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: agent.path) })
-            acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: agent.path) })
-        }
-        if deletable {
-            acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
-        }
-        return acts
+    var toolLabel: String? {
+        guard let toolCount else { return nil }
+        return toolCount == 0 ? "全部工具" : "\(toolCount) 工具"
     }
+}
 
-    var body: some View {
-        KnowledgeCard(enabled: agent.enabled, height: 128, actions: actions, onOpen: onOpen) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    SourceLogoTile(source: agent.source, size: 32)
-                    Text(agent.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(agent.enabled ? .primary : .secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    if agent.builtin {
-                        TagChip("内置", neutral: true)
-                    } else if hasFile {
-                        StatusDot(enabled: agent.enabled) {
-                            service.setAgentEnabled(agent, !agent.enabled)
-                        }
-                    }
-                }
-                if let desc = agent.description, !desc.isEmpty {
-                    Text(desc)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(3)
-                        .lineSpacing(1.5)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                HStack(spacing: 5) {
-                    if let project = agent.scope.projectName {
-                        TagChip(project)
-                    } else if let plugin = agent.pluginName {
-                        Text("插件 · \(plugin)")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                    if let model = agent.model {
-                        Text(model)
-                            .font(.system(size: 9).monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        } menu: {
-            Button(deletable ? "查看 / 编辑" : "查看") { onOpen() }
-            if hasFile {
-                if !agent.builtin {
-                    Button(agent.enabled ? "停用" : "启用") {
-                        service.setAgentEnabled(agent, !agent.enabled)
-                    }
-                }
-                Button("用默认编辑器打开") { service.openInEditor(path: agent.path) }
-                Button("在 Finder 中显示") { service.reveal(path: agent.path) }
-            }
-            if deletable {
-                Divider()
-                Button("删除", role: .destructive) { onDelete() }
-            }
+private func agentItemActions(
+    _ item: AgentItem, service: AgentConfigService, onDelete: @escaping () -> Void
+) -> [CardAction] {
+    if item.profile != nil {
+        return [CardAction(icon: "trash", destructive: true, help: "从 config.toml 移除该段") { onDelete() }]
+    }
+    var acts: [CardAction] = []
+    if !item.path.isEmpty {
+        acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: item.path) })
+        acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: item.path) })
+    }
+    if item.deletable {
+        acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+    }
+    return acts
+}
+
+@ViewBuilder
+private func agentItemMenu(
+    _ item: AgentItem, service: AgentConfigService,
+    onOpen: @escaping () -> Void, onToggle: @escaping () -> Void, onDelete: @escaping () -> Void
+) -> some View {
+    if item.profile != nil {
+        Button("编辑") { onOpen() }
+        Divider()
+        Button("删除", role: .destructive) { onDelete() }
+    } else {
+        Button(item.deletable ? "查看 / 编辑" : "查看") { onOpen() }
+        if item.canToggle { Button(item.enabled ? "停用" : "启用") { onToggle() } }
+        if !item.path.isEmpty {
+            Button("用默认编辑器打开") { service.openInEditor(path: item.path) }
+            Button("在 Finder 中显示") { service.reveal(path: item.path) }
+        }
+        if item.deletable {
+            Divider()
+            Button("删除", role: .destructive) { onDelete() }
         }
     }
 }
 
-/// Codex profile 卡片：名称 + 配置摘要；悬停浮现删除
-private struct ProfileCard: View {
-    let profile: CodexProfile
+/// 子代理图标卡：角色头像 + 名 + 角色标签/来源 logo + 开关；描述；模型 · 工具数 · 调用次数
+private struct AgentCard: View {
+    let item: AgentItem
+    let service: AgentConfigService
     let onOpen: () -> Void
+    let onToggle: () -> Void
     let onDelete: () -> Void
-
-    private var summary: String {
-        [profile.model.map { "model: \($0)" },
-         profile.reasoningEffort.map { "reasoning: \($0)" },
-         profile.personality.map { "persona: \($0)" }]
-            .compactMap { $0 }.joined(separator: " · ")
-    }
 
     var body: some View {
         KnowledgeCard(
-            height: 128,
-            actions: [CardAction(icon: "trash", destructive: true, help: "从 config.toml 移除该段") { onDelete() }],
-            onOpen: onOpen
+            enabled: item.enabled, minHeight: 96,
+            actions: agentItemActions(item, service: service, onDelete: onDelete), onOpen: onOpen
         ) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    SourceLogoTile(source: .codex, size: 32)
-                    Text(profile.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                if !summary.isEmpty {
-                    Text(summary)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(3)
-                        .lineSpacing(1.5)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                HStack(spacing: 5) {
-                    if let approval = profile.approvalPolicy {
-                        Text("approval: \(approval)")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        } menu: {
-            Button("编辑") { onOpen() }
-            Divider()
-            Button("删除", role: .destructive) { onDelete() }
-        }
-    }
-}
-
-/// agent 列表行：logo + 名称/描述两行 + model + 启停圆点/内置标；悬停浮现动作
-private struct AgentRow: View {
-    let agent: AgentDefinition
-    let service: AgentConfigService
-    let onOpen: () -> Void
-    let onDelete: () -> Void
-
-    private var hasFile: Bool { !agent.path.isEmpty }
-    private var deletable: Bool { hasFile && !agent.builtin && agent.pluginName == nil }
-
-    private var actions: [CardAction] {
-        var acts: [CardAction] = []
-        if hasFile {
-            acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: agent.path) })
-            acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: agent.path) })
-        }
-        if deletable {
-            acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
-        }
-        return acts
-    }
-
-    var body: some View {
-        KnowledgeRow(enabled: agent.enabled, actions: actions, onOpen: onOpen) {
-            HStack(spacing: 10) {
-                SourceLogoTile(source: agent.source, size: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(agent.name)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(agent.enabled ? .primary : .secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if let project = agent.scope.projectName {
-                            TagChip(project)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    RoleAvatar(role: item.role, size: 40)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.name)
+                            .font(Theme.font.monoSkillName(13))
+                            .foregroundStyle(item.enabled ? .primary : .secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                        HStack(spacing: 5) {
+                            RoleTag(role: item.role)
+                            SourceBadge(source: item.source, size: 12)
+                            if item.builtin { TagChip("内置", neutral: true) }
                         }
                     }
-                    if let desc = agent.description, !desc.isEmpty {
-                        Text(desc)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    } else if let plugin = agent.pluginName {
-                        Text("插件 · \(plugin)")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                    Spacer(minLength: 4)
+                    MiniSwitch(isOn: item.enabled) { onToggle() }
+                }
+                Text(item.description ?? "")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true).lineSpacing(1.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 0)
+                Divider().opacity(0.5)
+                HStack(spacing: 8) {
+                    ModelChip(model: item.model)
+                    if let tools = item.toolLabel {
+                        Text(tools).font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
                     }
-                }
-                Spacer(minLength: 8)
-                if let model = agent.model {
-                    Text(model)
-                        .font(.system(size: 9).monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                if agent.builtin {
-                    TagChip("内置", neutral: true)
-                } else if hasFile {
-                    StatusDot(enabled: agent.enabled) {
-                        service.setAgentEnabled(agent, !agent.enabled)
+                    Spacer(minLength: 0)
+                    if let calls = item.calls {
+                        Text("调用 \(calls) 次")
+                            .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
                     }
                 }
             }
         } menu: {
-            Button(deletable ? "查看 / 编辑" : "查看") { onOpen() }
-            if hasFile {
-                if !agent.builtin {
-                    Button(agent.enabled ? "停用" : "启用") { service.setAgentEnabled(agent, !agent.enabled) }
-                }
-                Button("用默认编辑器打开") { service.openInEditor(path: agent.path) }
-                Button("在 Finder 中显示") { service.reveal(path: agent.path) }
-            }
-            if deletable {
-                Divider()
-                Button("删除", role: .destructive) { onDelete() }
-            }
+            agentItemMenu(item, service: service, onOpen: onOpen, onToggle: onToggle, onDelete: onDelete)
         }
     }
 }
 
-/// Codex profile 列表行：logo + 名称/摘要两行 + approval；悬停浮现删除
-private struct ProfileRow: View {
-    let profile: CodexProfile
+/// 子代理列表行：角色头像 + 名/角色标签/内置标 + 描述 + 模型 · 调用次数 + 开关
+private struct AgentRow: View {
+    let item: AgentItem
+    let service: AgentConfigService
     let onOpen: () -> Void
+    let onToggle: () -> Void
     let onDelete: () -> Void
-
-    private var summary: String {
-        [profile.model.map { "model: \($0)" },
-         profile.reasoningEffort.map { "reasoning: \($0)" },
-         profile.personality.map { "persona: \($0)" }]
-            .compactMap { $0 }.joined(separator: " · ")
-    }
 
     var body: some View {
         KnowledgeRow(
-            actions: [CardAction(icon: "trash", destructive: true, help: "从 config.toml 移除该段") { onDelete() }],
-            onOpen: onOpen
+            enabled: item.enabled,
+            actions: agentItemActions(item, service: service, onDelete: onDelete), onOpen: onOpen
         ) {
             HStack(spacing: 10) {
-                SourceLogoTile(source: .codex, size: 28)
+                RoleAvatar(role: item.role, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.name)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if !summary.isEmpty {
-                        Text(summary)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(item.name)
+                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .foregroundStyle(item.enabled ? .primary : .secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                        RoleTag(role: item.role)
+                        if item.builtin { TagChip("内置", neutral: true) }
+                    }
+                    if let desc = item.description, !desc.isEmpty {
+                        Text(desc).font(.system(size: 10.5)).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 8)
-                if let approval = profile.approvalPolicy {
-                    Text("approval: \(approval)")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
+                trailing.fixedSize()
             }
         } menu: {
-            Button("编辑") { onOpen() }
-            Divider()
-            Button("删除", role: .destructive) { onDelete() }
+            agentItemMenu(item, service: service, onOpen: onOpen, onToggle: onToggle, onDelete: onDelete)
+        }
+    }
+
+    @ViewBuilder private var trailing: some View {
+        HStack(spacing: 12) {
+            Text(item.model).font(.system(size: 11)).foregroundStyle(.secondary)
+            if let calls = item.calls {
+                Text("调用 \(calls) 次")
+                    .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
+            }
+            MiniSwitch(isOn: item.enabled) { onToggle() }
         }
     }
 }
