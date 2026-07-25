@@ -70,7 +70,10 @@ struct PlansView: View {
                 placeholder: "搜索计划", text: $service.searchText,
                 scanning: service.scanning, resultCount: service.plans.count)
             Spacer(minLength: 12)
-            RefreshButton(help: "刷新（重新物化并索引计划）") { service.refresh(force: true) }
+            ScanStatusLabel(
+                scanning: service.scanning, phase: service.scanPhase,
+                lastScanAt: service.lastScanAt)
+            RefreshButton(help: "强制重扫（重新物化并索引计划）") { service.refresh(force: true) }
             LayoutToggle(layout: $layout)
         }
         .padding(.horizontal, 16)

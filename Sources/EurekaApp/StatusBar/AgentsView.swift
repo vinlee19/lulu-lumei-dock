@@ -105,7 +105,10 @@ struct AgentsView: View {
                 scanning: service.scanning, resultCount: totalCount)
             Spacer(minLength: 12)
             createMenu
-            RefreshButton(help: "刷新 agent / profile") { service.refresh() }
+            ScanStatusLabel(
+                scanning: service.scanning, phase: service.scanPhase,
+                lastScanAt: service.lastScanAt)
+            RefreshButton(help: "强制重扫 agent / profile") { service.refresh(force: true) }
             LayoutToggle(layout: $layout)
         }
         .padding(.horizontal, 16)

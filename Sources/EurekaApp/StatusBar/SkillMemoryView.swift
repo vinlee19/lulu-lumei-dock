@@ -104,7 +104,12 @@ struct SkillMemoryView: View {
                 resultCount: totalCount)
             Spacer(minLength: 12)
             createMenu
-            RefreshButton(help: mode == .skills ? "刷新技能" : "刷新记忆") { service.refresh() }
+            ScanStatusLabel(
+                scanning: service.scanning, phase: service.scanPhase,
+                lastScanAt: service.lastScanAt)
+            RefreshButton(help: mode == .skills ? "强制重扫技能" : "强制重扫记忆") {
+                service.refresh(force: true)
+            }
             LayoutToggle(layout: $layout)
         }
         .padding(.horizontal, 16)

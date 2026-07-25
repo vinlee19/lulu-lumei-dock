@@ -694,6 +694,38 @@ struct LayoutToggle: View {
     }
 }
 
+/// 扫描状态标签（Skills / Memory / Plans / Agents 顶栏共用，紧挨刷新按钮）。
+///
+/// 为什么需要：这四页的数据在应用启动时就后台扫好了，进页面不再盲扫 —— 那么「现在到底在不在扫」
+/// 与「数据有多旧」就必须显式说出来。原来 `scanning` 只体现在搜索框里一个 mini spinner 和
+/// **空状态**文案上，列表一旦有数据，重扫时几乎看不出来。
+/// 又因为不做文件系统监听（外部新增技能不会自动出现），「上次扫描 X 前」是用户判断该不该点刷新的唯一依据。
+struct ScanStatusLabel: View {
+    let scanning: Bool
+    /// 扫描阶段文案（Plans 会在物化/索引之间切换）
+    var phase: String?
+    var lastScanAt: Date?
+
+    var body: some View {
+        if scanning {
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.mini)
+                Text(phase ?? "正在扫描…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .transition(.opacity)
+        } else if let lastScanAt {
+            Text("上次扫描 " + relativeFormatter.localizedString(for: lastScanAt, relativeTo: Date()))
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .help("进页面不再自动重扫；点刷新可强制全量重扫")
+        }
+    }
+}
+
 /// 统一刷新按钮：紫图标 + 淡紫圆底（各管理页顶栏共用）。
 /// 明显但紧凑——作为次级动作，不与「新建」文字胶囊抢戏。
 struct RefreshButton: View {

@@ -11,6 +11,10 @@ final class SkillMemoryService: ObservableObject {
     @Published private(set) var skills: [SkillEntry] = []
     @Published private(set) var memories: [MemoryEntry] = []
     @Published private(set) var scanning = false
+    /// 扫描中的阶段文案（列表已有数据时，仅靠搜索框那个小 spinner 看不出在扫）；扫完置 nil
+    @Published private(set) var scanPhase: String?
+    /// 上次扫完的时间。nil = 从未扫过（refresh 的判据）；UI 用它显示「上次扫描 X 前」
+    @Published private(set) var lastScanAt: Date?
     @Published private(set) var lastError: String?
     @Published var searchText = "" {
         didSet { rebuild() }
@@ -23,9 +27,14 @@ final class SkillMemoryService: ObservableObject {
 
     // MARK: - 扫描
 
-    func refresh() {
+    /// force = false：只在「从未扫过」时扫 —— 启动预热与页面 onAppear 都走这条，天然幂等，
+    /// 所以进页面不会再盲扫一遍（数据靠启动预热已就绪）。
+    /// force = true：无条件全量重扫，仅刷新按钮使用。
+    func refresh(force: Bool = false) {
+        guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
         scanning = true
+        scanPhase = "正在扫描技能与记忆…"
         queue.async { [weak self] in
             guard let self else { return }
             // 各项目仓库根（技能与记忆共用同一份发现）
@@ -79,6 +88,8 @@ final class SkillMemoryService: ObservableObject {
                 self.allSkills = skills
                 self.allMemories = memories
                 self.scanning = false
+                self.scanPhase = nil
+                self.lastScanAt = Date()
                 self.rebuild()
             }
         }

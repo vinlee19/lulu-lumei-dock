@@ -219,8 +219,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        warmUpKnowledgeScans()
+
         render()
         logLine("启动完成 spool=\(SpoolPaths.root().path)")
+    }
+
+    /// 启动预热：不等用户点进页面就把 Skills / Memory / Agents / Plans 四类数据扫好。
+    /// 原来是懒扫描（各页 onAppear 才 refresh），第一次进页面得干等 spinner。
+    ///
+    /// 错峰按本机实测成本从小到大排（agents 7ms → skills+memory 234ms → plans ~1s，
+    /// 首次可能几分钟），避免三条 .userInitiated 队列和刚起来的窗口/灵动岛、以及
+    /// usageService 的首轮扫描同时抢资源。
+    /// 都走 refresh()（非 force）：语义是「没扫过才扫」，所以页面 onAppear 再调也不会重复扫。
+    private func warmUpKnowledgeScans() {
+        let steps: [(delay: TimeInterval, label: String, run: () -> Void)] = [
+            (0.8, "agents", { [weak self] in
+                guard let self else { return }
+                self.agentConfig.refresh()
+                self.usageService.loadAgentStats()
+            }),
+            (1.5, "skills+memory", { [weak self] in
+                guard let self else { return }
+                self.skillMemory.refresh()
+                self.usageService.loadSkillStats()
+                // 统计卡的「本周命中」也预热，否则数字要等进页面才出
+                self.usageService.loadSkillRanking(
+                    source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
+            }),
+            (3.0, "plans", { [weak self] in self?.plans.refresh() }),
+        ]
+        for step in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + step.delay) { [weak self] in
+                MainActor.assumeIsolated {
+                    step.run()
+                    self?.logLine("知识库预热启动 \(step.label)")
+                }
+            }
+        }
     }
 
     /// 外观主题：system=跟随系统（nil）/ light / dark

@@ -10,6 +10,10 @@ import Foundation
 final class PlansService: ObservableObject {
     @Published private(set) var plans: [PlanMaterializer.PlanEntry] = []
     @Published private(set) var scanning = false
+    /// 扫描中的阶段文案：Plans 最慢（首次要全量解析会话），必须交代当前在做什么；扫完置 nil
+    @Published private(set) var scanPhase: String?
+    /// 上次扫完的时间。nil = 从未扫过（refresh 的判据）
+    @Published private(set) var lastScanAt: Date?
     /// 全集口径的总量（不受筛选/搜索影响）
     @Published private(set) var totalCount = 0
     @Published private(set) var totalBytes: UInt64 = 0
@@ -21,18 +25,20 @@ final class PlansService: ObservableObject {
     private let queue = DispatchQueue(label: "com.vinlee.eureka.plans", qos: .userInitiated)
     private let resolver = ProjectResolver()
     private var all: [PlanMaterializer.PlanEntry] = []
-    private var lastRefreshAt = Date.distantPast
 
-    /// 刷新（物化 + 索引）。onAppear 反复触发 → 30s 节流；手动刷新按钮传 force 绕过。
+    /// 刷新（物化 + 索引）。force = false 只在「从未扫过」时扫（启动预热 + onAppear 兜底共用，
+    /// 幂等）；force = true 无条件全量重扫，仅刷新按钮使用。
     func refresh(force: Bool = false) {
-        guard force || Date().timeIntervalSince(lastRefreshAt) > 30 else { return }
+        guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
         scanning = true
+        scanPhase = "正在解析 Codex 会话…"
         queue.async { [weak self] in
             guard let self else { return }
             let staging = PlanMaterializer.defaultStagingRoot()
             PlanMaterializer.materializeCodex(
                 sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(), into: staging)
+            self.publishPhase("正在解析其它 CLI 会话…")
             PlanMaterializer.materializeOpencode(dbPath: OpencodePaths.db(), into: staging)
             PlanMaterializer.materializeGrok(
                 sessionsRoot: GrokPaths.sessionsRoot(), into: staging)
@@ -43,6 +49,7 @@ final class PlansService: ObservableObject {
                 projectsFile: GeminiPaths.projectsFile(), into: staging)
             PlanMaterializer.materializeQwen(
                 projectsRoot: QwenPaths.projectsRoot(), into: staging)
+            self.publishPhase("正在索引计划…")
             // Hermes 计划：profile 级 ~/.hermes/plans + 各仓库内 <repo>/.hermes/plans
             // （`plan` 技能默认写项目内那一份），都是真 .md，无需物化
             let repoRoots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)
@@ -59,10 +66,16 @@ final class PlansService: ObservableObject {
                 self.totalCount = entries.count
                 self.totalBytes = entries.reduce(0) { $0 + $1.sizeBytes }
                 self.scanning = false
-                self.lastRefreshAt = Date()
+                self.scanPhase = nil
+                self.lastScanAt = Date()
                 self.rebuild()
             }
         }
+    }
+
+    /// 扫描队列上回主线程更新阶段文案（阶段只是给人看的粗粒度提示）
+    private func publishPhase(_ phase: String) {
+        DispatchQueue.main.async { self.scanPhase = phase }
     }
 
     private func rebuild() {

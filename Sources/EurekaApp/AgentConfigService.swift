@@ -20,6 +20,10 @@ final class AgentConfigService: ObservableObject {
     @Published private(set) var kimiBuiltinAgents: [AgentDefinition] = []
     @Published private(set) var codexProfiles: [CodexProfile] = []
     @Published private(set) var scanning = false
+    /// 扫描中的阶段文案；扫完置 nil（列表已有数据时搜索框的小 spinner 太不显眼）
+    @Published private(set) var scanPhase: String?
+    /// 上次扫完的时间。nil = 从未扫过（refresh 的判据）
+    @Published private(set) var lastScanAt: Date?
     @Published private(set) var lastError: String?
     @Published var searchText = "" {
         didSet { rebuild() }
@@ -39,9 +43,13 @@ final class AgentConfigService: ObservableObject {
 
     // MARK: - 扫描
 
-    func refresh() {
+    /// force = false：只在「从未扫过」时扫（启动预热 + onAppear 兜底共用，幂等）。
+    /// force = true：无条件全量重扫，仅刷新按钮使用。
+    func refresh(force: Bool = false) {
+        guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
         scanning = true
+        scanPhase = "正在扫描子代理…"
         queue.async { [weak self] in
             guard let self else { return }
             // 项目级 agent 根：各项目仓库根下的 .claude/agents 与 .opencode/agents
@@ -82,6 +90,8 @@ final class AgentConfigService: ObservableObject {
                 self.allKimiBuiltinAgents = kimiBuiltins
                 self.allProfiles = profiles
                 self.scanning = false
+                self.scanPhase = nil
+                self.lastScanAt = Date()
                 self.rebuild()
             }
         }
