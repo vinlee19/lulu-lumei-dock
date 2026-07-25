@@ -5,6 +5,9 @@ import SwiftUI
 /// 支持「最近活跃 / 开始时间」排序。成功绿圈✓ / 失败红圈✕ / 自动清理灰圈—。
 struct HistoryView: View {
     let tasks: [FinishedTask]
+    /// 会话 → 最近所在终端，键 `AgentTask.key(source:sessionId:)`。
+    /// 传纯字典而不是 service：本视图只依赖 EurekaKit + SwiftUI，不该反向依赖服务层。
+    var terminals: [String: TerminalBinding] = [:]
     @ObservedObject var settings: AppSettings
 
     /// rawValue 为持久化 token；label 为界面文案
@@ -105,7 +108,10 @@ struct HistoryView: View {
                                 .padding(.top, 12)
                                 .padding(.bottom, 4)
                             ForEach(group.tasks) { task in
-                                HistoryRow(task: task)
+                                HistoryRow(
+                                    task: task,
+                                    terminal: terminals[AgentTask.key(
+                                        source: task.source, sessionId: task.sessionId)])
                                 Divider().padding(.leading, 44).opacity(0.5)
                             }
                         }
@@ -119,6 +125,7 @@ struct HistoryView: View {
 
 private struct HistoryRow: View {
     let task: FinishedTask
+    var terminal: TerminalBinding?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -147,6 +154,11 @@ private struct HistoryRow: View {
                     if let duration = task.duration {
                         Text("·")
                         Text("时长 \(formatDuration(duration))")
+                    }
+                    if let terminal {
+                        TerminalBadge(
+                            binding: terminal,
+                            isRunning: TerminalActivator.isRunning(terminal))
                     }
                 }
                 .font(.system(size: 10.5))

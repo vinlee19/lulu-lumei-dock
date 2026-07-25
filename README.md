@@ -172,10 +172,15 @@ make install                 # build release + install to /Applications/lulu-lum
 open /Applications/lulu-lumei-dock.app
 ```
 
-On first launch the Settings tab opens — click **一键安装/更新 (Install / Update)** to write Claude
-hooks and Codex notify (a `*.bak.eureka.*` backup is made first; "Uninstall all" restores it any
-time). After that, any `claude` / `codex` task shows up on the island. Consider enabling
-"Launch at login".
+On first launch the Settings tab opens. Go to **Settings → 集成 (Integrations)** and turn on the
+integrations you want: each one names the file it will rewrite, backs it up as `*.bak.eureka.*`
+first, and only ever adds or removes its own entries — hooks belonging to other tools are left
+untouched. Turning a switch off uninstalls just our entries. After that, any `claude` / `codex`
+task shows up on the island. Consider enabling "Launch at login".
+
+Nothing is installed without you asking. The app also works with no integrations at all: it reads
+local transcripts / rollouts / databases directly, you just get events on the next scan instead of
+in real time, and terminal attribution falls back to matching running processes.
 
 ## Interaction cheatsheet
 
@@ -224,7 +229,7 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (371 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (413 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
@@ -277,6 +282,19 @@ Full design doc: [docs/design.md](docs/design.md).
   this gap is wider: its model names mostly match no price entry (tokens shown, no cost), and a name
   that happens to share a prefix with a known model is priced at that provider's public API rate
   even when Hermes routed the call through a subscription at zero marginal cost.
+- Terminal attribution needs either an installed hook (exact) or a still-running agent process
+  whose working directory matches the session (approximate, drawn with a dashed border). When two
+  sessions of the same agent share a working directory it gives up rather than guess, so neither
+  gets a terminal. Jumping only raises the terminal **application** — it cannot select the tab.
+- "No completion card while you're looking at that terminal" is app-level: with several tabs open
+  in one terminal, any of them being frontmost counts as "looking". Permission cards are never
+  suppressed for exactly this reason.
+- Installing the Claude integration adds `PreToolUse`, which runs before **every** tool call.
+  Claude waits for hooks, so this adds a few milliseconds per tool call. (`PostToolUse` already
+  ran once per tool call before this release, so this doubles that count rather than introducing
+  it.) While "auto-update installed hooks" is on, hand-removing one of our individual hook
+  events won't stick — it is treated as an out-of-date install and restored on the next launch.
+  Turn the switch off in Settings → 集成, or uninstall the integration entirely.
 - Skills / memory / agents / plans are scanned at launch and on demand — nothing watches the
   filesystem, so anything added outside the app appears only after you click 刷新 (each page header
   shows when it was last scanned).

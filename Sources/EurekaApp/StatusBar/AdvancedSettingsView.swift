@@ -14,13 +14,6 @@ struct AdvancedSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.module) {
             CollapsibleCard(
-                icon: "link.badge.plus", tint: Theme.brand,
-                title: "接入状态",
-                subtitle: "Claude Code hooks 与 Codex notify 的安装与更新"
-            ) {
-                installContent
-            }
-            CollapsibleCard(
                 icon: "folder.badge.gearshape", tint: Theme.brand,
                 title: "配置文件目录",
                 subtitle: "Claude、Codex、OpenCode 与 lulu-lumei-dock 的数据存储路径"
@@ -43,51 +36,6 @@ struct AdvancedSettingsView: View {
             }
         }
         .onAppear { installer.refresh() }
-    }
-
-    // MARK: - 接入状态
-
-    @ViewBuilder
-    private var installContent: some View {
-        statusRow("Claude Code hooks", installer.claudeStatus)
-        statusRow("Codex notify", installer.codexStatus)
-        HStack {
-            Button("一键安装/更新") { installer.installAll() }
-                .controlSize(.small)
-            Button("全部卸载") { installer.uninstallAll() }
-                .controlSize(.small)
-        }
-        if let message = installer.message {
-            Text(message)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
-        Text("写入前自动备份（保留最近 5 份 *.bak.eureka.*）")
-            .font(.system(size: 9.5))
-            .foregroundStyle(.tertiary)
-    }
-
-    private func statusRow(_ name: String, _ status: InstallStatus) -> some View {
-        HStack {
-            Text(name)
-                .font(.system(size: 11.5))
-            Spacer()
-            Text(installLabel(status))
-                .font(.system(size: 10, weight: .medium))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(Theme.installColor(status).opacity(0.15)))
-                .foregroundStyle(Theme.installColor(status))
-        }
-    }
-
-    private func installLabel(_ status: InstallStatus) -> String {
-        switch status {
-        case .installed: return "已安装"
-        case .partial: return "部分安装"
-        case .foreign: return "有他人配置"
-        case .none: return "未安装"
-        }
     }
 
     // MARK: - 配置文件目录

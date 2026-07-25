@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mascotController: MascotPanelController?
     private var wellnessMonitor: WellnessMonitor?
     private var cancellables: Set<AnyCancellable> = []
+    /// 终端归属探测：定时器 + 专用队列（syscall 与读 Info.plist 都不该占主线程）
+    private var terminalProbeTimer: Timer?
+    private let probeQueue = DispatchQueue(
+        label: "com.vinlee.eureka.terminalprobe", qos: .utility)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 每次启动把随包 relay 同步到稳定路径（升级 app 后 hooks 不断链）
@@ -220,6 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         warmUpKnowledgeScans()
+        syncInstalledHooksIfAllowed()
+        startTerminalProbing()
 
         render()
         logLine("启动完成 spool=\(SpoolPaths.root().path)")
@@ -232,6 +238,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 首次可能几分钟），避免三条 .userInitiated 队列和刚起来的窗口/灵动岛、以及
     /// usageService 的首轮扫描同时抢资源。
     /// 都走 refresh()（非 force）：语义是「没扫过才扫」，所以页面 onAppear 再调也不会重复扫。
+    /// 启动后按策略刷新**已安装**的 hook（设置→集成里的「自动更新」开关）。
+    /// 只碰用户已经装过的项；看不懂的配置整体跳过并在设置页给出原因。
+    /// 放在启动末尾且延迟执行：它要读写用户配置文件，不该和启动抢时间。
+    private func syncInstalledHooksIfAllowed() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.installer.autoUpdateInstalled(enabled: self.settings.hookAutoUpdate)
+                // 自动更新会改用户的配置文件，无论成功还是跳过都要留痕
+                if let message = self.installer.message {
+                    self.logLine("hook 自动更新 \(message)")
+                }
+                if !self.installer.autoUpdateSkipped.isEmpty {
+                    self.logLine("hook 自动更新已跳过 "
+                        + self.installer.autoUpdateSkipped.map(\.title).joined(separator: ","))
+                }
+            }
+        }
+    }
+
     private func warmUpKnowledgeScans() {
         let steps: [(delay: TimeInterval, label: String, run: () -> Void)] = [
             (0.8, "agents", { [weak self] in
@@ -275,18 +301,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handle(_ event: TaskEvent, isStale: Bool) {
+        // 终端归属先落库，且**不受 isStale 影响**：它是历史事实（这个会话确实在那个终端跑过），
+        // 与写 history 同待遇。放在过期闸门之前，否则积压事件带来的绑定会被丢掉。
+        if let terminal = event.terminal {
+            usageService.recordTerminal(
+                source: event.source, sessionId: event.sessionId,
+                binding: terminal, at: event.timestamp)
+        }
         // 积压的"存活信号"不进状态机：孤立的过期心跳/等待/会话开始
         // 不代表现在还活着，照单全收会造出一堆幽灵会话
         if isStale {
             switch event.kind {
             case .activity, .waiting, .sessionStarted, .contextUpdate, .titleUpdate,
-                 .subagentsUpdated:
+                 .subagentsUpdated, .toolPending, .compacting:
+                // toolPending / compacting 同属"存活信号"：一条几分钟前的
+                // 「即将执行 Bash」不代表现在还在跑，照收会造出幽灵会话
                 return
             case .taskStarted, .taskFinished, .sessionEnded:
                 break  // 开始/结束要进历史与配对
             }
         }
         applyToUI(effects: store.apply(event), isStale: isStale)
+    }
+
+    /// 无 hook 会话的终端归属探测：15 秒一轮，且**仅在确实有"缺归属的活跃会话"时**才动。
+    ///
+    /// 覆盖没有 relay 的七个源，以及没装 Claude hooks 的用户 ——「不装 hook 也能用」是既有原则。
+    /// 无事可做时一次 syscall 都不做（`probe(wanted: [])` 立即返回）。
+    private func startTerminalProbing() {
+        terminalProbeTimer = Timer.scheduledTimer(
+            withTimeInterval: 15, repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.probeMissingTerminals() }
+        }
+    }
+
+    private func probeMissingTerminals() {
+        // 只查缺归属的会话；并且**同 (源, cwd) 有多个会话时整组跳过** ——
+        // 按 cwd 匹配无法分辨谁是谁，宁可没有也不给错的（探测侧也有同样的保护）。
+        var byKey: [String: [AgentTask]] = [:]
+        for task in store.activeTasks.values where task.terminal == nil {
+            guard let cwd = task.cwd, !cwd.isEmpty else { continue }
+            byKey["\(task.source.rawValue)|\(cwd)", default: []].append(task)
+        }
+        let unique = byKey.values.filter { $0.count == 1 }.compactMap(\.first)
+        guard !unique.isEmpty else { return }
+        let wanted = unique.map { (source: $0.source, cwd: $0.cwd ?? "") }
+        probeQueue.async { [weak self] in
+            let probes = TerminalProber.probe(wanted: wanted)
+            guard !probes.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.applyProbedTerminals(probes) }
+            }
+        }
+    }
+
+    private func applyProbedTerminals(_ probes: [TerminalProber.Probe]) {
+        var changed = false
+        for probe in probes {
+            // 找回那个唯一的会话（探测按 (源, cwd) 归组，此处对回去）
+            guard let task = store.activeTasks.values.first(where: {
+                $0.source == probe.source && $0.cwd == probe.cwd
+            }) else { continue }
+            if store.attachTerminal(
+                probe.binding, source: probe.source, sessionId: task.sessionId) {
+                changed = true
+                usageService.recordTerminal(
+                    source: probe.source, sessionId: task.sessionId,
+                    binding: probe.binding, at: Date())
+                logLine("终端归属（探测）\(task.id) → \(probe.binding.displayName)")
+            }
+        }
+        if changed { applyToUI(effects: [.activeTasksChanged], isStale: false) }
+    }
+
+    /// 智能静音：你正看着该会话所在的终端应用时，完成卡就不必再弹了（你已经看见了）。
+    ///
+    /// **判定只到应用级**（分不清标签页）：开了 5 个 iTerm 标签、任意一个在前台都算"在看"。
+    /// 因此调用点必须遵守一条硬规则 —— **等待授权卡永不静音**：那是需要你动手的阻塞提示，
+    /// 因为"某个 iTerm 标签在前台"就把它藏掉，代价是你干等着而 agent 一直卡住。
+    private func shouldSuppressCard(terminal: TerminalBinding?) -> Bool {
+        guard settings.suppressCardWhenTerminalFrontmost, let terminal else { return false }
+        return TerminalActivator.isFrontmost(terminal)
     }
 
     /// 把状态机副作用投影到 UI 与历史（积压/过期事件只入历史，不弹岛）
@@ -298,9 +394,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let duration = task.duration.map { String(format: "%.0f秒", $0) } ?? "未知耗时"
                 logLine("完成 \(task.id) [\(task.outcome.rawValue)] \(duration) \(task.title ?? "")\(isStale ? " (积压)" : "")")
                 usageService.recordFinished(task)
-                let wantCard = task.outcome == .success
+                let wantCard = (task.outcome == .success
                     ? settings.notifyCompletion
-                    : settings.notifyError
+                    : settings.notifyError)
+                    && !shouldSuppressCard(terminal: task.terminal)
                 if !isStale && wantCard {
                     island.viewModel.enqueueFinished(task)
                 }
@@ -309,7 +406,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case .taskWaiting(let task):
                 logLine("等待 \(task.id) \(task.title ?? "")")
-                if !isStale && settings.notifyWaiting {
+                // 只有「等待输入」这种非阻塞的才允许静音；
+                // 「等待授权」永远弹 —— 应用级判定分不清标签页，藏错了你会白等
+                let suppressible: Bool
+                if case .waiting(.idle, _) = task.phase {
+                    suppressible = shouldSuppressCard(terminal: task.terminal)
+                } else {
+                    suppressible = false
+                }
+                if !isStale && settings.notifyWaiting && !suppressible {
                     island.viewModel.enqueueWaiting(task)
                 }
             case .activeTasksChanged:

@@ -10,7 +10,7 @@ Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex C
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 371 tests
+make test       # swift run eureka-tests  — runs all 413 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
@@ -69,7 +69,7 @@ Key = `source:sessionId`. Phases: `running` / `waiting(permission|idle)` / `idle
 
 ## Critical invariants — do not break these
 
-- **`eureka-relay` hard constraints:** always `exit 0`, stdout absolutely silent (UserPromptSubmit stdout gets injected into the model's context), <50ms, stdin capped at 1MB. It writes to `tmp/` then `rename`s atomically into the spool.
+- **`eureka-relay` hard constraints:** always `exit 0`, stdout absolutely silent (UserPromptSubmit stdout gets injected into the model's context, and **PreToolUse stdout is read as a permission decision** — any byte there could allow or block a tool call), <50ms, stdin capped at 1MB. It writes to `tmp/` then `rename`s atomically into the spool. The envelope carries a top-level `terminal` object (env + controlling tty) so the app knows which terminal a session runs in; collecting it must stay syscall-only — never start a subprocess.
 - **Relay stable path:** hooks/notify configs only ever reference `~/Library/Application Support/Eureka/bin/eureka-relay`. The app re-syncs the bundled binary there on launch (by hash) so upgrades don't break the link — never hardcode the app-bundle path into installed configs.
 - **Stale-event suppression:** events older than 5 minutes only enter history/usage; they must NOT trigger island animations (`AppDelegate.handle` drops stale heartbeat/waiting/session-start events entirely).
 - **Usage dedup is mandatory and persistent:** Claude transcripts duplicate `(requestId, message.id)` rows heavily across files (resume/fork copies old rows into new files). Dedup must persist across files (via `scan_state`), or usage will be inflated.

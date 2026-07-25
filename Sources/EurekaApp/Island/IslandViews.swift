@@ -666,7 +666,14 @@ struct ExpandedCardView: View {
     private var title: String? {
         switch card {
         case .finished(let task): return task.title ?? task.projectName
-        case .waiting(let task): return taskDisplayName(task)
+        case .waiting(let task):
+            // 等待授权时最该看见的是"在请求什么"（PreToolUse 带来的工具 + 对象），
+            // 会话身份交给 subtitle 的项目 + #会话号 —— 与高危操作卡同一口径。
+            // 没有对象串（未装 PreToolUse hook / 工具无参数）时退回会话名，不会变空。
+            if case .waiting(.permission, _) = task.phase, let tool = task.currentActivity {
+                return task.currentToolDetail.map { "\(tool)：\($0)" } ?? tool
+            }
+            return taskDisplayName(task)
         case .alert(let alert):
             let firstLine = alert.detail.split(separator: "\n", maxSplits: 1).first.map(String.init)
                 ?? alert.detail
@@ -756,29 +763,48 @@ struct TaskListCardView: View {
                             .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                         Spacer(minLength: 8 * scale)
+                        // 跳到会话所在终端（只在知道终端且它还在运行时出现）
+                        if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
+                            terminalJumpButton(terminal)
+                        }
                         // 子 agent 数量徽标（可点开/收起；无子 agent 不显示）
                         if !task.subagents.isEmpty {
                             subagentBadge(task)
                         }
-                        if let activity = task.currentActivity {
-                            Text(activity)
+                        if task.isCompacting {
+                            // 压缩期间没有别的事件，不标出来就像卡死了
+                            Text("压缩上下文")
+                                .font(.system(size: 9.5 * scale))
+                                .foregroundStyle(Theme.gold.opacity(0.85))
+                                .lineLimit(1)
+                                .fixedSize()
+                        } else if let activity = task.currentActivity {
+                            // 有具体对象就一起显示：「Edit main.swift」比光「Edit」有用得多
+                            Text(compactToolLabel(
+                                tool: activity, detail: task.currentToolDetail))
                                 .font(.system(size: 9.5 * scale).monospaced())
                                 .foregroundStyle(.white.opacity(0.45))
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                         }
                         if let context = task.contextUsedPercent, context >= 60 {
                             Text("ctx \(Int(context.rounded()))%")
                                 .font(.system(size: 9.5 * scale, weight: .medium).monospacedDigit())
                                 .foregroundStyle(contextColor(context))
+                                .fixedSize()
                         }
+                        // 尾部必须 fixedSize：否则中间的工具标签会把它挤到换行
+                        // （Plans 行踩过同一个坑 —— 该固定的是尾部，让中间去让位）
                         if showStartTime {
                             Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
                                 .font(.system(size: 11 * scale).monospacedDigit())
                                 .foregroundStyle(.white.opacity(0.5))
+                                .fixedSize()
                         } else {
                             Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
                                 .font(.system(size: 11 * scale).monospacedDigit())
                                 .foregroundStyle(.white.opacity(0.5))
+                                .fixedSize()
                         }
                     }
                     .frame(height: 30 * scale)
@@ -841,6 +867,21 @@ struct TaskListCardView: View {
         } else {
             Circle().fill(Color.cyan).frame(width: 6 * scale, height: 6 * scale)
         }
+    }
+
+    /// 行尾跳转徽标：把会话所在终端应用带到前台（内层按钮消费点击，不触发整岛展开/收起）。
+    /// 只激活应用、不选标签页 —— 见 TerminalActivator 的取舍说明。
+    private func terminalJumpButton(_ terminal: TerminalBinding) -> some View {
+        Button(action: { TerminalActivator.activate(terminal) }) {
+            Image(systemName: "arrow.up.forward.app")
+                .font(.system(size: 9.5 * scale, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal, 5 * scale)
+                .padding(.vertical, 2 * scale)
+                .background(Capsule().fill(Color.white.opacity(0.1)))
+        }
+        .buttonStyle(.plain)
+        .help("切到 \(terminal.displayName)")
     }
 
     /// 行尾子 agent 徽标：chevron + 数量，点击展开/收起（内层按钮消费点击）

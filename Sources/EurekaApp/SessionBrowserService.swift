@@ -82,6 +82,8 @@ final class SessionBrowserService: ObservableObject {
     @Published private(set) var costs: [String: SessionCost] = [:]
     /// 每会话对话数
     @Published private(set) var promptCounts: [String: Int] = [:]
+    /// 会话 → 最近一次终端绑定，键为 `AgentTask.key(source:sessionId:)`
+    @Published private(set) var terminals: [String: TerminalBinding] = [:]
     @Published private(set) var scanning = false
     /// 当前选中的会话（详情栏渲染对象）
     @Published private(set) var selected: AgentSessionInfo?
@@ -182,12 +184,16 @@ final class SessionBrowserService: ObservableObject {
             let prompts = (try? self.store?.sessionStats.promptCounts(
                 for: indexed.map(\.id))) ?? [:]
 
+            // 终端归属：一次查完全表（键 source:sessionId），避免每行一次查询
+            let terminals = (try? self.store?.sessionTerminals.latestBySession()) ?? [:]
+
             DispatchQueue.main.async {
                 self.sessions = indexed
                 self.sessionsById = Dictionary(
                     indexed.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 self.costs = costMap
                 self.promptCounts = prompts
+                self.terminals = terminals
                 self.scanning = false
                 self.rebuild()
                 // 索引就绪后消费待跳转请求（用量"按会话"排行点击时索引可能还没建）
@@ -374,6 +380,20 @@ final class SessionBrowserService: ObservableObject {
     // MARK: - 恢复与删除
 
     /// 恢复命令（详情栏展示 + 复制 + 终端执行共用）
+    /// 某会话最近所在终端（列表行用；查的是已发布的批量结果，不碰 DB）
+    func terminal(for session: AgentSessionInfo) -> TerminalBinding? {
+        terminals[AgentTask.key(source: session.source, sessionId: session.id)]
+    }
+
+    /// 某会话的**全部**终端绑定（详情页「曾在 N 个终端运行」用）。
+    /// 只在打开详情时按需查一次 —— 列表页不需要历史，只需要最近那条。
+    func terminalHistory(
+        for session: AgentSessionInfo
+    ) -> [(binding: TerminalBinding, firstSeen: Date, lastSeen: Date)] {
+        (try? store?.sessionTerminals.bindings(
+            source: session.source, sessionId: session.id)) ?? []
+    }
+
     func resumeCommand(for session: AgentSessionInfo) -> String {
         let resume: String
         switch session.source {

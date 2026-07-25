@@ -163,7 +163,9 @@ struct PopoverRootView: View {
     private var content: some View {
         switch navigation.tab {
         case .history:
-            HistoryView(tasks: usageService.recentHistory, settings: settings)
+            HistoryView(
+                tasks: usageService.recentHistory,
+                terminals: sessionBrowser.terminals, settings: settings)
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings)
         case .skills:

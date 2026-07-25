@@ -1074,6 +1074,50 @@ struct ScopeBadge: View {
     }
 }
 
+/// 终端归属标签：「iTerm2 · ttys004」。与 ScopeBadge 同一套胶囊描边规格。
+///
+/// 探测来源（`origin == .probe`）用虚线描边并在 tooltip 里说明精度较低 —— 那是按 cwd
+/// 匹配进程上溯推出来的，不像 hook 那样确定；不该让用户误以为两者一样可靠。
+struct TerminalBadge: View {
+    let binding: TerminalBinding
+    /// 终端应用当前是否还在运行（决定要不要显示成"已退出"的灰态）
+    var isRunning: Bool = true
+
+    var body: some View {
+        let tint: Color = isRunning ? Theme.brand : .secondary
+        HStack(spacing: 3) {
+            Image(systemName: "terminal")
+                .font(.system(size: 8, weight: .semibold))
+            Text(binding.displayName)
+                .font(.system(size: 9.5, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .overlay {
+            let shape = Capsule()
+            if binding.origin == .probe {
+                shape.strokeBorder(
+                    tint.opacity(0.55),
+                    style: StrokeStyle(lineWidth: 1, dash: [2.5, 2]))
+            } else {
+                shape.strokeBorder(tint.opacity(0.6), lineWidth: 1)
+            }
+        }
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        var lines = [binding.origin == .probe
+            ? "按工作目录匹配运行中的进程推断（精度低于 hook 采集）"
+            : "由 hook 在会话所在终端内采集"]
+        if let tty = binding.tty { lines.append("终端设备 \(tty)") }
+        if !isRunning { lines.append("该终端应用当前未在运行") }
+        return lines.joined(separator: "\n")
+    }
+}
+
 /// Agents 角色方块：与 SourceLogoTile 同一套方块规格（紫底浅框圆角方块），内容换成角色单字
 /// （通/探/实/审/规/建/文）。四页的方块形状 / 线条 / 配色因此完全一致；角色色只留在 RoleTag 上。
 struct RoleAvatar: View {

@@ -18,6 +18,7 @@ struct SettingsView: View {
 
     enum SettingsSection: String, CaseIterable {
         case general = "通用"
+        case integrations = "集成"
         case backup = "备份"
         case audit = "审计"
         case advanced = "高级"
@@ -27,6 +28,7 @@ struct SettingsView: View {
         var icon: String {
             switch self {
             case .general: return "gearshape"
+            case .integrations: return "puzzlepiece.extension"
             case .backup: return "icloud.and.arrow.up"
             case .audit: return "checkmark.shield"
             case .advanced: return "wrench.and.screwdriver"
@@ -50,6 +52,8 @@ struct SettingsView: View {
                     Group {
                         switch section {
                         case .general: generalSection
+                        case .integrations: IntegrationsSettingsView(
+                            installer: installer, settings: settings)
                         case .advanced: AdvancedSettingsView(
                             installer: installer, usageService: usageService,
                             settings: settings)
@@ -124,6 +128,14 @@ struct SettingsView: View {
                         .font(.system(size: 11).monospacedDigit())
                         .frame(width: 36, alignment: .trailing)
                 }
+                Toggle("正在看着该终端时不弹完成卡",
+                       isOn: $settings.suppressCardWhenTerminalFrontmost)
+                Text("判定只到**应用**级、分不清标签页：开着多个标签时，任意一个在前台都算「在看」。"
+                    + "「等待授权」卡不受此开关影响，永远会弹 —— 那是需要你动手的提示，藏错了你会白等。"
+                    + "需要已装 hook 或探测到终端归属才生效。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Toggle("显示任务开始时间（而非已持续时长）", isOn: $settings.showStartTime)
                 Toggle("菜单栏显示限额百分比", isOn: $settings.menuBarShowsLimit)
                 Toggle("限额临近打满时提前预警（按最近用量速度外推）", isOn: $settings.limitAlertsEnabled)

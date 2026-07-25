@@ -4,7 +4,10 @@
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "/usr/local/bin/terminal-notifier -message done" }
+          {
+            "type": "command",
+            "command": "/usr/local/bin/terminal-notifier -message done"
+          }
         ]
       }
     ],
@@ -12,7 +15,20 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "/Users/me/bin/audit.sh" }
+          {
+            "type": "command",
+            "command": "/Users/me/bin/audit.sh"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/me/bin/subagent-notify.sh"
+          }
         ]
       }
     ]

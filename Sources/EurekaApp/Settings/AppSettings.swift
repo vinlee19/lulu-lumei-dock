@@ -58,6 +58,25 @@ final class AppSettings: ObservableObject {
     @Published var limitAlertsEnabled: Bool {
         didSet { defaults.set(limitAlertsEnabled, forKey: "limitAlertsEnabled") }
     }
+    /// app 升级后自动把**已经装过的** hook 刷到当前版本。
+    ///
+    /// 只存这一条**策略**：「某项是否已安装」的唯一真相是磁盘上的配置文件，绝不在这里存
+    /// 意图布尔值 —— 那会与磁盘状态不同步，然后我们就会拿着陈旧状态去改用户的文件。
+    /// 即便开着，也永远不会安装用户没点过的集成，且遇到看不懂的配置会整体跳过。
+    @Published var hookAutoUpdate: Bool {
+        didSet { defaults.set(hookAutoUpdate, forKey: "hookAutoUpdate") }
+    }
+    /// 你正看着该会话所在的终端应用时，不再弹完成卡（默认**关**）。
+    ///
+    /// 判定只到**应用级**，分不清标签页：开着多个标签时，任意一个在前台都算"你在看"。
+    /// 所以**永不静音等待授权卡** —— 那是需要你动手的阻塞提示，
+    /// 因为"某个 iTerm 标签在前台"就把它藏掉是真伤害（见 AppDelegate.shouldSuppressCard）。
+    @Published var suppressCardWhenTerminalFrontmost: Bool {
+        didSet {
+            defaults.set(suppressCardWhenTerminalFrontmost,
+                         forKey: "suppressCardWhenTerminalFrontmost")
+        }
+    }
     @Published var sessionDisplayLimit: Int {
         didSet { defaults.set(sessionDisplayLimit, forKey: "sessionDisplayLimit") }
     }
@@ -157,6 +176,9 @@ final class AppSettings: ObservableObject {
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
         fullTextSearchEnabled = defaults.object(forKey: "fullTextSearchEnabled") as? Bool ?? true
         limitAlertsEnabled = defaults.object(forKey: "limitAlertsEnabled") as? Bool ?? true
+        hookAutoUpdate = defaults.object(forKey: "hookAutoUpdate") as? Bool ?? true
+        suppressCardWhenTerminalFrontmost = defaults.object(
+            forKey: "suppressCardWhenTerminalFrontmost") as? Bool ?? false
         sessionDisplayLimit = defaults.object(forKey: "sessionDisplayLimit") as? Int ?? 10
         historySortMode = defaults.string(forKey: "historySortMode") ?? "active"
         sessionSortMode = defaults.string(forKey: "sessionSortMode") ?? "time"
