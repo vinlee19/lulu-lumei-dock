@@ -246,6 +246,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.installer.autoUpdateInstalled(enabled: self.settings.hookAutoUpdate)
+                // 自动更新会改用户的配置文件，无论成功还是跳过都要留痕
+                if let message = self.installer.message {
+                    self.logLine("hook 自动更新 \(message)")
+                }
                 if !self.installer.autoUpdateSkipped.isEmpty {
                     self.logLine("hook 自动更新已跳过 "
                         + self.installer.autoUpdateSkipped.map(\.title).joined(separator: ","))

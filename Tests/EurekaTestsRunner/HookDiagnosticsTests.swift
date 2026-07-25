@@ -121,6 +121,50 @@ func hookDiagnosticsTests(_ t: TestRunner) {
             .installed)
     }
 
+    t.test("认不出的 hooks 形态：拒绝改写而不是把它当空数组覆盖掉") {
+        // 真实风险：事件值不是条目数组时 entriesOf 返回 []，install 随后
+        // hooks[event] = [我们的条目] 会把原内容整个删掉。必须拒绝。
+        let shapes = [
+            // 数组里混了 null / 字符串
+            "{\"hooks\":{\"PreToolUse\":[{\"hooks\":[{\"command\":\"x\"}]},null]}}",
+            // 事件值是对象而不是数组
+            "{\"hooks\":{\"Stop\":{\"hooks\":[{\"command\":\"x\"}]}}}",
+            // 事件值是字符串
+            "{\"hooks\":{\"Stop\":\"some-command\"}}",
+        ]
+        for json in shapes {
+            let diagnosis = ClaudeHooksInstaller.diagnose(
+                json: json, expectedRelayPath: stable, relayIsExecutable: present)
+            guard case .unparseable = diagnosis else {
+                throw ExpectationError(description: "应判为 unparseable，实际 \(diagnosis)")
+            }
+            try expect(diagnosis.blocksAutomaticWrite, "看不懂的形态必须禁止自动写")
+
+            var installThrew = false
+            do { _ = try ClaudeHooksInstaller.install(into: json, relayPath: stable) }
+            catch { installThrew = true }
+            try expect(installThrew, "install 必须抛错而不是覆盖：\(json)")
+
+            var uninstallThrew = false
+            do { _ = try ClaudeHooksInstaller.uninstall(from: json) }
+            catch { uninstallThrew = true }
+            try expect(uninstallThrew, "uninstall 同样不该删掉看不懂的内容：\(json)")
+        }
+    }
+
+    t.test("正常形态不受形态校验影响（不能把好配置也拒了）") {
+        let json = try installedJSON(withForeign: true)
+        try expectEqual(
+            ClaudeHooksInstaller.diagnose(
+                json: json, expectedRelayPath: stable, relayIsExecutable: present),
+            .installed)
+        _ = try ClaudeHooksInstaller.install(into: json, relayPath: stable)
+        _ = try ClaudeHooksInstaller.uninstall(from: json)
+        // 空 hooks / 无 hooks 键也要照常工作
+        _ = try ClaudeHooksInstaller.install(into: "{}", relayPath: stable)
+        _ = try ClaudeHooksInstaller.install(into: "{\"hooks\":{}}", relayPath: stable)
+    }
+
     // MARK: - Codex notify
 
     t.test("Codex：他人占用顶层 notify → foreignOccupied 且拒绝自动写") {

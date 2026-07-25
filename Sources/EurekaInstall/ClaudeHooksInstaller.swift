@@ -35,9 +35,30 @@ public enum ClaudeHooksInstaller {
         "\"\(relayPath)\" claude-hook"
     }
 
+    /// hooks 里是否有我们**无法安全改写**的形态：事件值不是条目数组，或条目不是对象。
+    ///
+    /// 必须拒绝而不是当成空数组处理 —— `entriesOf` 对不认识的形态返回 `[]`，随后
+    /// `hooks[event] = entries` 会把原本的内容整个覆盖掉，等于删掉了我们看不懂的东西。
+    /// 返回第一个有问题的事件名。
+    static func unsupportedShapeEvent(in hooks: [String: Any]) -> String? {
+        for (event, value) in hooks {
+            guard let entries = value as? [Any] else { return event }
+            for entry in entries where !(entry is [String: Any]) { return event }
+        }
+        return nil
+    }
+
+    private static func rejectUnsupportedShape(_ hooks: [String: Any]) throws {
+        guard let event = unsupportedShapeEvent(in: hooks) else { return }
+        throw InstallError.foreignConfig(
+            "settings.json 的 hooks.\(event) 结构无法识别（不是条目数组）。"
+                + "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。")
+    }
+
     public static func install(into json: String, relayPath: String) throws -> String {
         var root = try parse(json)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
+        try rejectUnsupportedShape(hooks)
         let command: [String: Any] = [
             "type": "command",
             "command": hookCommand(relayPath: relayPath),
@@ -58,6 +79,7 @@ public enum ClaudeHooksInstaller {
     public static func uninstall(from json: String) throws -> String {
         var root = try parse(json)
         guard var hooks = root["hooks"] as? [String: Any] else { return try serialize(root) }
+        try rejectUnsupportedShape(hooks)
         for (event, _) in hooks {
             var entries = entriesOf(hooks, event)
             let before = entries.count
@@ -102,6 +124,10 @@ public enum ClaudeHooksInstaller {
             return .unparseable(reason: "settings.json 不是合法 JSON")
         }
         guard let hooks = root["hooks"] as? [String: Any] else { return .notInstalled }
+        // 不认识的形态一律按"无法解析"处理：宁可什么都不做，也不能覆盖掉看不懂的内容
+        if let event = unsupportedShapeEvent(in: hooks) {
+            return .unparseable(reason: "hooks.\(event) 的结构无法识别（不是条目数组）")
+        }
 
         let ourCommands = eurekaCommands(in: hooks)
         guard !ourCommands.isEmpty else { return .notInstalled }

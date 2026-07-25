@@ -5,7 +5,7 @@ import Foundation
 /// 设置页的 hooks/notify 装卸（与 CLI 共用 EurekaInstall 纯逻辑 + ConfigFile）。
 ///
 /// 安全约定（用户明确要求「不要乱改用户配置 / 检测到异常要告知」）：
-/// - **永不主动安装**用户没点过的集成；`installAll()` 只保留给 CLI 与首启引导的显式操作。
+/// - **永不主动安装**用户没点过的集成，且一次只碰一个集成的配置文件（见文件末尾说明）。
 /// - 只增删 command 含 `eureka-relay` 的自有条目，他人 hook 逐字不动。
 /// - 写前一律经 `ConfigFile.backupThenWrite` 留 `*.bak.eureka.<时间戳>`。
 /// - 诊断出 `blocksAutomaticWrite` 的异常（路径被手改 / 配置解析不了 / 他人占用）时，
@@ -99,12 +99,15 @@ final class InstallerService: ObservableObject {
     // MARK: - 逐项装卸（设置页唯一入口）
 
     /// 安装/更新单项。调用方须已向用户展示「会改哪个文件 + 会先备份」。
-    func install(_ integration: Integration) {
+    ///
+    /// `repairDriftedPath` 只由「改为稳定路径」那个按钮传 true：路径被手改过时默认**拒绝**改写，
+    /// 否则任何一个"安装"按钮都会静默覆盖用户自己编辑过的路径。
+    func install(_ integration: Integration, repairDriftedPath: Bool = false) {
         guard let relay = RelaySyncer.sync() else {
             message = "找不到 eureka-relay（应与应用同目录），未做任何改动"
             return
         }
-        // 解析不了 / 他人占用 → 拒绝写入，把原因告诉用户
+        // 解析不了 / 他人占用 / 路径被手改 → 拒绝写入，把原因告诉用户
         let diagnosis = diagnosis(for: integration)
         if case .unparseable = diagnosis {
             message = "\(integration.title)：\(diagnosis.detail ?? "配置无法解析")"
@@ -112,6 +115,11 @@ final class InstallerService: ObservableObject {
         }
         if case .foreignOccupied = diagnosis {
             message = "\(integration.title)：\(diagnosis.detail ?? "已被他人占用")"
+            return
+        }
+        if case .driftedPath = diagnosis, !repairDriftedPath {
+            message = "\(integration.title)：配置里的路径被改过，未做改动。"
+                + "确认要改回稳定路径请点该项的「改为稳定路径」。"
             return
         }
         do {
@@ -191,15 +199,8 @@ final class InstallerService: ObservableObject {
         if !updated.isEmpty || !skipped.isEmpty { refresh() }
     }
 
-    // MARK: - 兼容入口（CLI / 首启引导的显式一键操作）
-
-    func installAll() {
-        for integration in Integration.allCases { install(integration) }
-        message = "已安装/更新全部集成（原配置已自动备份）"
-    }
-
-    func uninstallAll() {
-        for integration in Integration.allCases { uninstall(integration) }
-        message = "已卸载全部集成（只移除了我们自己的条目）"
-    }
 }
+
+// 刻意不提供 installAll()/uninstallAll()：一个按钮同时改写多个 agent 的配置文件，
+// 必然会给「只用其中一个」的用户凭空造出别的 agent 的配置（审计页那个横幅就这样
+// 给纯 Claude 用户建过 ~/.codex/config.toml）。要装哪项就调哪项。

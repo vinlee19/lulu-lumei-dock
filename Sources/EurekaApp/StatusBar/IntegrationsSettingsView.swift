@@ -125,8 +125,11 @@ struct IntegrationsSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if needsRepair(diagnosis) {
-                Button(repairLabel(diagnosis)) { installer.install(integration) }
-                    .controlSize(.small)
+                // 路径漂移只有从这个按钮点进去才允许改写（默认拒绝，见 install(repairDriftedPath:)）
+                Button(repairLabel(diagnosis)) {
+                    installer.install(integration, repairDriftedPath: true)
+                }
+                .controlSize(.small)
             }
         }
     }

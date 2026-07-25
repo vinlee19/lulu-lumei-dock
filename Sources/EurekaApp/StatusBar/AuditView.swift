@@ -133,11 +133,22 @@ struct AuditView: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-            Text("Claude hooks 未安装，Claude 的操作暂未被审计采集（Codex 不受影响）。")
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Claude hooks 未安装，Claude 的操作暂未被审计采集（Codex 不受影响）。")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                // 装卸结果必须回显：否则被拒绝（配置解析不了 / 路径被手改）时这里毫无反馈
+                if let message = installer.message {
+                    Text(message)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer(minLength: 0)
-            Button("安装") { installer.installAll() }
+            // 只装 Claude hooks。绝不能调 installAll() —— 那会连带写
+            // ~/.codex/config.toml，给只用 Claude 的人凭空造出另一个 agent 的配置文件。
+            Button("安装") { installer.install(.claudeHooks) }
                 .controlSize(.small)
         }
         .padding(.horizontal, 12)

@@ -4,6 +4,62 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-07-25
+
+### Added
+
+- **Sessions now remember which terminal they ran in.** The session list,
+  history and the island task list show it, and each offers a one-click
+  jump that brings that terminal application to the front. A session that
+  moves — resumed in a different terminal — keeps both bindings, and its
+  detail page lists every terminal it has run in.
+- **Two ways of finding that out, so it works without hooks.** With an
+  integration installed, the relay reads it out of the environment it
+  inherits: a hook is a child of the CLI, which is a child of the
+  terminal. Without one, the app matches a running agent process by
+  working directory and follows the parent chain to the hosting
+  application. The second path is approximate and drawn with a dashed
+  border to say so; when two sessions of the same agent share a working
+  directory it declines to guess.
+- **Settings → 集成:** every integration now has its own switch instead of
+  one install-everything button. Each states the file it will rewrite,
+  that a timestamped backup comes first, and that only its own entries are
+  ever touched. Configuration problems are reported instead of all looking
+  like "not installed": a hook path that no longer points at the stable
+  relay, a missing relay binary (which silently drops every event), a
+  `notify` key already taken by another tool, and a config file that can't
+  be parsed. The last three are refused rather than guessed at. Hooks
+  belonging to other tools are detected and named, so it's clear they
+  aren't being touched.
+- **The permission card says what is being requested** — "Bash: rm -rf
+  node_modules/" instead of just the session name — and the task list
+  shows the object a tool is working on rather than only the tool name.
+  Context compaction is now shown as well; it used to look like a stall.
+  These come from two newly managed hooks, `PreToolUse` and `PreCompact`.
+- **Optional: no completion card while you're looking at that terminal.**
+  Off by default. Permission cards are never suppressed.
+
+### Changed
+
+- The install-everything block in Settings → 高级 is gone; hooks are now
+  managed per integration on the new Integrations page, and the first-run
+  instructions point there.
+- Automatic hook updates only ever refresh integrations already installed,
+  skip anything that can't be rewritten safely, and say why in Settings.
+- Installing the Claude integration now also registers `PreToolUse`, which
+  runs before every tool call. Claude waits for its hooks, so this adds a
+  few milliseconds to each one.
+
+### Fixed
+
+- A nullable column in the new session-terminal key made every upsert miss
+  — `NULL` is not equal to `NULL` in SQLite — so a session running inside
+  an IDE, which has neither `TERM_PROGRAM` nor a controlling terminal,
+  accumulated a duplicate row per event.
+- Reading a session's terminal device no longer goes through
+  `ttyname("/dev/tty")`, which only ever reports the generic `/dev/tty`
+  and so couldn't tell one terminal from another.
+
 ## [0.9.0] - 2026-07-25
 
 ### Added
@@ -545,6 +601,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.10.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.10.0
 [0.9.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.9.0
 [0.8.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.8.0
 [0.7.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.7.0
