@@ -94,9 +94,13 @@ public enum GeminiSessionIndexer {
             for file in files
             where file.lastPathComponent.hasPrefix("session-")
                 && file.pathExtension.lowercased() == "jsonl" {
+                // mtime 窗口先过滤再读内容：超窗文件连 512KB 头读都省掉
+                guard let mtime = (try? file.resourceValues(
+                    forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                    now.timeIntervalSince(mtime) < window
+                else { continue }
                 guard let info = sessionInfo(
-                    file: file, cwd: slugToProject[slugDir.lastPathComponent]),
-                    now.timeIntervalSince(info.lastActiveAt) < window
+                    file: file, cwd: slugToProject[slugDir.lastPathComponent])
                 else { continue }
                 results.append(info)
             }

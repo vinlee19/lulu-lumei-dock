@@ -51,6 +51,16 @@ public struct SyncRoots {
     public var hermesPlans: URL      // ~/.hermes/plans（profile 级，常不存在）
     public var claudePlans: URL      // ~/.claude/plans（Claude 计划，本就是 .md）
     public var plansStaging: URL     // ~/…/Eureka/plans（Codex/opencode 计划物化暂存，含 codex/ 与 opencode/）
+    /// ~/.codebuddy/projects（会话 *.jsonl + <sessionId>/subagents/）。
+    /// ⚠️ 同级 settings.json / mcp.json 可能含 API key/token —— 只 walk 这个根，绝不碰 home。
+    public var codeBuddyProjects: URL?
+    /// ~/.codebuddy/memery（全局记忆；官方拼写就是 memery）
+    public var codeBuddyMemory: URL?
+    /// ~/.qoder-cn/projects（会话 *.jsonl）。
+    /// ⚠️ 同级 .auth/ 是凭据、settings.json 含 API key —— 只 walk 这个根，绝不碰 home。
+    public var qoderProjects: URL?
+    /// ~/.qoder-cn/memories（<user-hash>/global/<category>/）
+    public var qoderMemories: URL?
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
     public var customDirs: [(root: URL, category: String)] = []
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
@@ -66,7 +76,9 @@ public struct SyncRoots {
         geminiHome: URL, geminiSessions: URL, geminiSkills: URL,
         qwenProjects: URL, qwenMemories: URL, qwenSkills: URL,
         hermesSkills: URL, hermesMemories: URL, hermesHome: URL, hermesPlans: URL,
-        claudePlans: URL, plansStaging: URL
+        claudePlans: URL, plansStaging: URL,
+        codeBuddyProjects: URL? = nil, codeBuddyMemory: URL? = nil,
+        qoderProjects: URL? = nil, qoderMemories: URL? = nil
     ) {
         self.claudeHome = claudeHome
         self.claudeProjects = claudeProjects
@@ -93,6 +105,10 @@ public struct SyncRoots {
         self.hermesPlans = hermesPlans
         self.claudePlans = claudePlans
         self.plansStaging = plansStaging
+        self.codeBuddyProjects = codeBuddyProjects
+        self.codeBuddyMemory = codeBuddyMemory
+        self.qoderProjects = qoderProjects
+        self.qoderMemories = qoderMemories
     }
 }
 
@@ -241,6 +257,31 @@ public enum SyncSourceCatalog {
              category: "grok/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("kimi", isDirectory: true),
              category: "kimi/plans", priority: 0, include: markdownOnly)
+        walk(root: roots.plansStaging.appendingPathComponent("qoder", isDirectory: true),
+             category: "qoder/plans", priority: 0, include: markdownOnly)
+
+        // codebuddy：会话 jsonl（含 <sessionId>/subagents/ 深层）+ 全局 memery（官方拼写）。
+        // ⚠️ ~/.codebuddy/{settings.json,mcp.json} 可能含 API key/token → 只列这两个根，
+        //    绝不 walk home（隐藏段本就会被 walk 跳过，双保险）。
+        if let codeBuddyProjects = roots.codeBuddyProjects {
+            walk(root: codeBuddyProjects, category: "codebuddy/projects", priority: 1,
+                 include: jsonlOnly)
+        }
+        if let codeBuddyMemory = roots.codeBuddyMemory {
+            walk(root: codeBuddyMemory, category: "codebuddy/memery", priority: 0,
+                 include: markdownOnly)
+        }
+
+        // qoder：会话 jsonl + 全局 memories（<user-hash>/global/<category>/）。
+        // ⚠️ ~/.qoder-cn/{.auth/,settings.json} 是凭据 → 只列这两个根，绝不 walk home。
+        if let qoderProjects = roots.qoderProjects {
+            walk(root: qoderProjects, category: "qoder/projects", priority: 1,
+                 include: jsonlOnly)
+        }
+        if let qoderMemories = roots.qoderMemories {
+            walk(root: qoderMemories, category: "qoder/memories", priority: 0,
+                 include: markdownOnly)
+        }
 
         // 用户自定义目录：远端类目由用户指定（custom/<名>），全部常规文件（隐藏文件仍跳过）
         for dir in roots.customDirs {

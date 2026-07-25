@@ -11,6 +11,8 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case gemini
     case qwen
     case hermes
+    case codebuddy
+    case qoder
 
     public var displayName: String {
         switch self {
@@ -23,6 +25,8 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         case .gemini: return "Gemini CLI"
         case .qwen: return "Qwen CLI"
         case .hermes: return "Hermes"
+        case .codebuddy: return "CodeBuddy"
+        case .qoder: return "Qoder"
         }
     }
 

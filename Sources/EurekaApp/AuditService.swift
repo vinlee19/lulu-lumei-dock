@@ -51,7 +51,8 @@ final class AuditService: ObservableObject {
         }
         // 2s 近实时扫描 Codex + 顺带到点清理
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 2, repeating: 2)
+        // leeway 让系统合并唤醒省电
+        timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in
             self?.scanCodex()
             self?.pruneIfDue()

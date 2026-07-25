@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI**（以及 OpenCode/Grok/Antigravity/Kimi/Gemini/Qwen/Hermes）task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
+Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI**（以及 OpenCode/Grok/Antigravity/Kimi/Gemini/Qwen/Hermes/CodeBuddy/Qoder）task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
 
 ## Commands
 
@@ -46,7 +46,7 @@ Codex rollout token_count ────────────→ UsageEngine / 
                                          SQLite (history / usage / scan state)
 ```
 
-**Ten event sources** feed `TaskStore`, wired together in `Sources/EurekaIngest/EventPipeline.swift` and composed in `Sources/EurekaApp/AppDelegate.swift`: (1) spool consumer for relayed hook/notify events, (2) Codex rollout tailer, (3) Claude transcript watcher, then one tailer each for (4) opencode, (5) Grok, (6) Antigravity, (7) Kimi, (8) Gemini, (9) Qwen and (10) Hermes. Usage is separate: **eight** scanners under `Sources/EurekaUsage/` write to the ledger, not to `TaskStore`. The app works **without hooks installed** — the transcript/rollout/DB watchers are the fallback so sessions opened before hooks were installed are still visible.
+**Twelve event sources** feed `TaskStore`, wired together in `Sources/EurekaIngest/EventPipeline.swift` and composed in `Sources/EurekaApp/AppDelegate.swift`: (1) spool consumer for relayed hook/notify events, (2) Codex rollout tailer, (3) Claude transcript watcher, then one tailer each for (4) opencode, (5) Grok, (6) Antigravity, (7) Kimi, (8) Gemini, (9) Qwen, (10) Hermes, (11) CodeBuddy and (12) Qoder. Usage is separate: **nine** scanners under `Sources/EurekaUsage/` write to the ledger, not to `TaskStore` (Qoder has none — its CN backend reports zero tokens). The app works **without hooks installed** — the transcript/rollout/DB watchers are the fallback so sessions opened before hooks were installed are still visible.
 
 ### Module dependency graph (SwiftPM targets, strictly one-directional)
 
@@ -57,7 +57,7 @@ Codex rollout token_count ────────────→ UsageEngine / 
 | `EurekaKit` | Pure domain layer: `TaskEvent`/`AgentTask` models, `TaskStore` state machine, `IslandState` projection, `IslandGeometry` pure functions. **No IO, no AppKit.** |
 | `EurekaStore` | SQLite (system `libsqlite3` + thin wrapper) with three repos: `task_history` / `usage_records` / `scan_state`. |
 | `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup, plus one tailer + session indexer + `*Paths` trio per non-Claude agent (`CodexRolloutTailer`, `OpencodeSessionTailer`, …, `HermesStateTailer`). |
-| `EurekaUsage` | Eight incremental+dedup usage scanners — file-based ones tail transcripts/rollouts; `Opencode`/`Hermes` read SQLite instead (Hermes diffs `session_model_usage` against a per-session snapshot). Antigravity has no usage scanner (conversations are protobuf, no local token accounting). Plus `PricingTable`, `RateLimitProvider` protocol + Codex/Claude/Grok impls. |
+| `EurekaUsage` | Nine incremental+dedup usage scanners — file-based ones tail transcripts/rollouts; `Opencode`/`Hermes` read SQLite instead (Hermes diffs `session_model_usage` against a per-session snapshot). Antigravity has no usage scanner (conversations are protobuf, no local token accounting). CodeBuddy's usage rides on its `function_call` transcript lines (`providerData.usage`); Qoder is excluded (CN backend reports zero tokens). Plus `PricingTable`, `RateLimitProvider` protocol + Codex/Claude/Grok impls. |
 | `EurekaInstall` | `settings.json` deep-merge / `config.toml` line-edit / `config.yaml` list-edit (`HermesConfigEditor`) installers, backup, diff preview, install-status detection. Pure text in/out, **zero deps**, independently testable. |
 | `eureka` (app) | AppKit shell: island `NSPanel`, `NSStatusItem`+popover, settings, `RelaySyncer`, CLI mode. |
 | `eureka-relay` | `claude-hook` / `codex-notify` / `inject` subcommands; writes to the spool. |

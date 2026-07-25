@@ -67,6 +67,17 @@ final class NotificationService: NSObject, ObservableObject {
         center.add(UNNotificationRequest(
             identifier: "eureka-audit-\(alert.opId)", content: content, trigger: nil))
     }
+
+    /// 推送一条关键事件通知（完成/等待/出错；identifier 去重，同事件不重复弹）
+    func postEvent(_ note: SystemEventNotification) {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = note.title
+        content.body = note.body
+        content.sound = .default
+        center.add(UNNotificationRequest(
+            identifier: note.identifier, content: content, trigger: nil))
+    }
 }
 
 extension NotificationService: UNUserNotificationCenterDelegate {

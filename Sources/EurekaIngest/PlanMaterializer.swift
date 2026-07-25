@@ -486,7 +486,30 @@ public enum PlanMaterializer {
         return written
     }
 
-    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi
+    // MARK: - qoder：plans/<slug>.md（本就是 markdown）→ 暂存 qoder/<名>.md
+
+    /// qoder 计划已是完整 .md（`~/.qoder-cn/plans/<slug>.md`，plan 模式产物），
+    /// 非空文件原样拷进暂存（保持管线统一 + 可同步）。codebuddy 无 plans 目录，无物化。
+    @discardableResult
+    public static func materializeQoder(plansRoot: URL, into stagingRoot: URL) -> Int {
+        let fm = FileManager.default
+        let outDir = stagingRoot.appendingPathComponent("qoder", isDirectory: true)
+        var written = 0
+        let plans = (try? fm.contentsOfDirectory(
+            at: plansRoot, includingPropertiesForKeys: nil)) ?? []
+        for planURL in plans where planURL.pathExtension.lowercased() == "md" {
+            guard let content = try? String(contentsOf: planURL, encoding: .utf8),
+                  !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+            if writeIfChanged(
+                content, to: outDir.appendingPathComponent(planURL.lastPathComponent)) {
+                written += 1
+            }
+        }
+        return written
+    }
+
+    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi/qoder
 
     /// hermesPlansDirs：Hermes 的计划由 `plan` 技能用 write_file 直接写成 .md
     /// （项目内 `<repo>/.hermes/plans/`，profile 级 `~/.hermes/plans/` 可选），
@@ -511,6 +534,8 @@ public enum PlanMaterializer {
                 source: .gemini, into: &result)
         collect(dir: stagingRoot.appendingPathComponent("qwen", isDirectory: true),
                 source: .qwen, into: &result)
+        collect(dir: stagingRoot.appendingPathComponent("qoder", isDirectory: true),
+                source: .qoder, into: &result)
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 

@@ -36,6 +36,8 @@ public final class CodexRolloutTailer {
     private var contexts: [String: FileContext] = [:]
     private var threadNames: [String: String] = [:]
     private var loadedThreadNames = false
+    /// session_index.jsonl 的 mtime+size 指纹；未变化则跳过整文件重解析
+    private var sessionIndexFingerprint: (mtime: TimeInterval, size: UInt64)?
 
     public init(
         sessionsRoot: URL,
@@ -57,7 +59,10 @@ public final class CodexRolloutTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 1, repeating: pollInterval)
+        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        let leeway: DispatchTimeInterval = pollInterval >= 2
+            ? .milliseconds(500) : .milliseconds(100)
+        timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
         timer.resume()
         self.timer = timer
@@ -78,7 +83,22 @@ public final class CodexRolloutTailer {
     }
 
     /// session_index.jsonl 是正式线程名的 append-only 索引；变化时给活跃任务补 titleUpdate。
+    /// 每秒轮询时先比对 mtime+size 指纹（廉价 stat），只有真正变化才重读整个文件。
     private func refreshThreadNames() {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: sessionIndexURL.path)
+        let fingerprint = attrs.flatMap { dict -> (mtime: TimeInterval, size: UInt64)? in
+            guard let mtime = (dict[.modificationDate] as? Date)?.timeIntervalSince1970,
+                  let size = dict[.size] as? UInt64
+            else { return nil }
+            return (mtime, size)
+        }
+        // 指纹一致（含文件持续不存在）则无需重解析
+        if loadedThreadNames, fingerprint?.mtime == sessionIndexFingerprint?.mtime,
+           fingerprint?.size == sessionIndexFingerprint?.size {
+            return
+        }
+        sessionIndexFingerprint = fingerprint
+
         let latest = CodexThreadNameIndex.load(sessionIndexURL)
         if loadedThreadNames {
             for (sessionId, name) in latest where threadNames[sessionId] != name {

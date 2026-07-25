@@ -121,6 +121,13 @@ struct SettingsView: View {
                 Toggle("任务完成", isOn: $settings.notifyCompletion)
                 Toggle("等待确认 / 等待输入", isOn: $settings.notifyWaiting)
                 Toggle("任务出错 / 中断", isOn: $settings.notifyError)
+                Toggle("关键事件发送系统通知（锁屏 / 其他桌面可见）",
+                       isOn: $settings.eventSystemNotifyEnabled)
+                if let hint = notificationHint, settings.eventSystemNotifyEnabled {
+                    Text(hint)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.orange)
+                }
                 HStack {
                     Text("自动收起")
                     Slider(value: $settings.autoDismissSeconds, in: 3...15, step: 1)

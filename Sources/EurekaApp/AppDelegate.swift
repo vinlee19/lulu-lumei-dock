@@ -120,6 +120,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak notificationService] on in if on { notificationService?.enable() } }
             .store(in: &cancellables)
+        // 关键事件系统通知：与高危告警共用授权，同样只在开启开关时请求
+        if settings.eventSystemNotifyEnabled { notificationService.enable() }
+        settings.$eventSystemNotifyEnabled
+            .dropFirst()
+            .sink { [weak notificationService] on in if on { notificationService?.enable() } }
+            .store(in: &cancellables)
 
         // 云端备份：配置快照推送 + 开关驱动定时器
         let pushSyncConfig = { [weak self] in
@@ -401,6 +407,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !isStale && wantCard {
                     island.viewModel.enqueueFinished(task)
                 }
+                // 系统通知只看开关，不做"正在看终端"静音 —— 它正是为看不见屏幕时准备的
+                if !isStale, let note = SystemEventNotifications.forFinished(
+                    task, master: settings.eventSystemNotifyEnabled,
+                    completion: settings.notifyCompletion, error: settings.notifyError) {
+                    notificationService.postEvent(note)
+                }
                 if !isStale {
                     mascotController?.viewModel.showFinished(success: task.outcome == .success)
                 }
@@ -416,6 +428,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 if !isStale && settings.notifyWaiting && !suppressible {
                     island.viewModel.enqueueWaiting(task)
+                }
+                if !isStale, let note = SystemEventNotifications.forWaiting(
+                    task, master: settings.eventSystemNotifyEnabled,
+                    waiting: settings.notifyWaiting) {
+                    notificationService.postEvent(note)
                 }
             case .activeTasksChanged:
                 break

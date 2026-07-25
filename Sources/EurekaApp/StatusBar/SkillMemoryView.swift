@@ -136,6 +136,8 @@ struct SkillMemoryView: View {
                 Button("Kimi 记忆（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
                 Button("Gemini 记忆（GEMINI.md）") { service.createMemory(source: .gemini, name: "GEMINI") }
                 Button("Qwen 记忆") { startCreate(.qwen, isSkill: false, "Qwen 记忆") }
+                Button("CodeBuddy 记忆") { startCreate(.codebuddy, isSkill: false, "CodeBuddy 记忆") }
+                Button("Qoder 记忆") { startCreate(.qoder, isSkill: false, "Qoder 记忆") }
                 // hermes 记忆 = 固定 memories/MEMORY.md（name 忽略，见 createMemory）
                 Button("Hermes 记忆（MEMORY.md）") { service.createMemory(source: .hermes, name: "MEMORY") }
             }
