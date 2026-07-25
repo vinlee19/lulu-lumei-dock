@@ -10,7 +10,7 @@ Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex C
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 300 tests
+make test       # swift run eureka-tests  — runs all 371 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
@@ -46,19 +46,19 @@ Codex rollout token_count ────────────→ UsageEngine / 
                                          SQLite (history / usage / scan state)
 ```
 
-**Five data sources** feed `TaskStore`, wired together in `Sources/EurekaApp/AppDelegate.swift` (the central composition root): (1) spool consumer for relayed hook/notify events, (2) Codex rollout tailer, (3) Claude transcript watcher, (4) Claude usage scanner, (5) Codex usage scanner. The app works **without hooks installed** — the transcript/rollout watchers are the fallback so sessions opened before hooks were installed are still visible.
+**Ten event sources** feed `TaskStore`, wired together in `Sources/EurekaIngest/EventPipeline.swift` and composed in `Sources/EurekaApp/AppDelegate.swift`: (1) spool consumer for relayed hook/notify events, (2) Codex rollout tailer, (3) Claude transcript watcher, then one tailer each for (4) opencode, (5) Grok, (6) Antigravity, (7) Kimi, (8) Gemini, (9) Qwen and (10) Hermes. Usage is separate: **eight** scanners under `Sources/EurekaUsage/` write to the ledger, not to `TaskStore`. The app works **without hooks installed** — the transcript/rollout/DB watchers are the fallback so sessions opened before hooks were installed are still visible.
 
 ### Module dependency graph (SwiftPM targets, strictly one-directional)
 
-`app → {EurekaIngest, EurekaUsage, EurekaInstall} → EurekaStore → EurekaKit`. `eureka-relay` is fully independent (zero deps).
+`app → {EurekaIngest, EurekaUsage, EurekaInstall, EurekaSync} → EurekaStore → EurekaKit`. `eureka-relay` is fully independent (zero deps).
 
 | Target | Role |
 |---|---|
 | `EurekaKit` | Pure domain layer: `TaskEvent`/`AgentTask` models, `TaskStore` state machine, `IslandState` projection, `IslandGeometry` pure functions. **No IO, no AppKit.** |
 | `EurekaStore` | SQLite (system `libsqlite3` + thin wrapper) with three repos: `task_history` / `usage_records` / `scan_state`. |
-| `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `CodexRolloutTailer`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup. |
-| `EurekaUsage` | Two incremental+dedup transcript scanners, `PricingTable`, `RateLimitProvider` protocol + Codex/Claude impls. |
-| `EurekaInstall` | `settings.json` deep-merge / `config.toml` line-edit installers, backup, diff preview, install-status detection. Pure text in/out, independently testable. |
+| `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup, plus one tailer + session indexer + `*Paths` trio per non-Claude agent (`CodexRolloutTailer`, `OpencodeSessionTailer`, …, `HermesStateTailer`). |
+| `EurekaUsage` | Eight incremental+dedup usage scanners — file-based ones tail transcripts/rollouts; `Opencode`/`Antigravity`/`Hermes` read SQLite instead (Hermes diffs `session_model_usage` against a per-session snapshot). Plus `PricingTable`, `RateLimitProvider` protocol + Codex/Claude impls. |
+| `EurekaInstall` | `settings.json` deep-merge / `config.toml` line-edit / `config.yaml` list-edit (`HermesConfigEditor`) installers, backup, diff preview, install-status detection. Pure text in/out, **zero deps**, independently testable. |
 | `eureka` (app) | AppKit shell: island `NSPanel`, `NSStatusItem`+popover, settings, `RelaySyncer`, CLI mode. |
 | `eureka-relay` | `claude-hook` / `codex-notify` / `inject` subcommands; writes to the spool. |
 | `eureka-tests` | Hand-rolled assertion harness. |

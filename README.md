@@ -52,7 +52,7 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with eight agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
+It works with nine agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
 Antigravity, Kimi Code, Gemini CLI, Qwen Code, and Hermes Agent** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
@@ -73,7 +73,7 @@ sessions opened before hooks were installed are still visible.
 - Toggle time display: elapsed duration ↔ the session's original start time (resolved across resume
   chains to the true creation moment).
 - Unified per‑source brand marks across the whole island (Claude star, Codex pinwheel, Grok slash,
-  opencode terminal, Antigravity chevrons).
+  opencode terminal, Antigravity chevrons) — one per supported agent.
 
 **Menu bar** — e.g. `▶2 · 37%`: active task count + the max of your subscription limits (Codex 5h /
 Grok weekly / Claude), colored 60% amber / 85% red, with a tooltip breakdown.
@@ -84,8 +84,11 @@ cache pricing); a day/hour trend chart; a weekday×hour activity heatmap; and a
 **skills / plugins** tab counting `skill` / `mcp` / `agent` / `command` / `tool` invocations. Export
 the last 30 days to CSV.
 
-**Skills** — browse, create, edit, and enable/disable skills across all five tools (enable/disable is
-non‑destructive: the skill folder is moved to a sibling `*.eureka-disabled` directory). Plus a
+**Skills** — browse, create, edit, and enable/disable skills across every tool that has them.
+Enable/disable is non‑destructive: the skill folder is moved to a sibling `*.eureka-disabled`
+directory — except for Hermes, where the app instead edits `skills.disabled` in
+`~/.hermes/config.yaml`, because moving the folder would break Hermes' bundled‑skill checksum
+accounting (so no `*.eureka-disabled` directory appears for Hermes skills). Plus a
 dedicated **usage‑analytics** view (list ↔ stats toggle):
 - Three rankings: **recently used / most used / longest unused**, each with last‑active time and
   cumulative count.
@@ -147,9 +150,11 @@ Antigravity and is attributed to Gemini.
 (`~/.hermes/state.db`) rather than per-session transcript files, so it is read through a
 read-only SQLite reader. Live island cards come from polling that database — its shell hooks
 run synchronously on the agent's own thread and need interactive consent, so they are not
-installed. One consequence: Hermes cannot report "waiting for permission", and a session
-already running when the app launches stays silent (Hermes only writes `ended_at` on a clean
-exit, so treating pre-existing open rows as live would flood the island with phantom cards).
+installed. One consequence: Hermes cannot report "waiting for permission". A session that was
+already running when the app launches produces no card at launch, and none at all for as long as
+it makes no progress; if it is genuinely still working, it surfaces on its next progress tick.
+Hermes only writes `ended_at` on a clean exit, so pre-existing open rows are treated as closed at
+first scan instead of being replayed as a wall of phantom cards.
 Full-text search and session deletion are skipped for the same reason as opencode: every
 session shares one database file. Hermes has no named subagent definitions, so the Agents page
 is empty for it.
@@ -213,7 +218,7 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (300 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (371 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
@@ -237,7 +242,7 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (atomic JSON write)    ↓         ├─ NSStatusItem + NSPopover
 Codex rollout tail ─┘                    SpoolConsumer   │   (history / sessions / skills / usage / limits / …)
 Claude transcript watch ──────────────→ TaskStore (state machine)
-usage scanners (Claude/Codex/opencode/Grok) ──────────→ SQLite (history / usage / tool_calls / audit)
+usage scanners (one per agent, 8 in all) ─────────────→ SQLite (history / usage / tool_calls / audit)
 ```
 
 - **`eureka-relay`** is a tiny, fully independent binary: it always `exit 0`, keeps stdout silent,
@@ -258,10 +263,17 @@ Full design doc: [docs/design.md](docs/design.md).
 - Codex's "waiting for approval" state isn't shown (rollouts don't persist approval events).
 - Claude subscription limits rely on an unofficial endpoint and may break with official changes
   (it hides itself when it does).
-- Per‑skill invocation data (count / tokens / trend) is **Claude‑only**; Codex/Grok/opencode/
-  Antigravity don't tag skill invocations in their logs.
+- Per‑skill invocation data (count / tokens / trend) is **Claude‑only**: no other agent tags skill
+  invocations in its logs. Hermes does keep its own `skills/.usage.json` counters, but the app does
+  not read them yet, so Hermes skills show no hit count, usage bar or weekly ranking.
 - `ctx%` for Claude is an estimate (window size from a per‑model table; overridable).
-- Costs are local estimates against public price lists and may differ from your bill.
+- Costs are local estimates against public price lists and may differ from your bill. For Hermes
+  this gap is wider: its model names mostly match no price entry (tokens shown, no cost), and a name
+  that happens to share a prefix with a known model is priced at that provider's public API rate
+  even when Hermes routed the call through a subscription at zero marginal cost.
+- Skills / memory / agents / plans are scanned at launch and on demand — nothing watches the
+  filesystem, so anything added outside the app appears only after you click 刷新 (each page header
+  shows when it was last scanned).
 
 ## Uninstall
 

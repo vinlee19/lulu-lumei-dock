@@ -4,6 +4,79 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-07-25
+
+### Added
+
+- **Hermes Agent is the ninth supported agent.** Live island cards, session
+  browsing, the usage ledger and the knowledge base (skills / memory / plans)
+  all cover Hermes, with its own brand mark, and it appears automatically in
+  every source filter.
+- **Live cards for Hermes without installing anything.** Hermes' shell hooks run
+  synchronously on the agent's own loop and need interactive consent, so instead
+  the app polls `~/.hermes/state.db` read-only every 5 seconds: top-level,
+  non-archived sessions started within the last 24 hours. Start, heartbeat and
+  finish cards are derived from the session counters, and `end_reason` is mapped
+  to completed / errored / interrupted. A session that stops progressing for 5
+  minutes is closed as idle, because Hermes only writes `ended_at` on a clean
+  exit. The first scan of each database records a watermark only, so launching
+  the app never replays history as a wall of cards — a session that was already
+  running still surfaces on its next progress tick.
+- **Hermes sessions in the session browser.** A 30-day window merged across the
+  default home and every `~/.hermes/profiles/*` home. Transcripts render straight
+  from the `messages` table, and each row offers a copyable resume command.
+- **Hermes usage in the ledger.** Input / output / cache-read / cache-write
+  tokens come from `session_model_usage`. Because Hermes accumulates those rows
+  in place, a per-session snapshot is kept so re-scans only ever record the
+  delta; `reasoning_tokens` is excluded as a subset of output. Auxiliary models
+  get their own rows, and gateway sessions that update only the `sessions` row
+  have their tokens back-filled as a residual instead of disappearing. A new
+  "用量扫描 Hermes" entry appears on the data-health dashboard.
+- **Hermes skills, memory and plans.** `~/.hermes/skills` is scanned recursively
+  so category, sub-category and un-categorised skills are all found, while
+  support directories (`references`, `templates`, …) and Python tooling
+  directories are pruned. Memory is the three global files `memories/MEMORY.md`,
+  `memories/USER.md` and `SOUL.md`. Plans are indexed directly from
+  `<repo>/.hermes/plans` and `~/.hermes/plans` — they are already Markdown, so no
+  materialization step is needed.
+- **Enable/disable Hermes skills from the app.** Toggling a Hermes skill edits
+  `skills.disabled` in `~/.hermes/config.yaml` rather than moving its folder,
+  because moving it would break Hermes' bundled-skill checksum accounting. The
+  editor works line by line: comments, key order and both inline and block list
+  styles survive, it is idempotent, it leaves `platform_disabled` alone, and it
+  writes a timestamped `*.bak.eureka.*` backup first. Anything it cannot rewrite
+  safely is left untouched rather than guessed at.
+- **Cloud backup covers Hermes**: the skills tree, `memories/*.md`, `SOUL.md` and
+  `~/.hermes/plans/*.md`. `state.db`, `config.yaml`, `.env` and `auth.json` are
+  deliberately excluded.
+- **Hermes in Settings**: the CLI tools list detects `hermes` and offers
+  `hermes update`, and Settings → Advanced lists the `~/.hermes` path.
+- **Knowledge pages are pre-scanned at launch.** Skills/Memory, Agents and Plans
+  are scanned in the background shortly after startup, staggered by measured
+  cost, so the first visit shows data instead of a spinner. Skill and agent stat
+  cards, including this week's hit ranking, are warmed at the same time.
+- **A scan-status label** next to the refresh button on Skills, Memory, Agents
+  and Plans shows the current phase while scanning and "上次扫描 …" when idle.
+
+### Changed
+
+- **Opening Skills / Memory / Agents / Plans no longer rescans.** Refresh now
+  means "scan only if never scanned", and the refresh button is an explicit
+  force-rescan. Plans' old 30-second throttle is gone. Because nothing watches
+  the filesystem, items added outside the app appear after a manual refresh.
+- `eureka --usage-snapshot` now really is a full scan — it was missing the
+  Gemini, Qwen and Hermes scanners, so their rows only landed in the ledger if
+  the GUI happened to scan them first.
+- The Limits panel names Hermes among the agents with no local rate-limit data.
+- Source logos can be bitmaps: Hermes ships a PNG, everything else stays SVG.
+
+### Fixed
+
+- Sessions that live in a shared database (opencode and now Hermes) no longer
+  offer a delete control that silently deletes nothing — the checkbox and delete
+  button are disabled with an explanatory tooltip, and the session detail pane
+  stops showing the shared database file as if it were that session's transcript.
+
 ## [0.8.0] - 2026-07-25
 
 ### Added
@@ -472,6 +545,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.9.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.9.0
 [0.8.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.8.0
 [0.7.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.7.0
 [0.6.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.2
