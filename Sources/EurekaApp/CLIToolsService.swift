@@ -54,6 +54,12 @@ final class CLIToolsService: ObservableObject {
              command: "qwen", npmPackage: "@qwen-code/qwen-code",
              installCommand: "npm install -g @qwen-code/qwen-code",
              updateCommand: "npm install -g @qwen-code/qwen-code@latest"),
+        // Hermes 是 Python + git 安装（~/.hermes/hermes-agent，入口 ~/.local/bin/hermes），
+        // 不在 npm 上 → npmPackage 留空；自带 `hermes update`（会跳过用户改过的内置技能）。
+        Tool(id: "hermes", name: "Hermes Agent", source: .hermes,
+             command: "hermes", npmPackage: "",
+             installCommand: "curl -fsSL https://hermes.nousresearch.com/install.sh | bash",
+             updateCommand: "hermes update"),
     ]
     @Published private(set) var detected = false
 

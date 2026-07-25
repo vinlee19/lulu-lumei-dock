@@ -182,6 +182,13 @@ extension AgentSource {
         case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot 蔚蓝 #1783FF
         case .gemini: return Color(red: 0.259, green: 0.522, blue: 0.957)  // Google 蓝 #4285F4
         case .qwen: return Color(red: 0.38, green: 0.36, blue: 0.93)       // 通义紫 #615CED
+        // Hermes（Nous Research）官方素材是黑白线稿 → 同 OpenCode 走动态墨色：
+        // 浅色近黑 #1A1A1E，深色浅灰 #E4E4E8（岛上恒深底也要看得见）。要换成有色只改这一处。
+        case .hermes: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.894, green: 0.894, blue: 0.909, alpha: 1)
+                : NSColor(srgbRed: 0.102, green: 0.102, blue: 0.118, alpha: 1)
+        }))
         }
     }
 }
@@ -324,6 +331,43 @@ struct KimiMarkShape: Shape {
     }
 }
 
+/// Hermes 标记：带翼头盔（赫尔墨斯的 petasos）——实心圆顶 + 帽檐 + 两侧后掠翼。
+/// Nous 官方素材是 512px 黑白插画（不透明白底 + 黑框），缩到徽标实际尺寸 9–15pt 只会糊成深色方块，
+/// 故与 OpenCode 同策略按比例代码绘制。**走实心剪影而非细描边**：本组里 9pt 下仍清楚的
+/// （Claude 星芒 / Gemini 四角星 / Kimi K）都是实心，细线在 18px 上会糊成波浪。
+struct HermesMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        /// 归一化取点：以 rect 中心为基准，非正方形也居中
+        func point(_ fx: CGFloat, _ fy: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + side * (fx - 0.5), y: rect.midY + side * (fy - 0.5))
+        }
+        var path = Path()
+        // 圆顶：上半弧 + 底边闭合 = 实心半圆（y 向下，180°→360° 经 270° 即正上方）
+        path.move(to: point(0.27, 0.62))
+        path.addArc(
+            center: point(0.50, 0.62), radius: side * 0.23,
+            startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+        path.closeSubpath()
+        // 帽檐：略宽于圆顶的圆角横条
+        let brimOrigin = point(0.20, 0.62)
+        path.addRoundedRect(
+            in: CGRect(x: brimOrigin.x, y: brimOrigin.y,
+                       width: side * 0.60, height: side * 0.09),
+            cornerSize: CGSize(width: side * 0.045, height: side * 0.045))
+        // 两侧后掠翼：自帽檐两端向外上挑，翼尖要明显高过帽檐才读得出「翼」
+        for direction in [CGFloat(-1), 1] {
+            let inner = 0.5 + direction * 0.27
+            let tip = 0.5 + direction * 0.50
+            path.move(to: point(inner, 0.625))
+            path.addLine(to: point(tip, 0.40))
+            path.addLine(to: point(inner, 0.735))
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
 /// Antigravity 标记：双层上升人字（⌃⌃），呼应「反重力 / 上升」
 struct AntigravityMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
@@ -342,7 +386,8 @@ struct AntigravityMarkShape: Shape {
 }
 
 /// 官方 logo 资产（Resources/source-logos/*.svg，macOS 14 NSImage 原生渲染矢量）。
-/// Grok 官方标为纯黑 → 深色环境用白色变体；OpenCode 用代码绘制（见 OpencodeMarkShape）。
+/// Grok 官方标为纯黑 → 深色环境用白色变体；OpenCode / Hermes 用代码绘制
+/// （见 OpencodeMarkShape / HermesMarkShape）——官方素材是精细插画，缩到 9–15pt 会糊成方块。
 enum SourceLogo {
     private static var cache: [String: NSImage] = [:]
     private static let lock = NSLock()
@@ -357,7 +402,7 @@ enum SourceLogo {
         case .kimi: name = "logo-kimi"
         case .gemini: name = "logo-gemini"
         case .qwen: name = "logo-qwen"
-        case .opencode: return nil
+        case .opencode, .hermes: return nil  // 无资产：由 SourceBadge 走代码绘制分支
         }
         lock.lock()
         defer { lock.unlock() }
@@ -422,6 +467,8 @@ struct SourceBadge: View {
             GeminiMarkShape().fill(source.brandColor)
         case .qwen:
             GeminiMarkShape().fill(source.brandColor)  // 兜底同用四角星（仅资产缺失时）
+        case .hermes:
+            HermesMarkShape().fill(source.brandColor)  // 无官方矢量：这就是 Hermes 的正式标记
         case .opencode:
             EmptyView()
         }

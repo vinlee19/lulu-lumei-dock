@@ -379,6 +379,7 @@ final class SessionBrowserService: ObservableObject {
         case .kimi: resume = "kimi --session \(session.id)"
         case .gemini: resume = "gemini --resume \(session.id)"
         case .qwen: resume = "qwen --resume \(session.id)"
+        case .hermes: resume = "hermes --resume \(session.id)"
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume

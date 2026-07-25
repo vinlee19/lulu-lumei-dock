@@ -169,6 +169,7 @@ final class SkillMemoryService: ObservableObject {
             case .kimi: root = KimiPaths.skillsRoot()
             case .gemini: root = GeminiPaths.skillsRoot()
             case .qwen: root = QwenPaths.skillsRoot()
+            case .hermes: root = HermesPaths.skillsRoot()
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -241,6 +242,24 @@ final class SkillMemoryService: ObservableObject {
                 return
             case .qwen:
                 dir = QwenPaths.memoriesRoot()
+            case .hermes:
+                // hermes 记忆 = 固定两份全局文件（memories/MEMORY.md 与 USER.md），name 参数忽略。
+                // 正文是「条目以 \n§\n 相连」的扁平格式且有字数上限，外部写坏会触发 Hermes 的
+                // 漂移保护（存 .bak 并拒绝后续写入）→ 这里建**空文件**，让 Hermes 自己写第一条。
+                let file = HermesPaths.memoriesRoot().appendingPathComponent("MEMORY.md")
+                var ok = false
+                do {
+                    try FileManager.default.createDirectory(
+                        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if !FileManager.default.fileExists(atPath: file.path) {
+                        try Data().write(to: file, options: .atomic)
+                    }
+                    ok = true
+                } catch {
+                    self?.report(error)
+                }
+                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                return
             case .gemini:
                 // gemini 记忆 = 全局 GEMINI.md（GEMINI.md-first，无 memories 目录概念）：
                 // 直接创建 ~/.gemini/GEMINI.md（name 参数忽略），已存在则不覆盖

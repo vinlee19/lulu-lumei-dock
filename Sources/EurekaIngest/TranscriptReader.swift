@@ -68,7 +68,52 @@ public enum TranscriptReader {
             return loadGemini(path: session.transcriptPath, maxMessages: maxMessages)
         case .qwen:
             return loadQwen(path: session.transcriptPath, maxMessages: maxMessages)
+        case .hermes:
+            return loadHermes(
+                dbPath: session.transcriptPath, sessionId: session.id,
+                maxMessages: maxMessages)
         }
+    }
+
+    // MARK: - Hermes（~/.hermes/state.db 的 messages 表；role=tool 转工具注记）
+
+    /// Hermes 把消息全部存在 state.db（无逐会话 JSONL）。timestamp 是 epoch **秒**（opencode 那张表是毫秒）。
+    /// 只读打开：SQLITE_OPEN_READONLY + 普通路径 → WAL 可见（不能用 immutable=1，会读到旧数据）。
+    public static func loadHermes(dbPath: String, sessionId: String, maxMessages: Int) -> Result {
+        guard let db = try? SQLiteDB(path: dbPath, readOnly: true) else {
+            return Result(messages: [], truncated: false)
+        }
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+        let rows = (try? db.query("""
+        SELECT role, content, tool_name, timestamp FROM messages
+        WHERE session_id = ? ORDER BY timestamp, id
+        """, [.text(sessionId)]) { row -> (String, String, String, Double) in
+            (row.text(0) ?? "", row.text(1) ?? "", row.text(2) ?? "", row.real(3))
+        }) ?? []
+
+        for (role, content, toolName, epoch) in rows {
+            guard messages.count < maxMessages else {
+                truncated = true
+                break
+            }
+            let timestamp = Date(timeIntervalSince1970: epoch)
+            let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch role {
+            case "user", "assistant":
+                guard !text.isEmpty else { continue }
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: role == "user" ? .user : .assistant,
+                    text: text, timestamp: timestamp))
+            case "tool":
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .toolNote,
+                    text: "🔧 \(toolName.isEmpty ? "工具" : toolName)", timestamp: timestamp))
+            default:
+                break  // system / 其它角色不进正文
+            }
+        }
+        return Result(messages: messages, truncated: truncated)
     }
 
     // MARK: - Qwen（projects/<encoded>/chats/<uuid>.jsonl；thought parts 跳过、functionCall → toolNote）
