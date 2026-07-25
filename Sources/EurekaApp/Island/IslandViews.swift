@@ -189,6 +189,9 @@ extension AgentSource {
                 ? NSColor(srgbRed: 0.894, green: 0.894, blue: 0.909, alpha: 1)
                 : NSColor(srgbRed: 0.102, green: 0.102, blue: 0.118, alpha: 1)
         }))
+        // CodeBuddy 官方 logo 是青→紫径向渐变（#2EA99D → #6C4DFF）→ 取主色紫
+        case .codebuddy: return Color(red: 0.424, green: 0.302, blue: 1.0)  // CodeBuddy 紫 #6C4DFF
+        case .qoder: return Color(red: 0.165, green: 0.859, blue: 0.361)    // Qoder 绿 #2ADB5C
         }
     }
 }
@@ -406,6 +409,8 @@ enum SourceLogo {
         case .hermes:
             name = "logo-hermes"
             ext = "png"  // Nous 官方素材是 512×512 位图
+        case .codebuddy: name = "logo-codebuddy"
+        case .qoder: name = "logo-qoder"
         case .opencode: return nil  // 无资产：由 SourceBadge 走代码绘制分支
         }
         lock.lock()
@@ -473,6 +478,11 @@ struct SourceBadge: View {
             GeminiMarkShape().fill(source.brandColor)  // 兜底同用四角星（仅资产缺失时）
         case .hermes:
             HermesMarkShape().fill(source.brandColor)  // 仅 logo-hermes.png 缺失时兜底
+        case .codebuddy:
+            // 兜底圆角方块（近官方圆角矩形底，仅资产缺失时）
+            RoundedRectangle(cornerRadius: size * 0.28).fill(source.brandColor)
+        case .qoder:
+            Circle().fill(source.brandColor)  // 兜底圆点（仅资产缺失时）
         case .opencode:
             EmptyView()
         }

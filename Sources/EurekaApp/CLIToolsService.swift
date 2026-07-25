@@ -1,4 +1,5 @@
 import AppKit
+import EurekaIngest
 import EurekaKit
 import Foundation
 
@@ -60,6 +61,17 @@ final class CLIToolsService: ObservableObject {
              command: "hermes", npmPackage: "",
              installCommand: "curl -fsSL https://hermes.nousresearch.com/install.sh | bash",
              updateCommand: "hermes update"),
+        Tool(id: "codebuddy", name: "CodeBuddy", source: .codebuddy,
+             command: "codebuddy", npmPackage: "@tencent-ai/codebuddy-code",
+             installCommand: "npm install -g @tencent-ai/codebuddy-code",
+             updateCommand: "npm install -g @tencent-ai/codebuddy-code@latest"),
+        // Qoder CLI（CN）不在 npm 上，二进制在 ~/.qoder-cn/bin/qoderclicn/qoderclicn-<version>
+        // （版本号在文件名里，glob 取最新）→ npmPackage 留空、command 用实际路径；
+        // 无已知自更新命令 → updateCommand 留空，仅提供下载指引。
+        Tool(id: "qoder", name: "Qoder", source: .qoder,
+             command: QoderPaths.cliBinary()?.path ?? "qoderclicn", npmPackage: "",
+             installCommand: "从 https://qoder.com 下载安装 Qoder（CN 版 CLI 随客户端分发）",
+             updateCommand: ""),
     ]
     @Published private(set) var detected = false
 

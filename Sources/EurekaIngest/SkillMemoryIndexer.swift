@@ -411,6 +411,8 @@ public enum SkillMemoryIndexer {
         geminiHome: URL? = nil,
         qwenHome: URL? = nil,
         hermesHome: URL? = nil,
+        codeBuddyMemoryRoot: URL? = nil,
+        qoderMemoriesRoot: URL? = nil,
         projectRoots: [(root: URL, name: String)] = [],
         codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
     ) -> [MemoryEntry] {
@@ -535,6 +537,23 @@ public enum SkillMemoryIndexer {
                 scope: "SOUL", kind: .instructions)
         }
 
+        // codebuddy 全局记忆 ~/.codebuddy/memery/**/*.md（官方拼写就是 memery，勿"修正"）
+        if let codeBuddyMemoryRoot {
+            for file in enumerateMarkdown(codeBuddyMemoryRoot) {
+                add(file, source: .codebuddy,
+                    scope: file.deletingPathExtension().lastPathComponent)
+            }
+        }
+
+        // qoder 全局记忆 memories/<user-hash>/global/<category>/**/*.md：
+        // scope 取相对 global/ 的类别路径（拿不到类别就退回文件名）
+        if let qoderMemoriesRoot {
+            for file in enumerateMarkdown(qoderMemoriesRoot) {
+                add(file, source: .qoder,
+                    scope: qoderMemoryScope(file: file, root: qoderMemoriesRoot))
+            }
+        }
+
         // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、GEMINI.md→Gemini、
         // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
         // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
@@ -577,6 +596,22 @@ public enum SkillMemoryIndexer {
             files.append(url)
         }
         return files
+    }
+
+    /// qoder 记忆的展示 scope：相对 memories 根的去扩展名路径；
+    /// 剥掉 <user-hash>/global/ 前缀，留下 <category>/<名>（无此前缀时原样返回）
+    static func qoderMemoryScope(file: URL, root: URL) -> String {
+        let rootPath = root.standardizedFileURL.path
+        var rel = file.deletingPathExtension().standardizedFileURL.path
+        if rel.hasPrefix(rootPath + "/") {
+            rel = String(rel.dropFirst(rootPath.count + 1))
+        }
+        if rel.hasPrefix("global/") {
+            rel = String(rel.dropFirst("global/".count))
+        } else if let range = rel.range(of: "/global/") {
+            rel = String(rel[range.upperBound...])
+        }
+        return rel
     }
 
     /// Claude 把 cwd 的 "/" 编码成 "-"；取末段作为项目名（含点的目录名会有损，但末段通常准确）

@@ -5,7 +5,7 @@
 **把本地 AI 编码助手装进 macOS 菜单栏的一座「灵动岛」。**
 
 把任务活动实时呈现,配上 ccusage 级精度的用量账本、订阅限额余量,以及会话 / 技能 / agent / 记忆管理、
-操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code**,全在一处。
+操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · CodeBuddy · Qoder**,全在一处。
 
 `Swift 5.10 + SwiftPM` · `唯一第三方依赖为 Sparkle` · `核心数据留在本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
@@ -113,9 +113,14 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 | **Grok** | ✅ | 仅活动量¹ | ✅(本地) | ✅ | ✅ |
 | **Antigravity** | ✅ | 仅活动量¹ | — | ✅ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅(技能) |
+| **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅(记忆) |
+| **Qoder** | ✅ | —² | — | ✅ | ✅(记忆/计划) |
 
 ¹ Grok 是订阅制、Antigravity 会话是 protobuf,两者本地都不暴露 per‑request token 账,只能给活动量
 (调用 / 会话)。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
+
+² Qoder(CN)本地日志中 token 恒为 0,不展示用量账;会话、实时任务、计划与记忆均正常。
+CodeBuddy 的 token 记在 transcript 的 `function_call` 行上,由用量扫描器读取。
 
 ## 快速上手
 
