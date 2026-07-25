@@ -24,6 +24,32 @@ public enum PlanMaterializer {
         }
     }
 
+    /// 计划状态（列表状态字 / 图标进度环 / 统计分布共用）。由 kind + 清单完成度派生。
+    public enum PlanStatus: String, Equatable, Sendable {
+        case complete       // 全部完成
+        case inProgress     // 进行中（有清单，部分完成，或无清单的活动方案）
+        case draft          // 草稿（有清单但一项未做）
+        case document       // 文档（计划文档 / 项目文档，无进度概念）
+
+        public var displayName: String {
+            switch self {
+            case .complete: return "已完成"
+            case .inProgress: return "进行中"
+            case .draft: return "草稿"
+            case .document: return "文档"
+            }
+        }
+    }
+
+    /// 由任务清单完成度派生状态：无清单 → 文档；否则 完成 / 草稿 / 进行中。
+    /// （kind 只表示文档类型，不决定状态——带清单的项目文档同样显示进度。）
+    public static func deriveStatus(done: Int, total: Int) -> PlanStatus {
+        if total == 0 { return .document }
+        if done >= total { return .complete }
+        if done == 0 { return .draft }
+        return .inProgress
+    }
+
     /// 计划条目（Plans 标签浏览用）
     public struct PlanEntry: Equatable, Sendable, Identifiable {
         public var id: String { path }
@@ -35,12 +61,29 @@ public enum PlanMaterializer {
         public var modifiedAt: Date
         /// 项目内 plan 文档 = 所属项目名；agent 计划 = nil
         public var project: String?
+        // 派生字段（索引时解析正文得到）
+        /// 已完成清单项数
+        public var stepsDone: Int
+        /// 清单项总数（0 = 无任务清单）
+        public var stepsTotal: Int
+        /// 派生状态
+        public var status: PlanStatus
+        /// 一句话摘要（正文首个有意义行）
+        public var summary: String?
+
+        /// 完成占比（无清单 → nil）
+        public var progress: Double? {
+            stepsTotal > 0 ? Double(stepsDone) / Double(stepsTotal) : nil
+        }
 
         public init(
             source: AgentSource, title: String, path: String,
             kind: PlanKind = .document,
             sizeBytes: UInt64, modifiedAt: Date,
-            project: String? = nil
+            project: String? = nil,
+            stepsDone: Int = 0, stepsTotal: Int = 0,
+            status: PlanStatus = .document,
+            summary: String? = nil
         ) {
             self.source = source
             self.title = title
@@ -49,6 +92,10 @@ public enum PlanMaterializer {
             self.sizeBytes = sizeBytes
             self.modifiedAt = modifiedAt
             self.project = project
+            self.stepsDone = stepsDone
+            self.stepsTotal = stepsTotal
+            self.status = status
+            self.summary = summary
         }
     }
 
@@ -569,14 +616,19 @@ public enum PlanMaterializer {
                     count += 1
                     let values = try? url.resourceValues(
                         forKeys: [.contentModificationDateKey, .fileSizeKey])
+                    let body = readBody(url) ?? ""
+                    let check = PlanParsing.checklist(body)
                     result.append(PlanEntry(
                         source: .claude,  // 占位：项目文档以 kind/project 区分，不按 source 展示
-                        title: planTitle(url),
+                        title: planTitle(body: body, url: url),
                         path: url.path,
                         kind: .projectDocument,
                         sizeBytes: UInt64(values?.fileSize ?? 0),
                         modifiedAt: values?.contentModificationDate ?? .distantPast,
-                        project: projectName))
+                        project: projectName,
+                        stepsDone: check.done, stepsTotal: check.total,
+                        status: deriveStatus(done: check.done, total: check.total),
+                        summary: PlanParsing.summary(body)))
                 }
             }
         }
@@ -590,32 +642,44 @@ public enum PlanMaterializer {
         for url in items where url.pathExtension.lowercased() == "md" {
             let values = try? url.resourceValues(
                 forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let body = readBody(url) ?? ""
+            let kind = planKind(body: body, source: source)
+            let check = PlanParsing.checklist(body)
             result.append(PlanEntry(
                 source: source,
-                title: planTitle(url),
+                title: planTitle(body: body, url: url),
                 path: url.path,
-                kind: planKind(url, source: source),
+                kind: kind,
                 sizeBytes: UInt64(values?.fileSize ?? 0),
-                modifiedAt: values?.contentModificationDate ?? .distantPast))
+                modifiedAt: values?.contentModificationDate ?? .distantPast,
+                stepsDone: check.done, stepsTotal: check.total,
+                status: deriveStatus(done: check.done, total: check.total),
+                summary: PlanParsing.summary(body)))
         }
     }
 
     /// 标题 = 首个 `# ` 标题行，否则文件名
-    private static func planTitle(_ url: URL) -> String {
-        if let head = readHead(url) {
-            for line in head.components(separatedBy: "\n") where line.hasPrefix("# ") {
-                let title = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                if !title.isEmpty { return title }
-            }
+    private static func planTitle(body: String, url: URL) -> String {
+        for line in body.components(separatedBy: "\n") where line.hasPrefix("# ") {
+            let title = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            if !title.isEmpty { return title }
         }
         return url.deletingPathExtension().lastPathComponent
     }
 
-    private static func planKind(_ url: URL, source: AgentSource) -> PlanKind {
-        guard source == .codex, let head = readHead(url) else { return .document }
-        if head.contains("> Codex Plan Mode 最终方案") { return .finalPlan }
-        if head.contains("> Codex 工作清单") { return .workingChecklist }
+    private static func planKind(body: String, source: AgentSource) -> PlanKind {
+        guard source == .codex else { return .document }
+        if body.contains("> Codex Plan Mode 最终方案") { return .finalPlan }
+        if body.contains("> Codex 工作清单") { return .workingChecklist }
         return .document
+    }
+
+    /// 读计划正文（较 readHead 更大上限，供清单/摘要解析；仍限最大字节防超大文件）
+    private static func readBody(_ url: URL, maxBytes: Int = 512 * 1024) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: url.path),
+              let data = try? handle.read(upToCount: maxBytes) else { return nil }
+        try? handle.close()
+        return String(decoding: data, as: UTF8.self)
     }
 
     // MARK: - 工具
@@ -645,10 +709,4 @@ public enum PlanMaterializer {
         }
     }
 
-    private static func readHead(_ url: URL, bytes: Int = 4096) -> String? {
-        guard let handle = FileHandle(forReadingAtPath: url.path),
-              let data = try? handle.read(upToCount: bytes) else { return nil }
-        try? handle.close()
-        return String(decoding: data, as: UTF8.self)
-    }
 }
