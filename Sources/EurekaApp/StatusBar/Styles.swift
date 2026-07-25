@@ -1012,47 +1012,6 @@ struct SourceFilterBar: View {
 
 // MARK: - 紫金改版：进度环 / 进度条 / 范围徽标 / 角色头像 / 角色标签 / 模型芯片
 
-/// Plans 图标卡进度环：完成→绿满环+✓；文档→金文档图标；否则紫弧 + 中心 %（草稿 0 灰）。
-struct ProgressRing: View {
-    let status: PlanMaterializer.PlanStatus
-    let progress: Double?
-    var size: CGFloat = 44
-
-    private let lineWidth: CGFloat = 3.5
-
-    var body: some View {
-        ZStack {
-            Circle().stroke(Theme.hairline, lineWidth: lineWidth)
-            content
-        }
-        .padding(lineWidth / 2)
-        .frame(width: size, height: size)
-    }
-
-    @ViewBuilder private var content: some View {
-        switch status {
-        case .complete:
-            Circle().stroke(Theme.enabledGreen, lineWidth: lineWidth)
-            Image(systemName: "checkmark")
-                .font(.system(size: size * 0.3, weight: .bold))
-                .foregroundStyle(Theme.enabledGreen)
-        case .document:
-            Image(systemName: "doc.text")
-                .font(.system(size: size * 0.34))
-                .foregroundStyle(Theme.gold)
-        case .draft, .inProgress:
-            let fraction = progress ?? 0
-            Circle()
-                .trim(from: 0, to: max(0.0001, fraction))
-                .stroke(Theme.brand, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            Text("\(Int((fraction * 100).rounded()))")
-                .font(.system(size: size * 0.3, weight: .bold).monospacedDigit())
-                .foregroundStyle(status == .draft ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.brand))
-        }
-    }
-}
-
 /// Plans 列表行进度条：灰轨 + 紫填充（固定宽度胶囊；% 文字由调用方另附）。
 struct PlanProgressBar: View {
     let progress: Double
@@ -1083,23 +1042,23 @@ struct ScopeBadge: View {
     }
 }
 
-/// Agents 角色头像：角色色浅底圆角方块 + 角色单字（通/探/实/审/规/建/文）。
+/// Agents 角色方块：与 SourceLogoTile 同一套方块规格（紫底浅框圆角方块），内容换成角色单字
+/// （通/探/实/审/规/建/文）。四页的方块形状 / 线条 / 配色因此完全一致；角色色只留在 RoleTag 上。
 struct RoleAvatar: View {
     let role: AgentRole
     var size: CGFloat = 28
 
     var body: some View {
-        let color = Theme.roleColor(role)
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(color.opacity(0.14))
+            .fill(TileSpec.fill(Theme.brand))
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-                    .strokeBorder(color.opacity(0.18), lineWidth: 0.5))
+                    .strokeBorder(TileSpec.border(Theme.brand), lineWidth: 0.5))
             .overlay(
                 Text(role.glyph)
                     .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(color))
+                    .foregroundStyle(Theme.brand))
     }
 }
 

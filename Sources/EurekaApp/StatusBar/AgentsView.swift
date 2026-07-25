@@ -440,7 +440,7 @@ private struct AgentCard: View {
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 10) {
-                    RoleAvatar(role: item.role, size: 40)
+                    RoleAvatar(role: item.role, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.name)
                             .font(Theme.font.monoSkillName(13))

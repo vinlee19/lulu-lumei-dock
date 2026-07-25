@@ -209,7 +209,8 @@ private func planMenu(
     }
 }
 
-/// 计划图标卡：进度环 + 来源 logo + 标题 + 摘要（2 行）+ 项目·步数·时间；悬停浮现动作
+/// 计划图标卡：与技能卡同一套骨架——紫底方块 logo + 标题 + 摘要 + 状态/项目/时间。
+/// 不放进度环：卡面只交代「是什么、什么状态」，完成度留给列表视图。
 private struct PlanCard: View {
     let plan: PlanMaterializer.PlanEntry
     let service: PlansService
@@ -221,38 +222,31 @@ private struct PlanCard: View {
             minHeight: 92,
             actions: planActions(plan, service: service, onDelete: onDelete), onOpen: onOpen
         ) {
-            HStack(alignment: .top, spacing: 12) {
-                ProgressRing(status: plan.status, progress: plan.progress, size: 46)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 6) {
-                        SourceBadge(source: plan.source, size: 15)
-                        Text(plan.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 4)
-                        Circle().fill(planAccentColor(plan.status)).frame(width: 7, height: 7)
-                    }
-                    if let summary = plan.summary {
-                        Text(summary)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    SourceLogoTile(source: plan.source, size: 28)
+                    // 计划标题比技能名长，留 2 行并恒占位（网格等高）
+                    Text(plan.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(2, reservesSpace: true)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 4)
+                    Circle().fill(planAccentColor(plan.status)).frame(width: 7, height: 7)
+                }
+                Text(plan.summary ?? "")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 0)
+                HStack(spacing: 6) {
+                    Text(plan.status.displayName)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(planAccentColor(plan.status))
+                    if let project = plan.project { TagChip(project) }
                     Spacer(minLength: 0)
-                    HStack(spacing: 8) {
-                        if let project = plan.project {
-                            Text(project).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        if plan.stepsTotal > 0 {
-                            Text("\(plan.stepsDone) / \(plan.stepsTotal) 步")
-                                .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
-                        }
-                        Spacer(minLength: 0)
-                        Text(plan.modifiedAt, formatter: relativeFormatter)
-                            .font(.system(size: 10)).foregroundStyle(.tertiary)
-                    }
+                    Text(plan.modifiedAt, formatter: relativeFormatter)
+                        .font(.system(size: 9.5)).foregroundStyle(.tertiary)
                 }
             }
         } menu: {
@@ -274,7 +268,8 @@ private struct PlanRow: View {
         ) {
             HStack(spacing: 10) {
                 Circle().fill(planAccentColor(plan.status)).frame(width: 8, height: 8)
-                SourceBadge(source: plan.source, size: 16)
+                // 与技能 / 记忆 / 代理列表行同款方块（紫底浅框 28pt）
+                SourceLogoTile(source: plan.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plan.title)
                         .font(.system(size: 13, weight: .semibold))
