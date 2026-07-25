@@ -19,7 +19,7 @@ import EurekaStore
 /// 而 usage_records 也没有整行覆盖的更新接口。快照按会话分行存（不是整库一坨 JSON），
 /// 写入量只与"本轮变动的会话数"成正比。
 public final class HermesUsageScanner {
-    private let stateDBs: [URL]
+    private let stateDBs: () -> [URL]
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
     /// 分批查询的会话数上限（IN 占位符规模，与 Store 各仓一致量级）
@@ -30,16 +30,22 @@ public final class HermesUsageScanner {
 
     /// stateDBs 由调用方传入（app/CLI 用 `HermesPaths.allStateDBs()` 覆盖全部 profile，
     /// 测试用临时库）—— EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
-    public init(stateDBs: [URL], store: EurekaStore) {
+    /// 传**闭包**而非数组：`allStateDBs()` 按 `fileExists` 过滤，运行期才装 Hermes
+    /// （或新建 profile）的用户否则要重启 app 才有用量。与 HermesStateTailer 同一口径。
+    public init(stateDBs: @escaping () -> [URL], store: EurekaStore) {
         self.stateDBs = stateDBs
         self.store = store
+    }
+
+    public convenience init(stateDBs: [URL], store: EurekaStore) {
+        self.init(stateDBs: { stateDBs }, store: store)
     }
 
     /// 返回本轮新增的 usage 记录数
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
-        for dbPath in stateDBs {
+        for dbPath in stateDBs() {
             inserted += try scan(dbPath: dbPath, now: Date())
         }
         return inserted
@@ -229,7 +235,7 @@ public final class HermesUsageScanner {
     /// 区间内各会话的官方成本（sessions 行为准：它含网关旁路的累计写，比 usage 表全）
     public func officialCosts(from: Date, to: Date) -> [OfficialCost] {
         var result: [OfficialCost] = []
-        for dbPath in stateDBs {
+        for dbPath in stateDBs() {
             guard let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { continue }
             result += (try? db.query("""
                 SELECT id, model, estimated_cost_usd, actual_cost_usd, cost_status

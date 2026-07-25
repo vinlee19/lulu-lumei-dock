@@ -164,7 +164,7 @@ final class UsageService: ObservableObject {
                     projectsRoot: QwenPaths.projectsRoot(), store: store)
                 // hermes：token/成本都在 state.db（含各 profile 的独立库）
                 self.hermesScanner = HermesUsageScanner(
-                    stateDBs: HermesPaths.allStateDBs(), store: store)
+                    stateDBs: { HermesPaths.allStateDBs() }, store: store)
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),

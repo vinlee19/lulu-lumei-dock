@@ -232,7 +232,7 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(events.count, 2, "ended_at 落地后应再产出完成事件")
     }
 
-    t.test("实时监视：启动前就在跑的会话全程静默（Hermes 崩溃时不写 ended_at，否则满屏假卡）") {
+    t.test("实时监视：启动前就在跑的会话首扫只记水位，随后收尾也不补卡") {
         // Hermes 只在干净退出时写 ended_at → 时间窗内每个被 kill 的会话都永远是 ended_at IS NULL。
         // 若首扫把它们当活跃，启动瞬间就会因空闲收尾刷出一堆完成卡，故首扫一律记为已收尾。
         let db = try makeStateDB()
@@ -245,6 +245,84 @@ func hermesIngestTests(_ t: TestRunner) {
         try handle.run("UPDATE sessions SET ended_at = ?", [.real(base + 1)])
         tailer.scanOnce(now: Date(timeIntervalSince1970: base + 2))
         try expectEqual(events.count, 0, "首扫已见过的会话即便随后收尾，也不该补出卡片")
+    }
+
+    t.test("实时监视：启动前就在跑的会话一旦有推进就出卡（真在干活的不能被水位埋掉）") {
+        // 上一条测的是「不推进则静默」。这条钉住反面：水位记为已收尾的行若计数器往前走，
+        // 说明它真在跑，必须补出开始卡 —— 否则启动前开的会话在 app 里永远是隐身的。
+        let db = try makeStateDB()
+        defer { try? FileManager.default.removeItem(at: db.deletingLastPathComponent()) }
+        var events: [TaskEvent] = []
+        let tailer = HermesStateTailer(stateDBs: { [db] }) { event, _ in events.append(event) }
+        let base: Double = 1_700_000_100
+        tailer.scanOnce(now: Date(timeIntervalSince1970: base))
+        try expectEqual(events.count, 0, "首扫只记水位")
+
+        let handle = try SQLiteDB(path: db.path)
+        try handle.run("UPDATE sessions SET message_count = message_count + 3")
+        tailer.scanOnce(now: Date(timeIntervalSince1970: base + 2))
+        try expectEqual(events.count, 1, "计数器推进 → 补出开始卡")
+        guard case .taskStarted = events[0].kind else {
+            throw ExpectationError(description: "水位态推进应出 taskStarted，实际 \(events[0].kind)")
+        }
+        // 第二次推进是心跳而非重复开始卡
+        try handle.run("UPDATE sessions SET tool_call_count = tool_call_count + 1")
+        tailer.scanOnce(now: Date(timeIntervalSince1970: base + 4))
+        try expectEqual(events.count, 2)
+        guard case .activity = events[1].kind else {
+            throw ExpectationError(description: "已活跃会话再推进应出 activity，实际 \(events[1].kind)")
+        }
+    }
+
+    t.test("未装 Hermes：四条读取路径全部安静返回空，不抛不炸") {
+        // 绝大多数用户没有 ~/.hermes。这几条断言把「静默降级」钉死，
+        // 免得后续重构掉一个 try? 就变成启动报错 / 红灯。
+        let nowhere = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-no-hermes-\(UUID())", isDirectory: true)
+        let env = ["EUREKA_HERMES_HOME": nowhere.path]
+        try expectEqual(HermesPaths.allStateDBs(environment: env).count, 0, "库不存在应被过滤掉")
+        try expectEqual(HermesSessionIndexer.indexAll(environment: env).count, 0)
+        try expectEqual(HermesSessionIndexer.recentDirectories(environment: env).count, 0)
+
+        var events: [TaskEvent] = []
+        let tailer = HermesStateTailer(stateDBs: { [] }) { event, _ in events.append(event) }
+        tailer.scanOnce(now: Date(timeIntervalSince1970: 1_700_000_100))
+        try expectEqual(events.count, 0, "无库时轮询不该产出任何事件")
+
+        try FileManager.default.createDirectory(at: nowhere, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: nowhere) }
+        let store = try EurekaStore(path: nowhere.appendingPathComponent("eureka.sqlite"))
+        try expectEqual(try HermesUsageScanner(stateDBs: [], store: store).scanOnce(), 0)
+        try expectEqual(
+            SkillMemoryIndexer.indexSkills(
+                claudeSkillsRoot: nowhere.appendingPathComponent("nx"),
+                codexSkillsRoot: nowhere.appendingPathComponent("nx"),
+                hermesSkillsRoot: nowhere.appendingPathComponent("skills")).count,
+            0, "技能根不存在应返回空")
+        // config.yaml 不存在 → 读成空串，禁用名单为空，且不该凭空建块
+        try expectEqual(HermesConfigEditor.disabledSkills(from: ""), Set<String>())
+        try expectEqual(HermesConfigEditor.setSkillDisabled("plan", disabled: false, in: ""), "")
+    }
+
+    t.test("state.db 存在但 schema 不认识：查询失败也只是空结果") {
+        // 用户可能装了老版 / 新版 Hermes，表名或列不一样；此时必须静默跳过而不是崩。
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-hermes-badschema-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("state.db")
+        let db = try SQLiteDB(path: path.path)
+        try db.run("CREATE TABLE unrelated (id TEXT)")
+
+        try expectEqual(
+            HermesSessionIndexer.index(dbPath: path, maxSessions: 10).count, 0,
+            "没有 sessions 表应返回空而不是抛错")
+        var events: [TaskEvent] = []
+        let tailer = HermesStateTailer(stateDBs: { [path] }) { event, _ in events.append(event) }
+        tailer.scanOnce(now: Date(timeIntervalSince1970: 1_700_000_100))
+        try expectEqual(events.count, 0)
+        let store = try EurekaStore(path: dir.appendingPathComponent("eureka.sqlite"))
+        try expectEqual(try HermesUsageScanner(stateDBs: [path], store: store).scanOnce(), 0)
     }
 
     t.test("技能树：递归扫分类/子分类/顶层三种深度，跳过 references 等支持目录") {

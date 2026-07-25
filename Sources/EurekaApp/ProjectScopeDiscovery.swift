@@ -10,7 +10,8 @@ enum ProjectScopeDiscovery {
         ProjectRoots.recentCwds(
             claudeProjectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
             codexSessionsRoot: CodexRolloutTailer.defaultSessionsRoot(),
-            opencodeDbPath: OpencodePaths.db())
+            opencodeDbPath: OpencodePaths.db(),
+            includeHermes: true)
     }
 
     static func repoRoots(resolver: ProjectResolver) -> [(root: URL, name: String)] {

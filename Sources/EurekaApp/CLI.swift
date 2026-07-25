@@ -169,13 +169,24 @@ enum EurekaCLI {
             let opencode = OpencodeUsageScanner(dbPath: OpencodePaths.db(), store: store)
             let grok = GrokUsageScanner(sessionsRoot: GrokPaths.sessionsRoot(), store: store)
             let kimi = KimiUsageScanner(sessionsRoot: KimiPaths.sessionsRoot(), store: store)
+            let gemini = GeminiUsageScanner(
+                tmpRoot: GeminiPaths.tmpRoot(),
+                projectsFile: GeminiPaths.projectsFile(), store: store)
+            let qwen = QwenUsageScanner(projectsRoot: QwenPaths.projectsRoot(), store: store)
+            let hermes = HermesUsageScanner(
+                stateDBs: { HermesPaths.allStateDBs() }, store: store)
             let newClaude = try claude.scanOnce()
             let newCodex = try codex.scanOnce()
             let newOpencode = try opencode.scanOnce()
             let newGrok = try grok.scanOnce()  // grok 无 token，仅入工具调用计数
             let newKimi = try kimi.scanOnce()
+            let newGemini = try gemini.scanOnce()
+            let newQwen = try qwen.scanOnce()
+            let newHermes = try hermes.scanOnce()
             FileHandle.standardError.write(Data(
-                "扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，grok 工具 +\(newGrok)，kimi +\(newKimi) 条\n".utf8))
+                ("扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，"
+                    + "grok 工具 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
+                    + "qwen +\(newQwen) 条，hermes +\(newHermes) 条\n").utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(
