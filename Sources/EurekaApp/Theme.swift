@@ -1,3 +1,4 @@
+import EurekaIngest
 import EurekaInstall
 import EurekaKit
 import SwiftUI
@@ -50,6 +51,8 @@ enum Theme {
     static let failureRed = Color(.sRGB, red: 0.82, green: 0.27, blue: 0.23, opacity: 1)
     /// 自动清理灰
     static let autoCleanGray = Color(.sRGB, red: 0.64, green: 0.64, blue: 0.66, opacity: 1)
+    /// 草稿灰（计划状态；palette #CFCFD6）
+    static let draftGray = Color(hex: "CFCFD6")
 
     /// 任务结局：成功绿 / 出错红 / 中断灰
     static func outcomeColor(_ outcome: TaskOutcome) -> Color {
@@ -114,6 +117,31 @@ enum Theme {
         brand.opacity(opacity)
     }
 
+    // MARK: - 角色 / 计划状态语义色（紫金稿）
+
+    /// 子代理角色标识色（palette「角色 · Agents」；实现=品牌紫，其余取 palette 固定值）
+    static func roleColor(_ role: AgentRole) -> Color {
+        switch role {
+        case .general: return Color(hex: "8A8A90")
+        case .explore: return Color(hex: "2A8FD4")
+        case .implement: return brand
+        case .review: return Color(hex: "B08A1E")
+        case .plan: return Color(hex: "7A5CF0")
+        case .model: return Color(hex: "C2762A")
+        case .doc: return Color(hex: "2CA24A")
+        }
+    }
+
+    /// 计划状态色：完成绿 / 进行紫 / 草稿灰 / 文档金
+    static func planStatusColor(_ status: PlanMaterializer.PlanStatus) -> Color {
+        switch status {
+        case .complete: return enabledGreen
+        case .inProgress: return brand
+        case .draft: return draftGray
+        case .document: return gold
+        }
+    }
+
     // MARK: - 间距（Codex 式宽松留白：模块间大间距，卡片内舒适内边距）
 
     enum spacing {
@@ -132,8 +160,8 @@ enum Theme {
     // MARK: - 圆角（简约两级阶梯：卡片 12 / 容器 10 / 小方块与侧栏项 8）
 
     enum radius {
-        /// 卡片 / 大容器
-        static let card: CGFloat = 12
+        /// 卡片 / 大容器（紫金稿：14）
+        static let card: CGFloat = 14
         /// 小型容器（统计瓦片、内嵌面板）
         static let container: CGFloat = 10
         /// 小方块（logo 块 / 图标块）与侧栏导航项
@@ -163,5 +191,27 @@ enum Theme {
         static func statNumber(_ size: CGFloat = 18) -> Font {
             .system(size: size, weight: .bold).monospacedDigit()
         }
+    }
+}
+
+extension Color {
+    /// 从 `#RRGGBB` / `RRGGBB` / `#RRGGBBAA` 十六进制创建（便于精确落 palette 色值）。
+    init(hex: String) {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var value: UInt64 = 0
+        Scanner(string: cleaned).scanHexInt64(&value)
+        let r, g, b, a: Double
+        if cleaned.count == 8 {
+            r = Double((value >> 24) & 0xFF) / 255
+            g = Double((value >> 16) & 0xFF) / 255
+            b = Double((value >> 8) & 0xFF) / 255
+            a = Double(value & 0xFF) / 255
+        } else {
+            r = Double((value >> 16) & 0xFF) / 255
+            g = Double((value >> 8) & 0xFF) / 255
+            b = Double(value & 0xFF) / 255
+            a = 1
+        }
+        self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 }

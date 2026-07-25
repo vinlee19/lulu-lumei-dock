@@ -1,3 +1,4 @@
+import EurekaIngest
 import EurekaKit
 import SwiftUI
 
@@ -199,9 +200,10 @@ struct StatTile: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
             // 等宽均分：内容撑满分配宽度，HStack 中每片一样大
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,12 +275,15 @@ private struct KnowledgeCardActions: View {
     }
 }
 
-/// 知识库统一卡片壳：中性底 + 卡片圆角 + 悬停描边；停用态整卡变淡；**无色脊**；
+/// 知识库统一卡片壳：中性底 + 卡片圆角 + 柔和投影 + 悬停描边；停用态整卡变淡；**无色脊**；
 /// 整卡点击进详情；操作按钮默认隐藏、悬停时右下角淡入；右键菜单由调用方按各页语义传入。
 /// content 内推荐布局：`标题行(图标+名+尾附件) → 描述/副标题 → Spacer → meta 行`。
 struct KnowledgeCard<Content: View, Menu: View>: View {
     var enabled = true
-    var height: CGFloat = 108
+    /// 最小高度：0 = 随内容自适应（网格同行自动等高），避免固定高度造成中部空洞
+    var minHeight: CGFloat = 0
+    /// 左侧色脊（Memory 按范围染色：全局紫 / 项目金）；nil = 无脊（默认）
+    var leadingEdge: Color? = nil
     var actions: [CardAction] = []
     let onOpen: () -> Void
     @ViewBuilder var content: () -> Content
@@ -288,13 +293,18 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
 
     var body: some View {
         content()
-            .padding(EdgeInsets(top: 13, leading: 14, bottom: 12, trailing: 13))
-            .frame(height: height, alignment: .topLeading)
+            .padding(12)
+            .frame(minHeight: minHeight, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .fill(Theme.surface)
                     .opacity(enabled ? 1 : 0.6))
+            .overlay(alignment: .leading) {
+                if let leadingEdge {
+                    Rectangle().fill(leadingEdge).frame(width: 3)
+                }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .strokeBorder(
@@ -308,6 +318,7 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius.card))
+            .shadow(color: .black.opacity(0.06), radius: 3, y: 1.5)
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.card))
             .onTapGesture { onOpen() }
             .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
@@ -624,10 +635,10 @@ struct CardActionButton: View {
 
 // MARK: - 布局切换（卡片 / 列表；Skills / Memory / Plans / Agents 四页共用）
 
-/// 知识库视图模式：卡片网格 / 通栏列表
+/// 知识库视图模式：通栏列表 / 图标（卡片网格）。顺序即分段控件顺序（列表在左，默认）。
 enum KnowledgeLayout: String, CaseIterable {
-    case cards = "卡片"
     case list = "列表"
+    case cards = "图标"
     var icon: String { self == .cards ? "square.grid.2x2" : "list.bullet" }
 }
 
@@ -714,7 +725,7 @@ struct KnowledgeRow<Content: View, Menu: View>: View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.vertical, 10)
             .opacity(enabled ? 1 : 0.6)
             .background(
                 ZStack(alignment: .leading) {
@@ -738,5 +749,350 @@ struct KnowledgeRow<Content: View, Menu: View>: View {
             .onTapGesture { onOpen() }
             .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
             .contextMenu { menu() }
+    }
+}
+
+/// 列表模式分组容器：白卡圆角 + 细描边 + 柔和投影，把同一分区的行收进一张「表格」卡
+/// （macOS 系统设置式分组列表）；分隔线由调用方按行内文字起始位置缩进。
+struct KnowledgeListContainer<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(Theme.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .strokeBorder(Theme.cardBorder, lineWidth: 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 3, y: 1.5)
+    }
+}
+
+// MARK: - 紫金改版：统计概览卡 / 来源筛选 chips / 流式布局
+
+/// 换行流式布局（chips 超宽自动折行；macOS 13+ Layout 协议）。
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 10
+    var lineSpacing: CGFloat = 10
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                x = 0
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(maxWidth, widest), height: y + lineHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let maxWidth = bounds.width
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                x = 0
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            view.place(
+                at: CGPoint(x: bounds.minX + x, y: bounds.minY + y),
+                proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
+/// 顶部统计概览卡：左「大数 + 单位 + 副标题」，竖分隔线，右「分布标题 + 可选堆叠段条 + 图例」。
+/// 四页共用；Agents 传 `showBar: false`（只有模型分布图例，无条）。结构性颜色只用语义/品牌色。
+struct StatOverviewCard: View {
+    struct Segment: Identifiable {
+        let id = UUID()
+        let label: String
+        let count: Int
+        let color: Color
+    }
+
+    let value: String
+    let unit: String
+    var subtitle: String?
+    let distributionTitle: String
+    let segments: [Segment]
+    var showBar = true
+    var trailingNote: String?
+
+    private var total: Int { max(1, segments.reduce(0) { $0 + $1.count }) }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(value).font(Theme.font.statNumber(28))
+                    Text(unit).font(.system(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
+                }
+                if let subtitle {
+                    Text(subtitle).font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(minWidth: 120, alignment: .leading)
+
+            Rectangle().fill(Theme.hairline).frame(width: 1, height: 46)
+
+            VStack(alignment: .leading, spacing: 9) {
+                Text(distributionTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                if showBar {
+                    GeometryReader { geo in
+                        HStack(spacing: 1.5) {
+                            ForEach(segments.filter { $0.count > 0 }) { seg in
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .fill(seg.color)
+                                    .frame(width: barWidth(seg, in: geo.size.width))
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipShape(Capsule())
+                    }
+                    .frame(height: 8)
+                }
+                HStack(spacing: 14) {
+                    ForEach(segments) { seg in
+                        HStack(spacing: 5) {
+                            Circle().fill(seg.color).frame(width: 8, height: 8)
+                            Text(seg.label).font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text("\(seg.count)")
+                                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if let trailingNote {
+                        Text(trailingNote).font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.card)
+                .fill(Theme.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.radius.card)
+                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)))
+        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+    }
+
+    private func barWidth(_ seg: Segment, in width: CGFloat) -> CGFloat {
+        let usable = width - CGFloat(max(0, segments.filter { $0.count > 0 }.count - 1)) * 1.5
+        return max(3, usable * CGFloat(seg.count) / CGFloat(total))
+    }
+}
+
+/// 来源筛选 chip：nil = 全部（用页内图标）；否则显来源 logo + 名 + 数。
+/// 选中 = 品牌紫底白字；未选 = 白底细边、悬停微染。
+struct SourceFilterChip: View {
+    var source: AgentSource?
+    var allIcon: String
+    let label: String
+    let count: Int
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                if let source {
+                    SourceBadge(source: source, size: 14)
+                } else {
+                    Image(systemName: allIcon).font(.system(size: 11, weight: .semibold))
+                }
+                Text(label)
+                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                Text("\(count)")
+                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.85))
+                                                : AnyShapeStyle(.secondary))
+            }
+            .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(
+                    isSelected
+                        ? AnyShapeStyle(Theme.brand)
+                        : AnyShapeStyle(hovering ? Theme.brandFill(0.06) : Theme.surface)))
+            .overlay(
+                Capsule().strokeBorder(
+                    isSelected ? Color.clear : Theme.cardBorder, lineWidth: 0.8))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// 来源筛选条：「全部」+ 各来源 chips（换行）。绑定 selectedSource（nil=全部），再点选中项取消。
+struct SourceFilterBar: View {
+    @Binding var selected: AgentSource?
+    let allLabel: String
+    let allIcon: String
+    let totalCount: Int
+    let sources: [AgentSource]
+    let count: (AgentSource) -> Int
+
+    var body: some View {
+        FlowLayout(spacing: 10, lineSpacing: 10) {
+            SourceFilterChip(
+                source: nil, allIcon: allIcon, label: allLabel,
+                count: totalCount, isSelected: selected == nil
+            ) { selected = nil }
+            ForEach(sources, id: \.self) { source in
+                SourceFilterChip(
+                    source: source, allIcon: allIcon, label: source.displayName,
+                    count: count(source), isSelected: selected == source
+                ) { selected = (selected == source ? nil : source) }
+            }
+        }
+    }
+}
+
+// MARK: - 紫金改版：进度环 / 进度条 / 范围徽标 / 角色头像 / 角色标签 / 模型芯片
+
+/// Plans 图标卡进度环：完成→绿满环+✓；文档→金文档图标；否则紫弧 + 中心 %（草稿 0 灰）。
+struct ProgressRing: View {
+    let status: PlanMaterializer.PlanStatus
+    let progress: Double?
+    var size: CGFloat = 44
+
+    private let lineWidth: CGFloat = 3.5
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Theme.hairline, lineWidth: lineWidth)
+            content
+        }
+        .padding(lineWidth / 2)
+        .frame(width: size, height: size)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch status {
+        case .complete:
+            Circle().stroke(Theme.enabledGreen, lineWidth: lineWidth)
+            Image(systemName: "checkmark")
+                .font(.system(size: size * 0.3, weight: .bold))
+                .foregroundStyle(Theme.enabledGreen)
+        case .document:
+            Image(systemName: "doc.text")
+                .font(.system(size: size * 0.34))
+                .foregroundStyle(Theme.gold)
+        case .draft, .inProgress:
+            let fraction = progress ?? 0
+            Circle()
+                .trim(from: 0, to: max(0.0001, fraction))
+                .stroke(Theme.brand, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(Int((fraction * 100).rounded()))")
+                .font(.system(size: size * 0.3, weight: .bold).monospacedDigit())
+                .foregroundStyle(status == .draft ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.brand))
+        }
+    }
+}
+
+/// Plans 列表行进度条：灰轨 + 紫填充（固定宽度胶囊；% 文字由调用方另附）。
+struct PlanProgressBar: View {
+    let progress: Double
+    var width: CGFloat = 88
+
+    var body: some View {
+        Capsule().fill(Theme.hairline)
+            .frame(width: width, height: 6)
+            .overlay(alignment: .leading) {
+                Capsule().fill(Theme.brand)
+                    .frame(width: max(3, width * progress), height: 6)
+            }
+    }
+}
+
+/// Memory 范围徽标：全局=紫描边 / 项目=金描边（描边胶囊，无实底）。
+struct ScopeBadge: View {
+    let isGlobal: Bool
+
+    var body: some View {
+        let tint = isGlobal ? Theme.brand : Theme.gold
+        Text(isGlobal ? "全局" : "项目")
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .overlay(Capsule().strokeBorder(tint.opacity(0.65), lineWidth: 1))
+    }
+}
+
+/// Agents 角色头像：角色色浅底圆角方块 + 角色单字（通/探/实/审/规/建/文）。
+struct RoleAvatar: View {
+    let role: AgentRole
+    var size: CGFloat = 28
+
+    var body: some View {
+        let color = Theme.roleColor(role)
+        RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+            .fill(color.opacity(0.14))
+            .frame(width: size, height: size)
+            .overlay(
+                RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+                    .strokeBorder(color.opacity(0.18), lineWidth: 0.5))
+            .overlay(
+                Text(role.glyph)
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(color))
+    }
+}
+
+/// Agents 角色标签：角色色浅底小胶囊。
+struct RoleTag: View {
+    let role: AgentRole
+
+    var body: some View {
+        let color = Theme.roleColor(role)
+        Text(role.displayName)
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(color.opacity(0.14)))
+    }
+}
+
+/// Agents 模型芯片：中性灰底小胶囊显规整后的模型名。
+struct ModelChip: View {
+    let model: String
+
+    var body: some View {
+        Text(model)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Theme.surfaceSecondary))
     }
 }
