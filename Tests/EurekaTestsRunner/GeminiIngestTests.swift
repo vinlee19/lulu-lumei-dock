@@ -150,4 +150,82 @@ func geminiIngestTests(_ t: TestRunner) {
         try expectEqual(geminiMemories.count, 1)
         try expect(geminiMemories[0].path.hasSuffix("GEMINI.md"))
     }
+
+    t.test("索引：mtime 超出窗口的文件不进列表（窗口过滤先于读内容）") {
+        let (home, chat) = try makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-40 * 86400)],
+            ofItemAtPath: chat.path)
+        let sessions = GeminiSessionIndexer.index(
+            tmpRoot: home.appendingPathComponent("tmp"),
+            projectsFile: home.appendingPathComponent("projects.json"))
+        try expectEqual(sessions.count, 0, "40 天前的会话应被 30 天窗口过滤")
+    }
+
+    t.test("首扫大文件只读头 64KB+尾 256KB：上下文取自头部，最后状态取自尾部") {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory
+            .appendingPathComponent("eureka-gemini-big-\(UUID())", isDirectory: true)
+        defer { try? fm.removeItem(at: home) }
+        let chats = home.appendingPathComponent("tmp/my-proj/chats", isDirectory: true)
+        try fm.createDirectory(at: chats, withIntermediateDirectories: true)
+        try #"{"projects": {"/work/my-proj": "my-proj"}}"#
+            .write(to: home.appendingPathComponent("projects.json"),
+                   atomically: true, encoding: .utf8)
+
+        /// 造一个 >320KB 的会话：头 = header+首条用户消息，中间 = 大量填充，尾 = 最后状态
+        func makeBigChat(_ name: String, finished: Bool) throws -> URL {
+            let chat = chats.appendingPathComponent(name)
+            var lines = [
+                #"{"sessionId":"\#(name)-id","startTime":"2026-07-21T11:22:46.553Z","kind":"main"}"#,
+                #"{"id":"m1","timestamp":"2026-07-21T11:23:00.000Z","type":"user","content":[{"text":"头部标题问题"}]}"#,
+                #"{"id":"m2","timestamp":"2026-07-21T11:24:00.000Z","type":"gemini","content":"先答头部。"}"#,
+            ]
+            // 中间 ~450KB 填充（超出 头64KB+尾256KB 窗口，整块不该被读到）
+            let filler = String(repeating: "填", count: 1000)  // UTF-8 每行约 3KB
+            for i in 0..<150 {
+                lines.append(
+                    #"{"id":"f\#(i)","timestamp":"2026-07-21T12:00:00.000Z","type":"gemini","content":"\#(filler)"}"#)
+            }
+            lines.append(
+                #"{"id":"m8","timestamp":"2026-07-21T13:00:00.000Z","type":"user","content":[{"text":"尾部新问题"}]}"#)
+            if finished {
+                lines.append(
+                    #"{"id":"m9","timestamp":"2026-07-21T13:01:00.000Z","type":"gemini","content":"收尾回答。"}"#)
+            }
+            let content = lines.joined(separator: "\n").appending("\n")
+            try content.write(to: chat, atomically: true, encoding: .utf8)
+            try expect(content.utf8.count > 64 * 1024 + 256 * 1024,
+                       "fixture 必须超过首扫窗口才有意义")
+            return chat
+        }
+
+        _ = try makeBigChat("session-big-run.jsonl", finished: false)
+        _ = try makeBigChat("session-big-done.jsonl", finished: true)
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = GeminiChatTailer(
+            tmpRoot: home.appendingPathComponent("tmp"),
+            projectsFile: home.appendingPathComponent("projects.json")
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()
+
+        // 每个会话只补发一条状态 + 标题，不重放中间 150 条填充
+        try expectEqual(events.count, 4, "首扫只发 状态+标题 ×2 会话: \(events.map(\.0.kind))")
+
+        let run = events.filter { $0.0.sessionId == "session-big-run.jsonl-id" }
+        try expect(run.contains { $0.0.kind == .taskStarted(title: "尾部新问题") },
+                   "尾部 user 晚于 gemini → 恢复 running: \(run.map(\.0.kind))")
+        try expect(run.contains { $0.0.kind == .titleUpdate(title: "头部标题问题") },
+                   "标题应取自头部首条用户消息: \(run.map(\.0.kind))")
+        try expectEqual(run.first?.0.cwd, "/work/my-proj")
+        try expect(run.first?.0.sessionStartedAt != nil, "开始时间来自头部 header")
+
+        let done = events.filter { $0.0.sessionId == "session-big-done.jsonl-id" }
+        try expect(done.contains { $0.0.kind == .sessionStarted },
+                   "尾部 gemini 收尾 → 注册空闲: \(done.map(\.0.kind))")
+        try expect(done.contains { $0.0.kind == .titleUpdate(title: "头部标题问题") },
+                   "标题应取自头部首条用户消息: \(done.map(\.0.kind))")
+    }
 }
