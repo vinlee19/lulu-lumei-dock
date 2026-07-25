@@ -4,6 +4,40 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-07-25
+
+### Added
+
+- **CodeBuddy and Qoder support** — the island, session browser,
+  transcript viewer/search, plans, memory and cloud backup now cover
+  Tencent CodeBuddy (`~/.codebuddy`) and Alibaba Qoder CN (`~/.qoder-cn`),
+  bringing the app to eleven monitored agents. CodeBuddy sessions also
+  feed the usage ledger (tokens ride on its transcript `function_call`
+  lines); Qoder's CN backend reports zero tokens, so it is intentionally
+  excluded from the usage dashboard. Resume jumps via
+  `codebuddy --resume` / `qoderclicn --resume`.
+- **Optional system notifications for key events** — a new
+  关键事件发送系统通知 toggle (off by default) mirrors
+  task-finished / waiting-for-input / task-error island cards to macOS
+  notifications, so they are visible over fullscreen terminals and on
+  other Spaces. Respects the existing per-type island toggles.
+
+### Fixed
+
+- Usage dashboard source-filter chips no longer get clipped at the
+  minimum window width — they wrap to a second row.
+
+### Performance
+
+- Codex session index is only re-parsed when the file actually changes
+  (was: fully re-read every second).
+- All polling timers now declare a leeway so macOS can coalesce wakeups
+  (battery); Gemini/Qwen/CodeBuddy/Qoder tailers no longer read whole
+  transcripts on first sight — a 64KB head + 256KB tail window is enough
+  to restore context and last state.
+- Gemini session indexer applies its recency window before reading
+  files instead of after.
+
 ## [0.10.0] - 2026-07-25
 
 ### Added
@@ -601,6 +635,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.11.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.11.0
 [0.10.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.10.0
 [0.9.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.9.0
 [0.8.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.8.0
