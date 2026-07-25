@@ -53,9 +53,6 @@ struct PopoverRootView: View {
         /// 侧边栏图标：紫金稿统一单色中性灰（不再用彩色圆角方块）；选中项由紫色胶囊承载强调
         var tileColor: Color? { nil }
 
-        /// 侧栏文案（Agents 页在侧栏显示单数「Agent」，与设计稿一致；页内标题仍用 rawValue）
-        var sidebarLabel: String { self == .agents ? "Agent" : rawValue }
-
         /// 侧边栏分组（标签 + 条目）：活动 / 知识库 / 用量；设置单独沉底
         static let sidebarGroups: [(label: String, tabs: [Tab])] = [
             ("活动", [.history, .sessions]),
@@ -109,7 +106,7 @@ struct PopoverRootView: View {
                     .padding(.bottom, 2)
                 ForEach(group.tabs, id: \.self) { tab in
                     SidebarNavButton(
-                        title: tab.sidebarLabel, icon: tab.icon, tileColor: tab.tileColor,
+                        title: tab.rawValue, icon: tab.icon, tileColor: tab.tileColor,
                         badge: tab == .limits ? limitsBadge?.text : nil,
                         badgeColor: (tab == .limits ? limitsBadge?.color : nil) ?? .secondary,
                         isSelected: navigation.tab == tab
