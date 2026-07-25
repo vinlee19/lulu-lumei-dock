@@ -8,13 +8,6 @@ import Foundation
 /// 外加各项目仓库内的 plan 文档（docs/**/plans、plans/）。
 /// 与 S3 同步共用同一批物化产物（`PlanMaterializer`）。只读浏览，不改写来源。
 final class PlansService: ObservableObject {
-    /// 筛选维度：项目文档与各工具来源平级
-    enum PlanFilter: Equatable {
-        case all
-        case project
-        case source(AgentSource)
-    }
-
     @Published private(set) var plans: [PlanMaterializer.PlanEntry] = []
     @Published private(set) var scanning = false
     /// 全集口径的总量（不受筛选/搜索影响）
@@ -22,9 +15,6 @@ final class PlansService: ObservableObject {
     @Published private(set) var totalBytes: UInt64 = 0
 
     @Published var searchText = "" {
-        didSet { rebuild() }
-    }
-    @Published var filter: PlanFilter = .all {
         didSet { rebuild() }
     }
 
@@ -69,54 +59,46 @@ final class PlansService: ObservableObject {
     }
 
     private func rebuild() {
-        var visible = all
-        switch filter {
-        case .all: break
-        case .project:
-            visible = visible.filter { $0.kind == .projectDocument }
-        case .source(let source):
-            visible = visible.filter { $0.kind != .projectDocument && $0.source == source }
-        }
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        if !query.isEmpty {
-            visible = visible.filter {
-                "\($0.title) \($0.path) \($0.project ?? "")".lowercased().contains(query)
-            }
+        guard !query.isEmpty else { plans = all; return }
+        plans = all.filter {
+            "\($0.title) \($0.path) \($0.project ?? "") \($0.summary ?? "")"
+                .lowercased().contains(query)
         }
-        plans = visible
     }
 
     var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    /// 某工具来源的计划（不含项目文档）
-    func plans(for source: AgentSource) -> [PlanMaterializer.PlanEntry] {
-        plans.filter { $0.kind != .projectDocument && $0.source == source }
-    }
-
-    /// 项目仓库内的 plan 文档
-    var projectPlans: [PlanMaterializer.PlanEntry] {
-        plans.filter { $0.kind == .projectDocument }
-    }
-
-    /// 全集里有数据的工具来源（筛选条按此渲染按钮）
+    /// 全集里出现过的来源（来源 chips 按此渲染；项目文档记在其占位 source=.claude 上）
+    /// 按计划数降序，贴合设计稿（数量最多的来源排在前）。
     var availableSources: [AgentSource] {
         var seen = Set<AgentSource>()
-        return all.filter { $0.kind != .projectDocument }.compactMap {
-            seen.insert($0.source).inserted ? $0.source : nil
-        }
+        let distinct = all.compactMap { seen.insert($0.source).inserted ? $0.source : nil }
+        return distinct.sorted { count(for: $0) > count(for: $1) }
     }
 
-    var hasProjectPlans: Bool {
-        all.contains { $0.kind == .projectDocument }
-    }
-
-    /// 全集口径计数（统计瓦片用，不受筛选/搜索影响）
-    var projectCount: Int {
-        all.lazy.filter { $0.kind == .projectDocument }.count
-    }
-
+    /// 某来源的计划数（全集口径，含以 .claude 占位的项目文档）
     func count(for source: AgentSource) -> Int {
-        all.lazy.filter { $0.kind != .projectDocument && $0.source == source }.count
+        all.lazy.filter { $0.source == source }.count
+    }
+
+    /// 不同项目数（统计卡副标题「N 项目」）
+    var distinctProjectCount: Int {
+        Set(all.compactMap { $0.project }).count
+    }
+
+    /// 状态分布（统计卡分段条）：完成 / 进行中 / 草稿 / 文档
+    var statusCounts: (complete: Int, inProgress: Int, draft: Int, document: Int) {
+        var complete = 0, inProgress = 0, draft = 0, document = 0
+        for plan in all {
+            switch plan.status {
+            case .complete: complete += 1
+            case .inProgress: inProgress += 1
+            case .draft: draft += 1
+            case .document: document += 1
+            }
+        }
+        return (complete, inProgress, draft, document)
     }
 
     func readContent(path: String) -> String? {
