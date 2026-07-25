@@ -385,15 +385,16 @@ struct AntigravityMarkShape: Shape {
     }
 }
 
-/// 官方 logo 资产（Resources/source-logos/*.svg，macOS 14 NSImage 原生渲染矢量）。
-/// Grok 官方标为纯黑 → 深色环境用白色变体；OpenCode / Hermes 用代码绘制
-/// （见 OpencodeMarkShape / HermesMarkShape）——官方素材是精细插画，缩到 9–15pt 会糊成方块。
+/// 官方 logo 资产（Resources/source-logos/*，macOS 14 NSImage 原生渲染矢量）。
+/// Grok 官方标为纯黑 → 深色环境用白色变体；OpenCode 用代码绘制（见 OpencodeMarkShape）。
+/// Hermes 官方只发了位图（无矢量版）→ 按扩展名区分加载，PNG 与 SVG 同一条 NSImage 解码路径。
 enum SourceLogo {
     private static var cache: [String: NSImage] = [:]
     private static let lock = NSLock()
 
     static func image(for source: AgentSource, dark: Bool) -> NSImage? {
         let name: String
+        var ext = "svg"
         switch source {
         case .claude: name = "logo-claude"
         case .codex: name = "logo-codex"
@@ -402,13 +403,16 @@ enum SourceLogo {
         case .kimi: name = "logo-kimi"
         case .gemini: name = "logo-gemini"
         case .qwen: name = "logo-qwen"
-        case .opencode, .hermes: return nil  // 无资产：由 SourceBadge 走代码绘制分支
+        case .hermes:
+            name = "logo-hermes"
+            ext = "png"  // Nous 官方素材是 512×512 位图
+        case .opencode: return nil  // 无资产：由 SourceBadge 走代码绘制分支
         }
         lock.lock()
         defer { lock.unlock() }
         if let cached = cache[name] { return cached }
         guard let url = AppResources.bundle.url(
-            forResource: name, withExtension: "svg", subdirectory: "source-logos"),
+            forResource: name, withExtension: ext, subdirectory: "source-logos"),
             let image = NSImage(contentsOf: url)
         else { return nil }
         cache[name] = image
@@ -468,7 +472,7 @@ struct SourceBadge: View {
         case .qwen:
             GeminiMarkShape().fill(source.brandColor)  // 兜底同用四角星（仅资产缺失时）
         case .hermes:
-            HermesMarkShape().fill(source.brandColor)  // 无官方矢量：这就是 Hermes 的正式标记
+            HermesMarkShape().fill(source.brandColor)  // 仅 logo-hermes.png 缺失时兜底
         case .opencode:
             EmptyView()
         }
