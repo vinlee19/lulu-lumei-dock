@@ -77,9 +77,48 @@ func decoderTests(_ t: TestRunner) {
         try expectEqual(end!.kind, .sessionEnded(reason: "prompt_input_exit"))
     }
 
+    t.test("PreToolUse：带出工具与具体对象（等待授权卡靠它说清在请求什么）") {
+        let bash = ClaudeHookDecoder.decode(payload: [
+            "hook_event_name": "PreToolUse", "session_id": "s1",
+            "tool_name": "Bash", "tool_input": ["command": "rm -rf build/"],
+        ], receivedAt: now)
+        try expectEqual(bash?.kind, .toolPending(tool: "Bash", detail: "rm -rf build/"))
+
+        // 文件类取路径
+        let edit = ClaudeHookDecoder.decode(payload: [
+            "hook_event_name": "PreToolUse", "session_id": "s1",
+            "tool_name": "Edit", "tool_input": ["file_path": "/repo/src/main.swift"],
+        ], receivedAt: now)
+        try expectEqual(edit?.kind, .toolPending(tool: "Edit", detail: "/repo/src/main.swift"))
+
+        // 多行命令只取首行（沿用 ToolStepExtractor 的既有裁剪口径）
+        let multi = ClaudeHookDecoder.decode(payload: [
+            "hook_event_name": "PreToolUse", "session_id": "s1",
+            "tool_name": "Bash", "tool_input": ["command": "echo one\necho two"],
+        ], receivedAt: now)
+        try expectEqual(multi?.kind, .toolPending(tool: "Bash", detail: "echo one …"))
+
+        // 无参数工具：detail 为 nil 而不是空串（UI 据此不拼多余的空格）
+        let bare = ClaudeHookDecoder.decode(payload: [
+            "hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "TodoWrite",
+        ], receivedAt: now)
+        try expectEqual(bare?.kind, .toolPending(tool: "TodoWrite", detail: nil))
+
+        // 缺 tool_name 不该产出事件
+        try expect(ClaudeHookDecoder.decode(payload: [
+            "hook_event_name": "PreToolUse", "session_id": "s1",
+        ], receivedAt: now) == nil)
+    }
+
+    t.test("PreCompact：解为压缩中（压缩期间没别的事件，岛上不标就像卡死）") {
+        let event = ClaudeHookDecoder.decode(
+            payload: ["hook_event_name": "PreCompact", "session_id": "s1"], receivedAt: now)
+        try expectEqual(event?.kind, .compacting)
+    }
+
     t.test("未知 hook 名 / 缺 session_id 返回 nil") {
         try expect(ClaudeHookDecoder.decode(
-            payload: ["hook_event_name": "PreCompact", "session_id": "x"], receivedAt: now) == nil)
+            payload: ["hook_event_name": "SubagentStop", "session_id": "x"], receivedAt: now) == nil)
         try expect(ClaudeHookDecoder.decode(
             payload: ["hook_event_name": "Stop"], receivedAt: now) == nil)
     }

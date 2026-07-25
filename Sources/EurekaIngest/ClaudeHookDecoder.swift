@@ -24,6 +24,16 @@ public enum ClaudeHookDecoder {
                 message: message
             ) else { return nil }  // auth_success / elicitation 等不构成等待
             kind = .waiting(reason: reason, message: message)
+        case "PreToolUse":
+            guard let tool = payload["tool_name"] as? String, !tool.isEmpty else { return nil }
+            // 复用 ToolStepExtractor（= AuditExtractor + 既有 160 字裁剪口径），不另写一套解析。
+            // 命令类只取首行；detail 只进 UI、不落历史库（tool_input 可能含凭据）。
+            let step = ToolStepExtractor.claude(
+                name: tool, input: payload["tool_input"] as? [String: Any])
+            kind = .toolPending(
+                tool: step.name, detail: step.detail.isEmpty ? nil : step.detail)
+        case "PreCompact":
+            kind = .compacting
         case "PostToolUse":
             kind = .activity(tool: payload["tool_name"] as? String)
         case "SessionStart":

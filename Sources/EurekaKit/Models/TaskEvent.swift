@@ -28,6 +28,14 @@ public struct TaskEvent: Equatable, Sendable {
         case waiting(reason: WaitReason, message: String?)
         /// PostToolUse 心跳：waiting 复位为 running、刷新活跃时间；tool = 刚执行的工具名
         case activity(tool: String?)
+        /// PreToolUse：工具**即将执行**（或正等你授权）。
+        /// 单独一个 case 而不是给 activity 加关联值：语义不同（将要做 vs 刚做完），
+        /// 且 `.activity` 有 30 处构造点，改签名纯属无谓的连带修改。
+        /// detail 是具体对象（命令首行 / 文件路径 / URL），让岛上能显示「Edit src/main.swift」，
+        /// 等待授权卡也能说清到底在请求什么。
+        case toolPending(tool: String, detail: String?)
+        /// PreCompact：正在压缩上下文。压缩期间没有别的事件，岛上看起来像卡死，需要单独交代。
+        case compacting
         /// 会话上下文窗口占用更新（0-100）
         case contextUpdate(percent: Double)
         /// 任务标题升级（如 transcript 里的 ai-title，比原始 prompt 更适合做会话名）
@@ -48,6 +56,8 @@ public struct TaskEvent: Equatable, Sendable {
     public var turnId: String?
     /// 会话最初创建的时间（transcript 首行时间戳 / session_meta，跨 resume 保持）
     public var sessionStartedAt: Date?
+    /// 会话所在终端（仅 relay 事件带，来自信封的 terminal 字段；其余源靠 app 层探测补）
+    public var terminal: TerminalBinding?
 
     public init(
         source: AgentSource,
@@ -57,7 +67,8 @@ public struct TaskEvent: Equatable, Sendable {
         cwd: String? = nil,
         transcriptPath: String? = nil,
         turnId: String? = nil,
-        sessionStartedAt: Date? = nil
+        sessionStartedAt: Date? = nil,
+        terminal: TerminalBinding? = nil
     ) {
         self.source = source
         self.sessionId = sessionId
@@ -67,5 +78,6 @@ public struct TaskEvent: Equatable, Sendable {
         self.transcriptPath = transcriptPath
         self.turnId = turnId
         self.sessionStartedAt = sessionStartedAt
+        self.terminal = terminal
     }
 }

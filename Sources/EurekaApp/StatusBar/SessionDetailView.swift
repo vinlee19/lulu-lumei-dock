@@ -168,6 +168,7 @@ struct SessionDetailView: View {
                 }
                 Spacer(minLength: 0)
             }
+            terminalHistoryRow(session)
             // resume 命令条
             HStack(spacing: 6) {
                 Text(service.resumeCommand(for: session))
@@ -196,6 +197,51 @@ struct SessionDetailView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+    }
+
+    /// 终端归属：这个会话在哪些终端里跑过。换终端 resume 过就会有多条，
+    /// 逐条给跳转按钮（该终端已退出则置灰）。一条都没有时整行不出现。
+    @ViewBuilder
+    private func terminalHistoryRow(_ session: AgentSessionInfo) -> some View {
+        let history = service.terminalHistory(for: session)
+        if !history.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if history.count > 1 {
+                    Text("曾在 \(history.count) 个终端运行")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                }
+                ForEach(Array(history.enumerated()), id: \.offset) { _, entry in
+                    HStack(spacing: 6) {
+                        TerminalBadge(
+                            binding: entry.binding,
+                            isRunning: TerminalActivator.isRunning(entry.binding))
+                        Text(relativeFormatter.localizedString(
+                            for: entry.lastSeen, relativeTo: Date()))
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        jumpButton(entry.binding)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 跳转按钮：只把终端**应用**带到前台（不选标签页，因此不需要自动化/辅助功能权限）
+    private func jumpButton(_ binding: TerminalBinding) -> some View {
+        let running = TerminalActivator.isRunning(binding)
+        return Button {
+            TerminalActivator.activate(binding)
+        } label: {
+            Image(systemName: "arrow.up.forward.app")
+                .font(.system(size: 10))
+        }
+        .buttonStyle(.borderless)
+        .disabled(!running)
+        .help(running
+            ? "切到 \(binding.terminalName)（只激活应用，多标签时需自行找到该标签）"
+            : "\(binding.terminalName) 当前未在运行")
     }
 
     private func metaItem(_ icon: String, _ text: String) -> some View {

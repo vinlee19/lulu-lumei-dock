@@ -77,13 +77,24 @@ func installerTests(_ t: TestRunner) {
         try expectEqual(stopEntries.count, 2)
         try expect(stopEntries.flatMap(commands(in:)).contains { $0.contains("terminal-notifier") })
 
-        // 不受管的 PreToolUse 原样保留
-        try expectEqual(hookEntries(root, "PreToolUse").count, 1)
+        // PreToolUse 现在也受管（提供"即将执行什么"）：他人的 audit.sh 与我们并存共 2 条
+        let preEntries = hookEntries(root, "PreToolUse")
+        try expectEqual(preEntries.count, 2)
+        try expect(preEntries.flatMap(commands(in:)).contains { $0.contains("audit.sh") })
+
+        // 我们从不受管的事件（SubagentStop）必须一条不差、原样不动
+        try expectEqual(hookEntries(root, "SubagentStop").count, 1)
+        try expect(commands(in: hookEntries(root, "SubagentStop")[0])[0]
+            .contains("subagent-notify.sh"))
 
         let uninstalled = try ClaudeHooksInstaller.uninstall(from: installed)
         root = try parseJSON(uninstalled)
         try expectEqual(hookEntries(root, "Stop").count, 1)
         try expect(commands(in: hookEntries(root, "Stop")[0])[0].contains("terminal-notifier"))
+        // 受管事件上的他人条目同样只删我们的那条
+        try expectEqual(hookEntries(root, "PreToolUse").count, 1)
+        try expect(commands(in: hookEntries(root, "PreToolUse")[0])[0].contains("audit.sh"))
+        try expectEqual(hookEntries(root, "SubagentStop").count, 1)
         try expectEqual(hookEntries(root, "PreToolUse").count, 1)
         try expect(hookEntries(root, "UserPromptSubmit").isEmpty, "我们的事件应被清掉")
     }

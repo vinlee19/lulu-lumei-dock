@@ -31,7 +31,32 @@ public final class TaskStore {
             task.sessionStartedAt = sessionStart
             activeTasks[key] = task
         }
+        // 终端归属则**每次都更新**（不是只设一次）：同一会话 resume 到别的终端后，
+        // 跳转必须落到当前那个，而不是最初那个。
+        if let terminal = event.terminal, var task = activeTasks[key], task.terminal != terminal {
+            task.terminal = terminal
+            activeTasks[key] = task
+        }
         return effects
+    }
+
+    /// 补齐终端归属。与事件无关（探测得来），故单独开口而不是伪造一个事件。
+    ///
+    /// 已有 `.hook` 精度的绑定不会被 `.probe` 覆盖 —— 前者由 relay 在会话所在终端内直接读到，
+    /// 后者是按 cwd 匹配进程推断的，可信度不同。返回是否真的改动了状态。
+    @discardableResult
+    public func attachTerminal(
+        _ binding: TerminalBinding, source: AgentSource, sessionId: String
+    ) -> Bool {
+        let key = AgentTask.key(source: source, sessionId: sessionId)
+        guard var task = activeTasks[key] else { return false }
+        if let existing = task.terminal {
+            guard existing.origin != .hook || binding.origin == .hook else { return false }
+            guard existing != binding else { return false }
+        }
+        task.terminal = binding
+        activeTasks[key] = task
+        return true
     }
 
     private func applyKind(_ event: TaskEvent, key: String) -> [TaskStoreEffect] {
@@ -80,7 +105,8 @@ public final class TaskStore {
                 sessionStartedAt: existing?.sessionStartedAt ?? event.sessionStartedAt,
                 finishedAt: event.timestamp,
                 outcome: outcome,
-                detail: detail
+                detail: detail,
+                terminal: existing?.terminal
             )
             if var task = existing {
                 // 已知会话（Claude/Codex）：turn 结束 → 转空闲，等下一个 prompt
@@ -143,10 +169,48 @@ public final class TaskStore {
             }
             if let tool, tool != task.currentActivity {
                 task.currentActivity = tool
+                // 换了工具，上一个工具的对象串就过期了（PostToolUse 只带名字，带不出对象）
+                task.currentToolDetail = nil
+                if effects.isEmpty { effects.append(.activeTasksChanged) }
+            }
+            if task.isCompacting {
+                task.isCompacting = false  // 有工具动静说明压缩已结束
                 if effects.isEmpty { effects.append(.activeTasksChanged) }
             }
             activeTasks[key] = task
             return effects
+
+        case .toolPending(let tool, let detail):
+            guard var task = activeTasks[key] else {
+                // 与 activity 同样的兜底：app 在 turn 中途启动时先登记为运行中
+                var task = AgentTask(
+                    source: event.source,
+                    sessionId: event.sessionId,
+                    cwd: event.cwd,
+                    startedAt: event.timestamp,
+                    phase: .running,
+                    currentActivity: tool
+                )
+                task.currentToolDetail = detail
+                activeTasks[key] = task
+                return [.activeTasksChanged]
+            }
+            task.lastActivityAt = event.timestamp
+            // PreToolUse 在权限提示**之前**到，所以此刻置 running 是对的；
+            // 紧随其后的 Notification 会把它重新置为 waiting，并借用这里存下的对象串。
+            if case .running = task.phase {} else { task.phase = .running }
+            task.currentActivity = tool
+            task.currentToolDetail = detail
+            task.isCompacting = false
+            activeTasks[key] = task
+            return [.activeTasksChanged]
+
+        case .compacting:
+            guard var task = activeTasks[key], !task.isCompacting else { return [] }
+            task.isCompacting = true
+            task.lastActivityAt = event.timestamp
+            activeTasks[key] = task
+            return [.activeTasksChanged]
 
         case .contextUpdate(let percent):
             guard var task = activeTasks[key] else { return [] }
@@ -201,7 +265,8 @@ public final class TaskStore {
                 sessionStartedAt: task.sessionStartedAt,
                 finishedAt: event.timestamp,
                 outcome: .interrupted,
-                detail: reason.map { "会话结束（\($0)）" }
+                detail: reason.map { "会话结束（\($0)）" },
+                terminal: task.terminal
             )
             return [.taskFinished(finished), .activeTasksChanged]
         }
@@ -231,7 +296,8 @@ public final class TaskStore {
                 sessionStartedAt: task.sessionStartedAt,
                 finishedAt: now,
                 outcome: .interrupted,
-                detail: "长时间无活动，已自动清理"
+                detail: "长时间无活动，已自动清理",
+                terminal: task.terminal
             )))
         }
         if changed { effects.append(.activeTasksChanged) }

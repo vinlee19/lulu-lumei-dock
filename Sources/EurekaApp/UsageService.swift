@@ -209,6 +209,18 @@ final class UsageService: ObservableObject {
         }
     }
 
+    /// 记录一次「会话跑在哪个终端」。同键 upsert，所以每个事件都调也不会长表。
+    /// 过期/积压事件同样要记：终端归属是历史事实，与写 history 同待遇。
+    func recordTerminal(
+        source: AgentSource, sessionId: String, binding: TerminalBinding, at: Date
+    ) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            try? store.sessionTerminals.record(
+                source: source, sessionId: sessionId, binding: binding, at: at)
+        }
+    }
+
     /// popover 打开时主动刷一次
     func refreshNow() {
         queue.async { [weak self] in self?.scanAndPublish() }

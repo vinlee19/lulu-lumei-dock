@@ -36,6 +36,51 @@ func logError(_ message: String) {
     }
 }
 
+/// 本进程**控制终端**的具体设备路径（如 `/dev/ttys004`）；没有控制终端时 nil。
+///
+/// 走 `sysctl(KERN_PROC_PID)` 读 `kinfo_proc.kp_eproc.e_tdev` 再 `devname` 转名，
+/// 而**不是** `ttyname(open("/dev/tty"))` —— 后者实测只返回通用别名 `"/dev/tty"`，
+/// 对"是哪个终端"毫无辨识力（`fstat` 拿到的 st_rdev 也是通用克隆设备，同样没用）。
+/// 也不用 `ttyname(fd)`：hook 的 stdin 是管道，stdout/stderr 可能被 CLI 接管，都可能失败。
+/// 问"控制终端"则不受任何 fd 重定向影响。一次 syscall，微秒级。
+func currentTTY() -> String? {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    let device = info.kp_eproc.e_tdev
+    // -1 = 无控制终端（launchd / setsid 起的进程）
+    guard device != -1, device != 0 else { return nil }
+    guard let name = devname(device, S_IFCHR) else { return nil }
+    return "/dev/" + String(cString: name)
+}
+
+/// 终端归属：hook 是 CLI 的子进程、CLI 又是终端的子进程，所以本进程**继承的环境**
+/// 里就带着「这个会话跑在哪个终端」。
+///
+/// 只读 env + 一次 `ttyname` —— 微秒级。**绝不起子进程**（会威胁 <50ms 预算，
+/// 这也是不抄 CodeIsland 那个 `tmux display-message` 调用的原因）。
+func terminalContext(
+    _ env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String: String] {
+    var result: [String: String] = [:]
+    // "iTerm.app" / "Apple_Terminal" / "ghostty" / "vscode" …
+    if let value = env["TERM_PROGRAM"], !value.isEmpty { result["app"] = value }
+    // macOS 只给 GUI 启动的进程注入，是最精确的终端标识（用于按 bundle id 激活应用）
+    if let value = env["__CFBundleIdentifier"], !value.isEmpty { result["bundleId"] = value }
+    if let value = env["TMUX_PANE"], !value.isEmpty { result["tmuxPane"] = value }
+    if let tty = currentTTY() { result["tty"] = tty }
+    return result
+}
+
+/// 序列化终端上下文；全空时返回 nil（信封里就不出现该键）。
+/// 走 JSONSerialization 而非字符串拼接：env 值来自用户环境，必须正确转义。
+func terminalContextJSON() -> Data? {
+    let context = terminalContext()
+    guard !context.isEmpty else { return nil }
+    return try? JSONSerialization.data(withJSONObject: context)
+}
+
 /// 把事件原子写入 spool：先写 tmp/ 再 rename 进 events/，监听方永远看到完整文件
 func writeEvent(channel: String, payloadJSON: Data) {
     let root = spoolRoot()
@@ -56,7 +101,14 @@ func writeEvent(channel: String, payloadJSON: Data) {
         }
 
         let nowMs = Int(Date().timeIntervalSince1970 * 1000)
-        var body = Data("{\"v\":1,\"channel\":\"\(channel)\",\"receivedAtMs\":\(nowMs),\"payload\":".utf8)
+        // terminal 放在**信封层**而不是并进 payload：终端归属是 relay 这次调用的环境属性，
+        // 不是 hook payload 的内容；而且免去 parse + 重序列化 payload（省时，也不会改坏它）。
+        var body = Data("{\"v\":1,\"channel\":\"\(channel)\",\"receivedAtMs\":\(nowMs)".utf8)
+        if let terminal = terminalContextJSON() {
+            body.append(Data(",\"terminal\":".utf8))
+            body.append(terminal)
+        }
+        body.append(Data(",\"payload\":".utf8))
         body.append(payload)
         body.append(Data("}".utf8))
 

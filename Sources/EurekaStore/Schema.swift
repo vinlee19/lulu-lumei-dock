@@ -1,6 +1,8 @@
 import Foundation
 
 enum Schema {
+    /// v16：修 session_terminals 主键含可空列导致 upsert 失效（见下方一次性重建）
+    /// v15：新增 session_terminals（会话 ↔ 终端绑定；只能在事件发生时采集，不可重推导，升级不 DROP）
     /// v14：新增 limit_samples（限额百分比采样，预测打满时间用；观测数据不可重推导，升级不 DROP）
     /// v13：新增全文搜索三件套 transcript_fts（FTS5 trigram）/ fts_docs / fts_files（派生表，升级重建全量重索引）
     /// v12：tool_calls 增列 last_ts（最近调用时间）+ tokens（触发时 token，仅 Claude 有值），派生表升级重建
@@ -10,7 +12,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 14
+    static let version: Int64 = 16
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -27,6 +29,12 @@ enum Schema {
             DROP TABLE IF EXISTS fts_docs;
             DROP TABLE IF EXISTS fts_files;
             """)
+        }
+        // v15 建的 session_terminals 主键含可空列，upsert 失效攒了重复行。该表尚未随任何
+        // 版本发布，且内容会随后续事件重新累积 → 一次性重建。**只在 15→16 这一跳生效**，
+        // 不进上面那串 DROP（那是给可重推导的派生表用的，本表仍属"升级不 DROP"）。
+        if current == 15 {
+            try db.execute("DROP TABLE IF EXISTS session_terminals;")
         }
         try db.execute("""
         CREATE TABLE IF NOT EXISTS task_history (
@@ -100,6 +108,30 @@ enum Schema {
             PRIMARY KEY (day, source, kind, name)
         );
         CREATE INDEX IF NOT EXISTS idx_tool_calls_day ON tool_calls(day);
+
+        -- 会话 ↔ 终端绑定：这个 session 在哪些终端里跑过（复合主键天然保留历史，
+        -- 同一会话 resume 到别的终端就多一行；last_seen 最大的那条是跳转目标）。
+        -- 只能在事件发生的那一刻采到（环境变量 / 运行中的进程），**不可由本地文件重推导**
+        -- → 与 task_history 同待遇，升级绝不 DROP。
+        -- origin: 'hook'（relay 读环境，准确）| 'probe'（按 cwd 匹配进程上溯，较粗）。
+        -- term_bundle / tty 参与主键，故必须 NOT NULL DEFAULT ''：
+        -- SQLite 里 NULL != NULL，可空列进主键会让 upsert 永不命中 → 每个事件插一行。
+        -- （实测踩过：Claude Code 跑在 IDE 里时既没有 TERM_PROGRAM 也没有控制终端，
+        --  两列全空，同一会话瞬间攒出十几条重复行。）读出时空串再转回 nil。
+        CREATE TABLE IF NOT EXISTS session_terminals (
+            source TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            term_app TEXT,
+            term_bundle TEXT NOT NULL DEFAULT '',
+            tty TEXT NOT NULL DEFAULT '',
+            tmux_pane TEXT,
+            origin TEXT NOT NULL,
+            first_seen REAL NOT NULL,
+            last_seen REAL NOT NULL,
+            PRIMARY KEY (source, session_id, term_bundle, tty)
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_terminals_session
+            ON session_terminals(source, session_id, last_seen DESC);
 
         -- 云端备份状态：path → 最近一次成功上传时的本地指纹（size+mtime）。
         -- 记录的是远端事实、不可本地重推导 → 与 task_history 同待遇，升级不 DROP。

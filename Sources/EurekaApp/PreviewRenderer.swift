@@ -32,10 +32,14 @@ enum PreviewRenderer {
         let running5 = AgentTask(
             source: .kimi, sessionId: "p7", title: "梳理会员配额文档",
             cwd: "/Users/me/work/kimi-docs", startedAt: now.addingTimeInterval(-66))
-        let waitingTask = AgentTask(
+        var waitingTask = AgentTask(
             source: .claude, sessionId: "p3", title: "批量更新依赖版本",
             cwd: "/Users/me/work/deps", startedAt: now.addingTimeInterval(-301),
             phase: .waiting(.permission, since: now.addingTimeInterval(-20)))
+        // 等待授权卡的重点是"在请求什么"（PreToolUse 带来的工具 + 对象），
+        // 而不只是"等待权限确认"。会话身份由副标题的项目 + #会话号承担。
+        waitingTask.currentActivity = "Bash"
+        waitingTask.currentToolDetail = "rm -rf node_modules/"
         let finished = FinishedTask(
             source: .claude, sessionId: "p1", title: "重构用户认证模块",
             cwd: "/Users/me/work/auth-service",
@@ -121,8 +125,13 @@ enum PreviewRenderer {
             idle2.lastActivityAt = now.addingTimeInterval(-300)
             var withActivity = running1
             withActivity.currentActivity = "Bash"
+            // 具体对象串（PreToolUse 带来）：验证「Edit src/main.swift」这类长文本不破版
+            withActivity.currentToolDetail = "swift build -c release"
             withActivity.contextUsedPercent = 64
-            $0.updateActiveTasks([withActivity, running2, waitingTask], idle: [idle1, idle2])
+            // 压缩上下文态：这段时间没有别的事件，必须在列表里看得出来
+            var compacting = running2
+            compacting.isCompacting = true
+            $0.updateActiveTasks([withActivity, compacting, waitingTask], idle: [idle1, idle2])
             $0.islandTapped()
         }
 

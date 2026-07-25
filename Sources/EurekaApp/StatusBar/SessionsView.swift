@@ -562,6 +562,11 @@ private struct SessionRow: View {
                         Text(formatCost(usd))
                             .foregroundStyle(Theme.cost)
                     }
+                    if let terminal = service.terminal(for: session) {
+                        TerminalBadge(
+                            binding: terminal,
+                            isRunning: TerminalActivator.isRunning(terminal))
+                    }
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
