@@ -4,6 +4,61 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-07-25
+
+### Added
+
+- **Plans now show real progress.** Plan bodies are parsed for checklist
+  markers, so every plan carries step counts, a completion percentage and a
+  derived status (完成 / 进行中 / 草稿 / 文档). The Plans overview card breaks the
+  whole library down by status, and list rows show a progress bar with 步数.
+- **Agents gain roles, models and call counts.** Each subagent is classified
+  into one of seven roles (通用 / 探索 / 实现 / 审查 / 规划 / 建模 / 文档) shown as a
+  glyph tile plus tag, its model string is normalized to a display label
+  (Opus / Sonnet / Haiku / GPT-5-Codex / 继承 …), and Claude/Kimi subagent
+  invocation counts are surfaced from the existing `tool_calls` rows via a new
+  read-only query.
+- **Memory lists project instruction files.** Per-project `CLAUDE.md`,
+  `AGENTS.md` and `GEMINI.md` now appear next to the global ones, tagged 全局 or
+  项目 with the owning project.
+- `eureka --render-knowledge [dir]` renders every knowledge page (list and
+  icon, light and dark) offscreen for visual review.
+
+### Changed
+
+- **Plans / Skills / Memory / Agents rebuilt around one layout.** Each page is
+  now an overview card with a big count and distribution, a row of source
+  filter chips, and a flat 列表 / 图标 pair — replacing the old stat-tile row and
+  per-source collapsible sections. Skills rows carry usage bars and 命中次数,
+  Memory rows a 全局/项目 scope badge.
+- **The search field is far less timid:** capsule shape, brand-gradient
+  magnifier tile, tinted fill that deepens on hover, a purple-gold focus ring
+  with a glow, an indigo caret, and a live hit-count pill with a round clear
+  button while searching. It no longer stretches across the whole header.
+- All four pages share one leading tile — same rounded square, brand tint and
+  hairline border — so Plans' progress ring and Agents' role-coloured squares
+  no longer read as separate design languages. Plan cards state what a plan is
+  rather than how far along it is; completion stays in the list view.
+- Sidebar knowledge icons are monochrome grey; the selected indigo capsule
+  carries the emphasis.
+
+### Fixed
+
+- **Home is no longer indexed as a project.** `ProjectResolver` stops its
+  upward `.git` search at the home directory but previously fell back to
+  returning the cwd, so any session run in `~` turned home into a project root.
+  That rescanned `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills` and
+  `~/.grok/skills` as "project level", double-counting every system skill (188
+  listed instead of 107), tagging global skills with the home directory name,
+  and — because entries are identified by path — leaving empty cells in the
+  icon grid where duplicate ids collided. Skills, memory and agent indexing now
+  also dedupe by path, so overlapping roots can never duplicate again.
+- **Plans no longer fall back to a meaningless title.** Codex sessions with no
+  thread name and no usable first user message were all listed as
+  「Codex 计划」(45 of 110 locally) despite carrying descriptive first steps;
+  those steps are now used as the title. Overly long titles are cut at the
+  nearest sentence or clause boundary instead of hard-truncating mid-word.
+
 ## [0.7.0] - 2026-07-24
 
 ### Added
@@ -417,6 +472,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.8.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.8.0
 [0.7.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.7.0
 [0.6.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.2
 [0.6.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.6.1
