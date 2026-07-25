@@ -296,7 +296,11 @@ final class SyncService: ObservableObject {
             hermesHome: HermesPaths.configHome(),
             hermesPlans: HermesPaths.plansRoot(),
             claudePlans: PlanMaterializer.defaultClaudePlansDir(),
-            plansStaging: PlanMaterializer.defaultStagingRoot())
+            plansStaging: PlanMaterializer.defaultStagingRoot(),
+            codeBuddyProjects: CodeBuddyPaths.projectsRoot(),
+            codeBuddyMemory: CodeBuddyPaths.memoryRoot(),
+            qoderProjects: QoderPaths.projectsRoot(),
+            qoderMemories: QoderPaths.memoriesRoot())
     }
 
     /// 物化 Codex / opencode 计划到暂存目录（Claude 计划本就是 .md，无需物化）。
@@ -308,6 +312,7 @@ final class SyncService: ObservableObject {
         PlanMaterializer.materializeOpencode(dbPath: OpencodePaths.db(), into: staging)
         PlanMaterializer.materializeGrok(sessionsRoot: GrokPaths.sessionsRoot(), into: staging)
         PlanMaterializer.materializeKimi(sessionsRoot: KimiPaths.sessionsRoot(), into: staging)
+        PlanMaterializer.materializeQoder(plansRoot: QoderPaths.plansRoot(), into: staging)
     }
 
     static func describe(_ report: SyncReport) -> String {

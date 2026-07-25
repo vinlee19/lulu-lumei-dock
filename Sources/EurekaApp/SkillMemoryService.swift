@@ -82,6 +82,8 @@ final class SkillMemoryService: ObservableObject {
                 geminiHome: GeminiPaths.configHome(),
                 qwenHome: QwenPaths.configHome(),
                 hermesHome: HermesPaths.configHome(),
+                codeBuddyMemoryRoot: CodeBuddyPaths.memoryRoot(),
+                qoderMemoriesRoot: QoderPaths.memoriesRoot(),
                 projectRoots: repoRoots,
                 codexInstructionScopes: codexInstructionScopes)
             DispatchQueue.main.async {
@@ -188,6 +190,10 @@ final class SkillMemoryService: ObservableObject {
             case .gemini: root = GeminiPaths.skillsRoot()
             case .qwen: root = QwenPaths.skillsRoot()
             case .hermes: root = HermesPaths.skillsRoot()
+            case .codebuddy, .qoder:
+                // 这两个 CLI 没有用户级 skills 目录（UI 不提供新建技能入口）；仅为穷举
+                DispatchQueue.main.async { completion?(false) }
+                return
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -260,6 +266,19 @@ final class SkillMemoryService: ObservableObject {
                 return
             case .qwen:
                 dir = QwenPaths.memoriesRoot()
+            case .codebuddy:
+                dir = CodeBuddyPaths.memoryRoot()  // ~/.codebuddy/memery（官方拼写）
+            case .qoder:
+                // qoder 记忆布局 memories/<user-hash>/global/<category>/；
+                // 新建落到首个 <user-hash>/global/（一个都没有就 memories/global/）
+                let root = QoderPaths.memoriesRoot()
+                let subdirs = ((try? FileManager.default.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
+                    .filter {
+                        (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                    }
+                dir = (subdirs.first ?? root)
+                    .appendingPathComponent("global", isDirectory: true)
             case .hermes:
                 // hermes 记忆 = 固定两份全局文件（memories/MEMORY.md 与 USER.md），name 参数忽略。
                 // 正文是「条目以 \n§\n 相连」的扁平格式且有字数上限，外部写坏会触发 Hermes 的

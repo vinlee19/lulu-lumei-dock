@@ -428,11 +428,12 @@ struct UsageDashboardView: View {
                 Spacer(minLength: 8)
 
                 // 来源筛选 chips：全部 + 各来源徽标
-                // （grok 订阅制无 token/费用账；antigravity 内容为 protobuf 无法取用量，故均不入用量；
-                //   kimi 有真实 token 账 → 自动包含）
+                // （grok 订阅制无 token/费用账；antigravity 内容为 protobuf 无法取用量；
+                //   qoder 的 CN 后端 token 全零无用量，故均不入用量；kimi 有真实 token 账 → 自动包含）
                 sourceChip(nil, label: "全部")
-                ForEach(AgentSource.allCases.filter { $0 != .grok && $0 != .antigravity },
-                        id: \.self) { source in
+                ForEach(AgentSource.allCases.filter {
+                    $0 != .grok && $0 != .antigravity && $0 != .qoder
+                }, id: \.self) { source in
                     sourceChip(source, label: source.displayName)
                 }
 

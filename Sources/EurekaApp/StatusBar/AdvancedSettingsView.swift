@@ -154,7 +154,7 @@ struct AdvancedSettingsView: View {
             .foregroundStyle(.tertiary)
         Divider()
         Toggle("跨会话全文搜索索引", isOn: $settings.fullTextSearchEnabled)
-        Text("在本地为 Claude / Codex / Grok / Kimi 的对话内容建索引，会话页搜索时可直达消息；"
+        Text("在本地为 Claude / Codex / Grok / Kimi / CodeBuddy / Qoder 的对话内容建索引，会话页搜索时可直达消息；"
             + "索引随用量扫描增量更新，全程本地。关闭后索引冻结不再更新。")
             .font(.system(size: 9.5))
             .foregroundStyle(.tertiary)

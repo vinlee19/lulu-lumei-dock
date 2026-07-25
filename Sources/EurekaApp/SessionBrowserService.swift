@@ -152,6 +152,10 @@ final class SessionBrowserService: ObservableObject {
             indexed += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
             // hermes：会话全在 state.db（含各 profile 的独立库）
             indexed += HermesSessionIndexer.indexAll()
+            indexed += CodeBuddySessionIndexer.index(
+                projectsRoot: CodeBuddyPaths.projectsRoot())
+            indexed += QoderSessionIndexer.index(
+                projectsRoot: QoderPaths.projectsRoot())
             // 按 id 去重（Claude 嵌套子代理目录等可能重复索引同一会话；
             // ForEach 重复 id 会导致列表渲染出空白行）
             var seenIds = Set<String>()
@@ -382,6 +386,11 @@ final class SessionBrowserService: ObservableObject {
         case .gemini: resume = "gemini --resume \(session.id)"
         case .qwen: resume = "qwen --resume \(session.id)"
         case .hermes: resume = "hermes --resume \(session.id)"
+        case .codebuddy: resume = "codebuddy --resume \(session.id)"
+        case .qoder:
+            // CLI 二进制版本号在文件名里，glob 取最新；找不到回退裸命令名
+            let binary = QoderPaths.cliBinary()?.path ?? "qoderclicn"
+            resume = "\(binary) --resume \(session.id)"
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume
@@ -420,6 +429,8 @@ final class SessionBrowserService: ObservableObject {
     /// （opencode / hermes 存共享库，不支持）。
     /// Claude 会话若有嵌套子代理目录（<session>/…）一并清理；grok 是整个 <uuid>/ 目录；
     /// antigravity 是 <uuid>.db（连 -wal/-shm）；kimi 是整个 session_<uuid>/ 目录。
+    /// codebuddy / qoder 走默认分支：删 <sessionId>.jsonl，顺带清理同名 <sessionId>/
+    /// 伴随目录（subagents 等，与 Claude 嵌套目录同一处逻辑）。
     func deleteSessions(_ toDelete: [AgentSessionInfo], completion: ((Int) -> Void)? = nil) {
         let deletable = toDelete.filter { $0.source.supportsSessionDeletion }
         guard !deletable.isEmpty else {

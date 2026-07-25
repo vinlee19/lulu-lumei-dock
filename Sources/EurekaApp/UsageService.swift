@@ -121,6 +121,7 @@ final class UsageService: ObservableObject {
     private var geminiScanner: GeminiUsageScanner?
     private var qwenScanner: QwenUsageScanner?
     private var hermesScanner: HermesUsageScanner?
+    private var codeBuddyScanner: CodeBuddyUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
     private var pricing = PricingTable(models: [])
 
@@ -132,6 +133,7 @@ final class UsageService: ObservableObject {
     private static let geminiHealthName = "用量扫描 Gemini"
     private static let qwenHealthName = "用量扫描 Qwen"
     private static let hermesHealthName = "用量扫描 Hermes"
+    private static let codeBuddyHealthName = "用量扫描 CodeBuddy"
 
     func start() {
         HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
@@ -142,6 +144,7 @@ final class UsageService: ObservableObject {
         HealthRegistry.shared.register(Self.geminiHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.qwenHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.hermesHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -165,6 +168,10 @@ final class UsageService: ObservableObject {
                 // hermes：token/成本都在 state.db（含各 profile 的独立库）
                 self.hermesScanner = HermesUsageScanner(
                     stateDBs: { HermesPaths.allStateDBs() }, store: store)
+                // codebuddy：token 在 projects/**/*.jsonl 的 function_call 行
+                // （qoder 的 CN 后端 token 全零，无用量扫描器）
+                self.codeBuddyScanner = CodeBuddyUsageScanner(
+                    projectsRoot: CodeBuddyPaths.projectsRoot(), store: store)
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
@@ -501,6 +508,9 @@ final class UsageService: ObservableObject {
             let hermesNew = try hermesScanner?.scanOnce() ?? 0
             HealthRegistry.shared.beat(Self.hermesHealthName)
             if hermesNew > 0 { HealthRegistry.shared.event(Self.hermesHealthName) }
+            let codeBuddyNew = try codeBuddyScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.codeBuddyHealthName)
+            if codeBuddyNew > 0 { HealthRegistry.shared.event(Self.codeBuddyHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             // 全文索引与用量同节奏增量跑（指纹无变化时近零开销）；开关默认开
