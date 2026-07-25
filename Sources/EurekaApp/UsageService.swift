@@ -26,6 +26,8 @@ final class UsageService: ObservableObject {
     @Published private(set) var skillStats: [ToolCallsRepo.SkillUsageStat] = []
     /// Top 技能排行（Skills 页分析卡，按所选时间档过滤）
     @Published private(set) var skillRanking: [ToolCallsRepo.SkillUsageStat] = []
+    /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，Claude/Kimi 有数据）
+    @Published private(set) var agentStats: [ToolCallsRepo.SkillUsageStat] = []
     /// vibe coding 周报（loadWeeklyReport 填充；nil = 未加载）
     @Published private(set) var weeklyReport: WeeklyReport?
     /// 项目统计（选中区间）
@@ -329,6 +331,15 @@ final class UsageService: ObservableObject {
             guard let self, let store = self.store else { return }
             let stats = (try? store.toolCalls.skillStats(source: source)) ?? []
             self.publish { $0.skillStats = stats }
+        }
+    }
+
+    /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，累计次数降序）
+    func loadAgentStats(source: AgentSource? = nil) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let stats = (try? store.toolCalls.agentStats(source: source)) ?? []
+            self.publish { $0.agentStats = stats }
         }
     }
 

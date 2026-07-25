@@ -925,11 +925,25 @@ public final class ToolCallsRepo {
     public func skillStats(
         source: AgentSource? = nil, from: Date? = nil, to: Date? = nil
     ) throws -> [SkillUsageStat] {
+        try statsByName(kind: "skill", source: source, from: from, to: to)
+    }
+
+    /// 子代理调用统计（kind='agent'），按累计次数降序（仅 Claude / Kimi 记录了 subagent 调用）。
+    public func agentStats(
+        source: AgentSource? = nil, from: Date? = nil, to: Date? = nil
+    ) throws -> [SkillUsageStat] {
+        try statsByName(kind: "agent", source: source, from: from, to: to)
+    }
+
+    /// 按 (source, name) 聚合某 kind 的调用统计（count 降序）。skill / agent 共用。
+    private func statsByName(
+        kind: String, source: AgentSource?, from: Date?, to: Date?
+    ) throws -> [SkillUsageStat] {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        var conditions = ["kind = 'skill'"]
-        var bindings: [SQLiteValue] = []
+        var conditions = ["kind = ?"]
+        var bindings: [SQLiteValue] = [.text(kind)]
         if let source {
             conditions.append("source = ?")
             bindings.append(.text(source.rawValue))
