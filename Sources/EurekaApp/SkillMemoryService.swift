@@ -171,7 +171,7 @@ final class SkillMemoryService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -203,7 +203,7 @@ final class SkillMemoryService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -230,7 +230,7 @@ final class SkillMemoryService: ObservableObject {
                 } catch {
                     self?.report(error)
                 }
-                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             case .opencode:
                 dir = OpencodePaths.configHome()
@@ -256,7 +256,7 @@ final class SkillMemoryService: ObservableObject {
                 } catch {
                     self?.report(error)
                 }
-                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             case .qwen:
                 dir = QwenPaths.memoriesRoot()
@@ -276,7 +276,7 @@ final class SkillMemoryService: ObservableObject {
                 } catch {
                     self?.report(error)
                 }
-                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             case .gemini:
                 // gemini 记忆 = 全局 GEMINI.md（GEMINI.md-first，无 memories 目录概念）：
@@ -293,7 +293,7 @@ final class SkillMemoryService: ObservableObject {
                 } catch {
                     self?.report(error)
                 }
-                DispatchQueue.main.async { completion?(ok); self?.refresh() }
+                DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             }
             let file = dir.appendingPathComponent(Self.slugify(name) + ".md")
@@ -307,7 +307,7 @@ final class SkillMemoryService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -332,7 +332,7 @@ final class SkillMemoryService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -364,7 +364,7 @@ final class SkillMemoryService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -376,6 +376,15 @@ final class SkillMemoryService: ObservableObject {
     ) {
         queue.async { [weak self] in
             let configURL = HermesPaths.configFile()
+            // config.yaml 不在就不写：ConfigFile.backupThenWrite 会连 ~/.hermes 一起 mkdir，
+            // 凭空造出一份只有 skills.disabled 的配置，而 Hermes 会把它当"已配置"读。
+            guard FileManager.default.fileExists(atPath: configURL.path) else {
+                DispatchQueue.main.async {
+                    self?.lastError = "未找到 \(configURL.path)，无法改写 Hermes 技能启停名单"
+                    completion?(false)
+                }
+                return
+            }
             let original = ConfigFile.read(configURL)
             let updated = HermesConfigEditor.setSkillDisabled(
                 skill.name, disabled: !enabled, in: original)
@@ -391,7 +400,7 @@ final class SkillMemoryService: ObservableObject {
                     self?.report(error)
                 }
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 

@@ -150,7 +150,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -179,7 +179,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -208,7 +208,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -237,7 +237,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -252,7 +252,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -276,7 +276,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self?.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self?.refresh() }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
     }
 
@@ -294,7 +294,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self.refresh() }
+            DispatchQueue.main.async { completion?(ok); self.refresh(force: true) }
         }
     }
 
@@ -310,7 +310,7 @@ final class AgentConfigService: ObservableObject {
             } catch {
                 self.report(error)
             }
-            DispatchQueue.main.async { completion?(ok); self.refresh() }
+            DispatchQueue.main.async { completion?(ok); self.refresh(force: true) }
         }
     }
 
