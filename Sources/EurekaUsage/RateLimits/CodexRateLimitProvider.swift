@@ -1,8 +1,8 @@
 import Foundation
 import EurekaKit
 
-/// Codex 限额：零网络请求——最新 rollout 文件尾部的最后一条
-/// token_count.rate_limits 快照（带"截至"时间）。
+/// Codex 限额：零网络请求——最新 rollout 文件（整树枚举，按 mtime 取新）
+/// 尾部的最后一条 token_count.rate_limits 快照（带"截至"时间）。
 public struct CodexRateLimitProvider: RateLimitProvider {
     public let source = AgentSource.codex
     private let sessionsRoot: URL
@@ -24,32 +24,16 @@ public struct CodexRateLimitProvider: RateLimitProvider {
         return result
     }
 
-    /// 近 lookback 天的日期目录中 mtime 最新的 rollout
-    private func newestRollout(lookbackDays: Int = 7) -> URL? {
-        let fm = FileManager.default
-        let calendar = Calendar.current
+    /// 整树枚举全部日期目录（YYYY/MM/DD），返回 mtime 最新的 rollout。
+    /// resume 的旧会话在创建日目录原地追加（mtime 刷新），只数最近日期目录会漏；
+    /// 不按回看天数过滤——"最新 mtime"本身已界定新鲜度，快照新旧再由 maxAge 把关。
+    public func newestRollout() -> URL? {
         var newest: (url: URL, mtime: Date)?
-        for dayOffset in 0..<lookbackDays {
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else {
-                continue
+        for entry in CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot) {
+            let mtime = entry.mtime ?? .distantPast
+            if newest == nil || mtime > newest!.mtime {
+                newest = (entry.url, mtime)
             }
-            let parts = calendar.dateComponents([.year, .month, .day], from: day)
-            let dir = sessionsRoot
-                .appendingPathComponent(String(format: "%04d", parts.year ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.month ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.day ?? 0), isDirectory: true)
-            let files = (try? fm.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            for file in files
-            where file.lastPathComponent.hasPrefix("rollout-") && file.pathExtension == "jsonl" {
-                let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey])
-                    .contentModificationDate) ?? .distantPast
-                if newest == nil || mtime > newest!.mtime {
-                    newest = (file, mtime)
-                }
-            }
-            // 当天已找到就不用再往前翻
-            if newest != nil && dayOffset == 0 { break }
         }
         return newest?.url
     }

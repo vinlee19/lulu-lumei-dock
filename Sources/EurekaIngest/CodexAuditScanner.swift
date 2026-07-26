@@ -6,13 +6,13 @@ import EurekaStore
 /// 扫描 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl，把 agent 操作落成审计流水。
 /// 独立于 CodexRolloutTailer：tailer 对新文件把 offset 置尾（不追历史），审计要完整性 →
 /// 走持久化 offset 增量扫描（scan_files，键加 "audit://" 前缀避免与用量扫描器冲突）。
-/// 覆盖全部回看日期目录；INSERT OR IGNORE 保证重扫幂等。
+/// 整树覆盖全部日期目录（resume 的旧会话在创建日目录原地追加）；
+/// INSERT OR IGNORE 保证重扫幂等。
 public final class CodexAuditScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
     private let pipeline: AuditPipeline
     private let staleThreshold: TimeInterval
-    private let lookbackDays: Int
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -34,10 +34,12 @@ public final class CodexAuditScanner {
         self.store = store
         self.pipeline = pipeline
         self.staleThreshold = staleThreshold
-        self.lookbackDays = lookbackDays
+        // lookbackDays 已废弃：枚举改为整树递归（resume 的旧会话在创建日目录原地追加，
+        // 数日期目录会漏），保留形参仅为源码兼容；scan_files 水位线保证整树重扫廉价。
+        _ = lookbackDays
     }
 
-    /// 扫一遍所有回看日期目录，返回本轮新插入的审计行数。alertSink 接收高危告警。
+    /// 整树扫一遍所有日期目录，返回本轮新插入的审计行数。alertSink 接收高危告警。
     @discardableResult
     public func scanOnce(alertSink: ((RiskAlert) -> Void)? = nil) throws -> Int {
         var inserted = 0
@@ -48,24 +50,7 @@ public final class CodexAuditScanner {
     }
 
     private func rolloutFiles() -> [URL] {
-        let fm = FileManager.default
-        let calendar = Calendar.current
-        var results: [URL] = []
-        for dayOffset in 0..<lookbackDays {
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else {
-                continue
-            }
-            let parts = calendar.dateComponents([.year, .month, .day], from: day)
-            let dir = sessionsRoot
-                .appendingPathComponent(String(format: "%04d", parts.year ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.month ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.day ?? 0), isDirectory: true)
-            let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-            results.append(contentsOf: files.filter {
-                $0.lastPathComponent.hasPrefix("rollout-") && $0.pathExtension == "jsonl"
-            })
-        }
-        return results
+        CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot).map(\.url)
     }
 
     private func scanFile(_ url: URL, alertSink: ((RiskAlert) -> Void)?) throws -> Int {

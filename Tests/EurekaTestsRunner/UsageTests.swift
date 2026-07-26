@@ -306,6 +306,27 @@ func codexScannerTests(_ t: TestRunner) {
         try expectEqual(codex?.outputTokens, 8000 + 1000 + 600)
         try expect((codex?.inputTokens ?? -1) >= 0, "绝不能出负数")
     }
+
+    t.test("resume 的旧会话（老日期目录）用量不丢") {
+        let store = try makeStore()
+        let root = try makeSessionsDir()
+        // 创建日目录很老的 rollout：resume 后原地追加，只数最近日期目录会漏
+        let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(
+            at: fixtureURL("codex-rollout-token-count-ratelimits.jsonl"),
+            to: oldDayDir.appendingPathComponent("rollout-2025-01-01T10-00-00-resumed.jsonl"))
+
+        let scanner = CodexUsageScanner(sessionsRoot: root, store: store)
+        try expectEqual(try scanner.scanOnce(), 2, "老日期目录里的活跃会话必须扫到")
+        let totals = try store.usage.totalsByModel(
+            from: Date(timeIntervalSince1970: 0), to: Date())
+        let codex = totals.first { $0.source == .codex }
+        // 与"相邻差值法记账"同一 fixture：in=8000+3000 cached=2000+3000 out=500+800
+        try expectEqual(codex?.inputTokens, 8000 + 3000)
+        try expectEqual(codex?.cacheReadTokens, 2000 + 3000)
+        try expectEqual(codex?.outputTokens, 500 + 800)
+    }
 }
 
 func pricingTests(_ t: TestRunner) {
