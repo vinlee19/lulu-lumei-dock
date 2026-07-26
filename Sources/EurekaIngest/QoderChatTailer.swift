@@ -5,7 +5,8 @@ import Foundation
 /// Qoder 无 hook/notify 回调，这是实时通道（与 qwen/kimi tailer 同理）。
 /// 生命周期映射：human user 消息 → taskStarted；assistant text → taskFinished(success)；
 /// assistant tool_use → activity(工具名)；custom-title/ai-title → titleUpdate。
-/// 只看 projects/*/*.jsonl 顶层文件，subagents/ 子目录不跟（子代理事件归父会话由别处处理）。
+/// 只看 projects/*/*.jsonl 顶层文件；子 agent 现场不逐行跟，由快照扫描（与 Claude 同构，
+/// 复用 ClaudeSubagentScanner）在运行中会话上随轮询以 .subagentsUpdated 发出。
 /// ⚠️ CN 后端 token 用量全是零，不做用量扫描。
 public final class QoderChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
@@ -25,8 +26,14 @@ public final class QoderChatTailer {
         var title: String?
         /// custom-title 优先级最高：已见自定义标题后 ai-title 不再覆盖
         var titleIsCustom = false
+        /// 当前是否有未收尾的 turn（子 agent 快照只在运行中扫描）
+        var running = false
+        /// 当前 turn 起点（taskStarted 时间）：子 agent 快照按它裁到本 turn
+        var turnStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
+    /// 各会话上次发出的子 agent 快照（变化才重发；TaskStore 还会再去重）
+    private var lastSubagents: [String: [SubagentInfo]] = [:]
 
     static let healthName = "qoder 事件监视"
 
@@ -62,6 +69,7 @@ public final class QoderChatTailer {
         for url in recentChatFiles() {
             tail(url)
         }
+        emitSubagentUpdates()
     }
 
     /// projects/*/*.jsonl 顶层文件（subagents/ 子目录不递归）
@@ -111,6 +119,15 @@ public final class QoderChatTailer {
             else { continue }
             absorb(root, into: &ctx)
             if let event = event(from: root, context: ctx) {
+                switch event.kind {
+                case .taskStarted:
+                    ctx.running = true
+                    ctx.turnStartedAt = event.timestamp
+                case .taskFinished:
+                    ctx.running = false
+                default:
+                    break
+                }
                 HealthRegistry.shared.event(Self.healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
                 handler(event, isStale)
@@ -199,6 +216,10 @@ public final class QoderChatTailer {
                 }
             }
         }
+        // 运行状态与 turn 起点：子 agent 快照按 turn 裁剪、只在运行中扫描
+        ctx.running = lastStarted != nil
+            && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
+        ctx.turnStartedAt = lastStarted?.timestamp
         contexts[path] = ctx
 
         func titleEvent(from base: TaskEvent) {
@@ -220,6 +241,32 @@ public final class QoderChatTailer {
             event.sessionStartedAt = ctx.sessionStartedAt
             handler(event, false)
             titleEvent(from: event)
+        }
+    }
+
+    // MARK: - 子 agent 快照（复用 Claude 扫描器，磁盘布局同构）
+
+    /// 只对已跟踪且运行中的会话扫描（幻影任务不变式：不为未跟踪会话发事件）；
+    /// 快照变化才发（TaskStore 还会再去重）；转空闲后清缓存，下一 turn 重新发。
+    private func emitSubagentUpdates() {
+        for (path, ctx) in contexts {
+            guard ctx.running else {
+                lastSubagents[path] = []
+                continue
+            }
+            let file = URL(fileURLWithPath: path)
+            let subagents = ClaudeSubagentScanner.scan(
+                sessionDir: file.deletingPathExtension(),
+                parentTranscript: file,
+                turnStartedAt: ctx.turnStartedAt)
+            guard subagents != (lastSubagents[path] ?? []) else { continue }
+            lastSubagents[path] = subagents
+            HealthRegistry.shared.event(Self.healthName)
+            handler(TaskEvent(
+                source: .qoder, sessionId: ctx.sessionId,
+                kind: .subagentsUpdated(subagents),
+                timestamp: Date(), cwd: ctx.cwd,
+                sessionStartedAt: ctx.sessionStartedAt), false)
         }
     }
 

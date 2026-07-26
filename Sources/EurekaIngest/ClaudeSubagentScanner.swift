@@ -1,13 +1,16 @@
 import Foundation
 import EurekaKit
 
-/// 扫描一个 Claude 会话的子 agent 现场（纯函数，便于单测）。
+/// 扫描一个 Claude 会话的子 agent 现场（纯函数，便于单测）。Qoder 复用本扫描器
+///（`~/.qoder-cn/projects/<slug>/<sessionId>/` 与 Claude 同构，实勘 v1.1.5）。
 ///
 /// 磁盘约定（当前版 Claude Code 实地核实）：
 /// - `<sessionDir>/subagents/agent-<id>.meta.json` = `{agentType, description, toolUseId}`，派生即建。
+///   Qoder 的 meta 文件名是 `agent-<type>-<hex>.meta.json`，同一推导同样得到 `<type>-<hex>` id。
 /// - `<sessionDir>/subagents/agent-<id>.jsonl` = 子 agent transcript，尾部最后一个 tool_use 名 = 当前工具。
 /// - 完成信号：父 transcript 出现 `tool_result`（`tool_use_id == toolUseId`），`is_error` → 失败。
 ///   大结果会被卸载到 `<sessionDir>/tool-results/<toolUseId>.txt`（兜底完成判据）。
+///   Qoder 另有 `subagents/task-<id>.json` 记录终态（`status`/"completed" 等），作第二兜底。
 public enum ClaudeSubagentScanner {
     /// `sessionDir` = `<项目>/<sessionId>/`（与 `<sessionId>.jsonl` 同级的目录）。
     /// `parentTranscript` = `<sessionId>.jsonl`（读尾窗找 tool_result）。
@@ -52,6 +55,8 @@ public enum ClaudeSubagentScanner {
             } else if fm.fileExists(
                 atPath: resultsDir.appendingPathComponent("\(toolUseId).txt").path) {
                 status = .completed  // 内联结果滚出尾窗，但卸载文件还在
+            } else if let taskStatus = taskFileStatus(agentId: agentId, in: subagentsDir) {
+                status = taskStatus  // Qoder 兜底：task-<id>.json 的终态记录
             } else {
                 status = .running
             }
@@ -102,6 +107,22 @@ public enum ClaudeSubagentScanner {
             }
         }
         return map
+    }
+
+    /// Qoder 的 `subagents/task-<agentId>.json` 终态（"completed"/"failed" 等）；
+    /// 文件不存在或仍在运行（"running" 等）返回 nil
+    private static func taskFileStatus(agentId: String, in subagentsDir: URL) -> SubagentInfo.Status? {
+        let url = subagentsDir.appendingPathComponent("task-\(agentId).json")
+        guard
+            let data = try? Data(contentsOf: url),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let status = obj["status"] as? String
+        else { return nil }
+        switch status {
+        case "completed": return .completed
+        case "failed", "error": return .failed
+        default: return nil
+        }
     }
 
     /// 子 agent transcript 尾窗里最后一个 assistant tool_use 的工具名

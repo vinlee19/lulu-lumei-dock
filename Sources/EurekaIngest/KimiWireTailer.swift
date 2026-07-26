@@ -6,7 +6,9 @@ import EurekaKit
 /// 轮询近期有写入的主 agent wire.jsonl，按 offset 续读、半行不消费；新发现文件只做
 /// 尾部状态恢复，不重放历史。会话 id/cwd/标题从上级 state.json 带入（mtime 变了就重读——
 /// Kimi 首轮后才生成标题）；上下文占用从 usage.record 累计 ÷ config.toml 的 max_context_size 估算。
-/// 只 tail main agent（子代理另有 wire，入岛会造成幻影任务；用量扫描器会单独收其 token）。
+/// 只 tail main agent 的事件流（子代理 wire 逐行入岛会造成幻影任务；用量扫描器单独收其 token）。
+/// 子 agent 现场由 KimiSubagentScanner 做轻量快照（各 agents/<id>/wire.jsonl 头+尾窗），
+/// 在运行中会话上随轮询以 .subagentsUpdated 发出。
 public final class KimiWireTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -26,10 +28,16 @@ public final class KimiWireTailer {
         var title: String?
         var modelAlias: String?
         var stateMtime: Date?
+        /// 当前是否有未收尾的 turn（子 agent 快照只在运行中扫描）
+        var running = false
+        /// 当前 turn 起点（taskStarted 时间）：子 agent 快照按它裁到本 turn
+        var turnStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
     private var contextWindows: [String: Int]?  // config.toml max_context_size，懒加载
+    /// 各会话上次发出的子 agent 快照（变化才重发；TaskStore 还会再去重）
+    private var lastSubagents: [String: [SubagentInfo]] = [:]
 
     static let healthName = "kimi 事件监视"
 
@@ -70,6 +78,7 @@ public final class KimiWireTailer {
         for url in recentWireFiles() {
             tail(url)
         }
+        emitSubagentUpdates()
     }
 
     // MARK: - 文件发现
@@ -144,9 +153,19 @@ public final class KimiWireTailer {
             // 旁路：模型别名跟踪（config.update / llm.request）+ 最近一次用量
             if let alias = KimiWireDecoder.modelAlias(root) { ctx.modelAlias = alias }
             if let record = KimiWireDecoder.usageRecord(root) { lastUsage = record }
-            deliver(
-                KimiWireDecoder.decode(root: root, sessionId: ctx.sessionId, cwd: ctx.cwd),
-                context: ctx)
+            let events = KimiWireDecoder.decode(root: root, sessionId: ctx.sessionId, cwd: ctx.cwd)
+            for event in events {
+                switch event.kind {
+                case .taskStarted:
+                    ctx.running = true
+                    ctx.turnStartedAt = event.timestamp
+                case .taskFinished:
+                    ctx.running = false
+                default:
+                    break
+                }
+            }
+            deliver(events, context: ctx)
         }
         contexts[url.path] = ctx
         if let lastUsage {
@@ -170,7 +189,7 @@ public final class KimiWireTailer {
     /// 两种情况都补发 state.json 的标题，让会话卡带名字。
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
-        let ctx = context(for: url)
+        var ctx = context(for: url)
         offsets[path] = size
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -197,6 +216,12 @@ public final class KimiWireTailer {
                 }
             }
         }
+
+        // 运行状态与 turn 起点：子 agent 快照按 turn 裁剪、只在运行中扫描
+        ctx.running = lastStarted != nil
+            && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
+        ctx.turnStartedAt = lastStarted?.timestamp
+        contexts[path] = ctx
 
         func titleEvent(from base: TaskEvent) {
             guard let title = ctx.title, !title.isEmpty else { return }
@@ -225,6 +250,31 @@ public final class KimiWireTailer {
         }
         if let lastUsage {
             emitContext(for: url, context: ctx, usage: lastUsage)
+        }
+    }
+
+    // MARK: - 子 agent 快照（agents/<id>/wire.jsonl 头+尾窗，轻量）
+
+    /// 只对已跟踪且运行中的会话扫描（幻影任务不变式：不为未跟踪会话发事件）；
+    /// 快照变化才发（TaskStore 还会再去重）；转空闲后清缓存，下一 turn 重新发。
+    private func emitSubagentUpdates() {
+        for (path, ctx) in contexts {
+            guard ctx.running else {
+                lastSubagents[path] = []
+                continue
+            }
+            let sessionDir = Self.sessionDir(of: URL(fileURLWithPath: path))
+            let subagents = KimiSubagentScanner.scan(
+                sessionDir: sessionDir,
+                turnStartedAt: ctx.turnStartedAt)
+            guard subagents != (lastSubagents[path] ?? []) else { continue }
+            lastSubagents[path] = subagents
+            HealthRegistry.shared.event(Self.healthName)
+            handler(TaskEvent(
+                source: .kimi, sessionId: ctx.sessionId,
+                kind: .subagentsUpdated(subagents),
+                timestamp: Date(), cwd: ctx.cwd,
+                sessionStartedAt: ctx.sessionStartedAt), false)
         }
     }
 

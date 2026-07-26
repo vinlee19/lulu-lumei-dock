@@ -4,7 +4,9 @@ import Foundation
 /// 增量 tail CodeBuddy 会话（~/.codebuddy/projects/<cwd-slug>/<sessionId>.jsonl）。
 /// CodeBuddy 无 hook/notify 回调，这是实时通道（与 qwen/kimi tailer 同理）。
 /// 只看顶层会话文件，不 tail `<sessionId>/subagents/` 子目录（子代理 token 由
-/// CodeBuddyUsageScanner 归并，事件流以主会话为准）。
+/// CodeBuddyUsageScanner 归并，事件流以主会话为准）；子 agent 现场由
+/// CodeBuddySubagentScanner 快照（父 transcript 的 function_call/result 对派生）
+/// 在运行中会话上随轮询以 .subagentsUpdated 发出。
 /// 生命周期映射（CodeBuddyTranscriptDecoder）：user 消息（非 skipRun）→ taskStarted；
 /// function_call → activity(工具名)；assistant completed → taskFinished(success)；
 /// ai-title/summary → titleUpdate（只改已有任务标题，不造幻影任务）。
@@ -28,9 +30,15 @@ public final class CodeBuddyChatTailer {
         var title: String?
         /// 标题来源优先级：ai-title(2) > summary(1) > 首条 user 文本(0)，高优先级可覆盖
         var titleRank: Int = -1
+        /// 当前是否有未收尾的 turn（子 agent 快照只在运行中扫描）
+        var running = false
+        /// 当前 turn 起点（taskStarted 时间）：子 agent 快照按它裁到本 turn
+        var turnStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
+    /// 各会话上次发出的子 agent 快照（变化才重发；TaskStore 还会再去重）
+    private var lastSubagents: [String: [SubagentInfo]] = [:]
 
     static let healthName = "codebuddy 事件监视"
 
@@ -66,6 +74,7 @@ public final class CodeBuddyChatTailer {
         for url in recentSessionFiles() {
             tail(url)
         }
+        emitSubagentUpdates()
     }
 
     /// projects/<slug>/*.jsonl 顶层文件（不进 <sessionId>/subagents/ 子目录）
@@ -117,6 +126,15 @@ public final class CodeBuddyChatTailer {
             absorb(root, into: &ctx)
             if let usage = contextUsage(root) { lastUsage = usage }
             if let event = event(from: root, context: ctx) {
+                switch event.kind {
+                case .taskStarted:
+                    ctx.running = true
+                    ctx.turnStartedAt = event.timestamp
+                case .taskFinished:
+                    ctx.running = false
+                default:
+                    break
+                }
                 HealthRegistry.shared.event(Self.healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
                 handler(event, isStale)
@@ -242,6 +260,10 @@ public final class CodeBuddyChatTailer {
                 }
             }
         }
+        // 运行状态与 turn 起点：子 agent 快照按 turn 裁剪、只在运行中扫描
+        ctx.running = lastStarted != nil
+            && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
+        ctx.turnStartedAt = lastStarted?.timestamp
         contexts[path] = ctx
 
         func titleEvent(from base: TaskEvent) {
@@ -267,6 +289,32 @@ public final class CodeBuddyChatTailer {
         // 尾部 usage 反映最新上下文占用（TaskStore 对未知会话直接丢弃，安全）
         if let lastUsage {
             emitContext(for: url, context: ctx, usage: lastUsage)
+        }
+    }
+
+    // MARK: - 子 agent 快照（父 transcript 的 function_call/result 对派生）
+
+    /// 只对已跟踪且运行中的会话扫描（幻影任务不变式：不为未跟踪会话发事件）；
+    /// 快照变化才发（TaskStore 还会再去重）；转空闲后清缓存，下一 turn 重新发。
+    private func emitSubagentUpdates() {
+        for (path, ctx) in contexts {
+            guard ctx.running else {
+                lastSubagents[path] = []
+                continue
+            }
+            let file = URL(fileURLWithPath: path)
+            let subagents = CodeBuddySubagentScanner.scan(
+                sessionDir: file.deletingPathExtension(),
+                parentTranscript: file,
+                turnStartedAt: ctx.turnStartedAt)
+            guard subagents != (lastSubagents[path] ?? []) else { continue }
+            lastSubagents[path] = subagents
+            HealthRegistry.shared.event(Self.healthName)
+            handler(TaskEvent(
+                source: .codebuddy, sessionId: ctx.sessionId,
+                kind: .subagentsUpdated(subagents),
+                timestamp: Date(), cwd: ctx.cwd,
+                sessionStartedAt: ctx.sessionStartedAt), false)
         }
     }
 
