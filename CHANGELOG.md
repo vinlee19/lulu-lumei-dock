@@ -4,6 +4,26 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-07-26
+
+### Added
+
+- **Session list: time-range picker replaces the hidden count cap** — the
+  session browser no longer truncates to 10 entries. It shows every
+  session in the selected range — 近 30 天 (default) or 全部时间 — via
+  capsule tabs matching the sort control (choice persists). Previously
+  the truncation lived behind an unlabeled icon, so less-recently-active
+  agents' sessions looked like scanning bugs.
+
+### Fixed
+
+- **Codex resumed sessions were invisible.** Rollout files live in
+  `YYYY/MM/DD` directories by creation date, and resuming an old session
+  appends in place — so old-created/recently-active sessions were missed
+  by live island monitoring, the session browser, the usage ledger, the
+  audit trail and the rate-limit gauge alike. All five now enumerate
+  every date directory and select by mtime.
+
 ## [0.11.0] - 2026-07-25
 
 ### Added
@@ -635,6 +655,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.12.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.12.0
 [0.11.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.11.0
 [0.10.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.10.0
 [0.9.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.9.0
