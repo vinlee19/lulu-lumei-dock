@@ -107,9 +107,9 @@ final class SessionBrowserService: ObservableObject {
     @Published var sourceFilter: AgentSource? {
         didSet { rebuild() }
     }
-    /// 按时间/大小最多展示多少个会话（0 = 全部）；搜索态忽略此限制
-    @Published var displayLimit: Int = 10 {
-        didSet { rebuild() }
+    /// 时间范围：false = 近 30 天（默认）；true = 全部时间（重建索引）
+    @Published var rangeAll = false {
+        didSet { refresh() }
     }
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.sessions", qos: .userInitiated)
@@ -140,24 +140,36 @@ final class SessionBrowserService: ObservableObject {
         queue.async { [weak self] in
             guard let self else { return }
             self.loadStoreIfNeeded()
+            // 时间范围：默认近 30 天；「全部时间」放大窗口与上限（head 解析在后台队列，
+            // 2000 上限是 IO 保险丝，正常用户远低于此）
+            let window: TimeInterval = self.rangeAll ? .greatestFiniteMagnitude : 30 * 86400
+            let maxSessions = self.rangeAll ? 2000 : 300
             var indexed = ClaudeSessionIndexer.index(
-                projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot())
+                projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
+                window: window, maxSessions: maxSessions)
             indexed += CodexSessionIndexer.index(
-                sessionsRoot: CodexRolloutTailer.defaultSessionsRoot())
-            indexed += OpencodeSessionIndexer.index(dbPath: OpencodePaths.db())
-            indexed += GrokSessionIndexer.index(sessionsRoot: GrokPaths.sessionsRoot())
+                sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(),
+                window: window, maxSessions: maxSessions)
+            indexed += OpencodeSessionIndexer.index(
+                dbPath: OpencodePaths.db(), window: window, maxSessions: maxSessions)
+            indexed += GrokSessionIndexer.index(
+                sessionsRoot: GrokPaths.sessionsRoot(), window: window, maxSessions: maxSessions)
             indexed += AntigravitySessionIndexer.index(
-                conversationsRoot: AntigravityPaths.conversationsRoot())
-            indexed += KimiSessionIndexer.index(sessionsRoot: KimiPaths.sessionsRoot())
+                conversationsRoot: AntigravityPaths.conversationsRoot(),
+                window: window, maxSessions: maxSessions)
+            indexed += KimiSessionIndexer.index(
+                sessionsRoot: KimiPaths.sessionsRoot(), window: window, maxSessions: maxSessions)
             indexed += GeminiSessionIndexer.index(
-                tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
-            indexed += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
+                tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile(),
+                window: window, maxSessions: maxSessions)
+            indexed += QwenSessionIndexer.index(
+                projectsRoot: QwenPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             // hermes：会话全在 state.db（含各 profile 的独立库）
-            indexed += HermesSessionIndexer.indexAll()
+            indexed += HermesSessionIndexer.indexAll(window: window, maxSessions: maxSessions)
             indexed += CodeBuddySessionIndexer.index(
-                projectsRoot: CodeBuddyPaths.projectsRoot())
+                projectsRoot: CodeBuddyPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             indexed += QoderSessionIndexer.index(
-                projectsRoot: QoderPaths.projectsRoot())
+                projectsRoot: QoderPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             // 按 id 去重（Claude 嵌套子代理目录等可能重复索引同一会话；
             // ForEach 重复 id 会导致列表渲染出空白行）
             var seenIds = Set<String>()
@@ -231,7 +243,7 @@ final class SessionBrowserService: ObservableObject {
             }
         }
 
-        // 扁平三档：排序 + 截断，不做项目分组
+        // 扁平三档：排序，不做项目分组、不按条数截断（范围由索引时的窗口控制）
         if sortMode != .project {
             switch sortMode {
             case .time: visible.sort { $0.lastActiveAt > $1.lastActiveAt }
@@ -239,20 +251,13 @@ final class SessionBrowserService: ObservableObject {
             case .duration: visible.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
             case .project: break
             }
-            if query.isEmpty, displayLimit > 0 {
-                visible = Array(visible.prefix(displayLimit))
-            }
             flatSessions = visible
             groups = []
             return
         }
 
-        // 项目档：按项目分组（组间按最近活跃排，组内按最近活跃排）；
-        // 非搜索态按最近活跃截断到 displayLimit 后再分组
-        if query.isEmpty, displayLimit > 0 {
-            visible.sort { $0.lastActiveAt > $1.lastActiveAt }
-            visible = Array(visible.prefix(displayLimit))
-        }
+        // 项目档：按项目分组（组间按最近活跃排，组内按最近活跃排）
+        visible.sort { $0.lastActiveAt > $1.lastActiveAt }
         var byProject: [String: [AgentSessionInfo]] = [:]
         for session in visible {
             let name = resolver.projectName(forCwd: session.cwd) ?? "（未知项目）"
