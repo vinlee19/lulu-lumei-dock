@@ -6,6 +6,11 @@ import Foundation
 /// 轮询近期有写入的会话文件，按 offset 续读、半行不消费；新发现文件只做尾部状态恢复。
 /// 生命周期映射：user 消息（非 session_context 注入）→ taskStarted；
 /// gemini 消息 → taskFinished(success)；error 消息 → taskFinished(error)。
+/// 上下文占用：gemini 消息行的 tokens.input + tokens.cached ≈ 当前上下文大小，
+/// 窗口按行内 model 查 ContextWindows（gemini-2.5/3 → 1M）。
+/// 工具活动不映射：实勘本机 ~/.gemini/tmp/*/chats/*.jsonl（2026-07，CLI 0.52）
+/// 只有 header/$set/user/info/gemini/error 行，工具调用不落盘（无 functionCall/
+/// toolCall 类字段），无从映射 activity(tool:)。
 /// cwd 由 projects.json 的 slug 反查；标题 = 首条真实用户消息摘要。
 public final class GeminiChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
@@ -26,6 +31,7 @@ public final class GeminiChatTailer {
         var title: String?
     }
     private var contexts: [String: FileContext] = [:]
+    private var lastContextPercent: [String: Double] = [:]
 
     static let healthName = "gemini 事件监视"
 
@@ -119,12 +125,14 @@ public final class GeminiChatTailer {
         offsets[path] = offset + UInt64(consumed)
     }
 
-    /// 处理完整行（最后的半行不消费），返回消费字节数
+    /// 处理完整行（最后的半行不消费），返回消费字节数。
+    /// 单次 JSON 解析同时喂生命周期解码与旁路（gemini 行 tokens → ctx%）。
     @discardableResult
     private func processLines(_ data: Data, url: URL, replay: Bool) -> Int {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
         let complete = data[data.startIndex...lastNewline]
         var ctx = context(for: url)
+        var lastUsage: (model: String?, used: Int)?
         var cursor = complete.startIndex
         while cursor < complete.endIndex {
             let lineEnd = complete[cursor...].firstIndex(of: UInt8(ascii: "\n"))
@@ -137,6 +145,7 @@ public final class GeminiChatTailer {
                   let root = object as? [String: Any]
             else { continue }
             absorb(root, into: &ctx)
+            if let usage = contextUsage(root) { lastUsage = usage }
             if replay, let event = event(from: root, context: ctx) {
                 HealthRegistry.shared.event(Self.healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
@@ -144,6 +153,9 @@ public final class GeminiChatTailer {
             }
         }
         contexts[url.path] = ctx
+        if let lastUsage {
+            emitContext(for: url, context: ctx, usage: lastUsage)
+        }
         return complete.count
     }
 
@@ -190,6 +202,36 @@ public final class GeminiChatTailer {
         }
     }
 
+    /// gemini 消息行的上下文用量旁路：input + cached ≈ 当前上下文大小（含缓存读的完整提示）
+    private func contextUsage(_ root: [String: Any]) -> (model: String?, used: Int)? {
+        guard let message = GeminiChatDecoder.parseMessage(root),
+              message.type == "gemini",
+              let tokens = message.tokens
+        else { return nil }
+        let used = tokens.input + tokens.cached
+        return used > 0 ? (message.model, used) : nil
+    }
+
+    // MARK: - 上下文占用（gemini 行 tokens ÷ ContextWindows 窗口）
+
+    /// 与 kimi/grok tailer 同例：按发射时刻 fresh 事件（stale 闸门会丢掉过期
+    /// contextUpdate），只在变化 ≥0.5 时补发避免刷屏。TaskStore 不为 contextUpdate
+    /// 建任务，且此处只对已跟踪会话发射，不会造幻影任务。
+    private func emitContext(
+        for chatURL: URL, context ctx: FileContext,
+        usage: (model: String?, used: Int)
+    ) {
+        let percent = min(100, ContextWindows.percent(used: usage.used, model: usage.model))
+        if let last = lastContextPercent[chatURL.path], abs(last - percent) < 0.5 { return }
+        lastContextPercent[chatURL.path] = percent
+        HealthRegistry.shared.event(Self.healthName)
+        handler(TaskEvent(
+            source: .gemini, sessionId: ctx.sessionId,
+            kind: .contextUpdate(percent: percent),
+            timestamp: Date(), cwd: ctx.cwd,
+            sessionStartedAt: ctx.sessionStartedAt), false)
+    }
+
     /// 首扫读取上限：头 64KB 建上下文（header/首条真实用户消息在头部），
     /// 尾 256KB 恢复"最后状态"；更小的文件整读。大转录不再全量载入解析。
     private static let initialHeadBytes: UInt64 = 64 * 1024
@@ -208,6 +250,7 @@ public final class GeminiChatTailer {
         var ctx = context(for: url)
         var lastStarted: TaskEvent?
         var lastFinished: TaskEvent?
+        var lastUsage: (model: String?, used: Int)?
 
         /// 扫一个数据块（块边界的半行丢弃），建上下文 + 跟踪最后 started/finished
         func scan(_ data: Data, dropLeadingPartial: Bool, dropTrailingPartial: Bool) {
@@ -219,6 +262,7 @@ public final class GeminiChatTailer {
                       let root = object as? [String: Any]
                 else { continue }
                 absorb(root, into: &ctx)
+                if let usage = contextUsage(root) { lastUsage = usage }
                 guard let event = event(from: root, context: ctx) else { continue }
                 switch event.kind {
                 case .taskStarted: lastStarted = event
@@ -264,6 +308,10 @@ public final class GeminiChatTailer {
             event.sessionStartedAt = ctx.sessionStartedAt
             handler(event, false)
             titleEvent(from: event)
+        }
+        // 尾部 tokens 反映最新上下文占用（有 gemini 行必已登记会话状态，安全）
+        if let lastUsage {
+            emitContext(for: url, context: ctx, usage: lastUsage)
         }
     }
 

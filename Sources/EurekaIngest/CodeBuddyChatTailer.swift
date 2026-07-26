@@ -8,6 +8,8 @@ import Foundation
 /// 生命周期映射（CodeBuddyTranscriptDecoder）：user 消息（非 skipRun）→ taskStarted；
 /// function_call → activity(工具名)；assistant completed → taskFinished(success)；
 /// ai-title/summary → titleUpdate（只改已有任务标题，不造幻影任务）。
+/// 上下文占用：function_call 行的归一化用量（复用 decoder 的 usage 提取，
+/// input + cacheRead ≈ 当前上下文大小）÷ ContextWindows 窗口。
 public final class CodeBuddyChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -28,6 +30,7 @@ public final class CodeBuddyChatTailer {
         var titleRank: Int = -1
     }
     private var contexts: [String: FileContext] = [:]
+    private var lastContextPercent: [String: Double] = [:]
 
     static let healthName = "codebuddy 事件监视"
 
@@ -106,11 +109,13 @@ public final class CodeBuddyChatTailer {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return }
         let complete = data[data.startIndex...lastNewline]
         var ctx = context(for: url)
+        var lastUsage: (model: String?, used: Int)?
         for line in complete.split(separator: UInt8(ascii: "\n")) {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
                   let root = object as? [String: Any]
             else { continue }
             absorb(root, into: &ctx)
+            if let usage = contextUsage(root) { lastUsage = usage }
             if let event = event(from: root, context: ctx) {
                 HealthRegistry.shared.event(Self.healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
@@ -119,6 +124,9 @@ public final class CodeBuddyChatTailer {
         }
         contexts[path] = ctx
         offsets[path] = offset + UInt64(complete.count)
+        if let lastUsage {
+            emitContext(for: url, context: ctx, usage: lastUsage)
+        }
     }
 
     private func absorb(_ root: [String: Any], into ctx: inout FileContext) {
@@ -157,6 +165,34 @@ public final class CodeBuddyChatTailer {
         return event
     }
 
+    /// function_call 行的上下文用量旁路：复用 decoder 的归一化 usage，
+    /// input + cacheRead = 含缓存读的完整提示 ≈ 当前上下文大小
+    private func contextUsage(_ root: [String: Any]) -> (model: String?, used: Int)? {
+        guard let (model, usage) = CodeBuddyTranscriptDecoder.usage(root) else { return nil }
+        let used = usage.input + usage.cacheRead
+        return used > 0 ? (model, used) : nil
+    }
+
+    // MARK: - 上下文占用（function_call usage ÷ ContextWindows 窗口）
+
+    /// 与 kimi/grok tailer 同例：按发射时刻 fresh 事件（stale 闸门会丢掉过期
+    /// contextUpdate），只在变化 ≥0.5 时补发避免刷屏。TaskStore 不为 contextUpdate
+    /// 建任务，且此处只对已跟踪会话发射，不会造幻影任务。
+    private func emitContext(
+        for chatURL: URL, context ctx: FileContext,
+        usage: (model: String?, used: Int)
+    ) {
+        let percent = min(100, ContextWindows.percent(used: usage.used, model: usage.model))
+        if let last = lastContextPercent[chatURL.path], abs(last - percent) < 0.5 { return }
+        lastContextPercent[chatURL.path] = percent
+        HealthRegistry.shared.event(Self.healthName)
+        handler(TaskEvent(
+            source: .codebuddy, sessionId: ctx.sessionId,
+            kind: .contextUpdate(percent: percent),
+            timestamp: Date(), cwd: ctx.cwd,
+            sessionStartedAt: ctx.sessionStartedAt), false)
+    }
+
     /// 新发现文件：只读头部 64KB 建上下文（cwd/起始时间/标题多在头部）
     /// + 尾部 256KB 恢复"最后状态"，不重放历史；小文件（≤320KB）一次读完。
     private func initialScan(_ url: URL, size: UInt64) {
@@ -190,12 +226,14 @@ public final class CodeBuddyChatTailer {
         var ctx = context(for: url)
         var lastStarted: TaskEvent?
         var lastFinished: TaskEvent?
+        var lastUsage: (model: String?, used: Int)?
         for chunk in chunks {
             for line in chunk.split(separator: UInt8(ascii: "\n")) {
                 guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
                       let root = object as? [String: Any]
                 else { continue }
                 absorb(root, into: &ctx)
+                if let usage = contextUsage(root) { lastUsage = usage }
                 guard let event = event(from: root, context: ctx) else { continue }
                 switch event.kind {
                 case .taskStarted: lastStarted = event
@@ -225,6 +263,10 @@ public final class CodeBuddyChatTailer {
             event.sessionStartedAt = ctx.sessionStartedAt
             handler(event, false)
             titleEvent(from: event)
+        }
+        // 尾部 usage 反映最新上下文占用（TaskStore 对未知会话直接丢弃，安全）
+        if let lastUsage {
+            emitContext(for: url, context: ctx, usage: lastUsage)
         }
     }
 

@@ -10,6 +10,10 @@ public enum ContextWindows {
     static let builtin: [String: Int] = [
         // 用户主力模型为 1M 窗口
         "claude-fable": 1_000_000,
+        // Gemini 2.5/3 全系官方 1M 窗口（前缀匹配，gemini-3-pro 等也能命中）
+        "gemini-2.5": 1_000_000,
+        "gemini-3": 1_000_000,
+        // glm/qwen 等暂无官方确数，刻意不收录——落到 defaultWindow，待官方数据再补
     ]
 
     /// 用户覆盖：{"claude-opus-4-8": 1000000, ...}

@@ -228,4 +228,52 @@ func geminiIngestTests(_ t: TestRunner) {
         try expect(done.contains { $0.0.kind == .titleUpdate(title: "头部标题问题") },
                    "标题应取自头部首条用户消息: \(done.map(\.0.kind))")
     }
+
+    t.test("上下文占用：gemini 行 tokens(input+cached) → contextUpdate（gemini-3 → 1M 窗口，变化才补发）") {
+        let (home, chat) = try makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = GeminiChatTailer(
+            tmpRoot: home.appendingPathComponent("tmp"),
+            projectsFile: home.appendingPathComponent("projects.json")
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()  // 初见：尾部 tokens 也应折算 ctx%（m3: 17628+8146=25774 / 1M）
+        func contextPercents() -> [Double] {
+            events.compactMap { event, _ in
+                if case .contextUpdate(let percent) = event.kind { return percent }
+                return nil
+            }
+        }
+        try expectEqual(contextPercents().count, 1,
+                        "初见应补发一次 ctx%: \(events.map(\.0.kind))")
+        try expect(abs(contextPercents()[0] - 2.5774) < 0.001,
+                   "25774/1M 应为 2.5774%: \(contextPercents())")
+        let ctxEvent = events.first { if case .contextUpdate = $0.0.kind { return true } else { return false } }
+        try expectEqual(ctxEvent?.0.sessionId, "ffb694fd-a055")
+        try expectEqual(ctxEvent?.0.cwd, "/work/my-proj")
+        try expect(ctxEvent?.1 == false, "ctx% 按发射时刻 fresh 交付，不判 stale")
+
+        // 增量：新 gemini 行带更大 tokens → 按行内 model 窗口补发
+        events.removeAll()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let now = iso.string(from: Date())
+        func appendLine(_ line: String) throws {
+            let content = try String(contentsOf: chat, encoding: .utf8)
+            try (content + line + "\n").write(to: chat, atomically: true, encoding: .utf8)
+        }
+        try appendLine(
+            #"{"id":"m5","timestamp":"\#(now)","type":"gemini","content":"继续。","tokens":{"input":100000,"output":10,"cached":0,"thoughts":0},"model":"gemini-3.5-flash"}"#)
+        tailer.scanOnce()
+        try expectEqual(contextPercents(), [10.0], "100000/1M 应为 10%: \(contextPercents())")
+
+        // 变化 <0.5 不补发（防刷屏）
+        events.removeAll()
+        try appendLine(
+            #"{"id":"m6","timestamp":"\#(now)","type":"gemini","content":"还是继续。","tokens":{"input":100100,"output":10,"cached":0,"thoughts":0},"model":"gemini-3.5-flash"}"#)
+        tailer.scanOnce()
+        try expect(contextPercents().isEmpty,
+                   "10% → 10.01% 变化不足 0.5 不应补发: \(contextPercents())")
+    }
 }

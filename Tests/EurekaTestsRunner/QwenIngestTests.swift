@@ -185,4 +185,63 @@ func qwenIngestTests(_ t: TestRunner) {
         try expectEqual(events.first?.0.cwd, "/work/my-proj", "cwd 取自头部消息")
         try expect(events.first?.0.sessionStartedAt != nil, "开始时间取自头部消息")
     }
+
+    t.test("functionCall parts → activity(工具名)；api_response → contextUpdate（默认 200k 窗口）") {
+        let (home, chat) = try makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let sessionId = "3dbdf6ce-5c3d-483c-b510-50e3e4ac4a6d"
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = QwenChatTailer(
+            projectsRoot: home.appendingPathComponent("projects")
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()  // 初见：恢复状态 + 尾部遥测折算 ctx%（u3: 27532 / 200k）
+        func kinds() -> [TaskEvent.Kind] { events.map(\.0.kind) }
+        func contextPercents() -> [Double] {
+            events.compactMap { event, _ in
+                if case .contextUpdate(let percent) = event.kind { return percent }
+                return nil
+            }
+        }
+        try expect(kinds().contains { $0 == .sessionStarted },
+                   "已完成会话初见应注册空闲: \(kinds())")
+        try expectEqual(contextPercents().count, 1,
+                        "初见应补发一次 ctx%: \(kinds())")
+        try expect(abs(contextPercents()[0] - 13.766) < 0.001,
+                   "27532/200k 应为 13.766%: \(contextPercents())")
+        // 首扫不重放历史：u2 的 functionCall 不应产出 activity
+        try expect(!kinds().contains { if case .activity = $0 { return true } else { return false } },
+                   "首扫不应补发 activity: \(kinds())")
+
+        // 增量：只有 functionCall 的 assistant 行（此前直接丢弃）→ 每个工具一次心跳
+        events.removeAll()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let now = iso.string(from: Date())
+        func appendLine(_ line: String) throws {
+            let content = try String(contentsOf: chat, encoding: .utf8)
+            try (content + line + "\n").write(to: chat, atomically: true, encoding: .utf8)
+        }
+        try appendLine(
+            #"{"uuid":"u5","sessionId":"\#(sessionId)","timestamp":"\#(now)","type":"assistant","cwd":"/work/my-proj","message":{"role":"assistant","parts":[{"functionCall":{"name":"read_file","args":{}}},{"functionCall":{"name":"write_file","args":{}}}]}}"#)
+        tailer.scanOnce()
+        try expectEqual(kinds(), [.activity(tool: "read_file"), .activity(tool: "write_file")],
+                        "两个 functionCall 应各产一次 activity: \(kinds())")
+        try expect(events.allSatisfy { !$0.1 }, "新事件不应判 stale")
+        try expectEqual(events.first?.0.sessionId, sessionId)
+        try expectEqual(events.first?.0.cwd, "/work/my-proj")
+
+        // 增量遥测：input_token_count 变化 → 补发 ctx%；不变（<0.5）不补发
+        events.removeAll()
+        try appendLine(
+            #"{"uuid":"u6","sessionId":"\#(sessionId)","timestamp":"\#(now)","type":"system","cwd":"/work/my-proj","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"qwen-code.api_response","event.timestamp":"\#(now)","response_id":"chatcmpl-def","model":"qwen3.7-max","status_code":200,"input_token_count":100000,"output_token_count":310,"cached_content_token_count":100}}}"#)
+        tailer.scanOnce()
+        try expectEqual(contextPercents(), [50.0], "100000/200k 应为 50%: \(contextPercents())")
+        events.removeAll()
+        try appendLine(
+            #"{"uuid":"u7","sessionId":"\#(sessionId)","timestamp":"\#(now)","type":"system","cwd":"/work/my-proj","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"qwen-code.api_response","event.timestamp":"\#(now)","response_id":"chatcmpl-ghi","model":"qwen3.7-max","status_code":200,"input_token_count":100100,"output_token_count":10,"cached_content_token_count":0}}}"#)
+        tailer.scanOnce()
+        try expect(contextPercents().isEmpty,
+                   "50% → 50.05% 变化不足 0.5 不应补发: \(contextPercents())")
+    }
 }

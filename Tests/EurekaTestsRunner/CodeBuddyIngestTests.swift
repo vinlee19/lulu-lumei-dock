@@ -246,6 +246,60 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
             if case .taskFinished = $0.0.kind { return true } else { return false }
         }, "补全后应产出完成")
     }
+
+    t.test("function_call usage → contextUpdate（camelCase/snake_case 口径一致，变化才补发）") {
+        let session = try makeCodeBuddySession()
+        defer { try? FileManager.default.removeItem(at: session.home) }
+        let now = codeBuddyNowMs()
+        try appendCodeBuddyLines([
+            #"{"id":"u1","timestamp":\#(now - 4000),"type":"message","role":"user","content":[{"type":"input_text","text":"分析一下这个仓库"}],"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
+        ], to: session.sessionFile)
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = CodeBuddyChatTailer(
+            projectsRoot: session.home.appendingPathComponent("projects")
+        ) { events.append(($0, $1)) }
+        tailer.scanOnce()  // 初见定基线（无 usage 行 → 无 ctx%）
+        func contextPercents() -> [Double] {
+            events.compactMap { event, _ in
+                if case .contextUpdate(let percent) = event.kind { return percent }
+                return nil
+            }
+        }
+        try expect(contextPercents().isEmpty, "无 usage 不应发 ctx%: \(events.map(\.0.kind))")
+
+        // camelCase：inputTokens 含缓存读 → 上下文 = (inputTokens−cached)+cached = 25709
+        // glm-5.2 无官方确数 → 默认 200k 窗口 → 12.8545%
+        events.removeAll()
+        try appendCodeBuddyLines([
+            #"{"id":"f1","timestamp":\#(now - 3000),"type":"function_call","callId":"call_1","name":"Bash","arguments":"{}","providerData":{"model":"glm-5.2","usage":{"requests":1,"inputTokens":25709,"outputTokens":422,"totalTokens":26131,"inputTokensDetails":[{"cached_tokens":12800}]}},"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
+        ], to: session.sessionFile)
+        tailer.scanOnce()
+        try expectEqual(contextPercents().count, 1, "应补发 ctx%: \(events.map(\.0.kind))")
+        try expect(abs(contextPercents()[0] - 12.8545) < 0.001,
+                   "25709/200k 应为 12.8545%: \(contextPercents())")
+        let ctxEvent = events.first { if case .contextUpdate = $0.0.kind { return true } else { return false } }
+        try expectEqual(ctxEvent?.0.sessionId, "a0cd6d00-5b4c-4d09-bb14-b80de59f6c26")
+        try expectEqual(ctxEvent?.0.cwd, "/work/demo")
+        try expect(ctxEvent?.1 == false, "ctx% 按发射时刻 fresh 交付，不判 stale")
+
+        // snake_case 兜底：input_tokens 不含缓存 → 上下文 = 1000+200 = 1200 → 0.6%
+        events.removeAll()
+        try appendCodeBuddyLines([
+            #"{"id":"f2","timestamp":\#(now - 2000),"type":"function_call","callId":"call_2","name":"Read","arguments":"{}","message":{"usage":{"input_tokens":1000,"output_tokens":50,"total_tokens":1250,"cache_read_input_tokens":200}},"providerData":{"model":"glm-5.2"},"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
+        ], to: session.sessionFile)
+        tailer.scanOnce()
+        try expectEqual(contextPercents(), [0.6], "1200/200k 应为 0.6%: \(contextPercents())")
+
+        // 变化 <0.5 不补发（防刷屏）
+        events.removeAll()
+        try appendCodeBuddyLines([
+            #"{"id":"f3","timestamp":\#(now - 1000),"type":"function_call","callId":"call_3","name":"Read","arguments":"{}","providerData":{"model":"glm-5.2","usage":{"requests":1,"inputTokens":1300,"outputTokens":10,"totalTokens":1310,"inputTokensDetails":[{"cached_tokens":0}]}},"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
+        ], to: session.sessionFile)
+        tailer.scanOnce()
+        try expect(contextPercents().isEmpty,
+                   "0.6% → 0.65% 变化不足 0.5 不应补发: \(contextPercents())")
+    }
 }
 
 func codeBuddySessionIndexerTests(_ t: TestRunner) {

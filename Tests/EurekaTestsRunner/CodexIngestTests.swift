@@ -380,6 +380,25 @@ func contextEstimatorTests(_ t: TestRunner) {
         try expectEqual(ContextWindows.window(forModel: "claude-opus-4-1"), 200_000)
     }
 
+    t.test("ContextWindows：gemini-2.5/3 → 1M；glm/qwen 刻意落默认 200k") {
+        // 前缀命中内建表（无需精确全名）
+        try expectEqual(ContextWindows.window(forModel: "gemini-2.5-pro"), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: "gemini-2.5-flash"), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: "gemini-3-pro-preview"), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: "gemini-3.5-flash"), 1_000_000)
+        // 无官方确数的模型不进表 → 落默认，ctx% 宁可保守
+        try expectEqual(ContextWindows.window(forModel: "glm-5.2"), 200_000)
+        try expectEqual(ContextWindows.window(forModel: "qwen3.7-max"), 200_000)
+        // 最长前缀优先：用户覆盖更长的 key 胜出，其余前缀仍命中内建
+        ContextWindows.overrides = ["gemini-3-pro": 500_000]
+        defer { ContextWindows.overrides = [:] }
+        try expectEqual(ContextWindows.window(forModel: "gemini-3-pro-preview"), 500_000)
+        try expectEqual(ContextWindows.window(forModel: "gemini-3.5-flash"), 1_000_000)
+        // percent 口径：used ÷ 命中窗口
+        try expectEqual(ContextWindows.percent(used: 250_000, model: "gemini-2.5-pro"), 25.0)
+        try expectEqual(ContextWindows.percent(used: 250_000, model: "glm-5.2"), 125.0)
+    }
+
     t.test("synthetic 错误行（usage 全零）不参与估算") {
         let percent = ClaudeContextEstimator.estimate(
             transcriptPath: try fixtureURL("claude-transcript-api-error.jsonl").path)
