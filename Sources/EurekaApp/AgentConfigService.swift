@@ -52,7 +52,7 @@ final class AgentConfigService: ObservableObject {
         scanPhase = "正在扫描子代理…"
         queue.async { [weak self] in
             guard let self else { return }
-            // 项目级 agent 根：各项目仓库根下的 .claude/agents 与 .opencode/agents
+            // 项目级 agent 根：各项目仓库根下的 .claude/agents、.opencode/agents 与 .grok/agents
             var claudeProjectRoots: [ProjectScopedRoot] = []
             var opencodeProjectRoots: [ProjectScopedRoot] = []
             var grokProjectRoots: [ProjectScopedRoot] = []

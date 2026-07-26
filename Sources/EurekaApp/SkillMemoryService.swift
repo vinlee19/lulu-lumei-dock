@@ -5,7 +5,8 @@ import EurekaKit
 import EurekaUsage
 import Foundation
 
-/// 技能 & 记忆的浏览与完整管理：Claude + Codex 双源。
+/// 技能 & 记忆的浏览与完整管理：覆盖全部 agent 源（含项目级目录，发现口径见
+/// ProjectRoots.recentCwds / SkillMemoryIndexer.projectSkillRoots）。
 /// 自带后台扫描队列；编辑写前备份、删除进废纸篓、停用 = 移到 *.eureka-disabled 同级目录（均可逆）。
 final class SkillMemoryService: ObservableObject {
     @Published private(set) var skills: [SkillEntry] = []

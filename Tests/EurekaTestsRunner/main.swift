@@ -86,5 +86,6 @@ codeBuddyChatTailerTests(t)
 codeBuddySessionIndexerTests(t)
 codeBuddyUsageScannerTests(t)
 qoderIngestTests(t)
+projectRootsTests(t)
 
 t.finish()
