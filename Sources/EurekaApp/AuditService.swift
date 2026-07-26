@@ -4,8 +4,8 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 安全审计服务：持有独立 SQLite 连接 + AuditPipeline + Codex 审计扫描器。
-/// Claude 操作经 EventPipeline 旁路送入（ingestClaude），Codex 靠定时扫描 rollout。
+/// 安全审计服务：持有独立 SQLite 连接 + AuditPipeline + Codex/CodeBuddy/Qoder 审计扫描器。
+/// Claude 操作经 EventPipeline 旁路送入（ingestClaude），其余靠定时扫描 jsonl。
 /// store/pipeline/scanner 只在内部串行队列上触碰；@Published 只在主线程更新。
 final class AuditService: ObservableObject {
     /// 审计面板当前页（倒序）与总条数
@@ -25,14 +25,20 @@ final class AuditService: ObservableObject {
     private var store: EurekaStore?
     private var pipeline: AuditPipeline?
     private var codexScanner: CodexAuditScanner?
+    private var codeBuddyScanner: CodeBuddyAuditScanner?
+    private var qoderScanner: QoderAuditScanner?
     private var captureEnabled = true
     private var retentionDays = 90
     private var lastPruneAt = Date.distantPast
 
-    private static let healthName = "审计扫描 Codex"
+    private static let codexHealthName = "审计扫描 Codex"
+    private static let codeBuddyHealthName = "审计扫描 CodeBuddy"
+    private static let qoderHealthName = "审计扫描 Qoder"
 
     func start() {
-        HealthRegistry.shared.register(Self.healthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.codexHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.qoderHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -43,18 +49,28 @@ final class AuditService: ObservableObject {
                 self.codexScanner = CodexAuditScanner(
                     sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(),
                     store: store, pipeline: pipeline)
+                self.codeBuddyScanner = CodeBuddyAuditScanner(
+                    projectsRoot: CodeBuddyPaths.projectsRoot(),
+                    store: store, pipeline: pipeline)
+                self.qoderScanner = QoderAuditScanner(
+                    projectsRoot: QoderPaths.projectsRoot(),
+                    store: store, pipeline: pipeline)
                 self.scanCodex()
+                self.scanCodeBuddy()
+                self.scanQoder()
                 self.pruneIfDue()
             } catch {
                 self.publish { $0.lastError = "审计库打开失败: \(error)" }
             }
         }
-        // 2s 近实时扫描 Codex + 顺带到点清理
+        // 2s 近实时扫描 Codex/CodeBuddy/Qoder + 顺带到点清理
         let timer = DispatchSource.makeTimerSource(queue: queue)
         // leeway 让系统合并唤醒省电
         timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in
             self?.scanCodex()
+            self?.scanCodeBuddy()
+            self?.scanQoder()
             self?.pruneIfDue()
         }
         timer.resume()
@@ -162,12 +178,34 @@ final class AuditService: ObservableObject {
 
     private func scanCodex() {
         guard captureEnabled, let scanner = codexScanner else { return }
-        HealthRegistry.shared.beat(Self.healthName)
+        HealthRegistry.shared.beat(Self.codexHealthName)
         do {
             let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
-            if new > 0 { HealthRegistry.shared.event(Self.healthName) }
+            if new > 0 { HealthRegistry.shared.event(Self.codexHealthName) }
         } catch {
-            HealthRegistry.shared.failure(Self.healthName, note: "\(error)")
+            HealthRegistry.shared.failure(Self.codexHealthName, note: "\(error)")
+        }
+    }
+
+    private func scanCodeBuddy() {
+        guard captureEnabled, let scanner = codeBuddyScanner else { return }
+        HealthRegistry.shared.beat(Self.codeBuddyHealthName)
+        do {
+            let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
+            if new > 0 { HealthRegistry.shared.event(Self.codeBuddyHealthName) }
+        } catch {
+            HealthRegistry.shared.failure(Self.codeBuddyHealthName, note: "\(error)")
+        }
+    }
+
+    private func scanQoder() {
+        guard captureEnabled, let scanner = qoderScanner else { return }
+        HealthRegistry.shared.beat(Self.qoderHealthName)
+        do {
+            let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
+            if new > 0 { HealthRegistry.shared.event(Self.qoderHealthName) }
+        } catch {
+            HealthRegistry.shared.failure(Self.qoderHealthName, note: "\(error)")
         }
     }
 
