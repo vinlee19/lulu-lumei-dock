@@ -3,6 +3,8 @@ import EurekaKit
 import EurekaStore
 
 /// 扫描 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl 的 token_count 事件。
+/// resume 的旧会话在创建日目录原地追加，故整树枚举全部日期目录；
+/// scan_files 水位线保证重扫廉价（老文件只在首扫时全量读一次）。
 /// 记账用 total_token_usage 的**相邻差值法**（对重连稳健）；
 /// 差值为负（compaction/重置）时回退用 last_token_usage。
 /// 模型名跟踪 turn_context.payload.model（缺省 "gpt-5.5"）。
@@ -10,8 +12,6 @@ public final class CodexUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
-    /// 回看天数：覆盖月度统计（offset 续读，老文件只在首扫时全量读一次）
-    private let lookbackDays = 35
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -49,23 +49,31 @@ public final class CodexUsageScanner {
         return inserted
     }
 
+    /// 整树递归枚举（与 EurekaIngest.CodexRolloutFiles 同逻辑；EurekaUsage 不能依赖
+    /// EurekaIngest，自带一份小拷贝，同 JSONLinesReader 的跨模块惯例）。
+    /// resume 的旧会话在创建日目录原地追加，只数最近日期目录必漏。
     private func rolloutFiles() -> [URL] {
         let fm = FileManager.default
-        let calendar = Calendar.current
-        var results: [URL] = []
-        for dayOffset in 0..<lookbackDays {
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else {
-                continue
+        func numericSubdirs(of dir: URL, digits: Int) -> [URL] {
+            let children = (try? fm.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            return children.filter { url in
+                let name = url.lastPathComponent
+                return name.count == digits && name.allSatisfy(\.isNumber)
+                    && (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
             }
-            let parts = calendar.dateComponents([.year, .month, .day], from: day)
-            let dir = sessionsRoot
-                .appendingPathComponent(String(format: "%04d", parts.year ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.month ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.day ?? 0), isDirectory: true)
-            let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-            results.append(contentsOf: files.filter {
-                $0.lastPathComponent.hasPrefix("rollout-") && $0.pathExtension == "jsonl"
-            })
+        }
+        var results: [URL] = []
+        for year in numericSubdirs(of: sessionsRoot, digits: 4) {
+            for month in numericSubdirs(of: year, digits: 2) {
+                for day in numericSubdirs(of: month, digits: 2) {
+                    let files = (try? fm.contentsOfDirectory(
+                        at: day, includingPropertiesForKeys: nil)) ?? []
+                    results.append(contentsOf: files.filter {
+                        $0.lastPathComponent.hasPrefix("rollout-") && $0.pathExtension == "jsonl"
+                    })
+                }
+            }
         }
         return results
     }

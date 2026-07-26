@@ -2,7 +2,9 @@ import Foundation
 import EurekaKit
 
 /// 增量 tail Codex rollout 文件（~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl）。
-/// 轮询今天/昨天日期目录中近期有写入的文件；按 offset 续读、半行不消费。
+/// resume 的旧会话在创建日目录原地追加（mtime 刷新、不新建当天目录），所以每轮
+/// 整树枚举日期目录、只 tail mtime 落入 recentWindow 的文件（已跟踪的始终续 tail）。
+/// 按 offset 续读、半行不消费。
 /// 新发现的文件流式找出最后的生命周期状态，不向 UI 重放中间历史。
 public final class CodexRolloutTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
@@ -22,6 +24,7 @@ public final class CodexRolloutTailer {
     private let sessionsRoot: URL
     private let sessionIndexURL: URL
     private let staleThreshold: TimeInterval
+    private let recentWindow: TimeInterval
     private let handler: Handler
     private let rateLimitHandler: RateLimitHandler?
     private let queue = DispatchQueue(label: "com.vinlee.eureka.codex-tailer")
@@ -43,6 +46,7 @@ public final class CodexRolloutTailer {
         sessionsRoot: URL,
         sessionIndexURL: URL? = nil,
         staleThreshold: TimeInterval = 300,
+        recentWindow: TimeInterval = 2 * 86400,
         rateLimitHandler: RateLimitHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -50,6 +54,7 @@ public final class CodexRolloutTailer {
         self.sessionIndexURL = sessionIndexURL
             ?? CodexThreadNameIndex.resolvedURL(for: sessionsRoot)
         self.staleThreshold = staleThreshold
+        self.recentWindow = recentWindow
         self.rateLimitHandler = rateLimitHandler
         self.handler = handler
     }
@@ -116,29 +121,17 @@ public final class CodexRolloutTailer {
 
     // MARK: - 文件发现
 
-    /// 今天/昨天（本地时区，与 rollout 目录命名一致）日期目录下全部 rollout 文件。
-    /// 不按 mtime 过滤：tail() 内部已有 size 检查（无新数据则跳过），过滤只会漏掉
-    /// 长时间空闲后重新活跃、或历史已完成的会话文件。
-    private func recentRolloutFiles() -> [URL] {
-        let fm = FileManager.default
-        let calendar = Calendar.current
-        let now = Date()
-        var results: [URL] = []
-        for dayOffset in 0...1 {
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
-            let parts = calendar.dateComponents([.year, .month, .day], from: day)
-            guard let y = parts.year, let m = parts.month, let d = parts.day else { continue }
-            let dir = sessionsRoot
-                .appendingPathComponent(String(format: "%04d", y), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", m), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", d), isDirectory: true)
-            let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-            for file in files
-            where file.lastPathComponent.hasPrefix("rollout-") && file.pathExtension == "jsonl" {
-                results.append(file)
-            }
+    /// 整树枚举全部日期目录的 rollout 文件，但只 tail mtime 落入 recentWindow 的。
+    /// resume 的旧会话在创建日目录原地追加、mtime 随之刷新，所以 mtime 过滤不会漏掉
+    /// 重新活跃的会话；已在 offsets 跟踪的文件不受窗口限制，始终续 tail。
+    /// 冷历史每轮只付出目录列举 + stat 的成本。
+    private func recentRolloutFiles(now: Date = Date()) -> [URL] {
+        CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot).compactMap { entry in
+            if offsets[entry.url.path] != nil { return entry.url }
+            guard let mtime = entry.mtime, now.timeIntervalSince(mtime) < recentWindow
+            else { return nil }
+            return entry.url
         }
-        return results
     }
 
     // MARK: - 增量读取
