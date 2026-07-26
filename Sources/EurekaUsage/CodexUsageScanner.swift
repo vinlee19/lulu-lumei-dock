@@ -49,33 +49,10 @@ public final class CodexUsageScanner {
         return inserted
     }
 
-    /// 整树递归枚举（与 EurekaIngest.CodexRolloutFiles 同逻辑；EurekaUsage 不能依赖
-    /// EurekaIngest，自带一份小拷贝，同 JSONLinesReader 的跨模块惯例）。
-    /// resume 的旧会话在创建日目录原地追加，只数最近日期目录必漏。
+    /// 整树递归枚举（CodexRolloutFiles）：resume 的旧会话在创建日目录原地追加，
+    /// 只数最近日期目录必漏。
     private func rolloutFiles() -> [URL] {
-        let fm = FileManager.default
-        func numericSubdirs(of dir: URL, digits: Int) -> [URL] {
-            let children = (try? fm.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-            return children.filter { url in
-                let name = url.lastPathComponent
-                return name.count == digits && name.allSatisfy(\.isNumber)
-                    && (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
-            }
-        }
-        var results: [URL] = []
-        for year in numericSubdirs(of: sessionsRoot, digits: 4) {
-            for month in numericSubdirs(of: year, digits: 2) {
-                for day in numericSubdirs(of: month, digits: 2) {
-                    let files = (try? fm.contentsOfDirectory(
-                        at: day, includingPropertiesForKeys: nil)) ?? []
-                    results.append(contentsOf: files.filter {
-                        $0.lastPathComponent.hasPrefix("rollout-") && $0.pathExtension == "jsonl"
-                    })
-                }
-            }
-        }
-        return results
+        CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot).map(\.url)
     }
 
     private func scanFile(_ url: URL) throws -> Int {

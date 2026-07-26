@@ -25,6 +25,41 @@ func rateLimitTests(_ t: TestRunner) {
         try expect(snapshot == nil)
     }
 
+    t.test("resume 的旧会话（老日期目录 + 新 mtime）能被发现为最新 rollout") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("eureka-cxrl-\(UUID().uuidString)", isDirectory: true)
+
+        // 今天目录里的干扰文件：mtime 稍旧
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let todayDir = root
+            .appendingPathComponent(String(format: "%04d", parts.year!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", parts.month!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", parts.day!), isDirectory: true)
+        try fm.createDirectory(at: todayDir, withIntermediateDirectories: true)
+        let decoy = todayDir.appendingPathComponent(
+            "rollout-2026-07-26T10-00-00-decoy.jsonl")
+        try fm.copyItem(
+            at: fixtureURL("codex-rollout-token-count-ratelimits.jsonl"), to: decoy)
+        try fm.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: decoy.path)
+
+        // resume 的旧会话：创建日目录很老，但原地追加使 mtime 最新 → 必须赢过干扰文件
+        let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
+        try fm.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
+        let resumed = oldDayDir.appendingPathComponent(
+            "rollout-2025-01-01T10-00-00-resumed.jsonl")
+        try fm.copyItem(
+            at: fixtureURL("codex-rollout-token-count-ratelimits.jsonl"), to: resumed)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumed.path)
+
+        let provider = CodexRateLimitProvider(sessionsRoot: root)
+        let found = provider.newestRollout()
+        try expect(
+            found?.lastPathComponent == resumed.lastPathComponent,
+            "应发现老目录里的 resume 文件: \(String(describing: found))")
+    }
+
     t.suite("ClaudeOAuthUsageProvider 响应解析")
 
     t.test("标准形态：小数 utilization 转百分比 + ISO 重置时间") {
