@@ -18,10 +18,6 @@ struct SessionsView: View {
     /// 来源选择 popover 开关
     @State private var showSourcePicker = false
 
-    private var rangeLabel: String {
-        settings.sessionRangeAll ? "全部时间" : "近 30 天"
-    }
-
     var body: some View {
         HSplitView {
             listPane
@@ -70,7 +66,7 @@ struct SessionsView: View {
 
     private var listPane: some View {
         VStack(spacing: 0) {
-            // 账本总览 + 展示数量
+            // 账本总览
             HStack(spacing: 6) {
                 Text("共 \(service.summary.sessionCount) 个会话")
                     .font(.system(size: 11, weight: .medium))
@@ -90,33 +86,6 @@ struct SessionsView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                // 时间范围下拉（胶囊盒，同来源下拉风格）：近 30 天 / 全部时间
-                Menu {
-                    Button("近 30 天") { settings.sessionRangeAll = false }
-                    Button("全部时间") { settings.sessionRangeAll = true }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                        Text(rangeLabel)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 7, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3.5)
-                    .background(Capsule().fill(Color.primary.opacity(0.05)))
-                    .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
-                    .contentShape(Capsule())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("会话时间范围（近 30 天 / 全部时间）")
-                .accessibilityLabel("会话时间范围")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -140,6 +109,29 @@ struct SessionsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+
+            // 时间范围（近 30 天 / 全部时间）；胶囊页签，与下方排序档同风格，选中紫底白字
+            CapsuleTabTray {
+                CapsuleTabButton(
+                    title: "近 30 天", icon: "clock",
+                    isSelected: !settings.sessionRangeAll
+                ) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        settings.sessionRangeAll = false
+                    }
+                }
+                CapsuleTabButton(
+                    title: "全部时间", icon: "infinity",
+                    isSelected: settings.sessionRangeAll
+                ) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        settings.sessionRangeAll = true
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+            .accessibilityLabel("会话时间范围")
 
             // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签，选中紫底白字
             CapsuleTabTray {
