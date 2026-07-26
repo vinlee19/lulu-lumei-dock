@@ -82,8 +82,9 @@ final class AppSettings: ObservableObject {
                          forKey: "suppressCardWhenTerminalFrontmost")
         }
     }
-    @Published var sessionDisplayLimit: Int {
-        didSet { defaults.set(sessionDisplayLimit, forKey: "sessionDisplayLimit") }
+    /// 会话页时间范围：false = 近 30 天（默认）；true = 全部时间
+    @Published var sessionRangeAll: Bool {
+        didSet { defaults.set(sessionRangeAll, forKey: "sessionRangeAll") }
     }
     /// 历史列表排序：active=最近活跃 / start=最初对话开始时间（存 rawValue）
     @Published var historySortMode: String {
@@ -185,7 +186,7 @@ final class AppSettings: ObservableObject {
         hookAutoUpdate = defaults.object(forKey: "hookAutoUpdate") as? Bool ?? true
         suppressCardWhenTerminalFrontmost = defaults.object(
             forKey: "suppressCardWhenTerminalFrontmost") as? Bool ?? false
-        sessionDisplayLimit = defaults.object(forKey: "sessionDisplayLimit") as? Int ?? 10
+        sessionRangeAll = defaults.bool(forKey: "sessionRangeAll")
         historySortMode = defaults.string(forKey: "historySortMode") ?? "active"
         sessionSortMode = defaults.string(forKey: "sessionSortMode") ?? "time"
         appearanceMode = defaults.string(forKey: "appearanceMode") ?? "system"

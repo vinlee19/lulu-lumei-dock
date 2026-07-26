@@ -18,8 +18,8 @@ struct SessionsView: View {
     /// 来源选择 popover 开关
     @State private var showSourcePicker = false
 
-    private var limitLabel: String {
-        settings.sessionDisplayLimit == 0 ? "全部" : "最近 \(settings.sessionDisplayLimit)"
+    private var rangeLabel: String {
+        settings.sessionRangeAll ? "全部时间" : "近 30 天"
     }
 
     var body: some View {
@@ -30,14 +30,14 @@ struct SessionsView: View {
                 .frame(minWidth: 380, maxWidth: .infinity)
         }
         .onAppear {
-            service.displayLimit = settings.sessionDisplayLimit
+            service.rangeAll = settings.sessionRangeAll
             if let mode = SessionBrowserService.SortMode(rawValue: settings.sessionSortMode) {
                 service.sortMode = mode
             }
             service.refresh()
         }
-        .onChange(of: settings.sessionDisplayLimit) { _, newValue in
-            service.displayLimit = newValue
+        .onChange(of: settings.sessionRangeAll) { _, newValue in
+            service.rangeAll = newValue
         }
         .onChange(of: service.sortMode) { _, newValue in
             settings.sessionSortMode = newValue.rawValue
@@ -90,18 +90,16 @@ struct SessionsView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                // 展示数量下拉（胶囊盒，同来源下拉风格）
+                // 时间范围下拉（胶囊盒，同来源下拉风格）：近 30 天 / 全部时间
                 Menu {
-                    ForEach([10, 20, 50], id: \.self) { n in
-                        Button("最近 \(n) 个") { settings.sessionDisplayLimit = n }
-                    }
-                    Button("全部") { settings.sessionDisplayLimit = 0 }
+                    Button("近 30 天") { settings.sessionRangeAll = false }
+                    Button("全部时间") { settings.sessionRangeAll = true }
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "line.3.horizontal.decrease")
+                        Image(systemName: "calendar")
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.tertiary)
-                        Text(limitLabel)
+                        Text(rangeLabel)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                         Image(systemName: "chevron.up.chevron.down")
@@ -117,7 +115,8 @@ struct SessionsView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("最多展示多少个会话")
+                .help("会话时间范围（近 30 天 / 全部时间）")
+                .accessibilityLabel("会话时间范围")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -170,7 +169,9 @@ struct SessionsView: View {
                         Image(systemName: "tray")
                             .font(.system(size: 28))
                             .foregroundStyle(Theme.brand.opacity(0.45))
-                        Text(service.isSearching ? "没有匹配的会话" : "近 30 天没有会话")
+                        Text(service.isSearching
+                            ? "没有匹配的会话"
+                            : (settings.sessionRangeAll ? "没有会话" : "近 30 天没有会话"))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
