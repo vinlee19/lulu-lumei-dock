@@ -2,6 +2,7 @@ import Foundation
 import EurekaKit
 
 /// Codex 会话索引：~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
+/// resume 的旧会话在创建日目录原地追加，故整树枚举后按 mtime 窗口过滤。
 /// 正式 thread_name 优先；缺失时流式读取 session_meta 与首条完整 user_message 兜底。
 public enum CodexSessionIndexer {
     public static func index(
@@ -11,30 +12,13 @@ public enum CodexSessionIndexer {
         maxSessions: Int = 300,
         now: Date = Date()
     ) -> [AgentSessionInfo] {
-        let fm = FileManager.default
-        let calendar = Calendar.current
+        // window 可传 .greatestFiniteMagnitude（"显示全部"），这里必须是无换算的
+        // 区间比较——先除 86400 再取 Int 会直接溢出崩溃。
         var candidates: [(URL, Date, UInt64)] = []
-        let days = Int(window / 86400) + 1
-        for dayOffset in 0..<days {
-            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: now) else {
-                continue
-            }
-            let parts = calendar.dateComponents([.year, .month, .day], from: day)
-            let dir = sessionsRoot
-                .appendingPathComponent(String(format: "%04d", parts.year ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.month ?? 0), isDirectory: true)
-                .appendingPathComponent(String(format: "%02d", parts.day ?? 0), isDirectory: true)
-            let files = (try? fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? []
-            for file in files
-            where file.lastPathComponent.hasPrefix("rollout-") && file.pathExtension == "jsonl" {
-                guard let values = try? file.resourceValues(
-                    forKeys: [.contentModificationDateKey, .fileSizeKey]),
-                    let mtime = values.contentModificationDate
-                else { continue }
-                candidates.append((file, mtime, UInt64(values.fileSize ?? 0)))
-            }
+        for entry in CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot) {
+            guard let mtime = entry.mtime, now.timeIntervalSince(mtime) < window
+            else { continue }
+            candidates.append((entry.url, mtime, entry.size))
         }
         candidates.sort { $0.1 > $1.1 }
         let names = CodexThreadNameIndex.load(

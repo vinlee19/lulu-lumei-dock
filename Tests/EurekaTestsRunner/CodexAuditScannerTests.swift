@@ -118,4 +118,21 @@ func codexAuditScannerTests(_ t: TestRunner) {
         try expectEqual(alerts.first?.ruleId, "rm-rf")
         try expectEqual(alerts.first?.source, .codex)
     }
+
+    t.test("resume 的旧会话（老日期目录）审计行不丢") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-auditscan-\(UUID().uuidString)", isDirectory: true)
+        // 创建日目录很老的 rollout：resume 后原地追加，只数最近日期目录会漏
+        let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(
+            at: fixtureURL("codex-rollout-trail.jsonl"),
+            to: oldDayDir.appendingPathComponent("rollout-2025-01-01T10-00-00-resumed.jsonl"))
+
+        let scanner = CodexAuditScanner(
+            sessionsRoot: root, store: store, pipeline: AuditPipeline(store: store))
+        try expectEqual(try scanner.scanOnce(), 4, "老日期目录里的活跃会话必须扫到")
+        try expectEqual(try store.audit.count(), 4)
+    }
 }

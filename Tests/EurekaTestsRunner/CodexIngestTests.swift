@@ -299,6 +299,62 @@ func codexRolloutTests(_ t: TestRunner) {
             throw ExpectationError(description: "未解码 thread_name_updated: \(decoded)")
         }
     }
+
+    t.test("resume 的旧会话（老日期目录 + 新 mtime）有实时事件流；冷历史不 tail") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("eureka-codex-resumed-\(UUID().uuidString)", isDirectory: true)
+        let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
+        try fm.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
+
+        // resume 的旧会话：创建日目录很老，但原地追加使 mtime 是刚刚
+        let resumedFile = oldDayDir.appendingPathComponent(
+            "rollout-2025-01-01T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0003.jsonl")
+        try append(Array(lifecycleLines[0...1]), to: resumedFile)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumedFile.path)
+
+        // 真正冷掉的历史：老目录 + 老 mtime → 不在 recentWindow 内，不该 tail
+        let ancientDir = root.appendingPathComponent("2024/12/31", isDirectory: true)
+        try fm.createDirectory(at: ancientDir, withIntermediateDirectories: true)
+        let ancientFile = ancientDir.appendingPathComponent(
+            "rollout-2024-12-31T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0004.jsonl")
+        try append([
+            try jsonLine([
+                "timestamp": "2024-12-31T10:00:00.000Z", "type": "session_meta",
+                "payload": ["id": "codex-ancient", "cwd": "/Users/me/work/old"],
+            ]),
+            try jsonLine([
+                "timestamp": "2024-12-31T10:00:01.000Z", "type": "event_msg",
+                "payload": ["type": "task_started", "turn_id": "turn-old"],
+            ]),
+        ], to: ancientFile)
+        try fm.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-10 * 86400)],
+            ofItemAtPath: ancientFile.path)
+
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = CodexRolloutTailer(sessionsRoot: root) { events.append(($0, $1)) }
+
+        // 初见：老目录里的 resume 会话恢复 running；冷历史完全不出事件
+        tailer.scanOnce()
+        try expectEqual(events.count, 1, "只有 resume 会话应出事件: \(events)")
+        try expectEqual(events[0].0.sessionId, "fixture-codex-1")
+        guard case .taskStarted = events[0].0.kind else {
+            throw ExpectationError(description: "resume 会话应恢复 running: \(events)")
+        }
+
+        // 增量追加：事件继续实时流动（live 监控覆盖老目录）
+        events.removeAll()
+        try append(Array(lifecycleLines[2...5]), to: resumedFile)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumedFile.path)
+        tailer.scanOnce()
+        try expect(events.contains {
+            if case .taskFinished = $0.0.kind { return true } else { return false }
+        }, "resume 会话的后续事件应实时送达: \(events.map(\.0.kind))")
+        try expect(
+            events.allSatisfy { $0.0.sessionId == "fixture-codex-1" },
+            "冷历史文件不该产出任何事件: \(events)")
+    }
 }
 
 func contextEstimatorTests(_ t: TestRunner) {
@@ -579,6 +635,43 @@ func sessionIndexerTests(_ t: TestRunner) {
         sessions = CodexSessionIndexer.index(
             sessionsRoot: root, threadNameIndexURL: indexURL)
         try expectEqual(sessions[0].name, "官方 Codex 会话标题")
+    }
+
+    t.test("Codex 索引：resume 的旧会话（老日期目录 + 新 mtime）被索引；全量 window 不溢出") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("eureka-cxidx-resumed-\(UUID().uuidString)", isDirectory: true)
+        let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
+        try fm.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
+
+        // resume 的旧会话：创建日目录很老，但 mtime 是刚刚 → 应被索引
+        let resumed = oldDayDir.appendingPathComponent(
+            "rollout-2025-01-01T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0005.jsonl")
+        try fm.copyItem(at: fixtureURL("codex-rollout-lifecycle.jsonl"), to: resumed)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumed.path)
+
+        // 真正冷掉的历史：老目录 + 老 mtime → 窗口过滤应排除
+        let ancientDir = root.appendingPathComponent("2024/12/31", isDirectory: true)
+        try fm.createDirectory(at: ancientDir, withIntermediateDirectories: true)
+        let ancient = ancientDir.appendingPathComponent(
+            "rollout-2024-12-31T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0006.jsonl")
+        try fm.copyItem(at: fixtureURL("codex-rollout-lifecycle.jsonl"), to: ancient)
+        try fm.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-400 * 86400)],
+            ofItemAtPath: ancient.path)
+
+        let sessions = CodexSessionIndexer.index(sessionsRoot: root)
+        try expectEqual(sessions.count, 1, "老 mtime 的应被窗口排除: \(sessions.map(\.transcriptPath))")
+        try expectEqual(sessions[0].id, "fixture-codex-1")
+        // 枚举返回的路径带 /private 前缀（macOS tmp 符号链接），只比文件名
+        try expect(
+            sessions[0].transcriptPath.hasSuffix(resumed.lastPathComponent),
+            "应索引 resume 文件: \(sessions[0].transcriptPath)")
+
+        // "显示全部" UI 传 .greatestFiniteMagnitude：不得溢出/崩溃，冷历史也返回
+        let all = CodexSessionIndexer.index(
+            sessionsRoot: root, window: .greatestFiniteMagnitude)
+        try expectEqual(all.count, 2, "全量窗口应连冷历史一起索引: \(all.map(\.transcriptPath))")
     }
 }
 
