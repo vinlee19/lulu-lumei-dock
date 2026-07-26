@@ -4,6 +4,34 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] - 2026-07-26
+
+### Added
+
+- **Audit trail covers CodeBuddy and Qoder** — incremental transcript
+  scanners feed the same risk-flagged tool-call ledger as Claude/Codex,
+  including subagent transcripts (attributed to the parent session).
+  Audit now covers 4 of 11 agents.
+- **Subagent progress on the island for Kimi, CodeBuddy and Qoder** —
+  spawned agents (type, task description, running/completed/failed,
+  current tool) now surface from all three, reusing the Claude subagent
+  model. Qoder reuses the Claude layout scanner; CodeBuddy derives from
+  spawn calls in the parent transcript; Kimi gets a cheap snapshot
+  (subagent wires are still never tailed).
+- **ctx% for Gemini, Qwen and CodeBuddy** — their transcripts already
+  carry per-request input/cached tokens; the island now shows context
+  usage for them. The built-in context-window table learns
+  `gemini-2.5`/`gemini-3` (1M) so Gemini ctx% is no longer overstated
+  ~5x against the 200k default.
+- **Qwen tool activity on the island** — function-call parts map to
+  current-tool events, which also keeps long tool runs alive instead of
+  being reaped as interrupted after 4h. (Verified: Gemini's chat jsonl
+  does not persist tool calls, so there is nothing to map there.)
+- **Project-level discovery from all 11 agents** — project skills,
+  memory, agent definitions and plan documents are now discovered for
+  repos only ever used with Kimi/Gemini/Qwen/Grok/CodeBuddy/Qoder/
+  Antigravity, not just Claude/Codex/opencode/Hermes checkouts.
+
 ## [0.12.0] - 2026-07-26
 
 ### Added
@@ -655,6 +683,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.13.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.13.0
 [0.12.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.12.0
 [0.11.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.11.0
 [0.10.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.10.0

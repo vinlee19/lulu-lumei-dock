@@ -114,7 +114,8 @@ tools, with in‑app markdown preview + edit (atomic save with timestamped backu
   block. Enabling it prompts a one‑time Keychain authorization (choose "Always Allow").
 
 **Audit** — an append‑only trail of agent tool calls (full commands / file paths, no output bodies),
-with risk flagging.
+with risk flagging. Covers Claude Code and Codex (hook/notify channel) plus CodeBuddy and Qoder
+(transcript scanners).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
 

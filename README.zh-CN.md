@@ -94,6 +94,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
   (选「始终允许」)。
 
 **审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带风险标记。
+覆盖 Claude Code 与 Codex(hook/notify 通道),以及 CodeBuddy 与 Qoder(transcript 扫描)。
 
 **备份** —— 可选:把本地数据备份到 S3 兼容的云存储(SigV4 签名)。
 
@@ -203,7 +204,7 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (原子 JSON 写)         ↓         ├─ NSStatusItem + NSPopover
 Codex rollout 监视 ─┘                    SpoolConsumer   │   (历史 / 会话 / 技能 / 用量 / 限额 / …)
 Claude transcript 监视 ────────────────→ TaskStore(状态机)
-用量扫描器(Claude/Codex/opencode/Grok) ────────────→ SQLite(历史 / 用量 / tool_calls / 审计)
+用量扫描器(除 Antigravity/Qoder 外各源) ───────────→ SQLite(历史 / 用量 / tool_calls / 审计)
 ```
 
 - **`eureka-relay`** 是一个极小、完全独立的二进制:永远 `exit 0`、stdout 绝对静默、<50ms 完成、
