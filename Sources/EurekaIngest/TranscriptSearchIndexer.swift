@@ -4,7 +4,8 @@ import Foundation
 
 /// 跨会话全文搜索索引器：发现 transcript → size+mtime 指纹比对 → 变更文件整体重建 docs。
 /// 只索引 user / assistant 文本（工具轨迹噪音大且可从会话页展开查看）；
-/// opencode（全部会话共享一个库文件，指纹无法区分）与 antigravity（protobuf 无明文）暂不索引。
+/// 共享库来源（opencode / hermes / cursor：全部会话共用一个 .db，指纹无法区分）
+/// 与 antigravity（protobuf 无明文）暂不索引。
 public final class TranscriptSearchIndexer {
     /// 单条消息入索引的截断上限（字符），防单条超长撑爆索引体积
     static let maxDocChars = 8192
@@ -35,11 +36,11 @@ public final class TranscriptSearchIndexer {
     /// 注入会话列表的索引一轮（测试入口；生产走 indexOnce()）
     @discardableResult
     public func indexOnce(sessions: [AgentSessionInfo]) -> Int {
-        // 排除 SQLite 型来源（opencode / hermes）：本索引以 transcriptPath 为主键
+        // 排除 SQLite 型来源（opencode / hermes / cursor）：本索引以 transcriptPath 为主键
         // （replaceDocs(path:) + prune(keeping:)），而它们所有会话共用同一个 .db 路径，
         // 后一个会话会把前一个的文档整片覆盖掉。antigravity 无可读 transcript，同样排除。
         let supported = sessions.filter {
-            $0.source != .opencode && $0.source != .antigravity && $0.source != .hermes
+            !$0.source.usesSharedSessionDatabase && $0.source != .antigravity
         }
         guard let fingerprints = try? store.search.fileFingerprints() else { return 0 }
         var rebuilt = 0

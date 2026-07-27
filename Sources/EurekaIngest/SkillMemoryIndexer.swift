@@ -150,6 +150,9 @@ public enum SkillMemoryIndexer {
             roots.append(ProjectScopedRoot(
                 root: root.appendingPathComponent(".qwen/skills", isDirectory: true),
                 source: .qwen, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".cursor/skills", isDirectory: true),
+                source: .cursor, projectName: name))
         }
         return roots
     }
@@ -235,6 +238,7 @@ public enum SkillMemoryIndexer {
         antigravitySkillsRoots: [URL] = [],
         hermesSkillsRoot: URL? = nil,
         hermesDisabledSkills: Set<String> = [],
+        cursorSkillsRoot: URL? = nil,
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
     ) -> [SkillEntry] {
@@ -263,6 +267,15 @@ public enum SkillMemoryIndexer {
                 kimiSkillsRoot, source: .kimi, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: kimiSkillsRoot), source: .kimi, enabled: false, scope: .system)
+        }
+        // cursor：~/.cursor/skills（SKILL.md 与 Claude 同构）。
+        // 同级的 ~/.cursor/skills-cursor 是官方内置技能，随客户端分发、用户改不了，不列。
+        if let cursorSkillsRoot {
+            result += scanSkillRoot(
+                cursorSkillsRoot, source: .cursor, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: cursorSkillsRoot), source: .cursor, enabled: false,
+                scope: .system)
         }
         // gemini：~/.gemini/skills（SKILL.md 与 Claude 同构；该目录同时被 Antigravity 共用，
         // 归 Gemini 一次避免双源重复列出）
@@ -554,6 +567,18 @@ public enum SkillMemoryIndexer {
             }
         }
 
+        // cursor 项目规则 <repo>/.cursor/rules/*.mdc（官方 create-rule 技能里的约定）：
+        // 这是 Cursor 唯一的本地"记忆"形态——它没有全局记忆目录，`cursor/memoriesEnabled`
+        // 指的是服务端记忆。.mdc 就是带 YAML frontmatter 的 markdown，按扩展名单独收。
+        for (root, name) in projectRoots {
+            let rulesDir = root.appendingPathComponent(".cursor/rules", isDirectory: true)
+            for file in enumerateFiles(rulesDir, extensions: ["mdc", "md"]) {
+                add(file, source: .cursor,
+                    scope: file.deletingPathExtension().lastPathComponent,
+                    projectName: name, kind: .instructions)
+            }
+        }
+
         // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、GEMINI.md→Gemini、
         // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
         // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
@@ -585,6 +610,22 @@ public enum SkillMemoryIndexer {
         return result.sorted {
             ($0.source.rawValue, $0.scope, $0.path) < ($1.source.rawValue, $1.scope, $1.path)
         }
+    }
+
+    /// 按扩展名枚举（Cursor 规则是 `.mdc`：带 YAML frontmatter 的 markdown 变体，
+    /// `enumerateMarkdown` 只认 `.md` 会整片漏掉）
+    static func enumerateFiles(_ dir: URL, extensions: [String]) -> [URL] {
+        let fm = FileManager.default
+        let wanted = Set(extensions.map { $0.lowercased() })
+        guard let enumerator = fm.enumerator(
+            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+        else { return [] }
+        var files: [URL] = []
+        for case let url as URL in enumerator
+        where wanted.contains(url.pathExtension.lowercased()) {
+            files.append(url)
+        }
+        return files
     }
 
     static func enumerateMarkdown(_ dir: URL) -> [URL] {

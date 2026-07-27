@@ -177,6 +177,15 @@ enum EurekaCLI {
                 stateDBs: { HermesPaths.allStateDBs() }, store: store)
             let codebuddy = CodeBuddyUsageScanner(
                 projectsRoot: CodeBuddyPaths.projectsRoot(), store: store)
+            let cursor = CursorUsageScanner(
+                dbPath: CursorPaths.globalStateDB(), store: store,
+                workspaceStorageRoot: CursorPaths.workspaceStorageRoot(),
+                sessions: { now in
+                    CursorSessionIndexer.index(
+                        window: CursorSessionIndexer.fullHistoryWindow,
+                        maxSessions: 2000, now: now)
+                        .map { ($0.id, $0.cwd, $0.lastActiveAt) }
+                })
             let newClaude = try claude.scanOnce()
             let newCodex = try codex.scanOnce()
             let newOpencode = try opencode.scanOnce()
@@ -186,10 +195,12 @@ enum EurekaCLI {
             let newQwen = try qwen.scanOnce()
             let newHermes = try hermes.scanOnce()
             let newCodeBuddy = try codebuddy.scanOnce()  // qoder 无 token（CN 后端全零），不扫描
+            let newCursor = try cursor.scanOnce()  // cursor 有 token 无价（成本恒 0）
             FileHandle.standardError.write(Data(
                 ("扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，"
                     + "grok 工具 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
-                    + "qwen +\(newQwen) 条，hermes +\(newHermes) 条，codebuddy +\(newCodeBuddy) 条\n").utf8))
+                    + "qwen +\(newQwen) 条，hermes +\(newHermes) 条，codebuddy +\(newCodeBuddy) 条，"
+                    + "cursor +\(newCursor) 条\n").utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(

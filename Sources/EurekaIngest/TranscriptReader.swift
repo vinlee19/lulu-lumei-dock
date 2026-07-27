@@ -76,7 +76,65 @@ public enum TranscriptReader {
             return loadCodeBuddy(path: session.transcriptPath, maxMessages: maxMessages)
         case .qoder:
             return loadQoder(path: session.transcriptPath, maxMessages: maxMessages)
+        case .cursor:
+            return loadCursor(
+                dbPath: session.transcriptPath, composerId: session.id,
+                maxMessages: maxMessages)
         }
+    }
+
+    // MARK: - Cursor（state.vscdb 只读：composerData 给气泡顺序，bubbleId 行给正文）
+
+    /// 消息顺序取 `composerData.fullConversationHeadersOnly`（气泡在 KV 里是散的，
+    /// key 按 uuid 排序，只有这张表知道时序）。`type` 1=user / 2=assistant；
+    /// `toolFormerData` 记 🔧 小注；空文本且无工具的气泡（纯 thinking 占位）跳过。
+    public static func loadCursor(dbPath: String, composerId: String, maxMessages: Int) -> Result {
+        guard let db = try? SQLiteDB(path: dbPath, readOnly: true),
+            let composer = cursorJSON(
+                db: db, key: "composerData:\(composerId)")
+        else { return Result(messages: [], truncated: false) }
+
+        let bubbleIds = (composer["fullConversationHeadersOnly"] as? [[String: Any]] ?? [])
+            .compactMap { $0["bubbleId"] as? String }
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+
+        for bubbleId in bubbleIds {
+            guard messages.count < maxMessages else {
+                truncated = true
+                break
+            }
+            guard let bubble = cursorJSON(
+                db: db, key: "bubbleId:\(composerId):\(bubbleId)") else { continue }
+            let timestamp = (bubble["createdAt"] as? String).flatMap { iso8601.date(from: $0) }
+
+            if let tool = bubble["toolFormerData"] as? [String: Any],
+                let name = tool["name"] as? String, !name.isEmpty {
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .toolNote,
+                    text: "🔧 \(CursorToolNames.displayName(name))", timestamp: timestamp))
+                guard messages.count < maxMessages else {
+                    truncated = true
+                    break
+                }
+            }
+            let text = (bubble["text"] as? String) ?? ""
+            guard !text.isEmpty else { continue }
+            let role: TranscriptMessage.Role =
+                (bubble["type"] as? NSNumber)?.intValue == 1 ? .user : .assistant
+            messages.append(TranscriptMessage(
+                id: messages.count, role: role, text: text, timestamp: timestamp))
+        }
+        return Result(messages: messages, truncated: truncated)
+    }
+
+    private static func cursorJSON(db: SQLiteDB, key: String) -> [String: Any]? {
+        let rows = (try? db.query(
+            "SELECT value FROM cursorDiskKV WHERE key = ?", [.text(key)]) { $0.text(0) }) ?? []
+        guard let text = rows.first.flatMap({ $0 }), let data = text.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     // MARK: - CodeBuddy（projects/<cwd-slug>/<sessionId>.jsonl；message/function_call 行）

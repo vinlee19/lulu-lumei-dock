@@ -83,6 +83,7 @@ struct AuditView: View {
                     Text("Codex").tag(AgentSource?.some(.codex))
                     Text("CodeBuddy").tag(AgentSource?.some(.codebuddy))
                     Text("Qoder").tag(AgentSource?.some(.qoder))
+                    Text("Cursor").tag(AgentSource?.some(.cursor))
                 }
                 .labelsHidden()
                 .frame(width: 110)
@@ -136,7 +137,7 @@ struct AuditView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Claude hooks 未安装，Claude 的操作暂未被审计采集（Codex / CodeBuddy / Qoder 不受影响）。")
+                Text("Claude hooks 未安装，Claude 的操作暂未被审计采集（Codex / CodeBuddy / Qoder / Cursor 不受影响）。")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                 // 装卸结果必须回显：否则被拒绝（配置解析不了 / 路径被手改）时这里毫无反馈

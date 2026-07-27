@@ -57,6 +57,9 @@ final class SkillMemoryService: ObservableObject {
             for root in AntigravityPaths.skillsRoots().dropFirst() {
                 bundledRoots.append((root, .antigravity))
             }
+            // cursor 内置技能 ~/.cursor/skills-cursor（官方分发、随客户端更新，
+            // 它自己的 create-skill 技能明写「绝不要往这里写」→ 只读，走 bundled）
+            bundledRoots.append((CursorPaths.bundledSkillsRoot(), .cursor))
             let skills = SkillMemoryIndexer.indexSkills(
                 claudeSkillsRoot: SkillMemoryIndexer.claudeSkillsRoot(),
                 codexSkillsRoot: SkillMemoryIndexer.codexSkillsRoot(),
@@ -71,6 +74,7 @@ final class SkillMemoryService: ObservableObject {
                 // EurekaInstall，故在 app 层读出来传进去
                 hermesDisabledSkills: HermesConfigEditor.disabledSkills(
                     from: ConfigFile.read(HermesPaths.configFile())),
+                cursorSkillsRoot: CursorPaths.skillsRoot(),
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
             let memories = SkillMemoryIndexer.indexMemory(
@@ -191,6 +195,7 @@ final class SkillMemoryService: ObservableObject {
             case .gemini: root = GeminiPaths.skillsRoot()
             case .qwen: root = QwenPaths.skillsRoot()
             case .hermes: root = HermesPaths.skillsRoot()
+            case .cursor: root = CursorPaths.skillsRoot()
             case .codebuddy, .qoder:
                 // 这两个 CLI 没有用户级 skills 目录（UI 不提供新建技能入口）；仅为穷举
                 DispatchQueue.main.async { completion?(false) }
@@ -267,6 +272,13 @@ final class SkillMemoryService: ObservableObject {
                 return
             case .qwen:
                 dir = QwenPaths.memoriesRoot()
+            case .cursor:
+                // Cursor 没有**全局**记忆目录：服务端记忆只有开关落在本地
+                // （`cursor/memoriesEnabled`），本地那份等价物是项目级规则
+                // `<repo>/.cursor/rules/*.mdc`——它归属某个仓库，不该由这个
+                // 「新建全局记忆」入口凭空造。索引照常收（见 SkillMemoryIndexer）。
+                DispatchQueue.main.async { completion?(false) }
+                return
             case .codebuddy:
                 dir = CodeBuddyPaths.memoryRoot()  // ~/.codebuddy/memery（官方拼写）
             case .qoder:

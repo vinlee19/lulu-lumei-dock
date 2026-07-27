@@ -51,6 +51,8 @@ final class PlansService: ObservableObject {
                 projectsRoot: QwenPaths.projectsRoot(), into: staging)
             PlanMaterializer.materializeQoder(
                 plansRoot: QoderPaths.plansRoot(), into: staging)
+            // cursor 无 plans 目录，计划是会话里的 todos → 合成（同 codex 的 update_plan）
+            PlanMaterializer.materializeCursor(into: staging)
             self.publishPhase("正在索引计划…")
             // Hermes 计划：profile 级 ~/.hermes/plans + 各仓库内 <repo>/.hermes/plans
             // （`plan` 技能默认写项目内那一份），都是真 .md，无需物化

@@ -13,6 +13,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case hermes
     case codebuddy
     case qoder
+    case cursor
 
     public var displayName: String {
         switch self {
@@ -27,13 +28,15 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         case .hermes: return "Hermes"
         case .codebuddy: return "CodeBuddy"
         case .qoder: return "Qoder"
+        case .cursor: return "Cursor"
         }
     }
 
-    /// 会话是否存在一个**共享数据库文件**里（opencode / hermes 各自只有一个 `.db`）。
+    /// 会话是否存在一个**共享数据库文件**里（opencode / hermes 各自只有一个 `.db`，
+    /// cursor 全部会话都在 `state.vscdb` 一个库里）。
     /// 由此派生两件事：不支持单条删除，且没有「本会话的转录文件」可展示。
     public var usesSharedSessionDatabase: Bool {
-        self == .opencode || self == .hermes
+        self == .opencode || self == .hermes || self == .cursor
     }
 
     /// 是否支持单条删除会话。共享库的源一律不支持：删文件会连坐全部会话，

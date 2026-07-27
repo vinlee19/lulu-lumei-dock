@@ -509,7 +509,86 @@ public enum PlanMaterializer {
         return written
     }
 
-    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi/qoder
+    // MARK: - cursor：composerData.todos → 暂存 cursor/<composerId>.md
+
+    /// Cursor **没有 plans 目录**（`composer.planMigrationToHomeDirCompleted=true`，
+    /// 但迁移目标目录根本不存在），它的计划是会话内的 `todos` 数组，由 `todo_write`
+    /// 工具写进 `composerData`。所以走合成路线，与 codex 的 `update_plan` 同一套路
+    /// （实勘 154 个会话里 22 个带 todos，状态 completed / in_progress / pending / cancelled）。
+    ///
+    /// 只物化**有 todos** 的会话；每会话一份 `<composerId>.md`，内容不变就不重写
+    /// （`writeIfChanged` 保持 mtime 稳定，备份才不会每轮都判为变更）。
+    @discardableResult
+    public static func materializeCursor(
+        dbPath: URL = CursorPaths.globalStateDB(),
+        into stagingRoot: URL,
+        maxSessions: Int = 500
+    ) -> Int {
+        guard FileManager.default.fileExists(atPath: dbPath.path),
+            let db = try? SQLiteDB(path: dbPath.path, readOnly: true)
+        else { return 0 }
+        let outDir = stagingRoot.appendingPathComponent("cursor", isDirectory: true)
+
+        // 键前缀范围扫描走覆盖索引；`json_array_length(...todos) > 0` 让 SQLite 在 C 侧
+        // 筛掉绝大多数会话，不用把 200KB 的 JSON 搬进 Swift（同 CursorSessionIndexer 的取舍）
+        let rows = (try? db.query(
+            """
+            SELECT substr(key, 14),
+                   json_extract(value, '$.name'),
+                   json_extract(value, '$.todos')
+            FROM cursorDiskKV
+            WHERE key >= 'composerData:' AND key < 'composerData;'
+              AND json_array_length(json_extract(value, '$.todos')) > 0
+            ORDER BY json_extract(value, '$.lastUpdatedAt') DESC
+            LIMIT ?
+            """, [.int(Int64(maxSessions))]
+        ) { row in
+            (row.text(0) ?? "", row.text(1), row.text(2) ?? "[]")
+        }) ?? []
+
+        var written = 0
+        for (composerId, name, todosJSON) in rows where !composerId.isEmpty {
+            guard let data = todosJSON.data(using: .utf8),
+                let todos = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
+                !todos.isEmpty
+            else { continue }
+            let content = renderCursorTodos(composerId: composerId, name: name, todos: todos)
+            guard !content.isEmpty else { continue }
+            if writeIfChanged(content, to: outDir.appendingPathComponent("\(composerId).md")) {
+                written += 1
+            }
+        }
+        return written
+    }
+
+    /// `todos` → markdown 清单。状态框与 codex 清单一致（`[x]` / `[~]` / `[ ]`），
+    /// 另加 `[-]` 表示 Cursor 特有的 `cancelled`：放弃的步骤不该看起来像还没做。
+    static func renderCursorTodos(
+        composerId: String, name: String?, todos: [[String: Any]]
+    ) -> String {
+        let title = name.flatMap { summarizeTitle($0) } ?? "Cursor 工作清单"
+        var lines = ["# \(title)", "", "> Cursor 工作清单 · 会话 \(composerId)", ""]
+        var any = false
+        for item in todos {
+            let content = (item["content"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty else { continue }
+            let box: String
+            switch item["status"] as? String {
+            case "completed": box = "[x]"
+            case "in_progress", "inProgress": box = "[~]"
+            case "cancelled", "canceled": box = "[-]"
+            default: box = "[ ]"
+            }
+            lines.append("- \(box) \(content)")
+            any = true
+        }
+        guard any else { return "" }
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi/qoder/cursor
 
     /// hermesPlansDirs：Hermes 的计划由 `plan` 技能用 write_file 直接写成 .md
     /// （项目内 `<repo>/.hermes/plans/`，profile 级 `~/.hermes/plans/` 可选），
@@ -536,6 +615,8 @@ public enum PlanMaterializer {
                 source: .qwen, into: &result)
         collect(dir: stagingRoot.appendingPathComponent("qoder", isDirectory: true),
                 source: .qoder, into: &result)
+        collect(dir: stagingRoot.appendingPathComponent("cursor", isDirectory: true),
+                source: .cursor, into: &result)
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 

@@ -184,6 +184,7 @@ struct AgentsView: View {
         items += (service.claudeAgents + service.pluginAgents + service.builtinAgents).map(item)
         items += service.opencodeAgents.map(item)
         items += service.grokAgents.map(item)
+        items += service.cursorAgents.map(item)
         items += service.kimiBuiltinAgents.map(item)
         items += service.codexProfiles.map { profile in
             AgentItem(

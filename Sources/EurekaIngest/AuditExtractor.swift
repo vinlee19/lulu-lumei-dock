@@ -96,6 +96,91 @@ public enum AuditExtractor {
         }
     }
 
+    // MARK: - Cursor（bubble 的 toolFormerData，rawArgs 是 JSON 字符串）
+
+    /// Cursor 的工具名是 snake_case 且带 `_v2` 后缀（新旧两套并存），先归一化再分类；
+    /// MCP 是单下划线的 `mcp_<server>_<tool>`，与 Claude 的 `mcp__` 不同，
+    /// 所以不能复用 `claude(name:input:)`——那样会全部落 default，风险规则永不命中。
+    ///
+    /// `input` 由 `cursorArguments(rawArgs:params:)` 拼出：`rawArgs`（JSON 字符串）为主，
+    /// `params`（Cursor 自己摘出来的结构化字段）补缺。`apply_patch` 的 rawArgs 是
+    /// 裸补丁文本不是 JSON（实勘 62/3936 行），走 `params.relativeWorkspacePath` 取路径。
+    public static func cursor(name: String, input: [String: Any]?) -> Operation {
+        if CursorToolNames.isMCP(name) {
+            return Operation(
+                kind: .mcp, name: CursorToolNames.mcpDisplayName(name),
+                detail: trim(firstString(in: input)))
+        }
+        let canonical = CursorToolNames.canonical(name)
+        func str(_ keys: String...) -> String? {
+            for key in keys {
+                if let value = input?[key] as? String, !value.isEmpty { return value }
+            }
+            return nil
+        }
+        func list(_ key: String) -> [String] {
+            (input?[key] as? [Any])?.compactMap { $0 as? String }.filter { !$0.isEmpty } ?? []
+        }
+        switch canonical {
+        case "read_file":
+            return Operation(kind: .read, name: canonical, detail: trim(str("target_file", "path")))
+        case "read_lints":
+            return Operation(
+                kind: .read, name: canonical, detail: list("paths").joined(separator: ", "))
+        case "list_dir":
+            return Operation(
+                kind: .search, name: canonical, detail: trim(str("target_directory", "path")))
+        case "glob_file_search":
+            return Operation(kind: .search, name: canonical, detail: trim(str("glob_pattern")))
+        case "grep", "ripgrep_raw_search":
+            var detail = str("pattern", "query") ?? ""
+            let scope = str("path") ?? list("target_directories").joined(separator: ", ")
+            if !scope.isEmpty { detail += " in \(scope)" }
+            return Operation(kind: .search, name: canonical, detail: trim(detail))
+        case "codebase_search":
+            return Operation(kind: .search, name: canonical, detail: trim(str("query")))
+        case "web_search":
+            return Operation(kind: .web, name: canonical, detail: trim(str("search_term", "query")))
+        case "run_terminal_cmd", "run_terminal_command":
+            return Operation(kind: .command, name: canonical, detail: trim(str("command")))
+        case "search_replace", "write", "edit_file", "delete_file":
+            return Operation(
+                kind: .edit, name: canonical,
+                detail: trim(str("file_path", "target_file", "relativeWorkspacePath")))
+        case "apply_patch":
+            let path = str("relativeWorkspacePath", "target_file")
+                ?? patchFilePaths(str("patch", "input", cursorRawArgsKey))
+            return Operation(kind: .edit, name: canonical, detail: trim(path))
+        case "todo_write":
+            return Operation(kind: .other, name: canonical, detail: "更新计划")
+        default:
+            return Operation(kind: .other, name: canonical, detail: trim(firstString(in: input)))
+        }
+    }
+
+    /// `rawArgs` 解析失败时把原文塞进这个 key（`apply_patch` 的裸补丁文本）
+    public static let cursorRawArgsKey = "__rawArgs"
+
+    /// `toolFormerData` 的两个参数源合并成一个字典：`rawArgs` 是模型给的原始入参，
+    /// `params` 是 Cursor 摘出来的结构化字段（实勘 3985/6505 条有），后者只补前者没有的 key。
+    public static func cursorArguments(rawArgs: Any?, params: Any?) -> [String: Any] {
+        var merged: [String: Any] = [:]
+        if let raw = rawArgs as? String, !raw.isEmpty {
+            if let parsed = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)))
+                as? [String: Any] {
+                merged = parsed
+            } else {
+                merged[cursorRawArgsKey] = raw
+            }
+        } else if let dict = rawArgs as? [String: Any] {
+            merged = dict
+        }
+        for (key, value) in (params as? [String: Any] ?? [:]) where merged[key] == nil {
+            merged[key] = value
+        }
+        return merged
+    }
+
     /// apply_patch 正文提取文件路径（`*** Update/Add/Delete File: <path>` 行）
     static func patchFilePaths(_ patch: String?) -> String {
         guard let patch else { return "" }

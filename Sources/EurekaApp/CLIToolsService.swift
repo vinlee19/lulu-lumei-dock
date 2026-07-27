@@ -72,6 +72,13 @@ final class CLIToolsService: ObservableObject {
              command: QoderPaths.cliBinary()?.path ?? "qoderclicn", npmPackage: "",
              installCommand: "从 https://qoder.com 下载安装 Qoder（CN 版 CLI 随客户端分发）",
              updateCommand: ""),
+        // Cursor 是 IDE，`cursor` 命令行入口要在 IDE 内 Cmd+Shift+P →
+        // "Install 'cursor' command" 才会装到 /usr/local/bin；应用自身走内置更新器。
+        Tool(id: "cursor", name: "Cursor", source: .cursor,
+             command: "cursor", npmPackage: "",
+             installCommand: "从 https://cursor.com 下载安装 Cursor（命令行入口在 IDE 内 "
+                 + "Cmd+Shift+P → Install 'cursor' command）",
+             updateCommand: ""),
     ]
     @Published private(set) var detected = false
 

@@ -129,6 +129,7 @@ struct SkillMemoryView: View {
                 Button("Gemini 技能") { startCreate(.gemini, isSkill: true, "Gemini 技能") }
                 Button("Qwen 技能") { startCreate(.qwen, isSkill: true, "Qwen 技能") }
                 Button("Hermes 技能") { startCreate(.hermes, isSkill: true, "Hermes 技能") }
+                Button("Cursor 技能") { startCreate(.cursor, isSkill: true, "Cursor 技能") }
             } else {
                 Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                 Button("Codex 指令（AGENTS.md）") { service.createMemory(source: .codex, name: "AGENTS") }

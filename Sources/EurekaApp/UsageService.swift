@@ -122,6 +122,7 @@ final class UsageService: ObservableObject {
     private var qwenScanner: QwenUsageScanner?
     private var hermesScanner: HermesUsageScanner?
     private var codeBuddyScanner: CodeBuddyUsageScanner?
+    private var cursorScanner: CursorUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
     private var pricing = PricingTable(models: [])
 
@@ -134,6 +135,7 @@ final class UsageService: ObservableObject {
     private static let qwenHealthName = "用量扫描 Qwen"
     private static let hermesHealthName = "用量扫描 Hermes"
     private static let codeBuddyHealthName = "用量扫描 CodeBuddy"
+    private static let cursorHealthName = "用量扫描 Cursor"
 
     func start() {
         HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
@@ -145,6 +147,7 @@ final class UsageService: ObservableObject {
         HealthRegistry.shared.register(Self.qwenHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.hermesHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.cursorHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -172,6 +175,19 @@ final class UsageService: ObservableObject {
                 // （qoder 的 CN 后端 token 全零，无用量扫描器）
                 self.codeBuddyScanner = CodeBuddyUsageScanner(
                     projectsRoot: CodeBuddyPaths.projectsRoot(), store: store)
+                // cursor：token 在 state.vscdb 的助手气泡里，按相邻差分归缓存
+                // （成本恒 0——pricing.json 里 cursor/ 前缀标了 unknown，见扫描器头注释）
+                self.cursorScanner = CursorUsageScanner(
+                    dbPath: CursorPaths.globalStateDB(), store: store,
+                    workspaceStorageRoot: CursorPaths.workspaceStorageRoot(),
+                    sessions: { now in
+                        // 全量历史：每 composer 各有水位，回访老会话近乎零成本；
+                        // 若按 30 天截断，一个月前的 Cursor 用量就永远进不了账
+                        CursorSessionIndexer.index(
+                            window: CursorSessionIndexer.fullHistoryWindow,
+                            maxSessions: 2000, now: now)
+                            .map { ($0.id, $0.cwd, $0.lastActiveAt) }
+                    })
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
@@ -524,6 +540,9 @@ final class UsageService: ObservableObject {
             let codeBuddyNew = try codeBuddyScanner?.scanOnce() ?? 0
             HealthRegistry.shared.beat(Self.codeBuddyHealthName)
             if codeBuddyNew > 0 { HealthRegistry.shared.event(Self.codeBuddyHealthName) }
+            let cursorNew = try cursorScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.cursorHealthName)
+            if cursorNew > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             // 全文索引与用量同节奏增量跑（指纹无变化时近零开销）；开关默认开

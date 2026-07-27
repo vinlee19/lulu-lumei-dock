@@ -12,6 +12,7 @@ final class AgentConfigService: ObservableObject {
     @Published private(set) var claudeAgents: [AgentDefinition] = []
     @Published private(set) var opencodeAgents: [AgentDefinition] = []
     @Published private(set) var grokAgents: [AgentDefinition] = []
+    @Published private(set) var cursorAgents: [AgentDefinition] = []
     /// 已安装插件提供的 agent（`~/.claude/plugins`），按 pluginName 分组展示
     @Published private(set) var pluginAgents: [AgentDefinition] = []
     /// Claude Code 内置 agent（静态清单，只读）
@@ -34,6 +35,7 @@ final class AgentConfigService: ObservableObject {
     private var allAgents: [AgentDefinition] = []
     private var allOpencodeAgents: [AgentDefinition] = []
     private var allGrokAgents: [AgentDefinition] = []
+    private var allCursorAgents: [AgentDefinition] = []
     private var allPluginAgents: [AgentDefinition] = []
     private var allBuiltinAgents: [AgentDefinition] = []
     private var allKimiBuiltinAgents: [AgentDefinition] = []
@@ -56,6 +58,7 @@ final class AgentConfigService: ObservableObject {
             var claudeProjectRoots: [ProjectScopedRoot] = []
             var opencodeProjectRoots: [ProjectScopedRoot] = []
             var grokProjectRoots: [ProjectScopedRoot] = []
+            var cursorProjectRoots: [ProjectScopedRoot] = []
             for (root, name) in ProjectScopeDiscovery.repoRoots(resolver: self.resolver) {
                 claudeProjectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".claude/agents", isDirectory: true),
@@ -66,6 +69,9 @@ final class AgentConfigService: ObservableObject {
                 grokProjectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".grok/agents", isDirectory: true),
                     source: .grok, projectName: name))
+                cursorProjectRoots.append(ProjectScopedRoot(
+                    root: root.appendingPathComponent(".cursor/agents", isDirectory: true),
+                    source: .cursor, projectName: name))
             }
             let agents = AgentDefinitionIndexer.indexClaudeAgents(
                 systemRoot: AgentDefinitionIndexer.claudeAgentsRoot(),
@@ -76,6 +82,9 @@ final class AgentConfigService: ObservableObject {
             let grokAgents = AgentDefinitionIndexer.indexGrokAgents(
                 systemRoots: GrokPaths.agentsRoots(),
                 projectRoots: grokProjectRoots)
+            let cursorAgents = AgentDefinitionIndexer.indexCursorAgents(
+                systemRoot: CursorPaths.agentsRoot(),
+                projectRoots: cursorProjectRoots)
             let pluginAgents = AgentDefinitionIndexer.indexPluginAgents(
                 pluginsRoot: AgentDefinitionIndexer.claudePluginsRoot())
             let builtinAgents = AgentDefinitionIndexer.builtinClaudeAgents()
@@ -85,6 +94,7 @@ final class AgentConfigService: ObservableObject {
                 self.allAgents = agents
                 self.allOpencodeAgents = opencodeAgents
                 self.allGrokAgents = grokAgents
+                self.allCursorAgents = cursorAgents
                 self.allPluginAgents = pluginAgents
                 self.allBuiltinAgents = builtinAgents
                 self.allKimiBuiltinAgents = kimiBuiltins
@@ -103,6 +113,7 @@ final class AgentConfigService: ObservableObject {
             claudeAgents = allAgents
             opencodeAgents = allOpencodeAgents
             grokAgents = allGrokAgents
+            cursorAgents = allCursorAgents
             pluginAgents = allPluginAgents
             builtinAgents = allBuiltinAgents
             kimiBuiltinAgents = allKimiBuiltinAgents
@@ -117,6 +128,7 @@ final class AgentConfigService: ObservableObject {
         claudeAgents = allAgents.filter(matchAgent)
         opencodeAgents = allOpencodeAgents.filter(matchAgent)
         grokAgents = allGrokAgents.filter(matchAgent)
+        cursorAgents = allCursorAgents.filter(matchAgent)
         pluginAgents = allPluginAgents.filter(matchAgent)
         builtinAgents = allBuiltinAgents.filter(matchAgent)
         kimiBuiltinAgents = allKimiBuiltinAgents.filter(matchAgent)

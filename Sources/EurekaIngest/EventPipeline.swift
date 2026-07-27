@@ -24,6 +24,8 @@ public final class EventPipeline {
     private var hermesTailer: HermesStateTailer?
     private var codeBuddyTailer: CodeBuddyChatTailer?
     private var qoderTailer: QoderChatTailer?
+    private var cursorTailer: CursorStateTailer?
+    private var cursorTranscriptTailer: CursorTranscriptTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -45,6 +47,9 @@ public final class EventPipeline {
         qwenProjectsRoot: URL = QwenPaths.projectsRoot(),
         codeBuddyProjectsRoot: URL = CodeBuddyPaths.projectsRoot(),
         qoderProjectsRoot: URL = QoderPaths.projectsRoot(),
+        cursorStateDB: URL = CursorPaths.globalStateDB(),
+        cursorWorkspaceStorageRoot: URL = CursorPaths.workspaceStorageRoot(),
+        cursorCLIHome: URL = CursorPaths.cliHome(),
         auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -125,6 +130,25 @@ public final class EventPipeline {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // cursor 是 IDE，没有 hook/notify 也没有 transcript 文件 → 只读轮询 state.vscdb
+        cursorTailer = CursorStateTailer(
+            dbPath: cursorStateDB, workspaceStorageRoot: cursorWorkspaceStorageRoot,
+            transcriptOwned: { now in
+                CursorTranscriptIndex.ownedComposerIds(
+                    cliHome: cursorCLIHome,
+                    workspaceStorageRoot: cursorWorkspaceStorageRoot, now: now)
+            }
+        ) { [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
+        // cursor 的第二条通道：agent-transcripts 有显式 turn_ended，收尾比库侧准。
+        // 有转录的会话，生命周期由它独占（库侧上面那个闭包负责让位），两边 sessionId
+        // 都是 composerId，不会出两张卡。
+        cursorTranscriptTailer = CursorTranscriptTailer(
+            cliHome: cursorCLIHome, workspaceStorageRoot: cursorWorkspaceStorageRoot
+        ) { [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -139,6 +163,8 @@ public final class EventPipeline {
         hermesTailer?.start(pollInterval: 5)
         codeBuddyTailer?.start(pollInterval: 2)
         qoderTailer?.start(pollInterval: 2)
+        cursorTailer?.start(pollInterval: 2)
+        cursorTranscriptTailer?.start(pollInterval: 2)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -161,6 +187,8 @@ public final class EventPipeline {
         hermesTailer?.stop()
         codeBuddyTailer?.stop()
         qoderTailer?.stop()
+        cursorTailer?.stop()
+        cursorTranscriptTailer?.stop()
         claudeWatcher?.stop()
     }
 

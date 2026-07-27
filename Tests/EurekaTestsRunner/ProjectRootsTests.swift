@@ -2,7 +2,7 @@ import EurekaIngest
 import Foundation
 
 /// ProjectRoots.recentCwds 聚合测试：全部 agent 根用临时目录里的空子目录顶替，
-/// 证明 kimi/codebuddy/qoder 等新源的会话 cwd 也能进入项目级发现；全程不碰真实 ~/。
+/// 证明 kimi/codebuddy/qoder/cursor 等新源的会话 cwd 也能进入项目级发现；全程不碰真实 ~/。
 func projectRootsTests(_ t: TestRunner) {
     t.suite("ProjectRoots")
 
@@ -30,6 +30,14 @@ func projectRootsTests(_ t: TestRunner) {
         try expectEqual(cwds, ["/Users/me/work/qoder-only-proj"])
     }
 
+    t.test("cursor 会话 cwd 进入 recentCwds（经 workspaceStorage 反查）") {
+        let base = try makeProjectRootsBase()
+        defer { try? FileManager.default.removeItem(at: base) }
+        try plantCursorSession(base: base, cwd: "/Users/me/work/cursor-only-proj")
+        let cwds = recentCwdsFrom(base: base)
+        try expectEqual(cwds, ["/Users/me/work/cursor-only-proj"])
+    }
+
     t.test("多源同 cwd 去重；全空根集返回空（不碰真实 ~/）") {
         let base = try makeProjectRootsBase()
         defer { try? FileManager.default.removeItem(at: base) }
@@ -53,9 +61,14 @@ private func makeProjectRootsBase() throws -> URL {
     return base
 }
 
-/// 以 base 下各（可能不存在的）空子目录顶替全部 11 源的根调 recentCwds。
+/// 以 base 下各（可能不存在的）空子目录顶替全部 12 源的根调 recentCwds。
 /// 索引器对缺失目录返回空，故未放 fixture 的源自然无产出；opencode/hermes 保持默认关闭。
+/// ⚠️ cursor 的两个根也必须显式传：漏传就会去读真实的
+/// ~/Library/Application Support/Cursor/…/state.vscdb，测试不再自洽。
 private func recentCwdsFrom(base: URL) -> [String] {
+    CursorWorkspaceIndex.resetCacheForTesting()
+    defer { CursorWorkspaceIndex.resetCacheForTesting() }
+    return
     ProjectRoots.recentCwds(
         claudeProjectsRoot: base.appendingPathComponent("claude", isDirectory: true),
         codexSessionsRoot: base.appendingPathComponent("codex", isDirectory: true),
@@ -66,7 +79,20 @@ private func recentCwdsFrom(base: URL) -> [String] {
         grokSessionsRoot: base.appendingPathComponent("grok", isDirectory: true),
         codeBuddyProjectsRoot: base.appendingPathComponent("codebuddy", isDirectory: true),
         qoderProjectsRoot: base.appendingPathComponent("qoder", isDirectory: true),
-        antigravityConversationsRoot: base.appendingPathComponent("antigravity", isDirectory: true))
+        antigravityConversationsRoot: base.appendingPathComponent("antigravity", isDirectory: true),
+        cursorStateDB: base.appendingPathComponent("cursor/User/globalStorage/state.vscdb"),
+        cursorWorkspaceStorageRoot: base.appendingPathComponent(
+            "cursor/User/workspaceStorage", isDirectory: true))
+}
+
+/// cursor 会话：会话在 state.vscdb 里，cwd 要经 workspaceStorage/<id>/workspace.json 反查
+private func plantCursorSession(base: URL, cwd: String) throws {
+    let cursor = base.appendingPathComponent("cursor", isDirectory: true)
+    let fixture = try CursorFixture(root: cursor)
+    try fixture.addWorkspace(id: "ws1", folder: cwd)
+    try fixture.addComposer(
+        id: "c-cursor", workspaceId: "ws1", name: "会话", status: "completed",
+        bubbles: [.user("你好")])
 }
 
 /// kimi 会话：<base>/kimi/wd_demo_ea973e2e828f/session_abc/state.json（workDir 带 cwd）

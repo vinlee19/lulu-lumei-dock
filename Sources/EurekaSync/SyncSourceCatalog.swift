@@ -61,6 +61,13 @@ public struct SyncRoots {
     public var qoderProjects: URL?
     /// ~/.qoder-cn/memories（<user-hash>/global/<category>/）
     public var qoderMemories: URL?
+    /// ~/.cursor/skills（SKILL.md，与 Claude 同构）。
+    /// ⚠️ Cursor 的会话与消息全在 `state.vscdb` 里，而**同一个库**的 ItemTable 还存着
+    ///    `cursorAuth/accessToken` 与 `cursorAuth/refreshToken` —— 那个库永远不进备份，
+    ///    Cursor 能同步的只有这一个技能目录。别加会话根。
+    public var cursorSkills: URL?
+    /// ~/.cursor/agents（子代理定义 <name>.md）
+    public var cursorAgents: URL?
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
     public var customDirs: [(root: URL, category: String)] = []
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
@@ -78,7 +85,9 @@ public struct SyncRoots {
         hermesSkills: URL, hermesMemories: URL, hermesHome: URL, hermesPlans: URL,
         claudePlans: URL, plansStaging: URL,
         codeBuddyProjects: URL? = nil, codeBuddyMemory: URL? = nil,
-        qoderProjects: URL? = nil, qoderMemories: URL? = nil
+        qoderProjects: URL? = nil, qoderMemories: URL? = nil,
+        cursorSkills: URL? = nil,
+        cursorAgents: URL? = nil
     ) {
         self.claudeHome = claudeHome
         self.claudeProjects = claudeProjects
@@ -109,6 +118,8 @@ public struct SyncRoots {
         self.codeBuddyMemory = codeBuddyMemory
         self.qoderProjects = qoderProjects
         self.qoderMemories = qoderMemories
+        self.cursorSkills = cursorSkills
+        self.cursorAgents = cursorAgents
     }
 }
 
@@ -259,6 +270,8 @@ public enum SyncSourceCatalog {
              category: "kimi/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("qoder", isDirectory: true),
              category: "qoder/plans", priority: 0, include: markdownOnly)
+        walk(root: roots.plansStaging.appendingPathComponent("cursor", isDirectory: true),
+             category: "cursor/plans", priority: 0, include: markdownOnly)
 
         // codebuddy：会话 jsonl（含 <sessionId>/subagents/ 深层）+ 全局 memery（官方拼写）。
         // ⚠️ ~/.codebuddy/{settings.json,mcp.json} 可能含 API key/token → 只列这两个根，
@@ -280,6 +293,17 @@ public enum SyncSourceCatalog {
         }
         if let qoderMemories = roots.qoderMemories {
             walk(root: qoderMemories, category: "qoder/memories", priority: 0,
+                 include: markdownOnly)
+        }
+
+        // cursor：只有技能与子代理定义两个目录。会话在 state.vscdb 里，
+        // 与 cursorAuth/* token 同库 → 那个库绝不纳入。
+        if let cursorSkills = roots.cursorSkills {
+            walk(root: cursorSkills, category: "cursor/skills", priority: 0,
+                 include: markdownOnly)
+        }
+        if let cursorAgents = roots.cursorAgents {
+            walk(root: cursorAgents, category: "cursor/agents", priority: 0,
                  include: markdownOnly)
         }
 

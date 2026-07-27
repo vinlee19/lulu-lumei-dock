@@ -24,6 +24,7 @@
     { "match": "qwen3.6-plus", "inputPerM": 0.4, "outputPerM": 1.2, "cacheReadPerM": 0.1 },
     { "match": "qwen", "unknown": true },
     { "match": "glm-", "unknown": true },
-    { "match": "qmodel", "unknown": true }
+    { "match": "qmodel", "unknown": true },
+    { "match": "cursor/", "unknown": true }
   ]
 }

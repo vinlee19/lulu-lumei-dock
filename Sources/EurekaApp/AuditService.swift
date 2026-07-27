@@ -27,6 +27,7 @@ final class AuditService: ObservableObject {
     private var codexScanner: CodexAuditScanner?
     private var codeBuddyScanner: CodeBuddyAuditScanner?
     private var qoderScanner: QoderAuditScanner?
+    private var cursorScanner: CursorAuditScanner?
     private var captureEnabled = true
     private var retentionDays = 90
     private var lastPruneAt = Date.distantPast
@@ -34,11 +35,13 @@ final class AuditService: ObservableObject {
     private static let codexHealthName = "审计扫描 Codex"
     private static let codeBuddyHealthName = "审计扫描 CodeBuddy"
     private static let qoderHealthName = "审计扫描 Qoder"
+    private static let cursorHealthName = "审计扫描 Cursor"
 
     func start() {
         HealthRegistry.shared.register(Self.codexHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.qoderHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.cursorHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -55,15 +58,20 @@ final class AuditService: ObservableObject {
                 self.qoderScanner = QoderAuditScanner(
                     projectsRoot: QoderPaths.projectsRoot(),
                     store: store, pipeline: pipeline)
+                self.cursorScanner = CursorAuditScanner(
+                    dbPath: CursorPaths.globalStateDB(),
+                    workspaceStorageRoot: CursorPaths.workspaceStorageRoot(),
+                    store: store, pipeline: pipeline)
                 self.scanCodex()
                 self.scanCodeBuddy()
                 self.scanQoder()
+                self.scanCursor()
                 self.pruneIfDue()
             } catch {
                 self.publish { $0.lastError = "审计库打开失败: \(error)" }
             }
         }
-        // 2s 近实时扫描 Codex/CodeBuddy/Qoder + 顺带到点清理
+        // 2s 近实时扫描 Codex/CodeBuddy/Qoder/Cursor + 顺带到点清理
         let timer = DispatchSource.makeTimerSource(queue: queue)
         // leeway 让系统合并唤醒省电
         timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
@@ -71,6 +79,7 @@ final class AuditService: ObservableObject {
             self?.scanCodex()
             self?.scanCodeBuddy()
             self?.scanQoder()
+            self?.scanCursor()
             self?.pruneIfDue()
         }
         timer.resume()
@@ -206,6 +215,17 @@ final class AuditService: ObservableObject {
             if new > 0 { HealthRegistry.shared.event(Self.qoderHealthName) }
         } catch {
             HealthRegistry.shared.failure(Self.qoderHealthName, note: "\(error)")
+        }
+    }
+
+    private func scanCursor() {
+        guard captureEnabled, let scanner = cursorScanner else { return }
+        HealthRegistry.shared.beat(Self.cursorHealthName)
+        do {
+            let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
+            if new > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }
+        } catch {
+            HealthRegistry.shared.failure(Self.cursorHealthName, note: "\(error)")
         }
     }
 

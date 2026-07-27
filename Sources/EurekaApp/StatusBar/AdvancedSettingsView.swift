@@ -49,6 +49,9 @@ struct AdvancedSettingsView: View {
         pathRow("Gemini", home.appendingPathComponent(".gemini"))
         pathRow("Qwen", home.appendingPathComponent(".qwen"))
         pathRow("Hermes", home.appendingPathComponent(".hermes"))
+        pathRow("CodeBuddy", home.appendingPathComponent(".codebuddy"))
+        pathRow("Qoder", home.appendingPathComponent(".qoder-cn"))
+        pathRow("Cursor", home.appendingPathComponent(".cursor"))
         pathRow("lulu-lumei-dock 数据", SpoolPaths.root())
     }
 
@@ -103,7 +106,9 @@ struct AdvancedSettingsView: View {
         Divider()
         Toggle("跨会话全文搜索索引", isOn: $settings.fullTextSearchEnabled)
         Text("在本地为 Claude / Codex / Grok / Kimi / CodeBuddy / Qoder 的对话内容建索引，会话页搜索时可直达消息；"
-            + "索引随用量扫描增量更新，全程本地。关闭后索引冻结不再更新。")
+            + "索引随用量扫描增量更新，全程本地。关闭后索引冻结不再更新。"
+            + "共享单库的来源（OpenCode / Hermes / Cursor）与 Antigravity 不入索引：索引以转录文件路径为主键，"
+            + "而它们所有会话共用同一个 .db。")
             .font(.system(size: 9.5))
             .foregroundStyle(.tertiary)
         Button("清空全文索引") { usageService.clearSearchIndex() }

@@ -192,6 +192,13 @@ extension AgentSource {
         // CodeBuddy 官方 logo 是青→紫径向渐变（#2EA99D → #6C4DFF）→ 取主色紫
         case .codebuddy: return Color(red: 0.424, green: 0.302, blue: 1.0)  // CodeBuddy 紫 #6C4DFF
         case .qoder: return Color(red: 0.165, green: 0.859, blue: 0.361)    // Qoder 绿 #2ADB5C
+        // Cursor 官方标是纯黑白立方 → 同 OpenCode / Hermes 走动态墨色，
+        // 硬编码黑在恒深底的岛上会整块看不见
+        case .cursor: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.92, green: 0.92, blue: 0.94, alpha: 1)
+                : NSColor(srgbRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
+        }))
         }
     }
 }
@@ -389,7 +396,8 @@ struct AntigravityMarkShape: Shape {
 }
 
 /// 官方 logo 资产（Resources/source-logos/*，macOS 14 NSImage 原生渲染矢量）。
-/// Grok 官方标为纯黑 → 深色环境用白色变体；OpenCode 用代码绘制（见 OpencodeMarkShape）。
+/// Grok / Qoder / Cursor 官方标为纯黑（或 currentColor）→ 深色环境用白色变体；
+/// OpenCode 用代码绘制（见 OpencodeMarkShape）。
 /// Hermes 官方只发了位图（无矢量版）→ 按扩展名区分加载，PNG 与 SVG 同一条 NSImage 解码路径。
 enum SourceLogo {
     private static var cache: [String: NSImage] = [:]
@@ -410,7 +418,8 @@ enum SourceLogo {
             name = "logo-hermes"
             ext = "png"  // Nous 官方素材是 512×512 位图
         case .codebuddy: name = "logo-codebuddy"
-        case .qoder: name = "logo-qoder"
+        case .qoder: name = dark ? "logo-qoder-dark" : "logo-qoder"
+        case .cursor: name = dark ? "logo-cursor-dark" : "logo-cursor"
         case .opencode: return nil  // 无资产：由 SourceBadge 走代码绘制分支
         }
         lock.lock()
@@ -483,9 +492,33 @@ struct SourceBadge: View {
             RoundedRectangle(cornerRadius: size * 0.28).fill(source.brandColor)
         case .qoder:
             Circle().fill(source.brandColor)  // 兜底圆点（仅资产缺失时）
+        case .cursor:
+            // 兜底实心六边形（官方是等距立方，9pt 下细描边会糊，故走实心剪影）
+            CursorMarkShape().fill(source.brandColor)
         case .opencode:
             EmptyView()
         }
+    }
+}
+
+/// Cursor 兜底标记：实心正六边形（官方等距立方的正投影轮廓，仅资产缺失时使用）。
+/// 同 HermesMarkShape 的规矩走实心而非细描边——9pt 下细线会糊成一团。
+struct CursorMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let cx = rect.midX, cy = rect.midY
+        let r = side / 2
+        var path = Path()
+        for index in 0..<6 {
+            // 从正上方起顺时针，顶点朝上（与官方立方的站位一致）
+            let angle: Double = Double(index) / 6 * 2 * Double.pi - Double.pi / 2
+            let point = CGPoint(
+                x: cx + r * CGFloat(Foundation.cos(angle)),
+                y: cy + r * CGFloat(Foundation.sin(angle)))
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
     }
 }
 

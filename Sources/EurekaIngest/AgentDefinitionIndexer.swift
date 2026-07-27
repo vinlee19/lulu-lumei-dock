@@ -92,6 +92,15 @@ public enum AgentDefinitionIndexer {
         indexAgents(systemRoots: systemRoots, source: .grok, projectRoots: projectRoots)
     }
 
+    /// Cursor 子代理：`~/.cursor/agents/<name>.md` 与 `<repo>/.cursor/agents/<name>.md`
+    /// （约定见 Cursor 自带的 create-subagent 技能：YAML frontmatter + 正文即系统提示，
+    /// 与 Claude 的 agents/*.md 同构，故直接复用同一套扫描）
+    public static func indexCursorAgents(
+        systemRoot: URL, projectRoots: [ProjectScopedRoot] = []
+    ) -> [AgentDefinition] {
+        indexAgents(systemRoots: [systemRoot], source: .cursor, projectRoots: projectRoots)
+    }
+
     private static func indexAgents(
         systemRoots: [URL], source: AgentSource, projectRoots: [ProjectScopedRoot]
     ) -> [AgentDefinition] {
