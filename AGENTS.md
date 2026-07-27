@@ -20,7 +20,7 @@ Read this before committing, opening a PR, or cutting a release.
 
 - **Types**: `feat` `fix` `docs` `refactor` `perf` `test` `chore` `ci`
 - **Scopes** (pick the area touched): `ui` `island` `claude` `codex` `opencode`
-  `grok` `kimi` `antigravity` `hermes` `codebuddy` `qoder` `ingest` `usage` `store` `sync` `install`
+  `grok` `kimi` `antigravity` `hermes` `codebuddy` `qoder` `cursor` `ingest` `usage` `store` `sync` `install`
   `updates` `packaging` `ci` `changelog`
 - Summary: imperative mood, lowercase, no trailing period, ≤ 72 chars.
 - Body (optional): bullet points explaining **what** and **why**, wrapped at ~80 chars.

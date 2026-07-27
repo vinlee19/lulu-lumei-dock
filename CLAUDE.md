@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI**（以及 OpenCode/Grok/Antigravity/Kimi/Gemini/Qwen/Hermes/CodeBuddy/Qoder）task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
+Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI**（以及 OpenCode/Grok/Antigravity/Kimi/Gemini/Qwen/Hermes/CodeBuddy/Qoder/Cursor）task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. UI strings and code comments are in Chinese — match that convention.
 
 ## Commands
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 413 tests
+make test       # swift run eureka-tests  — runs all 502 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
@@ -46,7 +46,7 @@ Codex rollout token_count ────────────→ UsageEngine / 
                                          SQLite (history / usage / scan state)
 ```
 
-**Twelve event sources** feed `TaskStore`, wired together in `Sources/EurekaIngest/EventPipeline.swift` and composed in `Sources/EurekaApp/AppDelegate.swift`: (1) spool consumer for relayed hook/notify events, (2) Codex rollout tailer, (3) Claude transcript watcher, then one tailer each for (4) opencode, (5) Grok, (6) Antigravity, (7) Kimi, (8) Gemini, (9) Qwen, (10) Hermes, (11) CodeBuddy and (12) Qoder. Usage is separate: **nine** scanners under `Sources/EurekaUsage/` write to the ledger, not to `TaskStore` (Qoder has none — its CN backend reports zero tokens). The app works **without hooks installed** — the transcript/rollout/DB watchers are the fallback so sessions opened before hooks were installed are still visible.
+**Fourteen event sources** feed `TaskStore`, wired together in `Sources/EurekaIngest/EventPipeline.swift` and composed in `Sources/EurekaApp/AppDelegate.swift`: (1) spool consumer for relayed hook/notify events, (2) Codex rollout tailer, (3) Claude transcript watcher, then one tailer each for (4) opencode, (5) Grok, (6) Antigravity, (7) Kimi, (8) Gemini, (9) Qwen, (10) Hermes, (11) CodeBuddy, (12) Qoder, (13) Cursor's `state.vscdb` poller and (14) Cursor's `agent-transcripts` tailer. Cursor is the only source with **two** live channels: the DB is the sole source of history / tokens / ctx% / todos / subagents, while the transcript has the explicit `turn_ended` the DB lacks. Ownership of lifecycle events is pinned **at turn start** (`SessionState.ownedByTranscript`) — if a transcript exists then, it owns the whole turn and the DB yields; otherwise the DB owns start *and* finish. Never re-decide mid-turn: the DB would emit the start and then yield the finish to a tailer that baselines the already-closed file silently, leaving the card stuck forever. Usage is separate: **ten** scanners under `Sources/EurekaUsage/` write to the ledger, not to `TaskStore` (Qoder has none — its CN backend reports zero tokens). The app works **without hooks installed** — the transcript/rollout/DB watchers are the fallback so sessions opened before hooks were installed are still visible.
 
 ### Module dependency graph (SwiftPM targets, strictly one-directional)
 
@@ -56,8 +56,8 @@ Codex rollout token_count ────────────→ UsageEngine / 
 |---|---|
 | `EurekaKit` | Pure domain layer: `TaskEvent`/`AgentTask` models, `TaskStore` state machine, `IslandState` projection, `IslandGeometry` pure functions. **No IO, no AppKit.** |
 | `EurekaStore` | SQLite (system `libsqlite3` + thin wrapper) with three repos: `task_history` / `usage_records` / `scan_state`. |
-| `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup, plus one tailer + session indexer + `*Paths` trio per non-Claude agent (`CodexRolloutTailer`, `OpencodeSessionTailer`, …, `HermesStateTailer`). |
-| `EurekaUsage` | Nine incremental+dedup usage scanners — file-based ones tail transcripts/rollouts; `Opencode`/`Hermes` read SQLite instead (Hermes diffs `session_model_usage` against a per-session snapshot). Antigravity has no usage scanner (conversations are protobuf, no local token accounting). CodeBuddy's usage rides on its `function_call` transcript lines (`providerData.usage`); Qoder is excluded (CN backend reports zero tokens). Plus `PricingTable`, `RateLimitProvider` protocol + Codex/Claude/Grok impls. |
+| `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup, plus one tailer + session indexer + `*Paths` trio per non-Claude agent (`CodexRolloutTailer`, `OpencodeSessionTailer`, …, `HermesStateTailer`, `CursorStateTailer`). |
+| `EurekaUsage` | Ten incremental+dedup usage scanners — file-based ones tail transcripts/rollouts; `Opencode`/`Hermes`/`Cursor` read SQLite instead (Hermes diffs `session_model_usage` against a per-session snapshot; Cursor differences adjacent `tokenCount.inputTokens` because it re-sends the whole context each turn and reports no cache split; all `cursor/*` models are priced `unknown` → tokens counted, cost $0). Antigravity has no usage scanner (conversations are protobuf, no local token accounting). CodeBuddy's usage rides on its `function_call` transcript lines (`providerData.usage`); Qoder is excluded (CN backend reports zero tokens). Plus `PricingTable`, `RateLimitProvider` protocol + Codex/Claude/Grok impls. |
 | `EurekaInstall` | `settings.json` deep-merge / `config.toml` line-edit / `config.yaml` list-edit (`HermesConfigEditor`) installers, backup, diff preview, install-status detection. Pure text in/out, **zero deps**, independently testable. |
 | `eureka` (app) | AppKit shell: island `NSPanel`, `NSStatusItem`+popover, settings, `RelaySyncer`, CLI mode. |
 | `eureka-relay` | `claude-hook` / `codex-notify` / `inject` subcommands; writes to the spool. |
@@ -74,9 +74,13 @@ Key = `source:sessionId`. Phases: `running` / `waiting(permission|idle)` / `idle
 - **Stale-event suppression:** events older than 5 minutes only enter history/usage; they must NOT trigger island animations (`AppDelegate.handle` drops stale heartbeat/waiting/session-start events entirely).
 - **Usage dedup is mandatory and persistent:** Claude transcripts duplicate `(requestId, message.id)` rows heavily across files (resume/fork copies old rows into new files). Dedup must persist across files (via `scan_state`), or usage will be inflated.
 - **Claude OAuth usage (rate limits) is unofficial, opt-in, default-off.** Any failure returns `nil` → the entire UI block hides. Keychain is read via the `/usr/bin/security` subprocess (avoids ACL re-prompts after ad-hoc re-signing).
+- **Cursor's `state.vscdb` must never be backed up or synced.** The same SQLite file that holds every Cursor session also holds `cursorAuth/accessToken` and `cursorAuth/refreshToken` in its `ItemTable`. `SyncSourceCatalog` only ever walks `~/.cursor/skills` for Cursor — never add the database or its parent directory.
+- **External agent databases are opened read-only, never with `immutable=1`.** Cursor / opencode / Hermes hold their libraries open in WAL mode; `immutable=1` would silently skip everything not yet checkpointed, so live sessions would look frozen.
 - **Dependency scope stays narrow:** Sparkle 2.9.2 is exact-pinned and only linked by the app target. SQLite still uses system `libsqlite3`, so the DB stays `sqlite3`-inspectable.
 
 ## Data & config locations
+
+Cursor is the one source whose data is not under a dotfile home: sessions/messages/tokens all live in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (with cwd resolved via `User/workspaceStorage/<id>/workspace.json`), while its skills live in `~/.cursor/skills`.
 
 App data lives in `~/Library/Application Support/Eureka/`: `eureka.sqlite` (history/usage/sessions), `events/` (spool), `bin/eureka-relay` (stable path), optional `pricing.json` (override price table) and `context-windows.json` (override per-model context-window size, the denominator for ctx%). Config backups are written as `*.bak.eureka.*` before any hooks/notify edit.
 

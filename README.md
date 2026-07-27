@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -52,9 +52,9 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with eleven agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, and Qoder** — and needs **no network** for its core features: everything is
-derived by reading local transcript / rollout / session files. The updater checks this repository's GitHub
+It works with twelve agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
+Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, Qoder, and Cursor** — and needs **no network** for its core features: everything is
+derived by reading local transcript / rollout / session / database files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
 
@@ -114,8 +114,8 @@ tools, with in‑app markdown preview + edit (atomic save with timestamped backu
   block. Enabling it prompts a one‑time Keychain authorization (choose "Always Allow").
 
 **Audit** — an append‑only trail of agent tool calls (full commands / file paths, no output bodies),
-with risk flagging. Covers Claude Code and Codex (hook/notify channel) plus CodeBuddy and Qoder
-(transcript scanners).
+with risk flagging. Covers Claude Code and Codex (hook/notify channel) plus CodeBuddy, Qoder
+(transcript scanners) and Cursor (SQLite scanner).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
 
@@ -141,6 +141,7 @@ many concurrent sessions, or late‑night runs.
 | **Hermes Agent** | ✅² | ✅ | — | ✅ | ✅ (skills/memory/plans) |
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅ (memory) |
 | **Qoder** | ✅ | —³ | — | ✅ | ✅ (memory/plans) |
+| **Cursor** | ✅⁴ | ✅ (no cost)⁴ | — | ✅ | ✅ |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
@@ -165,6 +166,40 @@ is empty for it.
 ³ Qoder's CN backend reports zero token usage in its local logs, so no usage ledger is
 surfaced for it — sessions, live tasks, plans and memory work normally. CodeBuddy carries
 per-request tokens on its transcript `function_call` lines, which the usage scanner tails.
+
+⁴ Cursor is an IDE, not a CLI: it has no hooks and no transcript files. Everything —
+sessions, messages, tool calls, context% and tokens — lives in one SQLite database
+(`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`), read read-only and
+polled every 2s for live cards. Since 3.13.10 Cursor *also* writes a Claude-style JSONL per turn
+under `~/.cursor/projects/<slug>/agent-transcripts/`, which is tailed as a second channel purely
+for its explicit `turn_ended` marker; it has no tokens/ctx%/todos and no historical coverage, so
+the database stays authoritative. Which channel owns a turn's start/finish events is decided at
+turn start and never revisited, so a turn is never reported twice or left hanging. Working directories are resolved through
+`workspaceStorage/<id>/workspace.json`; conversations whose workspace no longer exists list
+without one. Cursor records only `{inputTokens, outputTokens}` per turn with **no cache
+breakdown**, and `inputTokens` is the whole re-sent context, so the scanner attributes it by
+adjacent difference (the same approach as the Codex scanner) — fresh input per session then
+sums to the final context size instead of ~5× it. Cursor bills per request on a subscription
+and reports `default` as the model for many turns, so every `cursor/*` model is marked
+`unknown` in the price table: **tokens are counted, cost is always $0**. No local rate-limit
+snapshot (quota is only visible on the website and in-IDE).
+
+Cursor's knowledge surfaces do not live where the other agents' do, so they are worth spelling
+out (conventions taken from Cursor's own built-in `create-skill` / `create-rule` /
+`create-subagent` skills):
+- **Skills** — `~/.cursor/skills/<name>/SKILL.md` and `<repo>/.cursor/skills/…`, same layout as
+  Claude. `~/.cursor/skills-cursor/` is Cursor's own bundled set and is indexed read-only
+  (its `create-skill` skill explicitly forbids writing there).
+- **Memory** — Cursor has no global memory *file*; the server-side "Memories" feature only
+  leaves a toggle on disk. Its local equivalent is project rules,
+  `<repo>/.cursor/rules/*.mdc`, which are indexed as project-scoped memory.
+- **Agents** — `~/.cursor/agents/*.md` and `<repo>/.cursor/agents/*.md`, YAML frontmatter plus
+  a system-prompt body, structurally identical to Claude's.
+- **Plans** — no `plans/` directory; the plan is the `todos` array inside each conversation,
+  written by the `todo_write` tool, materialized into markdown checklists exactly like Codex's
+  `update_plan` calls. Full-text search and session deletion are skipped for the
+same reason as opencode/Hermes: every session shares one database file. That database also
+holds `cursorAuth/*` tokens, so it is **never** included in backup — only `~/.cursor/skills` is.
 
 ## Quick start
 
@@ -230,7 +265,7 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (413 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (502 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
@@ -254,7 +289,7 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (atomic JSON write)    ↓         ├─ NSStatusItem + NSPopover
 Codex rollout tail ─┘                    SpoolConsumer   │   (history / sessions / skills / usage / limits / …)
 Claude transcript watch ──────────────→ TaskStore (state machine)
-usage scanners (8 in all — every agent except Antigravity) ──→ SQLite (history / usage / tool_calls / audit)
+usage scanners (10 in all — every agent except Antigravity/Qoder) ─→ SQLite (history / usage / tool_calls / audit)
 ```
 
 - **`eureka-relay`** is a tiny, fully independent binary: it always `exit 0`, keeps stdout silent,
@@ -278,7 +313,10 @@ Full design doc: [docs/design.md](docs/design.md).
 - Per‑skill invocation data (count / tokens / trend) is **Claude‑only**: no other agent tags skill
   invocations in its logs. Hermes does keep its own `skills/.usage.json` counters, but the app does
   not read them yet, so Hermes skills show no hit count, usage bar or weekly ranking.
-- `ctx%` for Claude is an estimate (window size from a per‑model table; overridable).
+- `ctx%` for Claude is an estimate (window size from a per‑model table; overridable). Cursor is the
+  opposite case: it persists its own `contextUsagePercent`, which is used as-is.
+- Cursor tokens carry no cache split and its per-turn model is often just `default`, so its usage is
+  reported as **tokens only, cost $0** (see footnote ⁴ under Supported agents).
 - Costs are local estimates against public price lists and may differ from your bill. For Hermes
   this gap is wider: its model names mostly match no price entry (tokens shown, no cost), and a name
   that happens to share a prefix with a known model is priced at that provider's public API rate

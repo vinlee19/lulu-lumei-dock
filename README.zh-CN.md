@@ -5,7 +5,7 @@
 **把本地 AI 编码助手装进 macOS 菜单栏的一座「灵动岛」。**
 
 把任务活动实时呈现,配上 ccusage 级精度的用量账本、订阅限额余量,以及会话 / 技能 / agent / 记忆管理、
-操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · CodeBuddy · Qoder**,全在一处。
+操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor**,全在一处。
 
 `Swift 5.10 + SwiftPM` · `唯一第三方依赖为 Sparkle` · `核心数据留在本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
@@ -48,8 +48,9 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 `lulu-lumei-dock` 是一个原生 macOS 菜单栏应用:它监视本地 AI 编码助手的日志,把任务活动实时装进刘海
 旁的一座「灵动岛」,并提供一个完整面板——用量分析、订阅限额,以及会话 / 技能 / agent / 记忆的管理。
 
-开箱支持六种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code**,核心功能**零网络**:
-一切都靠读取本地 transcript / rollout / session 文件推导。唯一的联网功能是 Claude 订阅限额(非官方
+开箱支持十二种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
+Qwen Code、Hermes Agent、CodeBuddy、Qoder、Cursor**,核心功能**零网络**:
+一切都靠读取本地 transcript / rollout / session / 数据库文件推导。唯一的联网功能是 Claude 订阅限额(非官方
 接口,默认关闭,可在设置里 opt‑in)。此外，更新器默认会访问本仓库的 GitHub Releases feed 检查新版，
 可在「设置 → 关于」关闭。
 
@@ -94,7 +95,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
   (选「始终允许」)。
 
 **审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带风险标记。
-覆盖 Claude Code 与 Codex(hook/notify 通道),以及 CodeBuddy 与 Qoder(transcript 扫描)。
+覆盖 Claude Code 与 Codex(hook/notify 通道),以及 CodeBuddy、Qoder(transcript 扫描)与 Cursor(SQLite 扫描)。
 
 **备份** —— 可选:把本地数据备份到 S3 兼容的云存储(SigV4 签名)。
 
@@ -116,12 +117,35 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅(技能) |
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅(记忆) |
 | **Qoder** | ✅ | —² | — | ✅ | ✅(记忆/计划) |
+| **Cursor** | ✅³ | ✅(不计费)³ | — | ✅ | ✅ |
 
 ¹ Grok 是订阅制、Antigravity 会话是 protobuf,两者本地都不暴露 per‑request token 账,只能给活动量
 (调用 / 会话)。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
 
 ² Qoder(CN)本地日志中 token 恒为 0,不展示用量账;会话、实时任务、计划与记忆均正常。
 CodeBuddy 的 token 记在 transcript 的 `function_call` 行上,由用量扫描器读取。
+
+³ Cursor 是 IDE 而非 CLI:没有 hook,也没有 transcript 文件。会话、消息、工具调用、ctx% 与 token
+全在一个 SQLite 库里(`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`),
+只读打开、2 秒一轮轮询出实时卡片;工作目录经 `workspaceStorage/<id>/workspace.json` 反查,
+所属 workspace 已不存在的老会话则不带目录。Cursor 每轮只记 `{inputTokens, outputTokens}`、
+**没有缓存拆分**,且 `inputTokens` 是整个重发的上下文,故按相邻差分归集(与 Codex 扫描器同一套路),
+一个会话的新鲜输入之和才等于最终上下文而不是约 5 倍。Cursor 按请求订阅计费、多数轮次只报
+`default` 模型,因此价格表里 `cursor/` 前缀一律标 `unknown`:**只统计 token,金额恒为 0**。
+本地无限额快照(配额只在官网与 IDE 内可见)。
+
+Cursor 的知识面位置和别家都不一样,单独写清(约定取自 Cursor 自带的 `create-skill` /
+`create-rule` / `create-subagent` 内置技能):
+- **技能** —— `~/.cursor/skills/<名>/SKILL.md` 与 `<repo>/.cursor/skills/…`,布局同 Claude;
+  `~/.cursor/skills-cursor/` 是官方内置集,只读索引(它自己的 create-skill 明写不许往里写)。
+- **记忆** —— 没有全局记忆文件,服务端「Memories」只在本地留个开关;本地等价物是项目规则
+  `<repo>/.cursor/rules/*.mdc`,按项目级记忆收录。
+- **子代理** —— `~/.cursor/agents/*.md` 与 `<repo>/.cursor/agents/*.md`,YAML frontmatter +
+  正文即系统提示,与 Claude 同构。
+- **计划** —— 没有 `plans/` 目录,计划是会话里的 `todos` 数组(`todo_write` 工具写),
+  按 codex 的 `update_plan` 同一套路合成 markdown 清单。
+全文搜索与会话删除同 opencode/Hermes 一样跳过——所有会话共用一个库文件。
+该库里同时存着 `cursorAuth/*` token,**绝不纳入备份**,Cursor 只备份 `~/.cursor/skills`。
 
 ## 快速上手
 
@@ -204,7 +228,7 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (原子 JSON 写)         ↓         ├─ NSStatusItem + NSPopover
 Codex rollout 监视 ─┘                    SpoolConsumer   │   (历史 / 会话 / 技能 / 用量 / 限额 / …)
 Claude transcript 监视 ────────────────→ TaskStore(状态机)
-用量扫描器(除 Antigravity/Qoder 外各源) ───────────→ SQLite(历史 / 用量 / tool_calls / 审计)
+用量扫描器(10 个,除 Antigravity/Qoder 外各源) ──────→ SQLite(历史 / 用量 / tool_calls / 审计)
 ```
 
 - **`eureka-relay`** 是一个极小、完全独立的二进制:永远 `exit 0`、stdout 绝对静默、<50ms 完成、
