@@ -4,6 +4,87 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] - 2026-07-27
+
+### Added
+
+- **Cursor is the twelfth supported agent** — live island cards, history,
+  session browsing, ctx%, tool activity, subagents, tool-call audit,
+  usage tokens, plans and `~/.cursor/skills` indexing. Cursor is an IDE with no
+  hooks and no transcript files: everything lives in one SQLite database
+  (`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`),
+  read read-only (WAL-aware, never `immutable=1`) and polled every 2s.
+  Working directories resolve through `workspaceStorage/<id>/workspace.json`.
+- **Cursor usage: tokens counted, cost always $0** — Cursor stores only
+  `{inputTokens, outputTokens}` per turn with no cache split, and
+  `inputTokens` is the entire re-sent context. The scanner attributes it
+  by adjacent difference (same approach as the Codex scanner), so fresh
+  input per session sums to the final context size rather than ~5x it
+  (verified on this machine: 7.1M fresh + 26.3M cache = 33.4M raw). Every
+  `cursor/*` model is marked `unknown` in the price table because Cursor
+  bills per request on a subscription and reports `default` as the model
+  for many turns.
+- **Second live channel for Cursor: `agent-transcripts`** — Cursor 3.13.10
+  also writes a Claude-style JSONL per turn under
+  `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`, with an
+  explicit `turn_ended` marker and Claude-vocabulary tool names (`Read` /
+  `Glob` / `Grep` / `Shell`, not the DB's `read_file` / `glob_file_search`).
+  It carries no tokens, ctx%, todos or subagents, so it supplements the
+  database rather than replacing it — the transcript only covers turns after
+  the feature shipped, with zero historical coverage.
+  Lifecycle ownership is pinned **at turn start**: if a transcript exists
+  then, it owns the whole turn (explicit `turn_ended`, no close debounce
+  needed) and the DB poller yields; otherwise the DB owns start *and*
+  finish. Re-deciding mid-turn would strand the card forever — the DB would
+  emit the start, then yield the finish to a tailer whose first sight of the
+  file is already-closed and therefore silent. Both branches are pinned by
+  tests.
+- **Cursor's context% is reported, not estimated** — unlike Claude, Cursor
+  persists its own `contextUsagePercent`, which the island uses as-is.
+
+### Fixed
+
+- **Crash on launch when a Cursor conversation had no working directory** —
+  the transcript tailer wrote `contexts[path]?.cwd = entry.cwd ?? contexts[path]?.cwd`,
+  where the left side takes exclusive modify access to the dictionary while
+  the right side reads the same key. Swift aborts on that overlapping access
+  (`Fatal access conflict detected`). `??` short-circuits whenever the cwd is
+  non-nil, so only `empty-window` conversations (Cursor with no folder open)
+  reached it — which is exactly why the first round of tests missed it. Now
+  read-modify-write, with a regression test that uses a cwd-less conversation.
+- **CodeBuddy, Qoder and Cursor brand marks now render** — their SVGs
+  declared `width="1em" height="1em"`, which `NSImage` cannot resolve, so
+  all three drew as flat gradient squares. They now carry explicit 24×24
+  dimensions. Qoder additionally gained a white variant: its mark is
+  `currentColor` (i.e. black), which was invisible on the always-dark
+  island.
+
+### Notes
+
+- **Cursor plans come from `todos`, not a directory** — Cursor has no
+  `plans/` folder (`composer.planMigrationToHomeDirCompleted` is true but
+  the target never exists). Its plan lives as the `todos` array inside each
+  conversation, written by the `todo_write` tool; those are materialized
+  into markdown checklists exactly like Codex's `update_plan` calls
+  (verified: 22 of 154 local conversations produce a checklist).
+  `cancelled` steps get their own `[-]` box so an abandoned step does not
+  read as merely unfinished.
+- **Cursor skills, rules and subagents** — user skills
+  (`~/.cursor/skills`), Cursor's own bundled set (`~/.cursor/skills-cursor`,
+  indexed read-only), project skills (`<repo>/.cursor/skills`), project
+  rules (`<repo>/.cursor/rules/*.mdc`, indexed as project-scoped memory —
+  Cursor has no global memory file, the server-side feature only leaves a
+  toggle on disk) and subagent definitions (`~/.cursor/agents/*.md` and
+  `<repo>/.cursor/agents/*.md`). Conventions taken from Cursor's own
+  built-in `create-skill` / `create-rule` / `create-subagent` skills.
+- Cursor has **no** local rate-limit snapshot (quota is website/IDE only);
+  that surface is marked N/A rather than faked. Reading `cursorAuth/*` tokens to call
+  the official quota API is deliberately not done.
+- Cursor's database is **never** backed up or synced: the same file holds
+  `cursorAuth/accessToken`. Only `~/.cursor/skills` is eligible.
+- Full-text search and session deletion are skipped for Cursor for the
+  same reason as opencode/Hermes — every session shares one database file.
+
 ## [0.13.0] - 2026-07-26
 
 ### Added
@@ -683,6 +764,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.14.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.14.0
 [0.13.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.13.0
 [0.12.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.12.0
 [0.11.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.11.0
