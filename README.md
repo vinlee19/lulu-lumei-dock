@@ -114,8 +114,8 @@ tools, with in‑app markdown preview + edit (atomic save with timestamped backu
   block. Enabling it prompts a one‑time Keychain authorization (choose "Always Allow").
 
 **Audit** — an append‑only trail of agent tool calls (full commands / file paths, no output bodies),
-with risk flagging. Covers Claude Code and Codex (hook/notify channel) plus CodeBuddy, Qoder
-(transcript scanners) and Cursor (SQLite scanner).
+with risk flagging. Covers Claude Code and Codex (hook channel) plus CodeBuddy, Qoder, Grok and
+Qwen (transcript scanners) and Cursor (SQLite scanner).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
 
@@ -265,7 +265,7 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (502 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (525 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
@@ -307,7 +307,14 @@ Full design doc: [docs/design.md](docs/design.md).
 
 ## Known limitations
 
-- Codex's "waiting for approval" state isn't shown (rollouts don't persist approval events).
+- Codex's "waiting for approval" state now requires the **Codex hooks** integration
+  (Settings → Integrations). Its rollout files never persisted approval events, so without hooks
+  that state stays invisible — same as before.
+- Gemini gets no tool-call audit: its chat jsonl does not persist tool calls at all (verified).
+  Kimi's `toolCalls` field exists but no non-empty sample was available to pin its shape, so it
+  is deferred rather than guessed.
+- Qoder has no `ctx%`: its transcripts carry no token counts whatsoever (the same reason it has
+  no usage ledger), and a context percentage needs a numerator.
 - Claude subscription limits rely on an unofficial endpoint and may break with official changes
   (it hides itself when it does).
 - Per‑skill invocation data (count / tokens / trend) is **Claude‑only**: no other agent tags skill

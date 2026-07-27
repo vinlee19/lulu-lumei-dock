@@ -4,6 +4,84 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] - 2026-07-27
+
+### Added
+
+- **Codex hooks integration** — `~/.codex/hooks.json` exposes four events
+  (`UserPromptSubmit` / `Stop` / `SessionStart` / `PermissionRequest`), and the
+  file has the same shape as Claude's `settings.json`, so the existing
+  deep-merge installer applies. `PermissionRequest` is the point of it: Codex
+  rollouts never recorded approval events, so "waiting for approval" was
+  invisible for Codex until now. Installing also gives Codex *exact* terminal
+  attribution, since relay envelopes carry the terminal. The merge only ever
+  adds or removes entries carrying our own marker — verified against a real
+  `hooks.json` already occupied by another app, including that uninstall
+  restores the file byte-for-byte.
+- **Tool-call audit for Grok and Qwen** — Grok's arguments live on
+  `chat_history.jsonl`'s `assistant.tool_calls` (its `events.jsonl`
+  `tool_started` lines carry only a tool name, which would produce audit rows
+  with no detail and no risk-rule coverage). Qwen's are structured
+  `functionCall.args`. Both vocabularies overlap Cursor's snake_case set, so
+  the extractor is shared. Verified on real data: 1244 Grok rows and 28 Qwen
+  rows, of which only 9 lack a detail string.
+- **CodeBuddy and Qoder skills are indexed** — `~/.codebuddy/skills` holds 23
+  real skills on the author's machine; the code previously asserted these two
+  CLIs had no user-level skills directory and skipped them entirely. Project
+  scoped roots (`<repo>/.codebuddy/skills`, `<repo>/.qoder/skills`) and the
+  create-skill menu entries come with it. Qoder is unverified locally (not
+  installed) and is noted as such in code.
+- **Prompt counts for opencode, Hermes and Cursor** — the session list showed
+  no conversation count for the three shared-database sources. Counted from
+  `message.role`, `messages.role` and bubble type respectively, as absolute
+  values so they cannot drift with the usage watermark.
+- **Backup coverage for the last gaps** — `gemini/plans` and `qwen/plans` were
+  being materialized and indexed but never backed up; Antigravity had no
+  backup roots at all. Cursor's subagent definitions are included too.
+- **Cursor subagent creation** — the indexer and list were wired in 0.14.0 but
+  the create button was missing.
+- **OpenCode memory creation** — the service already supported it and the
+  index already read it; only the menu entry was absent.
+
+### Changed
+
+- **Backup page: composition is now two-level and no longer clipped** — it was
+  a single-line horizontal scroller of twelve 9.5pt capsules, which overflows
+  at the minimum window width with no visible indicator, and it only ever
+  showed per-source totals, so it could not answer "which data does each CLI
+  sync". `sync_state` gained a `category` column (idempotent migration), and
+  legacy rows are decomposed from their remote key — safely, since a key with
+  exactly four segments ends in a filename rather than a category. Real data
+  now yields 27 buckets across 11 sources. The UI reuses the overview card and
+  collapsible source headers the Skills/Memory/Plans/Agents pages already use.
+- **Backup page: sync history is now a table** — added column headers and fixed
+  column widths so fields line up across rows, a per-run source-composition
+  bar so a run's contents are visible without expanding, grouping by the
+  *full* category (`claude/skills`, not `claude`) with per-group collapse and a
+  30-file cap instead of flattening up to 500, `LazyVStack`, a "N runs total"
+  label, and theme tokens in place of raw greens and oranges.
+
+### Fixed
+
+- **Antigravity skills were written into Gemini's directory** —
+  `AntigravityPaths.userSkillsRoot()` returned `~/.gemini/skills`, which is
+  Gemini's. Antigravity's own root is `~/.gemini/antigravity/skills` (23 skills
+  locally, a separate directory with separate inodes). Combined with the
+  indexer being handed an empty root list, a skill created as "Antigravity"
+  landed in Gemini's directory and then reappeared tagged gemini. The two are
+  now fully disjoint (verified: zero path overlap).
+- **Antigravity memory creation wrote into Gemini's directory too** — there is
+  no Antigravity memory directory at all, so the entry point is gone rather
+  than borrowing someone else's.
+- **Backups over 1 GB displayed as megabytes** — the view used a formatter that
+  stops at MB while the summary line used one with GB, so a 2.7 GB backup read
+  as "2678.7 MB". Unified on the GB-aware formatter.
+- **Sync history jumped back to page 1** after every cycle while the view still
+  believed it was on the page the user had picked.
+- Grok's MCP calls were classified as "other" instead of "mcp", and its
+  `use_tool` bridge produced empty details because `tool_input` is an object
+  rather than a string (all 40 rows). Empty-detail rows dropped from 47 to 9.
+
 ## [0.14.0] - 2026-07-27
 
 ### Added
@@ -764,6 +842,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.15.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.15.0
 [0.14.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.14.0
 [0.13.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.13.0
 [0.12.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.12.0

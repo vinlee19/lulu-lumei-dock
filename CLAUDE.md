@@ -10,7 +10,7 @@ Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex C
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 502 tests
+make test       # swift run eureka-tests  — runs all 525 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
@@ -73,6 +73,8 @@ Key = `source:sessionId`. Phases: `running` / `waiting(permission|idle)` / `idle
 - **Relay stable path:** hooks/notify configs only ever reference `~/Library/Application Support/Eureka/bin/eureka-relay`. The app re-syncs the bundled binary there on launch (by hash) so upgrades don't break the link — never hardcode the app-bundle path into installed configs.
 - **Stale-event suppression:** events older than 5 minutes only enter history/usage; they must NOT trigger island animations (`AppDelegate.handle` drops stale heartbeat/waiting/session-start events entirely).
 - **Usage dedup is mandatory and persistent:** Claude transcripts duplicate `(requestId, message.id)` rows heavily across files (resume/fork copies old rows into new files). Dedup must persist across files (via `scan_state`), or usage will be inflated.
+- **Hook installers must never overwrite an event wholesale.** `~/.claude/settings.json` and `~/.codex/hooks.json` share the same shape (`hooks: {Event: [{hooks: [...]}]}`) and both are routinely shared with other apps. Only add/remove entries carrying the `eureka-relay` marker; an unrecognisable shape must abort the write rather than be treated as an empty array.
+- **Codex hook stdout is as dangerous as Claude's.** `PermissionRequest` very likely reads stdout as an allow/deny decision, so the relay's silence rule covers `codex-hook` exactly as it covers `claude-hook`.
 - **Claude OAuth usage (rate limits) is unofficial, opt-in, default-off.** Any failure returns `nil` → the entire UI block hides. Keychain is read via the `/usr/bin/security` subprocess (avoids ACL re-prompts after ad-hoc re-signing).
 - **Cursor's `state.vscdb` must never be backed up or synced.** The same SQLite file that holds every Cursor session also holds `cursorAuth/accessToken` and `cursorAuth/refreshToken` in its `ItemTable`. `SyncSourceCatalog` only ever walks `~/.cursor/skills` for Cursor — never add the database or its parent directory.
 - **External agent databases are opened read-only, never with `immutable=1`.** Cursor / opencode / Hermes hold their libraries open in WAL mode; `immutable=1` would silently skip everything not yet checkpointed, so live sessions would look frozen.
