@@ -75,7 +75,27 @@ public final class OpencodeUsageScanner {
             inserted = records.count
         }
         try scanPartsForTools(db: db, inode: inode)
+        try recordPromptCounts(db: db)
         return inserted
+    }
+
+    /// 每会话的用户提问数。共享库来源没有「每会话一个文件」，故 scan_files 那套字节水位用不上：
+    /// 直接一条聚合查询取**绝对值**，用 `<db>#<sessionId>` 作 path、`reset: true` 覆盖写。
+    /// 这样不依赖 rowid 水位，重扫幂等，也不会因为水位停在进行中的 turn 而少算。
+    private func recordPromptCounts(db: SQLiteDB) throws {
+        let rows = (try? db.query("""
+            SELECT session_id, COUNT(*) FROM message
+            WHERE json_extract(data, '$.role') = 'user'
+            GROUP BY session_id
+            """) { row -> (String, Int) in (row.text(0) ?? "", Int(row.int(1))) }) ?? []
+        guard !rows.isEmpty else { return }
+        try store.scanState.transaction {
+            for (sessionId, count) in rows where !sessionId.isEmpty {
+                try store.sessionStats.recordPrompts(
+                    path: "\(dbPath.path)#\(sessionId)", sessionId: sessionId,
+                    count: count, reset: true)
+            }
+        }
     }
 
     /// part 表 tool 类型分片 → 工具调用计数（独立 rowid 水位，键 "<db>#parts"）

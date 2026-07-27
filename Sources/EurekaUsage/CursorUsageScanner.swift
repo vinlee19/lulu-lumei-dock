@@ -121,12 +121,15 @@ public final class CursorUsageScanner {
 
         var records: [UsageRecord] = []
         var toolBumps: [(day: String, kind: String, name: String, ts: Double)] = []
+        var promptCount = 0
         for bubbleId in bubbleIds[processed...] {
             guard let bubble = Self.json(db: db, key: "bubbleId:\(session.id):\(bubbleId)") else {
                 continue
             }
             let timestamp = (bubble["createdAt"] as? String)
                 .flatMap { Self.iso8601.date(from: $0) } ?? session.lastActiveAt
+            // type 1 = 用户气泡 → 会话页的「对话数」
+            if (bubble["type"] as? NSNumber)?.intValue == 1 { promptCount += 1 }
 
             if let tool = bubble["toolFormerData"] as? [String: Any],
                 let name = tool["name"] as? String, !name.isEmpty {
@@ -169,6 +172,9 @@ public final class CursorUsageScanner {
             try store.scanState.setFileState(
                 path: stateKey,
                 .init(inode: inode, offset: Int64(bubbleIds.count), extra: Self.encode(extra)))
+            // 首扫（processed == 0）覆盖写，之后增量累加——与 CodeBuddy 同口径
+            try store.sessionStats.recordPrompts(
+                path: stateKey, sessionId: session.id, count: promptCount, reset: processed == 0)
         }
         return inserted
     }

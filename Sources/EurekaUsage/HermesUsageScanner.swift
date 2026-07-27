@@ -47,8 +47,28 @@ public final class HermesUsageScanner {
         var inserted = 0
         for dbPath in stateDBs() {
             inserted += try scan(dbPath: dbPath, now: Date())
+            try recordPromptCounts(dbPath: dbPath)
         }
         return inserted
+    }
+
+    /// 每会话的用户提问数（`messages.role = 'user'`）。同 opencode：共享库没有每会话文件，
+    /// 取绝对值 + `reset: true` 覆盖写，不挂在 usage 的快照水位上。
+    /// 注意不能用 `sessions.message_count` —— 那是所有角色的总数（含 assistant/tool）。
+    private func recordPromptCounts(dbPath: URL) throws {
+        guard FileManager.default.fileExists(atPath: dbPath.path),
+              let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return }
+        let rows = (try? db.query("""
+            SELECT session_id, COUNT(*) FROM messages WHERE role = 'user' GROUP BY session_id
+            """) { row -> (String, Int) in (row.text(0) ?? "", Int(row.int(1))) }) ?? []
+        guard !rows.isEmpty else { return }
+        try store.scanState.transaction {
+            for (sessionId, count) in rows where !sessionId.isEmpty {
+                try store.sessionStats.recordPrompts(
+                    path: "\(dbPath.path)#\(sessionId)", sessionId: sessionId,
+                    count: count, reset: true)
+            }
+        }
     }
 
     // MARK: - 单库扫描
