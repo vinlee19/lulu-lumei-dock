@@ -138,7 +138,7 @@ public final class SyncEngine {
                 try repo.upsert(SyncStateRepo.Entry(
                     path: candidate.localPath, remoteKey: candidate.remoteKey,
                     size: candidate.size, mtime: candidate.mtime,
-                    etag: etag, uploadedAt: Date()))
+                    etag: etag, uploadedAt: Date(), category: candidate.category))
                 report.uploaded += 1
                 report.uploadedBytes += Int64(data.count)
                 if report.uploadedFiles.count < SyncReport.maxRecordedFiles {

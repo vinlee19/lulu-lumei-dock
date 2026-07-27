@@ -23,7 +23,11 @@ final class SyncService: ObservableObject {
     @Published private(set) var stats: SyncStateRepo.Stats?
     /// 备份按来源构成（remote_key 来源段 → 文件数/字节；「构成」chips 用）
     @Published private(set) var sourceComposition: [String: (count: Int, bytes: Int64)] = [:]
+    /// 备份构成（两级：来源 → 类目），备份页的构成区用
+    @Published private(set) var composition: [SyncStateRepo.CompositionBucket] = []
     /// 当前同步间隔（分钟，只读展示用）
+    /// 视图当前显示的历史页码（由 BackupView 同步过来，供每轮同步后原页刷新）
+    var visibleRunsPage = 1
     @Published private(set) var intervalMinutes: Double = 30
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.sync", qos: .utility)
@@ -99,10 +103,18 @@ final class SyncService: ObservableObject {
                   let store = try? EurekaStore(path: EurekaStore.defaultURL()),
                   let stats = try? store.syncState.stats()
             else { return }
-            let composition = (try? store.syncState.sourceComposition()) ?? [:]
+            let buckets = (try? store.syncState.composition()) ?? []
+            var bySource: [String: (count: Int, bytes: Int64)] = [:]
+            for bucket in buckets {
+                var entry = bySource[bucket.source] ?? (0, 0)
+                entry.count += bucket.count
+                entry.bytes += bucket.bytes
+                bySource[bucket.source] = entry
+            }
             self.publish {
                 $0.stats = stats
-                $0.sourceComposition = composition
+                $0.sourceComposition = bySource
+                $0.composition = buckets
             }
         }
     }
@@ -259,7 +271,9 @@ final class SyncService: ObservableObject {
             $0.lastResult = Self.describe(report)
             $0.lastError = report.firstError.map { "部分失败（\(report.failed) 个）：\($0)" }
         }
-        loadRuns(page: 1)
+        // 只有用户当前就在第 1 页时才刷新列表：否则会把他翻到的页码顶回去
+        // （视图自己持有 historyPage，服务这边强刷会让两者对不上）
+        loadRuns(page: visibleRunsPage)
         refreshStats()
     }
 
@@ -307,7 +321,8 @@ final class SyncService: ObservableObject {
             qoderProjects: QoderPaths.projectsRoot(),
             qoderMemories: QoderPaths.memoriesRoot(),
             cursorSkills: CursorPaths.skillsRoot(),
-            cursorAgents: CursorPaths.agentsRoot())
+            cursorAgents: CursorPaths.agentsRoot(),
+            antigravitySkills: AntigravityPaths.userSkillsRoot())
     }
 
     /// 物化 Codex / opencode / Grok / Kimi 计划到暂存目录（Claude 计划本就是 .md，无需物化）。
@@ -348,7 +363,9 @@ final class SyncService: ObservableObject {
     }
 }
 
-private func formatSyncBytes(_ bytes: Int64) -> String {
+/// 字节格式化（带 GB）。**备份页统一用这个**：`formatBytes`（SessionsView）只到 MB，
+/// 超过 1 GB 的备份会显示成「1234.5 MB」。
+func formatSyncBytes(_ bytes: Int64) -> String {
     switch bytes {
     case ..<1024: return "\(bytes) B"
     case ..<(1 << 20): return String(format: "%.1f KB", Double(bytes) / 1024)

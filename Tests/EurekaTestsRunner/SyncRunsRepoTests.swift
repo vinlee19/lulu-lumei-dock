@@ -99,3 +99,50 @@ func syncRunsRepoTests(_ t: TestRunner) {
         try expectEqual(try reopened.syncRuns.recent(limit: 1)[0].uploaded, 7)
     }
 }
+
+/// 备份构成（两级）：新行走 category 列，老行回退 remote_key。
+func syncCompositionTests(_ t: TestRunner) {
+    t.suite("SyncStateRepo · 备份构成两级拆分")
+
+    t.test("新行按 category 列；老行按 remote_key 段数区分类目与根文件") {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("comp-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = try EurekaStore(path: tmp)
+
+        // 新行：category 精确
+        try store.syncState.upsert(.init(
+            path: "/a/1.md", remoteKey: "eureka/host/claude/skills/x/SKILL.md",
+            size: 100, mtime: 1, uploadedAt: Date(), category: "claude/skills"))
+        // 项目级技能：category 是 claude/skills/project/<名> → 类目应归到 skills
+        try store.syncState.upsert(.init(
+            path: "/a/2.md", remoteKey: "eureka/host/claude/skills/project/p/SKILL.md",
+            size: 200, mtime: 1, uploadedAt: Date(), category: "claude/skills/project/p"))
+        // 老行（category 为 nil）：段数 6 → 第 4 段 sessions 是类目
+        try store.syncState.upsert(.init(
+            path: "/a/3.jsonl", remoteKey: "eureka/host/codex/sessions/2026/r.jsonl",
+            size: 400, mtime: 1, uploadedAt: Date()))
+        // 老行且段数 4 → 第 4 段是文件名，属根文件（kind = nil）
+        try store.syncState.upsert(.init(
+            path: "/a/SOUL.md", remoteKey: "eureka/host/hermes/SOUL.md",
+            size: 50, mtime: 1, uploadedAt: Date()))
+
+        let buckets = try store.syncState.composition()
+        func bucket(_ source: String, _ kind: String?) -> SyncStateRepo.CompositionBucket? {
+            buckets.first { $0.source == source && $0.kind == kind }
+        }
+        try expectEqual(bucket("claude", "skills")?.count, 2, "项目级技能应并进 skills")
+        try expectEqual(bucket("claude", "skills")?.bytes, 300)
+        try expectEqual(bucket("codex", "sessions")?.count, 1, "老行段数≥5 时第 4 段即类目")
+        try expectEqual(
+            bucket("hermes", nil)?.count, 1,
+            "老行段数=4 时第 4 段是文件名 → 根文件（kind 为 nil），不能造出假类目")
+        // 字节降序
+        try expectEqual(buckets.first?.source, "codex")
+
+        // 兼容旧调用点
+        let bySource = try store.syncState.sourceComposition()
+        try expectEqual(bySource["claude"]?.count, 2)
+        try expectEqual(bySource["hermes"]?.bytes, 50)
+    }
+}

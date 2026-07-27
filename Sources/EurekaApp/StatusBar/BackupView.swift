@@ -13,6 +13,9 @@ struct BackupView: View {
     @State private var showConfig = false
     @State private var historyPage = 1
     @State private var expandedRuns: Set<Int64> = []
+    @State private var expandedSources: Set<String> = []
+    /// 展开中的「轮次+类目」，键 `<runId>|<category>`
+    @State private var expandedRunGroups: Set<String> = []
 
     private let historyPageSize = 20
 
@@ -29,6 +32,7 @@ struct BackupView: View {
                         progressCard
                     }
                     statsCard
+                    compositionCard
                     if service.runsTotal > 0 {
                         historyCard
                     }
@@ -41,6 +45,7 @@ struct BackupView: View {
         .onAppear {
             service.refreshCredentialStatus()
             service.refreshStats()
+            service.visibleRunsPage = historyPage
             service.loadRuns(page: historyPage, pageSize: historyPageSize)
         }
         .sheet(isPresented: $showConfig) {
@@ -115,7 +120,8 @@ struct BackupView: View {
                 HStack(spacing: 8) {
                     Text("\(progress.completedFiles)/\(progress.totalFiles) 个文件")
                         .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                    Text("\(formatBytes(UInt64(max(0, progress.transferredBytes)))) / \(formatBytes(UInt64(max(0, progress.totalBytes))))")
+                    // 统一用带 GB 的格式化：大备份用 formatBytes 会显示成「1234.5 MB」
+                    Text("\(formatSyncBytes(max(0, progress.transferredBytes))) / \(formatSyncBytes(max(0, progress.totalBytes)))")
                         .font(.system(size: 10.5).monospacedDigit())
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -145,12 +151,11 @@ struct BackupView: View {
         card("备份统计") {
             HStack(spacing: 18) {
                 stat("已备份文件", service.stats.map { "\($0.fileCount)" } ?? "—")
-                stat("总大小", service.stats.map { formatBytes(UInt64(max(0, $0.totalBytes))) } ?? "—")
+                stat("总大小", service.stats.map { formatSyncBytes(max(0, $0.totalBytes)) } ?? "—")
                 stat("最近上传", service.stats?.lastUploadAt.map {
                     relativeFormatter.localizedString(for: $0, relativeTo: Date())
                 } ?? "—")
             }
-            compositionRow
             if let result = service.lastResult {
                 Text("上轮：\(result)")
                     .font(.system(size: 10))
@@ -159,35 +164,118 @@ struct BackupView: View {
         }
     }
 
-    /// 「按来源构成」chips：来源徽标（命中 AgentSource）/文件夹图标（custom/其它）+ 文件数 + 字节
+    // MARK: - 备份构成（总览卡 + 每来源可折叠分组）
+
+    /// 按来源聚合后的构成，字节降序
+    private var compositionBySource:
+        [(source: String, count: Int, bytes: Int64, kinds: [SyncStateRepo.CompositionBucket])] {
+        var grouped: [String: [SyncStateRepo.CompositionBucket]] = [:]
+        for bucket in service.composition {
+            grouped[bucket.source, default: []].append(bucket)
+        }
+        return grouped
+            .map { source, kinds in
+                (source: source,
+                 count: kinds.reduce(0) { $0 + $1.count },
+                 bytes: kinds.reduce(0) { $0 + $1.bytes },
+                 kinds: kinds.sorted { $0.bytes > $1.bytes })
+            }
+            .sorted { $0.bytes > $1.bytes }
+    }
+
+    /// 构成区。旧版是单行横向 ScrollView + 12 个 9.5pt 胶囊：最小窗口宽度（可用约 610pt）
+    /// 下必然溢出，而 `showsIndicators: false` 让用户根本看不出还有内容被藏起来。
+    /// 现在改成总览卡 + 每来源一行可折叠分组，展开看二级类目占比 —— 与 Skills/Memory/
+    /// Plans/Agents 四页同一套语言（`StatOverviewCard` + `SourceSectionHeader`）。
     @ViewBuilder
-    private var compositionRow: some View {
-        let composition = service.sourceComposition.sorted { $0.value.count > $1.value.count }
-        if !composition.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(composition, id: \.key) { key, value in
-                        HStack(spacing: 4) {
-                            if let source = AgentSource(rawValue: key) {
-                                SourceBadge(source: source, size: 9)
-                            } else {
-                                Image(systemName: "folder.fill")
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(Theme.brand.opacity(0.7))
+    private var compositionCard: some View {
+        let bySource = compositionBySource
+        if !bySource.isEmpty {
+            let totalFiles = bySource.reduce(0) { $0 + $1.count }
+            let totalBytes = bySource.reduce(Int64(0)) { $0 + $1.bytes }
+            card("备份构成") {
+                StatOverviewCard(
+                    value: "\(totalFiles)",
+                    unit: "个文件",
+                    subtitle: formatSyncBytes(totalBytes),
+                    distributionTitle: "按来源",
+                    segments: bySource.prefix(6).enumerated().map { index, item in
+                        StatOverviewCard.Segment(
+                            label: displayName(forSource: item.source),
+                            count: item.count,
+                            color: sourceColor(item.source, fallbackIndex: index))
+                    },
+                    trailingNote: bySource.count > 6 ? "另有 \(bySource.count - 6) 个来源" : nil)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(bySource, id: \.source) { item in
+                        SourceSectionHeader(
+                            source: AgentSource(rawValue: item.source),
+                            icon: "folder.fill",
+                            title: displayName(forSource: item.source),
+                            count: item.count,
+                            trailingNote: formatSyncBytes(item.bytes),
+                            collapsed: !expandedSources.contains(item.source),
+                            onToggle: { toggleSource(item.source) })
+                        if expandedSources.contains(item.source) {
+                            ForEach(item.kinds, id: \.kind) { bucket in
+                                kindRow(bucket, sourceBytes: item.bytes)
                             }
-                            Text("\(key) \(value.count)")
-                                .font(.system(size: 9.5, weight: .medium).monospacedDigit())
-                            Text(formatBytes(UInt64(max(0, value.bytes))))
-                                .font(.system(size: 9).monospacedDigit())
-                                .foregroundStyle(.tertiary)
                         }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.primary.opacity(0.05)))
                     }
                 }
             }
         }
+    }
+
+    /// 二级类目一行：名称 + 占该来源的比例条 + 文件数 + 字节
+    private func kindRow(
+        _ bucket: SyncStateRepo.CompositionBucket, sourceBytes: Int64
+    ) -> some View {
+        let ratio = sourceBytes > 0 ? Double(bucket.bytes) / Double(sourceBytes) : 0
+        return HStack(spacing: 8) {
+            Text(bucket.kind ?? "根文件")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 108, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.hairline)
+                    Capsule().fill(Theme.brand.opacity(0.55))
+                        .frame(width: max(3, geo.size.width * ratio))
+                }
+            }
+            .frame(height: 4)
+            Text("\(bucket.count) 个")
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 54, alignment: .trailing)
+            Text(formatSyncBytes(bucket.bytes))
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: 66, alignment: .trailing)
+        }
+        .padding(.leading, 26)
+        .padding(.vertical, 2)
+    }
+
+    private func toggleSource(_ source: String) {
+        if expandedSources.contains(source) {
+            expandedSources.remove(source)
+        } else {
+            expandedSources.insert(source)
+        }
+    }
+
+    /// 来源段 → 展示名。`custom` 与未知段回退原文（以前页面上直接印裸 rawValue 如 `codebuddy`）
+    private func displayName(forSource source: String) -> String {
+        AgentSource(rawValue: source)?.displayName ?? source
+    }
+
+    /// 总览条的分段色：命中来源用品牌色，其余（custom）按序取品牌色不同透明度
+    private func sourceColor(_ source: String, fallbackIndex: Int) -> Color {
+        if let agent = AgentSource(rawValue: source) { return agent.brandColor }
+        return Theme.brand.opacity(max(0.25, 0.8 - Double(fallbackIndex) * 0.12))
     }
 
     // MARK: - 历史卡（持久化 + 分页 + 可展开文件明细）
@@ -196,36 +284,70 @@ struct BackupView: View {
         max(1, (service.runsTotal + historyPageSize - 1) / historyPageSize)
     }
 
+    /// 同步历史。旧版无列头无对齐（字段左挤、跨行对不齐）、20 行非 lazy、
+    /// 展开后最多 500 个文件平铺、且只按来源一级分组（把 `RunFile.category` 的二级丢了）。
+    /// 现在照仓库里最相近的两页（`AuditView` 的 LazyVStack + `UsageDashboardView` 的
+    /// 固定列宽表格）重做，并给每行加一条来源占比微条 —— 不展开也能看出这轮传了谁的东西。
     private var historyCard: some View {
-        card("同步历史（共 \(service.runsTotal) 轮）") {
-            ForEach(service.runs) { run in
-                runRow(run)
-                Divider().opacity(0.35)
+        card("同步历史") {
+            historyHeader
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(service.runs) { run in
+                    runRow(run)
+                    Divider().opacity(0.35)
+                }
             }
-            HStack(spacing: 8) {
-                Spacer()
-                Button {
-                    historyPage = max(1, historyPage - 1)
-                    service.loadRuns(page: historyPage, pageSize: historyPageSize)
-                } label: { Image(systemName: "chevron.left").font(.system(size: 9)) }
-                .buttonStyle(.borderless)
-                .disabled(historyPage <= 1)
-                Text("\(historyPage) / \(totalHistoryPages)")
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Button {
-                    historyPage = min(totalHistoryPages, historyPage + 1)
-                    service.loadRuns(page: historyPage, pageSize: historyPageSize)
-                } label: { Image(systemName: "chevron.right").font(.system(size: 9)) }
-                .buttonStyle(.borderless)
-                .disabled(historyPage >= totalHistoryPages)
-            }
+            historyPager
         }
+    }
+
+    private var historyHeader: some View {
+        HStack(spacing: 8) {
+            Color.clear.frame(width: 10)  // chevron 列
+            Text("时间").frame(width: 84, alignment: .leading)
+            Text("状态").frame(width: 46, alignment: .leading)
+            Text("上传").frame(width: 58, alignment: .trailing)
+            Text("大小").frame(width: 68, alignment: .trailing)
+            Text("构成").frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(.tertiary)
+        .padding(.bottom, 2)
+    }
+
+    private var historyPager: some View {
+        HStack(spacing: 8) {
+            Text("共 \(service.runsTotal) 轮")
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Button {
+                goToHistoryPage(historyPage - 1)
+            } label: { Image(systemName: "chevron.left").font(.system(size: 9)) }
+            .buttonStyle(.borderless)
+            .disabled(historyPage <= 1)
+            Text("\(historyPage) / \(totalHistoryPages)")
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.secondary)
+            Button {
+                goToHistoryPage(historyPage + 1)
+            } label: { Image(systemName: "chevron.right").font(.system(size: 9)) }
+            .buttonStyle(.borderless)
+            .disabled(historyPage >= totalHistoryPages)
+        }
+    }
+
+    private func goToHistoryPage(_ page: Int) {
+        historyPage = min(max(1, page), totalHistoryPages)
+        // 服务侧每轮同步后按这个页码原地刷新，不再把用户顶回第 1 页
+        service.visibleRunsPage = historyPage
+        service.loadRuns(page: historyPage, pageSize: historyPageSize)
     }
 
     @ViewBuilder
     private func runRow(_ run: SyncRunsRepo.Run) -> some View {
         let expanded = expandedRuns.contains(run.id)
+        let groups = groupedFiles(run.files)
         Button {
             if expanded { expandedRuns.remove(run.id) } else { expandedRuns.insert(run.id) }
         } label: {
@@ -235,31 +357,39 @@ struct BackupView: View {
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .opacity(run.files.isEmpty ? 0 : 1)
-                Circle()
-                    .fill(run.error == nil ? Color.green : Color.orange)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 10)
                 Text(run.date, format: .dateTime.month().day().hour().minute())
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(.system(size: 10.5).monospacedDigit())
                     .foregroundStyle(.secondary)
-                Text("↑\(run.uploaded) 个")
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-                if run.uploadedBytes > 0 {
-                    Text(formatBytes(UInt64(run.uploadedBytes)))
-                        .font(.system(size: 10).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    .frame(width: 84, alignment: .leading)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(run.error == nil ? Theme.enabledGreen : Theme.failureRed)
+                        .frame(width: 6, height: 6)
+                    Text(run.error == nil ? "成功" : "失败")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(run.error == nil ? .secondary : Color(Theme.failureRed))
                 }
+                .frame(width: 46, alignment: .leading)
+                Text("\(run.uploaded) 个")
+                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .frame(width: 58, alignment: .trailing)
+                Text(run.uploadedBytes > 0 ? formatSyncBytes(run.uploadedBytes) : "—")
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 68, alignment: .trailing)
+                compositionBar(groups)
+                    .frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
                 if run.failed > 0 {
                     Text("失败 \(run.failed)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
+                        .font(.system(size: 10)).foregroundStyle(Color(Theme.failureRed))
                 }
                 if run.deferred > 0 {
                     Text("待传 \(run.deferred)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
             }
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -267,66 +397,137 @@ struct BackupView: View {
         if let error = run.error {
             Text(error)
                 .font(.system(size: 9.5))
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color(Theme.failureRed))
                 .lineLimit(2)
-                .padding(.leading, 22)
+                .padding(.leading, 18)
         }
 
         if expanded {
-            VStack(alignment: .leading, spacing: 2) {
-                // 按来源分组（category 首段；老记录无 category → "其他"）
-                ForEach(groupedFiles(run.files), id: \.source) { group in
-                    HStack(spacing: 5) {
-                        if let source = AgentSource(rawValue: group.source) {
-                            SourceBadge(source: source, size: 9)
-                        } else {
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(Theme.brand.opacity(0.7))
-                        }
-                        Text("\(group.source) · \(group.files.count) 个 · \(formatBytes(UInt64(max(0, group.bytes))))")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 3)
-                    ForEach(Array(group.files.enumerated()), id: \.offset) { _, file in
-                        HStack(spacing: 6) {
-                            Text(file.name)
-                                .font(.system(size: 9.5).monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 4)
-                            Text(formatBytes(UInt64(max(0, file.size))))
-                                .font(.system(size: 9.5).monospacedDigit())
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.leading, 14)
-                    }
+            VStack(alignment: .leading, spacing: 1) {
+                // 按**完整 category** 分组（claude/skills 而不是 claude），每组可再折叠
+                ForEach(groups, id: \.category) { group in
+                    runGroupRow(run: run, group: group)
                 }
                 if run.uploaded > run.files.count {
-                    Text("…等 \(run.uploaded - run.files.count) 个文件")
-                        .font(.system(size: 9))
+                    Text("本轮共 \(run.uploaded) 个文件，只记录了前 \(run.files.count) 个明细")
+                        .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
                 }
             }
-            .padding(.leading, 22)
-            .padding(.top, 1)
+            .padding(.leading, 18)
+            .padding(.bottom, 3)
         }
     }
 
-    /// 一轮的文件按来源分组（category 首段），组按文件数降序
-    private func groupedFiles(
-        _ files: [SyncRunsRepo.RunFile]
-    ) -> [(source: String, files: [SyncRunsRepo.RunFile], bytes: Int64)] {
+    /// 每行一条来源占比微条（照 UsageDashboardView.toolRow 的做法）
+    @ViewBuilder
+    private func compositionBar(_ groups: [RunGroup]) -> some View {
+        let total = max(Int64(1), groups.reduce(Int64(0)) { $0 + $1.bytes })
+        if groups.isEmpty {
+            Text("—").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+        } else {
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    ForEach(Array(groups.prefix(8).enumerated()), id: \.offset) { index, group in
+                        Capsule()
+                            .fill(sourceColor(group.source, fallbackIndex: index))
+                            .frame(width: max(2, geo.size.width * Double(group.bytes) / Double(total)))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 5)
+        }
+    }
+
+    /// 展开区的一个类目组：默认收起，点开才列文件（最多 30 个，避免 500 个平铺）
+    @ViewBuilder
+    private func runGroupRow(run: SyncRunsRepo.Run, group: RunGroup) -> some View {
+        let key = "\(run.id)|\(group.category)"
+        let open = expandedRunGroups.contains(key)
+        Button {
+            if open { expandedRunGroups.remove(key) } else { expandedRunGroups.insert(key) }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 7, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                if let source = AgentSource(rawValue: group.source) {
+                    SourceBadge(source: source, size: 10)
+                } else {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.brand.opacity(0.7))
+                }
+                Text(group.category)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Text("\(group.files.count) 个")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(formatSyncBytes(group.bytes))
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 66, alignment: .trailing)
+            }
+            .padding(.top, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        if open {
+            let shown = group.files.prefix(30)
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, file in
+                HStack(spacing: 6) {
+                    Text(file.name)
+                        .font(.system(size: 10).monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Text(formatSyncBytes(max(0, file.size)))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.leading, 20)
+            }
+            if group.files.count > shown.count {
+                Text("…剩 \(group.files.count - shown.count) 个")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 20)
+            }
+        }
+    }
+
+    /// 一轮里的一个类目组
+    struct RunGroup {
+        var category: String
+        var source: String
+        var files: [SyncRunsRepo.RunFile]
+        var bytes: Int64
+    }
+
+    /// 一轮的文件按**完整 category** 分组（`claude/skills` 而不是 `claude`），字节降序。
+    /// 旧版只取首段，把二级信息丢了 —— 而 `RunFile.category` 本来就带着。
+    private func groupedFiles(_ files: [SyncRunsRepo.RunFile]) -> [RunGroup] {
         var groups: [String: [SyncRunsRepo.RunFile]] = [:]
         for file in files {
-            let source = file.category?.split(separator: "/").first.map(String.init) ?? "其他"
-            groups[source, default: []].append(file)
+            let category = (file.category?.isEmpty == false ? file.category! : "其他")
+            groups[category, default: []].append(file)
         }
         return groups
-            .map { (source: $0.key, files: $0.value, bytes: $0.value.reduce(0) { $0 + $1.size }) }
-            .sorted { $0.files.count > $1.files.count }
+            .map { category, files in
+                RunGroup(
+                    category: category,
+                    source: category.split(separator: "/").first.map(String.init) ?? category,
+                    files: files,
+                    bytes: files.reduce(Int64(0)) { $0 + $1.size })
+            }
+            .sorted { $0.bytes > $1.bytes }
     }
 
     // MARK: - 空态

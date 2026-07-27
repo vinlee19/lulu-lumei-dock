@@ -216,6 +216,9 @@ enum Schema {
 
         // task_history 不参与 drop/重建（真实历史），旧库补列走幂等 ALTER
         try addColumnIfMissing(db, table: "task_history", column: "session_started_at", type: "REAL")
+        // sync_state 也是事实表（记录远端已有什么），同样只补列不重建。
+        // category 是备份构成分两级展示的依据；老行为 NULL → 回退按 remote_key 解析。
+        try addColumnIfMissing(db, table: "sync_state", column: "category", type: "TEXT")
 
         try db.execute("PRAGMA user_version = \(version)")
     }

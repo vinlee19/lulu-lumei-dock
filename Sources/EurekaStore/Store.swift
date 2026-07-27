@@ -631,10 +631,13 @@ public final class SyncStateRepo {
         public var mtime: Double
         public var etag: String?
         public var uploadedAt: Date
+        /// 备份类目（`SyncCandidate.category`，如 `claude/skills`）。
+        /// 老行没有这一列 → nil，构成统计会回退按 remote_key 解析。
+        public var category: String?
 
         public init(
             path: String, remoteKey: String, size: Int64, mtime: Double,
-            etag: String? = nil, uploadedAt: Date
+            etag: String? = nil, uploadedAt: Date, category: String? = nil
         ) {
             self.path = path
             self.remoteKey = remoteKey
@@ -642,12 +645,13 @@ public final class SyncStateRepo {
             self.mtime = mtime
             self.etag = etag
             self.uploadedAt = uploadedAt
+            self.category = category
         }
     }
 
     public func entry(path: String) throws -> Entry? {
         try db.query("""
-        SELECT path, remote_key, size, mtime, etag, uploaded_at
+        SELECT path, remote_key, size, mtime, etag, uploaded_at, category
         FROM sync_state WHERE path = ?
         """, [.text(path)]) { Self.mapRow($0) }.first
     }
@@ -656,7 +660,7 @@ public final class SyncStateRepo {
     public func allEntries() throws -> [String: Entry] {
         var result: [String: Entry] = [:]
         let rows = try db.query("""
-        SELECT path, remote_key, size, mtime, etag, uploaded_at FROM sync_state
+        SELECT path, remote_key, size, mtime, etag, uploaded_at, category FROM sync_state
         """) { Self.mapRow($0) }
         for entry in rows {
             result[entry.path] = entry
@@ -666,12 +670,14 @@ public final class SyncStateRepo {
 
     public func upsert(_ entry: Entry) throws {
         try db.run("""
-        INSERT OR REPLACE INTO sync_state (path, remote_key, size, mtime, etag, uploaded_at)
-        VALUES (?,?,?,?,?,?)
+        INSERT OR REPLACE INTO sync_state
+            (path, remote_key, size, mtime, etag, uploaded_at, category)
+        VALUES (?,?,?,?,?,?,?)
         """, [
             .text(entry.path), .text(entry.remoteKey),
             .int(entry.size), .real(entry.mtime),
             .string(entry.etag), .real(entry.uploadedAt.timeIntervalSince1970),
+            .string(entry.category),
         ])
     }
 
@@ -699,21 +705,74 @@ public final class SyncStateRepo {
         }.first ?? Stats(fileCount: 0, totalBytes: 0, lastUploadAt: nil)
     }
 
-    /// 备份构成：remote_key 第三段（<prefix>/<host>/<来源>/…）→ (文件数, 字节)。
-    /// 「按来源构成」chips 用；键在 Swift 侧解析（量级数千，开销可忽略）。
-    public func sourceComposition() throws -> [String: (count: Int, bytes: Int64)] {
+    /// 备份构成的一格：某来源下某个类目的文件数与字节数
+    public struct CompositionBucket: Equatable, Sendable {
+        /// 来源段（`AgentSource.rawValue` 或 `custom`）
+        public var source: String
+        /// 类目段（`skills` / `projects` / `plans` / `memories`…）；
+        /// 根文件（CLAUDE.md、SOUL.md 之类，category 恰等于来源）为 nil
+        public var kind: String?
+        public var count: Int
+        public var bytes: Int64
+
+        public init(source: String, kind: String?, count: Int, bytes: Int64) {
+            self.source = source
+            self.kind = kind
+            self.count = count
+            self.bytes = bytes
+        }
+    }
+
+    /// 备份构成（两级：来源 → 类目）。
+    ///
+    /// 优先用 `category` 列（`SyncCandidate.category`，精确）；老行该列为 NULL →
+    /// 回退按 `remote_key` 解析，段数 ≥5 时第 4 段即类目。
+    /// ⚠️ 段数正好 4 时第 4 段是**文件名**而不是类目（根文件），硬拆会造出假类目。
+    public func composition() throws -> [CompositionBucket] {
         let rows = try db.query(
-            "SELECT remote_key, size FROM sync_state"
-        ) { row in (row.text(0) ?? "", row.int(1)) }
+            "SELECT remote_key, size, category FROM sync_state"
+        ) { row in (row.text(0) ?? "", row.int(1), row.text(2)) }
+
+        var buckets: [String: CompositionBucket] = [:]
+        for (key, size, category) in rows {
+            let source: String
+            var kind: String?
+            if let category, !category.isEmpty {
+                let parts = category.split(separator: "/", maxSplits: 1)
+                source = String(parts[0])
+                // 类目只留第一段：`claude/skills/project/<名>` 归到 skills
+                kind = parts.count > 1
+                    ? parts[1].split(separator: "/").first.map(String.init) : nil
+            } else {
+                // 老行（category 列加上之前上传的）：从 remote_key 推。
+                // key = `<prefix>/<host>/<来源>/<类目>/…`，所以 parts[3] 是类目 ——
+                // **但只有段数 ≥5 时才是**：段数正好 4 时那一段是文件名（根文件，
+                // 实勘 GEMINI.md / projects.json / opencode.db / AGENTS.md / SOUL.md 共 5 条）。
+                let parts = key.split(separator: "/")
+                guard parts.count >= 3 else { continue }
+                source = String(parts[2])
+                kind = parts.count >= 5 ? String(parts[3]) : nil
+            }
+            let bucketKey = "\(source)/\(kind ?? "")"
+            var bucket = buckets[bucketKey]
+                ?? CompositionBucket(source: source, kind: kind, count: 0, bytes: 0)
+            bucket.count += 1
+            bucket.bytes += size
+            buckets[bucketKey] = bucket
+        }
+        return buckets.values.sorted {
+            $0.bytes != $1.bytes ? $0.bytes > $1.bytes : $0.source < $1.source
+        }
+    }
+
+    /// 兼容旧调用点：只按来源汇总（新 UI 走 `composition()`）
+    public func sourceComposition() throws -> [String: (count: Int, bytes: Int64)] {
         var result: [String: (count: Int, bytes: Int64)] = [:]
-        for (key, size) in rows {
-            let parts = key.split(separator: "/")
-            guard parts.count >= 3 else { continue }
-            let source = String(parts[2])
-            var entry = result[source] ?? (0, 0)
-            entry.count += 1
-            entry.bytes += size
-            result[source] = entry
+        for bucket in try composition() {
+            var entry = result[bucket.source] ?? (0, 0)
+            entry.count += bucket.count
+            entry.bytes += bucket.bytes
+            result[bucket.source] = entry
         }
         return result
     }
@@ -741,7 +800,8 @@ public final class SyncStateRepo {
             size: row.int(2),
             mtime: row.real(3),
             etag: row.text(4),
-            uploadedAt: Date(timeIntervalSince1970: row.real(5)))
+            uploadedAt: Date(timeIntervalSince1970: row.real(5)),
+            category: row.text(6))
     }
 }
 

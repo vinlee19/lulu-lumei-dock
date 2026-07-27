@@ -90,6 +90,7 @@ codeBuddySessionIndexerTests(t)
 codeBuddyUsageScannerTests(t)
 qoderIngestTests(t)
 cursorIngestTests(t)
+syncCompositionTests(t)
 codexHooksTests(t)
 projectRootsTests(t)
 

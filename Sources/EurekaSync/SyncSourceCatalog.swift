@@ -61,6 +61,9 @@ public struct SyncRoots {
     public var qoderProjects: URL?
     /// ~/.qoder-cn/memories（<user-hash>/global/<category>/）
     public var qoderMemories: URL?
+    /// ~/.gemini/antigravity/skills（Antigravity 自己的技能，**不是** ~/.gemini/skills）。
+    /// 会话是 protobuf（conversations/*.pb），二进制无从增量比对 → 不纳入备份。
+    public var antigravitySkills: URL?
     /// ~/.cursor/skills（SKILL.md，与 Claude 同构）。
     /// ⚠️ Cursor 的会话与消息全在 `state.vscdb` 里，而**同一个库**的 ItemTable 还存着
     ///    `cursorAuth/accessToken` 与 `cursorAuth/refreshToken` —— 那个库永远不进备份，
@@ -87,7 +90,8 @@ public struct SyncRoots {
         codeBuddyProjects: URL? = nil, codeBuddyMemory: URL? = nil,
         qoderProjects: URL? = nil, qoderMemories: URL? = nil,
         cursorSkills: URL? = nil,
-        cursorAgents: URL? = nil
+        cursorAgents: URL? = nil,
+        antigravitySkills: URL? = nil
     ) {
         self.claudeHome = claudeHome
         self.claudeProjects = claudeProjects
@@ -120,6 +124,7 @@ public struct SyncRoots {
         self.qoderMemories = qoderMemories
         self.cursorSkills = cursorSkills
         self.cursorAgents = cursorAgents
+        self.antigravitySkills = antigravitySkills
     }
 }
 
@@ -268,6 +273,10 @@ public enum SyncSourceCatalog {
              category: "grok/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("kimi", isDirectory: true),
              category: "kimi/plans", priority: 0, include: markdownOnly)
+        walk(root: roots.plansStaging.appendingPathComponent("gemini", isDirectory: true),
+             category: "gemini/plans", priority: 0, include: markdownOnly)
+        walk(root: roots.plansStaging.appendingPathComponent("qwen", isDirectory: true),
+             category: "qwen/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("qoder", isDirectory: true),
              category: "qoder/plans", priority: 0, include: markdownOnly)
         walk(root: roots.plansStaging.appendingPathComponent("cursor", isDirectory: true),
@@ -304,6 +313,12 @@ public enum SyncSourceCatalog {
         }
         if let cursorAgents = roots.cursorAgents {
             walk(root: cursorAgents, category: "cursor/agents", priority: 0,
+                 include: markdownOnly)
+        }
+
+        // antigravity：只有技能目录可备份（会话是 protobuf，不纳入）
+        if let antigravitySkills = roots.antigravitySkills {
+            walk(root: antigravitySkills, category: "antigravity/skills", priority: 0,
                  include: markdownOnly)
         }
 
