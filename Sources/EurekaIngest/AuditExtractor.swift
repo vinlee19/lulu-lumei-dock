@@ -96,7 +96,23 @@ public enum AuditExtractor {
         }
     }
 
-    // MARK: - Cursor（bubble 的 toolFormerData，rawArgs 是 JSON 字符串）
+    // MARK: - Cursor / Grok（snake_case 工具词表，两家几乎一致）
+
+    /// Grok 的 `chat_history.jsonl` 里 `assistant.tool_calls[] = {id, name, arguments}`，
+    /// `arguments` 是 JSON 字符串。词表与 Cursor 高度重合（实勘 `read_file`(target_file) /
+    /// `grep`(pattern,path) / `run_terminal_command`(command) / `search_replace`(file_path) /
+    /// `list_dir`(target_directory) / `write`(file_path) / `todo_write` 全同名同参），
+    /// 故直接复用 `cursor(name:input:)`，只在那里补 Grok 独有的几个。
+    public static func grok(name: String, argumentsJSON: String?) -> Operation {
+        cursor(name: name, input: cursorArguments(rawArgs: argumentsJSON, params: nil))
+    }
+
+    /// Qwen 的 `functionCall.args` 已是结构化对象（不像 Codex/Grok 是 JSON 字符串），
+    /// 直接进共享的 snake_case 映射。实勘 `read_file`(**file_path**，不是 Cursor 的
+    /// `target_file`) / `grep_search` / `agent` / `ask_user_question`。
+    public static func qwen(name: String, args: [String: Any]?) -> Operation {
+        cursor(name: name, input: args)
+    }
 
     /// Cursor 的工具名是 snake_case 且带 `_v2` 后缀（新旧两套并存），先归一化再分类；
     /// MCP 是单下划线的 `mcp_<server>_<tool>`，与 Claude 的 `mcp__` 不同，
@@ -106,6 +122,12 @@ public enum AuditExtractor {
     /// `params`（Cursor 自己摘出来的结构化字段）补缺。`apply_patch` 的 rawArgs 是
     /// 裸补丁文本不是 JSON（实勘 62/3936 行），走 `params.relativeWorkspacePath` 取路径。
     public static func cursor(name: String, input: [String: Any]?) -> Operation {
+        // Claude 式 `mcp__server__tool`：Grok 用的是这种双下划线写法（实勘 notion__*），
+        // 先认它，否则会落 default 归成 .other，MCP 调用在审计页就分不出类
+        if name.hasPrefix("mcp__") {
+            return Operation(
+                kind: .mcp, name: cleanMCPName(name), detail: trim(firstString(in: input)))
+        }
         if CursorToolNames.isMCP(name) {
             return Operation(
                 kind: .mcp, name: CursorToolNames.mcpDisplayName(name),
@@ -123,7 +145,9 @@ public enum AuditExtractor {
         }
         switch canonical {
         case "read_file":
-            return Operation(kind: .read, name: canonical, detail: trim(str("target_file", "path")))
+            return Operation(
+                kind: .read, name: canonical,
+                detail: trim(str("target_file", "file_path", "path")))
         case "read_lints":
             return Operation(
                 kind: .read, name: canonical, detail: list("paths").joined(separator: ", "))
@@ -132,7 +156,7 @@ public enum AuditExtractor {
                 kind: .search, name: canonical, detail: trim(str("target_directory", "path")))
         case "glob_file_search":
             return Operation(kind: .search, name: canonical, detail: trim(str("glob_pattern")))
-        case "grep", "ripgrep_raw_search":
+        case "grep", "grep_search", "ripgrep_raw_search":
             var detail = str("pattern", "query") ?? ""
             let scope = str("path") ?? list("target_directories").joined(separator: ", ")
             if !scope.isEmpty { detail += " in \(scope)" }
@@ -153,6 +177,33 @@ public enum AuditExtractor {
             return Operation(kind: .edit, name: canonical, detail: trim(path))
         case "todo_write":
             return Operation(kind: .other, name: canonical, detail: "更新计划")
+        // 以下几个只在 Grok 出现（Cursor 没有），归类口径与同类工具保持一致
+        case "web_fetch":
+            return Operation(kind: .web, name: canonical, detail: trim(str("url")))
+        case "search_tool":
+            return Operation(kind: .search, name: canonical, detail: trim(str("query")))
+        case "spawn_subagent":
+            return Operation(
+                kind: .agent, name: str("subagent_type") ?? canonical,
+                detail: trim(str("description", "prompt")))
+        case "use_tool":
+            // Grok 的 MCP 桥：真正的工具名在 tool_name 里（实勘是 Claude 式 `mcp__` 或
+            // `<server>__<tool>`），入参在 tool_input —— **它通常是对象而不是字符串**，
+            // 直接当字符串取会得到空 detail（实勘 40/40 条全空）→ 嵌套字典也要往里取一层。
+            let inner = input?["tool_input"] as? [String: Any]
+            let rawName = str("tool_name") ?? canonical
+            return Operation(
+                kind: .mcp,
+                name: rawName.contains("__") ? cleanMCPName(rawName) : rawName,
+                detail: trim(str("tool_input") ?? firstString(in: inner)))
+        case "exit_plan_mode":
+            return Operation(kind: .other, name: canonical, detail: "退出计划模式")
+        case "agent":
+            return Operation(
+                kind: .agent, name: str("subagent_type") ?? canonical,
+                detail: trim(str("description", "prompt")))
+        case "ask_user_question":
+            return Operation(kind: .other, name: canonical, detail: "向用户提问")
         default:
             return Operation(kind: .other, name: canonical, detail: trim(firstString(in: input)))
         }

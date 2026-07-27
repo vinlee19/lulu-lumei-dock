@@ -28,6 +28,8 @@ final class AuditService: ObservableObject {
     private var codeBuddyScanner: CodeBuddyAuditScanner?
     private var qoderScanner: QoderAuditScanner?
     private var cursorScanner: CursorAuditScanner?
+    private var grokScanner: GrokAuditScanner?
+    private var qwenScanner: QwenAuditScanner?
     private var captureEnabled = true
     private var retentionDays = 90
     private var lastPruneAt = Date.distantPast
@@ -36,12 +38,16 @@ final class AuditService: ObservableObject {
     private static let codeBuddyHealthName = "审计扫描 CodeBuddy"
     private static let qoderHealthName = "审计扫描 Qoder"
     private static let cursorHealthName = "审计扫描 Cursor"
+    private static let grokHealthName = "审计扫描 Grok"
+    private static let qwenHealthName = "审计扫描 Qwen"
 
     func start() {
         HealthRegistry.shared.register(Self.codexHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.qoderHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.cursorHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.grokHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.qwenHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -62,16 +68,24 @@ final class AuditService: ObservableObject {
                     dbPath: CursorPaths.globalStateDB(),
                     workspaceStorageRoot: CursorPaths.workspaceStorageRoot(),
                     store: store, pipeline: pipeline)
+                self.grokScanner = GrokAuditScanner(
+                    sessionsRoot: GrokPaths.sessionsRoot(),
+                    store: store, pipeline: pipeline)
+                self.qwenScanner = QwenAuditScanner(
+                    projectsRoot: QwenPaths.projectsRoot(),
+                    store: store, pipeline: pipeline)
                 self.scanCodex()
                 self.scanCodeBuddy()
                 self.scanQoder()
                 self.scanCursor()
+                self.scanGrok()
+                self.scanQwen()
                 self.pruneIfDue()
             } catch {
                 self.publish { $0.lastError = "审计库打开失败: \(error)" }
             }
         }
-        // 2s 近实时扫描 Codex/CodeBuddy/Qoder/Cursor + 顺带到点清理
+        // 2s 近实时扫描 Codex/CodeBuddy/Qoder/Cursor/Grok/Qwen + 顺带到点清理
         let timer = DispatchSource.makeTimerSource(queue: queue)
         // leeway 让系统合并唤醒省电
         timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
@@ -80,6 +94,8 @@ final class AuditService: ObservableObject {
             self?.scanCodeBuddy()
             self?.scanQoder()
             self?.scanCursor()
+            self?.scanGrok()
+            self?.scanQwen()
             self?.pruneIfDue()
         }
         timer.resume()
@@ -226,6 +242,28 @@ final class AuditService: ObservableObject {
             if new > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }
         } catch {
             HealthRegistry.shared.failure(Self.cursorHealthName, note: "\(error)")
+        }
+    }
+
+    private func scanGrok() {
+        guard captureEnabled, let scanner = grokScanner else { return }
+        HealthRegistry.shared.beat(Self.grokHealthName)
+        do {
+            let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
+            if new > 0 { HealthRegistry.shared.event(Self.grokHealthName) }
+        } catch {
+            HealthRegistry.shared.failure(Self.grokHealthName, note: "\(error)")
+        }
+    }
+
+    private func scanQwen() {
+        guard captureEnabled, let scanner = qwenScanner else { return }
+        HealthRegistry.shared.beat(Self.qwenHealthName)
+        do {
+            let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
+            if new > 0 { HealthRegistry.shared.event(Self.qwenHealthName) }
+        } catch {
+            HealthRegistry.shared.failure(Self.qwenHealthName, note: "\(error)")
         }
     }
 
