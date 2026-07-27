@@ -18,6 +18,12 @@ enum EurekaCLI {
             .appendingPathComponent(".codex/config.toml")
     }
 
+    /// Codex 的 hooks 配置（与 notify 的 config.toml 是**两个不同文件**）
+    static var codexHooksURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/hooks.json")
+    }
+
     /// 返回 true 表示已按 CLI 处理，调用方应直接退出
     static func runIfNeeded() -> Bool {
         let args = Array(CommandLine.arguments.dropFirst())

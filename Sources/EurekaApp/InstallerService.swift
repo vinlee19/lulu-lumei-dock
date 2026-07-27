@@ -16,6 +16,7 @@ final class InstallerService: ObservableObject {
     enum Integration: String, CaseIterable, Identifiable {
         case claudeHooks
         case codexNotify
+        case codexHooks
 
         var id: String { rawValue }
 
@@ -23,6 +24,7 @@ final class InstallerService: ObservableObject {
             switch self {
             case .claudeHooks: return "Claude Code hooks"
             case .codexNotify: return "Codex notify"
+            case .codexHooks: return "Codex hooks"
             }
         }
 
@@ -31,6 +33,7 @@ final class InstallerService: ObservableObject {
             switch self {
             case .claudeHooks: return EurekaCLI.claudeSettingsURL
             case .codexNotify: return EurekaCLI.codexConfigURL
+            case .codexHooks: return EurekaCLI.codexHooksURL
             }
         }
 
@@ -38,6 +41,7 @@ final class InstallerService: ObservableObject {
             switch self {
             case .claudeHooks: return .claude
             case .codexNotify: return .codex
+            case .codexHooks: return .codex
             }
         }
 
@@ -48,6 +52,10 @@ final class InstallerService: ObservableObject {
                 return "实时任务卡、等待授权提醒、工具调用审计、会话所在终端"
             case .codexNotify:
                 return "回合完成通知、会话所在终端"
+            case .codexHooks:
+                // 装它的主要理由就是等待授权：Codex 的 rollout 不落授权事件，
+                // 不装 hooks 这个状态对 Codex 永远不可见
+                return "等待授权提醒、实时任务卡、精确的会话所在终端"
             }
         }
     }
@@ -71,6 +79,7 @@ final class InstallerService: ObservableObject {
 
     var claudeSettingsURL: URL { EurekaCLI.claudeSettingsURL }
     var codexConfigURL: URL { EurekaCLI.codexConfigURL }
+    var codexHooksURL: URL { EurekaCLI.codexHooksURL }
 
     /// relay 稳定路径。hooks/notify 配置永远只该引用这里。
     var stableRelayPath: String { RelaySyncer.stableRelayURL.path }
@@ -89,7 +98,13 @@ final class InstallerService: ObservableObject {
         diagnoses[.codexNotify] = CodexNotifyInstaller.diagnose(
             toml: ConfigFile.read(codexConfigURL), expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
+        let codexHooksJSON = ConfigFile.read(codexHooksURL)
+        diagnoses[.codexHooks] = CodexHooksInstaller.diagnose(
+            json: codexHooksJSON, expectedRelayPath: relay,
+            relayIsExecutable: relayIsExecutable)
+        // 两份配置里他人的条目合并展示（本机 ~/.codex/hooks.json 正被 Otty 占用）
         foreignHooks = ClaudeHooksInstaller.foreignHooks(in: claudeJSON)
+            .merging(CodexHooksInstaller.foreignHooks(in: codexHooksJSON))
     }
 
     func diagnosis(for integration: Integration) -> HookDiagnosis {
@@ -144,6 +159,7 @@ final class InstallerService: ObservableObject {
             switch integration {
             case .claudeHooks: updated = try ClaudeHooksInstaller.uninstall(from: original)
             case .codexNotify: updated = CodexNotifyInstaller.uninstall(from: original)
+            case .codexHooks: updated = try CodexHooksInstaller.uninstall(from: original)
             }
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
             message = "\(integration.title) 已卸载（只移除了我们自己的条目）"
@@ -162,6 +178,8 @@ final class InstallerService: ObservableObject {
             updated = try ClaudeHooksInstaller.install(into: original, relayPath: relayPath)
         case .codexNotify:
             updated = try CodexNotifyInstaller.install(into: original, relayPath: relayPath)
+        case .codexHooks:
+            updated = try CodexHooksInstaller.install(into: original, relayPath: relayPath)
         }
         try ConfigFile.backupThenWrite(path: url, newContent: updated)
     }

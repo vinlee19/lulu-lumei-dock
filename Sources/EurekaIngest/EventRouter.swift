@@ -9,6 +9,9 @@ public enum EventRouter {
         case "claude-hook":
             events = ClaudeHookDecoder.decode(payload: raw.payload, receivedAt: raw.receivedAt)
                 .map { [$0] } ?? []
+        case "codex-hook":
+            events = CodexHookDecoder.decode(payload: raw.payload, receivedAt: raw.receivedAt)
+                .map { [$0] } ?? []
         case "codex-notify":
             events = CodexNotifyDecoder.decode(payload: raw.payload, receivedAt: raw.receivedAt)
                 .map { [$0] } ?? []

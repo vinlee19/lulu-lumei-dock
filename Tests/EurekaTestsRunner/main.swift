@@ -90,6 +90,7 @@ codeBuddySessionIndexerTests(t)
 codeBuddyUsageScannerTests(t)
 qoderIngestTests(t)
 cursorIngestTests(t)
+codexHooksTests(t)
 projectRootsTests(t)
 
 t.finish()

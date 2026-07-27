@@ -90,7 +90,7 @@ public enum HookDiagnosis: Equatable, Sendable {
 
 /// 同一个配置文件里**他人**的 hook 条目。只用于告知，绝不据此改动什么。
 public struct ForeignHookReport: Equatable, Sendable {
-    /// 涉及的事件名（Claude）；Codex 用不到
+    /// 涉及的事件名（Claude settings.json 与 Codex hooks.json 都是事件→条目数组）
     public var events: [String]
     /// 他人命令的可辨识短名（取首个 token 的 basename，不展示完整命令）
     public var tools: [String]
@@ -100,6 +100,13 @@ public struct ForeignHookReport: Equatable, Sendable {
     public init(events: [String] = [], tools: [String] = []) {
         self.events = events
         self.tools = tools
+    }
+
+    /// 合并两份配置的他人条目（Claude settings.json + Codex hooks.json 各扫一次）
+    public func merging(_ other: ForeignHookReport) -> ForeignHookReport {
+        ForeignHookReport(
+            events: Array(Set(events).union(other.events)).sorted(),
+            tools: Array(Set(tools).union(other.tools)).sorted())
     }
 }
 

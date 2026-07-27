@@ -216,6 +216,24 @@ case "claude-hook":
     if !stdin.isEmpty {
         writeEvent(channel: "claude-hook", payloadJSON: stdin)
     }
+case "codex-hook":
+    // Codex hooks 与 Claude 同样把载荷 JSON 走 stdin 传进来，但**不带事件名**
+    // （Claude 有 hook_event_name）→ 事件名由安装时写进命令行的第二个参数带入。
+    // stdout 依旧绝对静默：Codex 的 PermissionRequest 极可能像 Claude 的 PreToolUse
+    // 一样把 stdout 当授权决定读，任何一个字节都可能放行或拦掉一次工具调用。
+    let codexEvent = arguments.count > 1 ? arguments[1] : ""
+    let stdin = readStdin(limit: maxStdinBytes)
+    if !codexEvent.isEmpty, !stdin.isEmpty {
+        // 把事件名并进载荷，省得下游再猜；解析失败就原样透传（app 侧容缺）
+        if var root = (try? JSONSerialization.jsonObject(with: stdin)) as? [String: Any] {
+            root["hook_event_name"] = codexEvent
+            if let merged = try? JSONSerialization.data(withJSONObject: root) {
+                writeEvent(channel: "codex-hook", payloadJSON: merged)
+            }
+        } else {
+            writeEvent(channel: "codex-hook", payloadJSON: stdin)
+        }
+    }
 case "codex-notify":
     // notify 程序收到的 JSON 是最后一个参数
     if let json = arguments.dropFirst().last, !json.isEmpty {
