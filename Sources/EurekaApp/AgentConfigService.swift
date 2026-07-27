@@ -253,6 +253,28 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
+    /// 新建 Cursor 子代理 `~/.cursor/agents/<slug>.md`
+    /// （约定见 Cursor 自带的 create-subagent 技能：YAML frontmatter + 正文即系统提示）
+    func createCursorAgent(name: String, completion: ((Bool) -> Void)? = nil) {
+        queue.async { [weak self] in
+            let slug = Self.slugify(name)
+            let root = CursorPaths.agentsRoot()
+            let file = root.appendingPathComponent(slug + ".md")
+            let template = "---\nname: \(slug)\ndescription: \n---\n\n"
+            var ok = false
+            do {
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                if !FileManager.default.fileExists(atPath: file.path) {
+                    try template.write(to: file, atomically: true, encoding: .utf8)
+                }
+                ok = true
+            } catch {
+                self?.report(error)
+            }
+            DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
+        }
+    }
+
     /// 删除 agent 文件 → 废纸篓
     func deleteAgent(_ agent: AgentDefinition, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in

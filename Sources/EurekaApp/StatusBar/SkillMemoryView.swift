@@ -130,9 +130,12 @@ struct SkillMemoryView: View {
                 Button("Qwen 技能") { startCreate(.qwen, isSkill: true, "Qwen 技能") }
                 Button("Hermes 技能") { startCreate(.hermes, isSkill: true, "Hermes 技能") }
                 Button("Cursor 技能") { startCreate(.cursor, isSkill: true, "Cursor 技能") }
+                Button("CodeBuddy 技能") { startCreate(.codebuddy, isSkill: true, "CodeBuddy 技能") }
+                Button("Qoder 技能") { startCreate(.qoder, isSkill: true, "Qoder 技能") }
             } else {
                 Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                 Button("Codex 指令（AGENTS.md）") { service.createMemory(source: .codex, name: "AGENTS") }
+                Button("OpenCode 记忆") { startCreate(.opencode, isSkill: false, "OpenCode 记忆") }
                 Button("Grok 记忆") { startCreate(.grok, isSkill: false, "Grok 记忆") }
                 Button("Kimi 记忆（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
                 Button("Gemini 记忆（GEMINI.md）") { service.createMemory(source: .gemini, name: "GEMINI") }

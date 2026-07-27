@@ -68,13 +68,16 @@ final class SkillMemoryService: ObservableObject {
                 kimiSkillsRoot: KimiPaths.skillsRoot(),
                 geminiSkillsRoot: GeminiPaths.skillsRoot(),
                 qwenSkillsRoot: QwenPaths.skillsRoot(),
-                antigravitySkillsRoots: [],
+                // 用户级 ~/.gemini/antigravity/skills；内置 builtin 走 bundledRoots
+                antigravitySkillsRoots: [AntigravityPaths.userSkillsRoot()],
                 hermesSkillsRoot: HermesPaths.skillsRoot(),
                 // Hermes 的启停名单在 config.yaml 里（不是目录位置）；EurekaIngest 不依赖
                 // EurekaInstall，故在 app 层读出来传进去
                 hermesDisabledSkills: HermesConfigEditor.disabledSkills(
                     from: ConfigFile.read(HermesPaths.configFile())),
                 cursorSkillsRoot: CursorPaths.skillsRoot(),
+                codeBuddySkillsRoot: CodeBuddyPaths.skillsRoot(),
+                qoderSkillsRoot: QoderPaths.skillsRoot(),
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
             let memories = SkillMemoryIndexer.indexMemory(
@@ -196,10 +199,8 @@ final class SkillMemoryService: ObservableObject {
             case .qwen: root = QwenPaths.skillsRoot()
             case .hermes: root = HermesPaths.skillsRoot()
             case .cursor: root = CursorPaths.skillsRoot()
-            case .codebuddy, .qoder:
-                // 这两个 CLI 没有用户级 skills 目录（UI 不提供新建技能入口）；仅为穷举
-                DispatchQueue.main.async { completion?(false) }
-                return
+            case .codebuddy: root = CodeBuddyPaths.skillsRoot()
+            case .qoder: root = QoderPaths.skillsRoot()
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -250,9 +251,11 @@ final class SkillMemoryService: ObservableObject {
             case .grok:
                 dir = GrokPaths.memoryRoot()  // grok 用 ~/.grok/memory（无 memories 子目录）
             case .antigravity:
-                // antigravity 无记忆概念（UI 不提供入口）；仅为穷举，写 ~/.gemini/memories
-                dir = AntigravityPaths.geminiHome()
-                    .appendingPathComponent("memories", isDirectory: true)
+                // antigravity 没有自己的记忆目录（~/.gemini/antigravity/ 下只有 skills）。
+                // 以前这里写 ~/.gemini/memories —— 那是 Gemini 的，建完会被索引成 gemini
+                // 来源。宁可不提供入口，也不借用别人的目录。
+                DispatchQueue.main.async { completion?(false) }
+                return
             case .kimi:
                 // kimi 记忆 = 单一全局 AGENTS.md（AGENTS.md-first，无 memories 目录概念）：
                 // 直接创建 ~/.kimi-code/AGENTS.md（name 参数忽略），已存在则不覆盖

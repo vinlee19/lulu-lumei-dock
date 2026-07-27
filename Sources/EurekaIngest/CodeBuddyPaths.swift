@@ -37,6 +37,14 @@ public enum CodeBuddyPaths {
     }
 
     /// 全局记忆目录 `<home>/memery`（官方拼写就是 memery，不是 memory，勿"修正"）
+    /// 技能根 `<home>/skills`（SKILL.md 与 Claude 同构；实勘 23 个真目录，非软链）
+    public static func skillsRoot(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        configHome(environment: environment)
+            .appendingPathComponent("skills", isDirectory: true)
+    }
+
     public static func memoryRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

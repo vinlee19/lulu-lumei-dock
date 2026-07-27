@@ -153,6 +153,12 @@ public enum SkillMemoryIndexer {
             roots.append(ProjectScopedRoot(
                 root: root.appendingPathComponent(".cursor/skills", isDirectory: true),
                 source: .cursor, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".codebuddy/skills", isDirectory: true),
+                source: .codebuddy, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".qoder/skills", isDirectory: true),
+                source: .qoder, projectName: name))
         }
         return roots
     }
@@ -239,6 +245,8 @@ public enum SkillMemoryIndexer {
         hermesSkillsRoot: URL? = nil,
         hermesDisabledSkills: Set<String> = [],
         cursorSkillsRoot: URL? = nil,
+        codeBuddySkillsRoot: URL? = nil,
+        qoderSkillsRoot: URL? = nil,
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
     ) -> [SkillEntry] {
@@ -292,11 +300,27 @@ public enum SkillMemoryIndexer {
             result += scanSkillRoot(
                 disabledRoot(for: qwenSkillsRoot), source: .qwen, enabled: false, scope: .system)
         }
-        // antigravity：内置 builtin/skills（用户级 ~/.gemini/skills 已归 gemini）
+        // antigravity 用户级技能 ~/.gemini/antigravity/skills（**不是** ~/.gemini/skills，
+        // 那是 Gemini 的、已归 gemini 一次）；内置 builtin/skills 走 bundledRoots
         for root in antigravitySkillsRoots {
             result += scanSkillRoot(root, source: .antigravity, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: root), source: .antigravity, enabled: false, scope: .system)
+        }
+        // codebuddy：~/.codebuddy/skills（SKILL.md 与 Claude 同构，实勘 23 个）
+        if let codeBuddySkillsRoot {
+            result += scanSkillRoot(
+                codeBuddySkillsRoot, source: .codebuddy, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: codeBuddySkillsRoot), source: .codebuddy, enabled: false,
+                scope: .system)
+        }
+        // qoder：~/.qoder-cn/skills（与 codebuddy 同构；⚠️ 本机未装 Qoder，未实勘）
+        if let qoderSkillsRoot {
+            result += scanSkillRoot(
+                qoderSkillsRoot, source: .qoder, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: qoderSkillsRoot), source: .qoder, enabled: false, scope: .system)
         }
         // hermes：分类目录树，启停看 config.yaml 而非目录位置（详见 scanHermesSkillTree）
         if let hermesSkillsRoot {

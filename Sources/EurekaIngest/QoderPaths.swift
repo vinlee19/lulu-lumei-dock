@@ -29,6 +29,14 @@ public enum QoderPaths {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
+    /// 技能根 `<home>/skills`（与 CodeBuddy 同构；⚠️ 本机未装 Qoder，未实勘）
+    public static func skillsRoot(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        configHome(environment: environment)
+            .appendingPathComponent("skills", isDirectory: true)
+    }
+
     /// 计划文档根 `<home>/plans`（plan 模式的 <slug>.md）
     public static func plansRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment

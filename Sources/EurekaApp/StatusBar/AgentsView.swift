@@ -67,6 +67,7 @@ struct AgentsView: View {
                     case .claude: service.createClaudeAgent(name: name)
                     case .opencode: service.createOpencodeAgent(name: name)
                     case .grok: service.createGrokAgent(name: name)
+                    case .cursor: service.createCursorAgent(name: name)
                     }
                 }
                 newAgentName = ""
@@ -120,6 +121,7 @@ struct AgentsView: View {
             Button("Claude Agent") { startCreate(.claude) }
             Button("OpenCode Agent") { startCreate(.opencode) }
             Button("Grok Agent") { startCreate(.grok) }
+            Button("Cursor Agent") { startCreate(.cursor) }
             Button("Codex Profile") {
                 profileDetail = ProfileEditTarget(id: "new", profile: CodexProfile(name: ""), isNew: true)
             }
@@ -142,6 +144,7 @@ struct AgentsView: View {
         case .claude: return "新建 Claude Agent"
         case .opencode: return "新建 OpenCode Agent"
         case .grok: return "新建 Grok Agent"
+        case .cursor: return "新建 Cursor Agent"
         }
     }
 
@@ -353,7 +356,7 @@ struct AgentsView: View {
 
 // MARK: - 数据载体
 
-enum AgentCreateKind { case claude, opencode, grok }
+enum AgentCreateKind { case claude, opencode, grok, cursor }
 
 struct ProfileEditTarget: Identifiable {
     let id: String

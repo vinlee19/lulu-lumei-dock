@@ -40,8 +40,12 @@ public enum AntigravityPaths {
             .appendingPathComponent("conversations", isDirectory: true)
     }
 
-    /// 技能根：用户 `~/.gemini/skills` + 内置 `~/.gemini/antigravity-cli/builtin/skills`。
+    /// 技能根：用户 `~/.gemini/antigravity/skills` + 内置 `~/.gemini/antigravity-cli/builtin/skills`。
     /// env `EUREKA_ANTIGRAVITY_SKILLS` 覆盖时只用该单一根。
+    ///
+    /// ⚠️ 用户根**不是** `~/.gemini/skills` —— 那是 Gemini 的。两者是各自独立的目录
+    /// （实勘 inode 不同，同名 `SKILL.md` 也是各自的副本）。曾经指错，后果是「新建
+    /// Antigravity 技能」写进了 Gemini 的目录、刷新后被索引成 gemini 来源，建完就改名换姓。
     public static func skillsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
@@ -49,17 +53,22 @@ public enum AntigravityPaths {
             return [URL(fileURLWithPath: custom, isDirectory: true)]
         }
         return [
-            geminiHome(environment: environment).appendingPathComponent("skills", isDirectory: true),
+            userSkillsRoot(environment: environment),
             configHome(environment: environment)
                 .appendingPathComponent("builtin/skills", isDirectory: true),
         ]
     }
 
-    /// 用户技能根（新建技能写这里）
+    /// 用户技能根 `~/.gemini/antigravity/skills`（新建技能写这里）。
+    /// env `EUREKA_ANTIGRAVITY_SKILLS` 覆盖时用该单一根，与 `skillsRoots()` 保持一致。
     public static func userSkillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
-        skillsRoots(environment: environment)[0]
+        if let custom = environment["EUREKA_ANTIGRAVITY_SKILLS"], !custom.isEmpty {
+            return URL(fileURLWithPath: custom, isDirectory: true)
+        }
+        return geminiHome(environment: environment)
+            .appendingPathComponent("antigravity/skills", isDirectory: true)
     }
 
     // MARK: - 会话 db 裸读（避开 live-WAL 只读打开问题；不依赖 SQLite）
