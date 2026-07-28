@@ -354,6 +354,21 @@ final class SessionBrowserService: ObservableObject {
         return pendingJumpMessageId
     }
 
+    /// 跨页跳「某会话第 N 轮的血缘图」。与 `revealMessage` 一比一同构：
+    /// 记下目标后走同一条 reveal 链路（索引未就绪的兜底也照旧）。
+    @Published private(set) var pendingTurnIndex: Int?
+
+    func revealTurn(sessionId: String, turnIndex: Int) {
+        pendingTurnIndex = turnIndex
+        reveal(sessionId: sessionId)
+    }
+
+    /// transcript 加载完成后取走待跳转轮次（取即清）
+    func consumePendingTurn() -> Int? {
+        defer { pendingTurnIndex = nil }
+        return pendingTurnIndex
+    }
+
     // MARK: - 选中与对话记录
 
     /// 跨页签跳转：按 id 选中会话（索引未就绪时记下，refresh 完成后自动选中）

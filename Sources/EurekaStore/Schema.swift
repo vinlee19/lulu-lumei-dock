@@ -1,6 +1,7 @@
 import Foundation
 
 enum Schema {
+    /// v17：新增 turn_metrics + turn_files（逐轮诊断指标，派生表，升级重建全量重扫）
     /// v16：修 session_terminals 主键含可空列导致 upsert 失效（见下方一次性重建）
     /// v15：新增 session_terminals（会话 ↔ 终端绑定；只能在事件发生时采集，不可重推导，升级不 DROP）
     /// v14：新增 limit_samples（限额百分比采样，预测打满时间用；观测数据不可重推导，升级不 DROP）
@@ -12,7 +13,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 16
+    static let version: Int64 = 17
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -28,6 +29,8 @@ enum Schema {
             DROP TABLE IF EXISTS transcript_fts;
             DROP TABLE IF EXISTS fts_docs;
             DROP TABLE IF EXISTS fts_files;
+            DROP TABLE IF EXISTS turn_metrics;
+            DROP TABLE IF EXISTS turn_files;
             """)
         }
         // v15 建的 session_terminals 主键含可空列，upsert 失效攒了重复行。该表尚未随任何
@@ -197,6 +200,43 @@ enum Schema {
 
         -- 已索引文件指纹（size+mtime 变更即整文件重建 docs；截断/改写天然覆盖）
         CREATE TABLE IF NOT EXISTS fts_files (
+            path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime REAL NOT NULL
+        );
+
+        -- 逐轮诊断指标（派生表，可由 transcript 重扫恢复，升级重建）。
+        -- **只存指标不存图**：图在打开时现算（单轮 <1ms），而跨会话聚合要扫 ~2GB /
+        -- 2000 个文件，不该在每次开页时重付；趋势也需要历史（会话文件会被轮转）。
+        CREATE TABLE IF NOT EXISTS turn_metrics (
+            path TEXT NOT NULL,
+            source TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            turn_index INTEGER NOT NULL,
+            prompt_message_id INTEGER,
+            ts REAL NOT NULL,
+            duration_ms INTEGER,
+            prompt_chars INTEGER NOT NULL DEFAULT 0,
+            step_count INTEGER NOT NULL DEFAULT 0,
+            node_count INTEGER NOT NULL DEFAULT 0,
+            explore_nodes INTEGER NOT NULL DEFAULT 0,
+            reread_count INTEGER NOT NULL DEFAULT 0,
+            rework_count INTEGER NOT NULL DEFAULT 0,
+            retry_max INTEGER NOT NULL DEFAULT 0,
+            edit_churn INTEGER NOT NULL DEFAULT 0,
+            error_steps INTEGER NOT NULL DEFAULT 0,
+            subagent_count INTEGER NOT NULL DEFAULT 0,
+            asked_user INTEGER NOT NULL DEFAULT 0,
+            severity INTEGER NOT NULL DEFAULT 0,
+            rules TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (source, session_id, turn_index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_turn_metrics_path ON turn_metrics(path);
+        CREATE INDEX IF NOT EXISTS idx_turn_metrics_ts ON turn_metrics(ts DESC);
+
+        -- 逐轮指标的水位。**另开一张而不复用 fts_files**：两个消费者的覆盖面与
+        -- 重建时机不同，共用一张指纹表会互相牵制（一方重建会让另一方误以为无需重扫）。
+        CREATE TABLE IF NOT EXISTS turn_files (
             path TEXT PRIMARY KEY,
             size INTEGER NOT NULL,
             mtime REAL NOT NULL

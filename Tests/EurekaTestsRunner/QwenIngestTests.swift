@@ -51,19 +51,23 @@ func qwenIngestTests(_ t: TestRunner) {
             chat.resolvingSymlinksInPath().path)
     }
 
-    t.test("对话渲染：thought 跳过、functionCall→toolNote、system 不进流") {
+    t.test("对话渲染：thought 独立成思考消息、functionCall→toolNote、system 不进流") {
         let (home, chat) = try makeHome()
         defer { try? FileManager.default.removeItem(at: home) }
 
         let result = TranscriptReader.loadQwen(path: chat.path, maxMessages: 2000)
-        try expectEqual(result.messages.count, 3)
+        try expectEqual(result.messages.count, 4)
         try expectEqual(result.messages[0].role, .user)
         try expectEqual(result.messages[0].text, "请分析一下语义层模块")
-        try expectEqual(result.messages[1].role, .toolNote)
-        try expectEqual(result.messages[1].text, "🔧 read_file")
-        try expectEqual(result.messages[2].role, .assistant)
-        try expectEqual(result.messages[2].text, "好的,我来分析。")
-        try expect(!result.messages[2].text.contains("内心思考"), "thought parts 不进正文")
+        // `{text, thought:true}` 是**明文思考**（Qwen 不加密不剥离，实机单段 5000+ 字符）：
+        // 与可见回答分开收，排在工具之前（先想再动手）
+        try expectEqual(result.messages[1].role, .thinking)
+        try expect(result.messages[1].text.contains("内心思考"))
+        try expectEqual(result.messages[2].role, .toolNote)
+        try expectEqual(result.messages[2].text, "🔧 read_file")
+        try expectEqual(result.messages[3].role, .assistant)
+        try expectEqual(result.messages[3].text, "好的,我来分析。")
+        try expect(!result.messages[3].text.contains("内心思考"), "thought 不进可见正文")
     }
 
     t.test("用量：token 口径与 response_id 去重（同批次 + 重扫幂等）") {

@@ -52,6 +52,109 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(todo.detail, "")
     }
 
+    // MARK: - Codex custom_tool_call（当前 Codex 的命令/补丁主通道）
+
+    t.test("custom_tool_call exec：从 JS 源码里抽 cmd，含转义与多行") {
+        // 形态照实勘：input 是 JS 源码而不是 JSON（12 个最大 rollout 里 exec 1334 条）
+        let exec = ToolStepExtractor.codexCustomTool(name: "exec", input: """
+        const r = await tools.exec_command({
+          cmd: "wc -l /a/b.md && sed -n '1,240p' /a/c.md",
+          yield_time_ms: 5000
+        })
+        """)
+        try expectEqual(exec.kind, .command)
+        try expectEqual(exec.name, "exec_command")
+        try expectEqual(exec.detail, "wc -l /a/b.md && sed -n '1,240p' /a/c.md")
+
+        // 转义序列要还原；命令类只取首行（ToolStep 口径）
+        let escaped = ToolStepExtractor.codexCustomTool(
+            name: "exec", input: #"await tools.exec_command({cmd: "echo \"hi\"\nls -la"})"#)
+        try expectEqual(escaped.detail, #"echo "hi" …"#)
+
+        // 相近 key 不能误命中（`foo_cmd:` 不是 `cmd:`）
+        let nearMiss = ToolStepExtractor.codexCustomTool(
+            name: "exec", input: #"await tools.exec_command({foo_cmd: "假的", cmd: "真的"})"#)
+        try expectEqual(nearMiss.detail, "真的")
+    }
+
+    t.test("custom_tool_call：补丁三种落法都归 apply_patch/编辑") {
+        let bare = ToolStepExtractor.codexCustomTool(name: "apply_patch", input: """
+        *** Begin Patch
+        *** Update File: /w/Sources/A.swift
+        @@
+        -old
+        +new
+        *** End Patch
+        """)
+        try expectEqual(bare.kind, .edit)
+        try expectEqual(bare.name, "apply_patch")
+        try expectEqual(bare.detail, "/w/Sources/A.swift")
+
+        // exec 里塞裸补丁正文（实勘 97 条）
+        let viaExec = ToolStepExtractor.codexCustomTool(name: "exec", input: """
+        *** Begin Patch
+        *** Add File: /w/Sources/B.swift
+        *** End Patch
+        """)
+        try expectEqual(viaExec.kind, .edit)
+        try expectEqual(viaExec.detail, "/w/Sources/B.swift")
+
+        // exec 里 patch 变量（实勘 110 条）
+        let viaVar = ToolStepExtractor.codexCustomTool(
+            name: "exec",
+            input: #"const patch = "*** Begin Patch\n*** Delete File: /w/C.swift\n*** End Patch";"#)
+        try expectEqual(viaVar.kind, .edit)
+        try expectEqual(viaVar.detail, "/w/C.swift")
+    }
+
+    t.test("custom_tool_call：tools.<名字> 归类与 function_call 通道口径一致") {
+        let image = ToolStepExtractor.codexCustomTool(
+            name: "exec", input: #"await tools.view_image({path: "/w/shot.png"})"#)
+        try expectEqual(image.kind, .read)
+        try expectEqual(image.name, "view_image")
+        try expectEqual(image.detail, "/w/shot.png")
+
+        let plan = ToolStepExtractor.codexCustomTool(
+            name: "exec", input: "await tools.update_plan({plan: []})")
+        try expectEqual(plan.kind, .other)
+        try expectEqual(plan.detail, "更新计划")
+
+        let mcp = ToolStepExtractor.codexCustomTool(
+            name: "exec",
+            input: #"await tools.mcp__claude_ai_Notion__notion_fetch({id: "abc"})"#)
+        try expectEqual(mcp.kind, .mcp)
+        try expectEqual(mcp.name, "Notion.notion_fetch", "清洗口径与 Claude 侧一致")
+
+        let web = ToolStepExtractor.codexCustomTool(
+            name: "exec", input: #"await tools.web__run({q: "swiftpm"})"#)
+        try expectEqual(web.kind, .web)
+
+        // 认不出的形态兜底当命令，保真不丢
+        let unknown = ToolStepExtractor.codexCustomTool(name: "exec", input: "// 无法识别")
+        try expectEqual(unknown.kind, .command)
+        try expectEqual(unknown.detail, "// 无法识别")
+    }
+
+    t.test("Codex 工具结果：两代格式都判成败，判不出返回 nil") {
+        // 老 rollout：结构化 exit_code（磁盘上还有近 1GB 这种文件，不能只认新格式）
+        let legacyFail = AuditExtractor.codexOutcome(#"{"metadata":{"exit_code":1}}"#)
+        try expectEqual(legacyFail?.isError, true)
+        try expectEqual(legacyFail?.exitCode, 1)
+        try expectEqual(AuditExtractor.codexOutcome(#"{"metadata":{"exit_code":0}}"#)?.isError, false)
+
+        // 当前 Codex：metadata 已消失，只能看输出文本
+        let failed: [[String: Any]] = [["type": "input_text", "text": "Script failed\nWall time 0.9 seconds"]]
+        try expectEqual(AuditExtractor.codexOutcome(failed)?.isError, true)
+        let ok: [[String: Any]] = [["type": "input_text", "text": "Script completed\nWall time 0.1 seconds"]]
+        try expectEqual(AuditExtractor.codexOutcome(ok)?.isError, false)
+        try expectEqual(AuditExtractor.codexOutcome("Exit code: 2\nOutput:\n")?.exitCode, 2)
+        try expectEqual(AuditExtractor.codexOutcome("Exit code: 0\n")?.isError, false)
+
+        // 判不出就说不知道，别假装成功（否则失败步会被静默标成正常）
+        try expect(AuditExtractor.codexOutcome("Plan updated") == nil)
+        try expect(AuditExtractor.codexOutcome(nil) == nil)
+    }
+
     t.test("Claude MCP 命名清洗：mcp__server__tool → server.tool，去 claude_ai_ 前缀") {
         let mcp = ToolStepExtractor.claude(
             name: "mcp__claude_ai_Notion__notion-search", input: ["query": "设计文档"])

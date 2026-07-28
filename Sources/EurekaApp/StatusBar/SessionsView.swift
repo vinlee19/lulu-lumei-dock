@@ -18,11 +18,68 @@ struct SessionsView: View {
     /// 来源选择 popover 开关
     @State private var showSourcePicker = false
 
+    /// 血缘下钻的目标
+    enum LineageRoute: Equatable {
+        case list
+        case graph(turn: Int)
+    }
+
+    /// 血缘下钻（nil = 两栏原状）。**替换整个内容区**而不是嵌进右栏：
+    /// 右栏最坏只有 ~423pt，图铺不开。样板照 `PlansView` 的 detail 下钻。
+    @State private var lineage: LineageRoute?
+
     var body: some View {
+        Group {
+            if let route = lineage {
+                lineagePane(route)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                twoPane
+            }
+        }
+        // 切会话时退出下钻：新会话的轮次和旧的对不上
+        .onChange(of: service.selected?.id) { _, _ in lineage = nil }
+        .onChange(of: service.transcriptLoading) { _, loading in
+            // 跨页跳「某会话第 N 轮」：transcript 加载完才有轮次可切
+            guard !loading, let turn = service.consumePendingTurn() else { return }
+            withAnimation(.easeOut(duration: 0.15)) { lineage = .graph(turn: turn) }
+        }
+    }
+
+    private func lineagePane(_ route: LineageRoute) -> some View {
+        let pane: TurnLineageView.Pane
+        let turn: Int
+        switch route {
+        case .list: (pane, turn) = (.list, 0)
+        case .graph(let index): (pane, turn) = (.graph, index)
+        }
+        return TurnLineageView(
+            sessionName: service.selected?.displayName ?? "会话",
+            turns: TurnSlicer.slice(service.transcript),
+            onBack: { withAnimation(.easeOut(duration: 0.15)) { lineage = nil } },
+            onJumpToMessage: { messageId in
+                // 先收起下钻页让消息流的 LazyVStack 重新挂载，再延迟一拍发通知 ——
+                // 沿用 SessionDetailView 已经验证过的 0.15，不发明新数值
+                withAnimation(.easeOut(duration: 0.15)) { lineage = nil }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    NotificationCenter.default.post(
+                        name: .eurekaJumpToMessage, object: messageId)
+                }
+            },
+            initialPane: pane, initialTurn: turn)
+    }
+
+    private var twoPane: some View {
         HSplitView {
             listPane
                 .frame(minWidth: 250, idealWidth: 300, maxWidth: 420)
-            SessionDetailView(service: service)
+            SessionDetailView(
+                service: service,
+                onOpenLineage: { pane in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        lineage = pane == .graph ? .graph(turn: 0) : .list
+                    }
+                })
                 .frame(minWidth: 380, maxWidth: .infinity)
         }
         .onAppear {

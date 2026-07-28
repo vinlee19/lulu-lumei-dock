@@ -10,7 +10,7 @@ Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex C
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 525 tests
+make test       # swift run eureka-tests  — runs all 573 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
@@ -28,6 +28,9 @@ swift run eureka --hooks-status            # Claude hooks + Codex notify install
 swift run eureka --usage-snapshot          # full scan → today's usage JSON (used by ccusage diff)
 swift run eureka --limits-snapshot --claude # rate-limit snapshot (--claude also hits unofficial API)
 swift run eureka --render-previews [dir]   # offscreen-render every island state to PNG
+swift run eureka --render-shell [dir]      # offscreen-render the sidebar + audit page (light/dark)
+swift run eureka --render-lineage [dir]    # offscreen-render the turn lineage graph (golden + live)
+swift run eureka --diagnostics-snapshot    # scan and dump per-turn prompt-quality metrics
 swift run eureka-relay inject --event stop --session demo  # inject a test event into the spool
 ```
 

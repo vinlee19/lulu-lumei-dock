@@ -16,21 +16,11 @@ public final class TranscriptSearchIndexer {
         self.store = store
     }
 
-    /// 按默认磁盘根路径发现全部会话并索引一轮；返回本轮重建的文件数
+    /// 按默认磁盘根路径发现全部会话并索引一轮；返回本轮重建的文件数。
+    /// 发现走 `AgentSessionDiscovery` 共享（发现是主要成本，见那里的说明）。
     @discardableResult
     public func indexOnce() -> Int {
-        var sessions = ClaudeSessionIndexer.index(
-            projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot())
-        sessions += CodexSessionIndexer.index(
-            sessionsRoot: CodexRolloutTailer.defaultSessionsRoot())
-        sessions += GrokSessionIndexer.index(sessionsRoot: GrokPaths.sessionsRoot())
-        sessions += KimiSessionIndexer.index(sessionsRoot: KimiPaths.sessionsRoot())
-        sessions += GeminiSessionIndexer.index(
-            tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
-        sessions += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
-        sessions += CodeBuddySessionIndexer.index(projectsRoot: CodeBuddyPaths.projectsRoot())
-        sessions += QoderSessionIndexer.index(projectsRoot: QoderPaths.projectsRoot())
-        return indexOnce(sessions: sessions)
+        indexOnce(sessions: AgentSessionDiscovery.forIndexing())
     }
 
     /// 注入会话列表的索引一轮（测试入口；生产走 indexOnce()）
@@ -61,7 +51,11 @@ public final class TranscriptSearchIndexer {
                 rebuilt += 1
             }
         }
-        try? store.search.prune(keeping: Set(supported.map(\.transcriptPath)))
+        // 空集绝不 prune：一次空的发现结果会把整个全文索引删掉，再付一次全量重索引。
+        // 宁可留着可能过时的条目（下轮指纹一变就重建），也不能凭空结果清库。
+        if !supported.isEmpty {
+            try? store.search.prune(keeping: Set(supported.map(\.transcriptPath)))
+        }
         return rebuilt
     }
 

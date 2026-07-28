@@ -751,12 +751,27 @@ struct RefreshButton: View {
 }
 
 /// lulu-lumei-dock 品牌标：紫金渐变圆角块 + 金色「Lu」描边（与 Dock 图标同源的 LuluMark）。
-/// 侧栏头部 / 侧栏底部 / 设置→关于 卡片共用，按 size 等比缩放。
+/// 侧栏底部品牌区 / 设置→关于 卡片共用，按 size 等比缩放。
+///
+/// 比例**全部照 `AppIconView` 的 1024 母版换算**（`IconRenderer.swift:44-95`），
+/// 以前这里是另一套手调数值：字标只占 `0.42` 字高（母版是 `430/824 ≈ 0.522`），
+/// 金色是纯色而非三段渐变，也没有左上白高光与投影 —— 放大后就是一块扁方块。
+///
+/// 唯二不照抄的地方（且都有理由）：
+///  - 高光描边与投影按母版换算是 `0.007×size` / `0.034×size`，在 26pt 上不到 0.2pt，
+///    2x 屏也画不出一条线 → 给下限并按 size 放大到肉眼可辨；
+///  - 母版的 824 底板外还有 100px 透明留白（阴影画在留白里），这里 `size` 就是底板本身。
 struct LuluLogoTile: View {
-    var size: CGFloat = 18
+    var size: CGFloat = 26
+
+    /// 母版：字高 430 / 底板 824
+    private var glyphHeight: CGFloat { size * 0.522 }
+    /// 母版：笔画粗 = 字高 / φ³
+    private var stroke: CGFloat { max(1, glyphHeight * 0.2361) }
+    private var corner: CGFloat { size * 0.2237 }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [
@@ -766,12 +781,42 @@ struct LuluLogoTile: View {
                     ],
                     startPoint: .topLeading, endPoint: .bottomTrailing))
             .frame(width: size, height: size)
+            // 中心暖金柔光，托起金色字标（母版 640/824 直径、300/824 半径）
+            .overlay(
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(red: 1.0, green: 0.9, blue: 0.6).opacity(0.18), .clear,
+                            ],
+                            center: .center, startRadius: 0, endRadius: size * 0.364))
+                    .frame(width: size * 0.777, height: size * 0.777))
             .overlay(
                 LuluMark()
-                    .stroke(Theme.gold, style: StrokeStyle(
-                        lineWidth: max(1, size * 0.1), lineCap: .round, lineJoin: .round))
-                    .frame(width: size * 0.66, height: size * 0.42)
-            )
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.98, green: 0.87, blue: 0.55),
+                                Color(red: 0.89, green: 0.74, blue: 0.38),
+                                Color(red: 0.76, green: 0.58, blue: 0.18),
+                            ],
+                            startPoint: .top, endPoint: .bottom),
+                        style: StrokeStyle(
+                            lineWidth: stroke, lineCap: .round, lineJoin: .round))
+                    // 宽度给满：LuluMark 自己按 rect 水平居中（母版也是给满底板宽）
+                    .frame(width: size, height: glyphHeight)
+                    .shadow(
+                        color: Color(red: 0.10, green: 0.07, blue: 0.30).opacity(0.45),
+                        radius: size * 0.035, y: size * 0.025))
+            // 左上白高光描边：把平面染色块变成有厚度的实体
+            .overlay(
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.42), .white.opacity(0.02)],
+                            startPoint: .top, endPoint: .bottom),
+                        lineWidth: max(0.75, size * 0.015)))
+            .shadow(color: .black.opacity(0.28), radius: size * 0.045, y: size * 0.022)
     }
 }
 
@@ -944,6 +989,11 @@ struct StatOverviewCard: View {
                             Text("\(seg.count)")
                                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
                         }
+                        // 兜底：图例条目过多时宁可整体溢出裁掉，也不能让「命令」「16,911」
+                        // 逐字竖着折成一列（审计页 9 个 ToolKind 曾真实撞出这个形态）。
+                        // 收口是调用方的责任（照 AgentsView 折成「前 4 + 其他」）。
+                        .lineLimit(1)
+                        .fixedSize()
                     }
                     Spacer(minLength: 8)
                     if let trailingNote {

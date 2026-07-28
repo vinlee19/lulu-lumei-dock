@@ -124,6 +124,7 @@ final class UsageService: ObservableObject {
     private var codeBuddyScanner: CodeBuddyUsageScanner?
     private var cursorScanner: CursorUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
+    private var turnIndexer: TurnMetricsIndexer?
     private var pricing = PricingTable(models: [])
 
     private static let claudeHealthName = "用量扫描 Claude"
@@ -189,6 +190,7 @@ final class UsageService: ObservableObject {
                             .map { ($0.id, $0.cwd, $0.lastActiveAt) }
                     })
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
+                self.turnIndexer = TurnMetricsIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
                     overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
@@ -546,8 +548,22 @@ final class UsageService: ObservableObject {
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             // 全文索引与用量同节奏增量跑（指纹无变化时近零开销）；开关默认开
+            // 会话发现约 60s（逐文件解析文件头），是索引的**主要成本** ——
+            // 发现一次喂给两个消费者，别各扫一遍。
+            let indexSessions = AgentSessionDiscovery.forIndexing()
             if UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
-                searchIndexer?.indexOnce()
+                searchIndexer?.indexOnce(sessions: indexSessions)
+            }
+            // 逐轮诊断指标同节奏增量跑。**不放 AuditService 的 2s 节奏**：这不是近实时数据，
+            // 而全量首扫要读 ~2GB。指纹无变化时近零开销。
+            //
+            // 单独 do/catch 而不是并进外层：它排在用量聚合之前，抛出去会**连累用量**
+            // （聚合与发布都不再执行）。诊断是附加能力，不该有这个权力。
+            // 同时把错误打到日志 —— 之前只写进 @Published lastError，日志里查不到任何线索。
+            do {
+                try turnIndexer?.indexOnce(sessions: indexSessions)
+            } catch {
+                print("[eureka] 逐轮指标索引失败: \(error)")
             }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             publish { $0.summary = summary }

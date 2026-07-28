@@ -102,6 +102,37 @@ func auditRepoTests(_ t: TestRunner) {
         try expect(none.riskLevel == nil)
     }
 
+    t.test("counts(by:) 按来源/类型分组，且沿用同一套筛选") {
+        let path = tempStorePath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let store = try EurekaStore(path: path)
+        try store.audit.insert(event("a", source: .codex, kind: .command))
+        try store.audit.insert(event("b", source: .codex, kind: .command, detail: "sudo x",
+                                    risk: .high, rule: "sudo"))
+        try store.audit.insert(event("c", source: .claude, kind: .edit, tool: "Edit"))
+        try store.audit.insert(event("d", source: .cursor, kind: .read, tool: "Read"))
+
+        try expectEqual(
+            try store.audit.counts(by: .source),
+            ["codex": 2, "claude": 1, "cursor": 1])
+        try expectEqual(
+            try store.audit.counts(by: .kind),
+            ["command": 2, "edit": 1, "read": 1])
+
+        // 筛选参与分组：这正是筛选 chip 上「切过去还剩多少条」的来源
+        try expectEqual(try store.audit.counts(by: .kind, .init(source: .codex)), ["command": 2])
+        try expectEqual(try store.audit.counts(by: .source, .init(riskOnly: true)), ["codex": 1])
+        // 一条都不命中时返回空字典（不是 0 值占位）
+        let noMatch = try store.audit.counts(by: .source, .init(keyword: "no-such"))
+        try expect(noMatch.isEmpty)
+
+        // 返回的键必须能还原成领域枚举 —— UI 端就是靠 rawValue 反查的
+        let sources = try store.audit.counts(by: .source)
+        try expectEqual(sources.keys.compactMap { AgentSource(rawValue: $0) }.count, 3)
+        let kinds = try store.audit.counts(by: .kind)
+        try expectEqual(kinds.keys.compactMap { ToolKind(rawValue: $0) }.count, 3)
+    }
+
     t.test("prune(olderThan:) / prune(keepingLast:) / deleteAll") {
         let path = tempStorePath()
         defer { try? FileManager.default.removeItem(at: path) }

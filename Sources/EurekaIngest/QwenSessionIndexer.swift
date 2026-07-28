@@ -12,16 +12,20 @@ enum QwenChatDecoder {
         /// user / assistant / system
         var type: String
         var cwd: String?
-        /// 可见正文（text parts 拼接，thought parts 跳过）
+        /// 可见正文（text parts 拼接，thought parts 单独进 `thoughts`）
         var text: String
         /// functionCall parts 的工具名列表
         var toolCalls: [String]
+        /// **明文思考**（`{text, thought:true}` part）。Qwen 既不加密也不剥离，
+        /// 实勘单段可达 5000+ 字符。以前和正文一起被 `continue` 丢掉了。
+        var thoughts: [String] = []
     }
 
     static func parseMessage(_ root: [String: Any]) -> Message? {
         guard let type = root["type"] as? String else { return nil }
         var text: [String] = []
         var tools: [String] = []
+        var thoughts: [String] = []
         if let message = root["message"] as? [String: Any],
            let parts = message["parts"] as? [[String: Any]] {
             for part in parts {
@@ -29,9 +33,11 @@ enum QwenChatDecoder {
                     tools.append((call["name"] as? String) ?? "?")
                     continue
                 }
-                // thought parts 是思考轨迹，不进正文
-                if (part["thought"] as? Bool) == true { continue }
-                if let piece = part["text"] as? String, !piece.isEmpty {
+                guard let piece = part["text"] as? String, !piece.isEmpty else { continue }
+                // thought parts 是思考正文，与可见回答分开收
+                if (part["thought"] as? Bool) == true {
+                    thoughts.append(piece)
+                } else {
                     text.append(piece)
                 }
             }
@@ -42,7 +48,8 @@ enum QwenChatDecoder {
             type: type,
             cwd: root["cwd"] as? String,
             text: text.joined(separator: "\n"),
-            toolCalls: tools)
+            toolCalls: tools,
+            thoughts: thoughts)
     }
 
     /// ui_telemetry 行 → api_response 事件（token 采集用）

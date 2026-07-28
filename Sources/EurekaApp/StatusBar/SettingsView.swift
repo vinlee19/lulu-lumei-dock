@@ -2,9 +2,13 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// 设置页：五个子栏目（通用 / 备份 / 审计 / 高级 / 关于），仿参考设计的胶囊子页签条。
-/// 使用统计不在此页——顶级「用量」模块已完整覆盖。
+/// 设置页：五个子栏目（通用 / 集成 / 备份 / 高级 / 关于），仿参考设计的胶囊子页签条。
+/// 使用统计不在此页——顶级「用量」模块已完整覆盖；
+/// 审计也已升为顶级页签（采集开关随页面一起搬进了 `AuditView` 的页头齿轮浮层）。
 struct SettingsView: View {
+    /// 由 PopoverNavigation 持有，便于侧栏品牌区直接跳「关于」
+    @Binding var section: SettingsSection
+
     @ObservedObject var settings: AppSettings
     @ObservedObject var installer: InstallerService
     @ObservedObject var usageService: UsageService
@@ -12,15 +16,11 @@ struct SettingsView: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var updateService: UpdateService
     @ObservedObject var syncService: SyncService
-    @ObservedObject var auditService: AuditService
-
-    @State private var section: SettingsSection = .general
 
     enum SettingsSection: String, CaseIterable {
         case general = "通用"
         case integrations = "集成"
         case backup = "备份"
-        case audit = "审计"
         case advanced = "高级"
         case about = "关于"
 
@@ -30,7 +30,6 @@ struct SettingsView: View {
             case .general: return "gearshape"
             case .integrations: return "puzzlepiece.extension"
             case .backup: return "icloud.and.arrow.up"
-            case .audit: return "checkmark.shield"
             case .advanced: return "wrench.and.screwdriver"
             case .about: return "info.circle"
             }
@@ -43,10 +42,8 @@ struct SettingsView: View {
             Divider()
             switch section {
             case .backup:
-                // 备份/审计面板自带滚动与留白，不套外层 ScrollView
+                // 备份面板自带滚动与留白，不套外层 ScrollView
                 BackupView(service: syncService, settings: settings)
-            case .audit:
-                auditSection
             default:
                 ScrollView {
                     Group {
@@ -69,17 +66,6 @@ struct SettingsView: View {
         .controlSize(.small)
         .font(.system(size: 11.5))
         .onAppear { notificationService.refresh() }
-    }
-
-    // MARK: - 审计子栏目（配置卡 + 流水列表）
-
-    private var auditSection: some View {
-        VStack(spacing: 0) {
-            auditCard
-                .padding(Theme.spacing.page)
-            Divider()
-            AuditView(service: auditService, installer: installer)
-        }
     }
 
     // MARK: - 子页签条（灰底托盘 + 品牌色选中胶囊）
@@ -222,45 +208,6 @@ struct SettingsView: View {
                         .frame(width: 52, alignment: .trailing)
                 }
                 Text("提醒后每小时最多再提醒一次；并发 ≥5 个会话、23 点后还在跑任务也会轻声提示。")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    // MARK: - 安全审计
-
-    @ViewBuilder
-    private var auditCard: some View {
-        settingCard("安全审计") {
-            Toggle("记录 agent 操作审计流水", isOn: $settings.auditEnabled)
-            Text("记录 Claude / Codex 执行的完整命令与读写的文件路径，用于事后回溯；"
-                + "不记录任何执行输出内容。命令文本本就明文存于本地会话记录中。")
-                .font(.system(size: 9.5))
-                .foregroundStyle(.tertiary)
-            if settings.auditEnabled {
-                Toggle("高危操作岛内红卡告警", isOn: $settings.auditRiskAlertsEnabled)
-                Toggle("高危操作系统通知（锁屏 / 其他桌面可见）", isOn: $settings.auditSystemNotifyEnabled)
-                if let hint = notificationHint, settings.auditSystemNotifyEnabled {
-                    Text(hint)
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.orange)
-                }
-                HStack {
-                    Text("保留时长")
-                    Spacer()
-                    Picker("", selection: $settings.auditRetentionDays) {
-                        Text("30 天").tag(30)
-                        Text("90 天").tag(90)
-                        Text("180 天").tag(180)
-                        Text("365 天").tag(365)
-                        Text("永久").tag(0)
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 120)
-                }
-                Text("高危规则为启发式提示（sudo / rm -rf 绝对路径 / 管道执行下载脚本 / 读写密钥等），"
-                    + "非沙箱拦截；命中会去重节流。下方流水可筛选、搜索、导出与清空。")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             }

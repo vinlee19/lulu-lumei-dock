@@ -6,6 +6,8 @@ import SwiftUI
 /// 会话详情：头部信息 + resume 命令条 + 恢复/删除动作 + 对话记录流 + 对话目录（可折叠右栏）
 struct SessionDetailView: View {
     @ObservedObject var service: SessionBrowserService
+    /// 打开血缘下钻（由 SessionsView 提供 —— 下钻要替换整个内容区才有足够宽度）
+    var onOpenLineage: ((TurnLineageView.Pane) -> Void)?
 
     @State private var showTOC = true
     @State private var confirmingDelete = false
@@ -139,6 +141,18 @@ struct SessionDetailView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("导出对话记录")
+                if let onOpenLineage {
+                    Button {
+                        onOpenLineage(.list)
+                    } label: {
+                        Label("轮次血缘", systemImage:
+                            "point.3.filled.connected.trianglepath.dotted")
+                            .font(.system(size: 11))
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.bordered)
+                    .help("按轮次看它做了什么、哪一轮的提示词该改")
+                }
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { showTOC.toggle() }
                 } label: {
@@ -522,6 +536,8 @@ private struct MessageRowView: View {
         case .turnTrail:
             TurnTrailRowView(
                 message: message, isMatch: isMatch, expandedTrails: $expandedTrails)
+        case .thinking:
+            ThinkingRowView(message: message, isMatch: isMatch, expanded: $expandedTrails)
         case .user:
             HStack(spacing: 0) {
                 // 左侧至少留 ~15% 空，气泡宽度由内容决定、靠右

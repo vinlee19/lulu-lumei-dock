@@ -6,6 +6,9 @@ import SwiftUI
 @MainActor
 final class PopoverNavigation: ObservableObject {
     @Published var tab: PopoverRootView.Tab = .history
+    /// 设置页当前子页。放这里而不是 SettingsView 的私有 @State：
+    /// 侧栏底部品牌区要能直接跳「设置 → 关于」，跨页跳转本就是本类的职责。
+    @Published var settingsSection: SettingsView.SettingsSection = .general
 }
 
 struct PopoverRootView: View {
@@ -20,6 +23,7 @@ struct PopoverRootView: View {
     @ObservedObject var syncService: SyncService
     @ObservedObject var cliToolsService: CLIToolsService
     @ObservedObject var auditService: AuditService
+    @ObservedObject var promptDiagnostics: PromptDiagnosticsService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var updateService: UpdateService
     @ObservedObject var navigation: PopoverNavigation
@@ -27,12 +31,14 @@ struct PopoverRootView: View {
     enum Tab: String, CaseIterable {
         case history = "历史"
         case sessions = "会话"
+        case diagnostics = "诊断"
         case skills = "Skills"
         case memory = "Memory"
         case plans = "Plans"
         case agents = "Agents"
         case usage = "用量"
         case limits = "限额"
+        case audit = "审计"
         case settings = "设置"
 
         /// 页签图标（SF Symbol）
@@ -40,12 +46,14 @@ struct PopoverRootView: View {
             switch self {
             case .history: return "clock.arrow.circlepath"
             case .sessions: return "bubble.left.and.bubble.right.fill"
+            case .diagnostics: return "waveform.path.ecg"
             case .skills: return "wand.and.stars"
             case .memory: return "brain.fill"
             case .plans: return "list.bullet.clipboard.fill"
             case .agents: return "person.crop.rectangle.stack.fill"
             case .usage: return "chart.bar.fill"
             case .limits: return "gauge.with.dots.needle.67percent"
+            case .audit: return "checkmark.shield"
             case .settings: return "gearshape.fill"
             }
         }
@@ -53,11 +61,17 @@ struct PopoverRootView: View {
         /// 侧边栏图标：紫金稿统一单色中性灰（不再用彩色圆角方块）；选中项由紫色胶囊承载强调
         var tileColor: Color? { nil }
 
-        /// 侧边栏分组（标签 + 条目）：活动 / 知识库 / 用量；设置单独沉底
+        /// 侧边栏分组（标签 + 条目）。**每个页签都要属于某一组**：
+        /// 以前 `.settings` 不在任何组里、靠 `Spacer` 之后手写一行沉底，样式与组内项完全一样
+        /// 却没有任何分隔，读起来是个走失的孤项。现在归入「系统」，底部只留品牌脚注。
         static let sidebarGroups: [(label: String, tabs: [Tab])] = [
-            ("活动", [.history, .sessions]),
+            // 诊断归「活动」而不是新开一组：新增组标签会吃掉侧栏竖向空间，
+            // 而最小窗内容高只有 ~512（shell-sidebar-min-height 那张图就是为此存在的）。
+            ("活动", [.history, .sessions, .diagnostics]),
             ("知识库", [.skills, .memory, .plans, .agents]),
+            ("安全", [.audit]),
             ("用量", [.usage, .limits]),
+            ("系统", [.settings]),
         ]
     }
 
@@ -83,7 +97,7 @@ struct PopoverRootView: View {
         }
     }
 
-    // MARK: - 左侧边栏（macOS 系统设置式：logo 头部 + 分组彩色图标条目 + 品牌色选中胶囊）
+    // MARK: - 左侧边栏（视图在 SidebarView.swift；这里只算注入它的三个值）
 
     /// 限额徽标：三源主窗口用量的最大百分比（无数据时不显示）
     private var limitsBadge: (text: String, color: Color)? {
@@ -93,68 +107,21 @@ struct PopoverRootView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            sidebarHeader
-            Divider().padding(.vertical, 6).padding(.horizontal, 2)
-            ForEach(Array(Tab.sidebarGroups.enumerated()), id: \.offset) { _, group in
-                // 分组标签（小写灰强调，替代单纯分隔线）
-                Text(group.label)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 6)
-                    .padding(.bottom, 2)
-                ForEach(group.tabs, id: \.self) { tab in
-                    SidebarNavButton(
-                        title: tab.rawValue, icon: tab.icon, tileColor: tab.tileColor,
-                        badge: tab == .limits ? limitsBadge?.text : nil,
-                        badgeColor: (tab == .limits ? limitsBadge?.color : nil) ?? .secondary,
-                        isSelected: navigation.tab == tab
-                    ) {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            navigation.tab = tab
-                        }
-                    }
+        SidebarView(
+            selected: navigation.tab,
+            limitsBadge: limitsBadge,
+            appVersion: appVersion,
+            onSelect: { tab in
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                    navigation.tab = tab
                 }
-            }
-            Spacer(minLength: 0)
-            // 设置沉底
-            SidebarNavButton(
-                title: Tab.settings.rawValue, icon: Tab.settings.icon,
-                isSelected: navigation.tab == .settings
-            ) {
+            },
+            onOpenAbout: {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                     navigation.tab = .settings
+                    navigation.settingsSection = .about
                 }
-            }
-            // 左下角品牌脚注：真 logo + 版本号
-            HStack(spacing: 5) {
-                LuluLogoTile(size: 13)
-                Text("v\(appVersion)")
-                    .font(.system(size: 9.5).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 2)
-            .padding(.bottom, 8)
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 12)
-        .frame(width: 165)
-        .background(Theme.surfaceSecondary)
-    }
-
-    /// logo 头部：迷你紫金「Lu」标（与 Dock 图标同源的 LuluMark）+ 应用名
-    private var sidebarHeader: some View {
-        HStack(spacing: 7) {
-            LuluLogoTile(size: 18)
-            Text("lulu-lumei-dock")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.primary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 2)
+            })
     }
 
     // MARK: - 内容区
@@ -168,6 +135,9 @@ struct PopoverRootView: View {
                 terminals: sessionBrowser.terminals, settings: settings)
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings)
+        case .diagnostics:
+            PromptDiagnosticsView(
+                service: promptDiagnostics, sessionBrowser: sessionBrowser)
         case .skills:
             SkillMemoryView(
                 service: skillMemoryService, mode: .skills, usageService: usageService)
@@ -182,13 +152,17 @@ struct PopoverRootView: View {
             UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
         case .limits:
             LimitsPanelView(service: limitsService)
+        case .audit:
+            AuditView(
+                service: auditService, installer: installer, settings: settings,
+                notificationService: notificationService)
         case .settings:
             SettingsView(
+                section: $navigation.settingsSection,
                 settings: settings, installer: installer,
                 usageService: usageService,
                 cliTools: cliToolsService, notificationService: notificationService,
-                updateService: updateService,
-                syncService: syncService, auditService: auditService)
+                updateService: updateService, syncService: syncService)
         }
     }
 }

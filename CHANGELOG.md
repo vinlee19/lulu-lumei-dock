@@ -4,6 +4,85 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] - 2026-07-28
+
+### Added
+
+- **Turn lineage graph** — a real DAG of what an agent did in one turn: the
+  prompt, its thinking, every tool call, spawned subagents, and the answer, with
+  edges for causality *and* for the loops that matter. Nodes are deduplicated by
+  operation identity (kind + tool + canonical target), so reading the same file
+  eight times is one node badged `×8` rather than eight nodes — and the loops
+  fall out of that for free: `Edit → build fails → Edit` becomes a genuine cycle
+  instead of a synthesized edge. Back edges get their own lanes, data re-reads on
+  the left and retries/rework on the right, so "context wasn't given up front"
+  and "the change broke something" are distinguishable at a glance. Reachable
+  from the session page header ("轮次血缘"), which also lists every turn with its
+  step/re-read/retry counts. The layout engine lives in `EurekaKit` as pure
+  functions (following `IslandGeometry`) and is covered by invariants —
+  most valuably that **no edge segment ever crosses a node**, which holds by
+  construction: horizontal runs only ever travel the mid-line of an inter-layer
+  gutter, and edges spanning more than one layer reserve a column via dummies.
+- **Prompt diagnostics tab** — cross-session answer to "which habits cost me the
+  most, and am I improving". Ranks the rules actually hit (same rule table the
+  per-turn view uses), each with the concrete prompt change it implies, plus a
+  daily trend and a list of the worst turns that link straight to their graph.
+  On the author's machine: 1979 turns across six CLIs, most common being
+  "edited the same file repeatedly" (163 turns) and "asked you to clarify" (147).
+- **Plaintext thinking for Codex, Kimi and Qwen** — the code previously asserted
+  thinking was never available locally. That is true only for Claude, which
+  strips the body and keeps an encrypted signature. Codex's plaintext lives on
+  `event_msg/agent_reasoning` (the encrypted one is `response_item/reasoning`),
+  Kimi's on `part.type == "think"`, Qwen's on `{text, thought: true}`. All three
+  now render as collapsible thinking blocks in the session view and as thinking
+  nodes in the graph; Claude's graph shows a dashed fork node instead and says
+  why, rather than implying the model didn't think.
+- **CLI**: `--render-lineage` (golden + live lineage renders) and
+  `--diagnostics-snapshot` (scan and dump per-turn prompt-quality metrics).
+
+### Fixed
+
+- **Codex's main command channel was never parsed.** `custom_tool_call` carries
+  `exec` and `apply_patch` today (1334 + 97 occurrences across the twelve largest
+  local rollouts) and had no branch in either the transcript reader or the audit
+  scanner — meaning session trails were incomplete *and the security audit was
+  under-reporting Codex commands*. Its `input` is not JSON but JavaScript source
+  (`await tools.exec_command({cmd: "…"})`) or raw patch text, in seven observed
+  shapes; all now resolve, with a 3.8% fallthrough that is genuinely not a tool
+  invocation. Note that historical rows are **not** backfilled: the watermark has
+  already advanced past those files, so only new lines are captured.
+- **Tool outcome detection for Codex.** `function_call_output.metadata.exit_code`
+  no longer exists in current versions (0 of 2624 occurrences), so failures went
+  unrecorded. Both formats are now recognised — old rollouts still on disk keep
+  working — and an indeterminate result stays indeterminate instead of being
+  reported as success.
+- **An empty discovery result no longer wipes the index.** `prune(keeping:)` was
+  called unconditionally, so a single empty session-discovery pass (transient IO
+  error, unreadable root) deleted every row and forced a full re-scan. Observed
+  destroying 1979 rows of turn metrics; the same flaw affected the full-text
+  search index.
+- **Session discovery ran twice per scan tick.** Discovery is the dominant cost
+  (~60s for 267 sessions, since each file head is parsed), and the full-text and
+  turn-metric indexers each ran their own pass. They now share one result.
+- Slash-command echoes (`<command-name>`, `<local-command-stdout>`) and
+  background task notifications are no longer counted as user prompts — half of
+  the string-content user messages on the author's machine (240 of 483) are
+  injected, which previously produced a turn list full of empty zero-step turns.
+  Injected blocks are stripped rather than dropping the whole message, because a
+  real prompt often follows them.
+
+### Changed
+
+- Schema v17 adds `turn_metrics` + `turn_files` (derived tables, rebuilt on
+  upgrade). Only metrics are persisted — the graph itself is computed on open in
+  under a millisecond, while cross-session aggregation would otherwise re-read
+  ~2 GB on every page visit. First full index takes ~130s; afterwards a
+  size+mtime fingerprint skips 263 of 267 files.
+- The sidebar's navigation list scrolls. `hosting.sizingOptions = []` clips
+  rather than grows the window, and `window.minSize` 540 is frame height (~512 of
+  content), which left barely a dozen points of slack before the brand footer
+  would have been cut off.
+
 ## [0.15.0] - 2026-07-27
 
 ### Added
@@ -842,6 +921,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.16.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.16.0
 [0.15.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.15.0
 [0.14.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.14.0
 [0.13.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.13.0

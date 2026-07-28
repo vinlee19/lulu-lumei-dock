@@ -410,7 +410,7 @@ func kimiUsageScannerTests(_ t: TestRunner) {
 func kimiTranscriptAndPlansTests(_ t: TestRunner) {
     t.suite("Kimi transcript / plans")
 
-    t.test("loadKimi：user/assistant/🔧 小注；think 跳过；epoch-ms 时间") {
+    t.test("loadKimi：user/思考/🔧 小注/assistant；epoch-ms 时间") {
         let session = try makeKimiSession()
         defer { try? FileManager.default.removeItem(at: session.root) }
         try appendKimiLines([
@@ -422,13 +422,17 @@ func kimiTranscriptAndPlansTests(_ t: TestRunner) {
         ], to: session.mainWire)
 
         let result = TranscriptReader.loadKimi(path: session.mainWire.path, maxMessages: 100)
-        try expectEqual(result.messages.count, 3)
+        try expectEqual(result.messages.count, 4)
         try expectEqual(result.messages[0].role, .user)
         try expectEqual(result.messages[0].text, "你好")
-        try expectEqual(result.messages[1].role, .toolNote)
-        try expectEqual(result.messages[1].text, "🔧 FetchURL")
-        try expectEqual(result.messages[2].role, .assistant)
-        try expectEqual(result.messages[2].text, "你好！有什么可以帮你？")
+        // Kimi 的 think 段是**明文**（不加密不剥离，实机单段可达 19.5k）→ 独立成思考消息，
+        // 不再像旧版那样丢掉
+        try expectEqual(result.messages[1].role, .thinking)
+        try expectEqual(result.messages[1].text, "推理中")
+        try expectEqual(result.messages[2].role, .toolNote)
+        try expectEqual(result.messages[2].text, "🔧 FetchURL")
+        try expectEqual(result.messages[3].role, .assistant)
+        try expectEqual(result.messages[3].text, "你好！有什么可以帮你？")
         // epoch-ms → Date
         try expectEqual(
             result.messages[0].timestamp,

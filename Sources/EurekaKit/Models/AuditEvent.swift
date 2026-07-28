@@ -29,6 +29,24 @@ public enum ToolKind: String, Equatable, Sendable, CaseIterable, Codable {
     }
 }
 
+extension ToolKind {
+    /// 列表/轨迹的类型图标（SF Symbol）。与 `.label` 一样是纯展示数据，
+    /// 放模型层供审计页与会话轨迹共用（原先只挂在 EurekaApp 的 TurnTrailView 里）。
+    public var icon: String {
+        switch self {
+        case .read: return "doc.text"
+        case .search: return "magnifyingglass"
+        case .command: return "terminal"
+        case .edit: return "pencil"
+        case .web: return "globe"
+        case .mcp: return "puzzlepiece.extension"
+        case .agent: return "person.2"
+        case .skill: return "wand.and.stars"
+        case .other: return "wrench.adjustable"
+        }
+    }
+}
+
 /// 风险等级。0（无风险）不建模，只用 notice / high 两档。
 public enum RiskLevel: Int, Codable, Sendable, Comparable {
     case notice = 1   // 提醒：只标记入库，不弹卡/通知

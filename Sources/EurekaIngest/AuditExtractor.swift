@@ -96,6 +96,182 @@ public enum AuditExtractor {
         }
     }
 
+    // MARK: - Codex 自定义工具通道（response_item 的 custom_tool_call）
+
+    /// **当前 Codex 的命令/补丁主通道**，`function_call` 只剩少数工具还在走。
+    /// 实勘 12 个最大 rollout：`name` 只有 `exec`(1334) 与 `apply_patch`(97) 两种，
+    /// 而 `input` **不是 JSON**：
+    ///  - `apply_patch` → `input` 就是补丁正文（`*** Begin Patch` 开头）
+    ///  - `exec` → `input` 是一段 **JS 源码**，形态实测 7 种：
+    ///    `await tools.exec_command({cmd: "…"})`(663) / `const patch = "*** Begin Patch…"`(110) /
+    ///    裸补丁正文(97) / `tools.mcp__*`(72) / `tools.view_image`(71) /
+    ///    `// @exec: {...}` 注释头(45) / `tools.web__run`(35) / `tools.update_plan`(33)
+    ///
+    /// 归类口径与 `codex(name:argumentsJSON:)` 保持一致，这样同一个操作无论走哪条通道
+    /// 在审计流水与会话轨迹里都是同一个 kind/name。
+    public static func codexCustomTool(name: String, input: String?) -> Operation {
+        let source = trim(input)
+        // 补丁：显式 apply_patch，或 exec 里塞了裸补丁 / patch 变量
+        if name == "apply_patch" || source.hasPrefix("*** Begin Patch") {
+            return Operation(kind: .edit, name: "apply_patch", detail: patchFilePaths(source))
+        }
+        if let patch = jsStringArgument(source, key: "patch"),
+            patch.hasPrefix("*** Begin Patch") {
+            return Operation(kind: .edit, name: "apply_patch", detail: patchFilePaths(patch))
+        }
+        // `tools.<名字>(` → 把内层工具名交回 codex 词表归类（口径与 function_call 通道一致）
+        if let inner = jsToolName(source) {
+            if let cmd = jsStringArgument(source, key: "cmd") {
+                return Operation(kind: .command, name: inner, detail: cmd)
+            }
+            if let command = jsStringArgument(source, key: "command") {
+                return Operation(kind: .command, name: inner, detail: command)
+            }
+            if inner.hasPrefix("mcp__") {
+                return Operation(
+                    kind: .mcp, name: cleanMCPName(inner),
+                    detail: jsFirstStringArgument(source))
+            }
+            switch inner {
+            case "view_image":
+                return Operation(
+                    kind: .read, name: inner,
+                    detail: jsStringArgument(source, key: "path") ?? "")
+            case "update_plan":
+                return Operation(kind: .other, name: inner, detail: "更新计划")
+            default:
+                let isWeb = inner.hasPrefix("web") || inner.contains("search")
+                return Operation(
+                    kind: isWeb ? .web : .other, name: inner,
+                    detail: jsFirstStringArgument(source))
+            }
+        }
+        // 认不出的形态：当命令看，保真整段（ToolStepExtractor 那侧只取首行）
+        return Operation(kind: .command, name: name, detail: source)
+    }
+
+    /// `custom_tool_call_output.output` / `function_call_output.output` → 纯文本。
+    /// 实勘两种形态：字符串（2498 条）与 `[{type:"input_text", text:"…"}]`（126 条）。
+    public static func codexOutputText(_ output: Any?) -> String {
+        if let text = output as? String { return text }
+        if let blocks = output as? [[String: Any]] {
+            return blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        }
+        return ""
+    }
+
+    /// 工具结果 → 成败判定。判不出返回 nil（调用方就别回填，保持"未知"而不是假装成功）。
+    ///
+    /// 两代格式都要认，因为**两代文件都还在磁盘上**：
+    ///  1. 老 rollout：`output` 是 JSON 字符串，带 `metadata.exit_code`（结构化，最准）；
+    ///  2. 当前 Codex：**该字段已消失**（实勘 2624 条 `function_call_output` 里
+    ///     `metadata` 出现 0 次）→ 只能从输出文本判 `Script failed`（实测 26 条）/
+    ///     `Exit code: <N>`。
+    public static func codexOutcome(_ output: Any?) -> (isError: Bool, exitCode: Int?)? {
+        // 老格式优先：有结构化退出码就以它为准
+        if let json = output as? String,
+            let parsed = (try? JSONSerialization.jsonObject(with: Data(json.utf8)))
+                as? [String: Any],
+            let metadata = parsed["metadata"] as? [String: Any],
+            let exitCode = metadata["exit_code"] as? Int {
+            return (exitCode != 0, exitCode)
+        }
+        let text = codexOutputText(output)
+        for line in text.split(separator: "\n") where line.hasPrefix("Exit code: ") {
+            guard let code = Int(
+                line.dropFirst("Exit code: ".count).trimmingCharacters(in: .whitespaces))
+            else { continue }
+            return (code != 0, code)
+        }
+        if text.hasPrefix("Script failed") { return (true, nil) }
+        if text.hasPrefix("Script completed") { return (false, nil) }
+        return nil
+    }
+
+    // MARK: - JS 源码里的字面量提取（Codex custom_tool_call 专用）
+
+    /// `await tools.<名字>(` → `<名字>`；找不到返回 nil。
+    /// 只认 `tools.` 前缀（实勘全部形态都带），避免把注释里的词误判成工具名。
+    static func jsToolName(_ source: String) -> String? {
+        guard let range = source.range(of: "tools.") else { return nil }
+        let name = source[range.upperBound...].prefix {
+            $0.isLetter || $0.isNumber || $0 == "_"
+        }
+        return name.isEmpty ? nil : String(name)
+    }
+
+    /// 取 JS 里 `<key>: "…"`（对象属性）或 `<key> = "…"`（变量赋值）的字符串值并解转义。
+    /// 两种分隔符都要认：实勘 `cmd:` 走属性、`const patch = "*** Begin Patch…"` 走赋值。
+    /// 手写扫描而不是正则：值里含 `"` `\n` `'` 等，正则难写对；也不把外部输入拼进正则。
+    static func jsStringArgument(_ source: String, key: String) -> String? {
+        let chars = Array(source)
+        let name = Array(key)
+        var index = 0
+        while index + name.count < chars.count {
+            defer { index += 1 }
+            guard Array(chars[index..<(index + name.count)]) == name else { continue }
+            // 前一个字符必须是分隔符，否则 `foo_cmd:` 会命中 `cmd:`
+            if index > 0 {
+                let prev = chars[index - 1]
+                if prev.isLetter || prev.isNumber || prev == "_" { continue }
+            }
+            var cursor = index + name.count
+            func skipSpace() {
+                while cursor < chars.count,
+                    chars[cursor] == " " || chars[cursor] == "\n" || chars[cursor] == "\t" {
+                    cursor += 1
+                }
+            }
+            skipSpace()
+            guard cursor < chars.count, chars[cursor] == ":" || chars[cursor] == "=" else {
+                continue
+            }
+            cursor += 1
+            skipSpace()
+            guard cursor < chars.count, chars[cursor] == "\"" || chars[cursor] == "'" else {
+                continue
+            }
+            return unescapeJS(chars, from: cursor)
+        }
+        return nil
+    }
+
+    /// 兜底摘要：整段里第一个字符串字面量（MCP/未知工具用）
+    static func jsFirstStringArgument(_ source: String) -> String {
+        let chars = Array(source)
+        for (index, char) in chars.enumerated() where char == "\"" {
+            if let value = unescapeJS(chars, from: index), !value.isEmpty { return value }
+        }
+        return ""
+    }
+
+    /// 从 `chars[start]` 处的引号开始读一个 JS 字符串字面量并解转义（未闭合返回 nil）
+    private static func unescapeJS(_ chars: [Character], from start: Int) -> String? {
+        let quote = chars[start]
+        var result = ""
+        var index = start + 1
+        while index < chars.count {
+            let char = chars[index]
+            if char == "\\", index + 1 < chars.count {
+                switch chars[index + 1] {
+                case "n": result.append("\n")
+                case "t": result.append("\t")
+                case "r": result.append("\r")
+                case "\\": result.append("\\")
+                case "\"": result.append("\"")
+                case "'": result.append("'")
+                case let other: result.append(other)
+                }
+                index += 2
+                continue
+            }
+            if char == quote { return result }
+            result.append(char)
+            index += 1
+        }
+        return nil  // 未闭合（被上游截断过）→ 交给调用方走兜底
+    }
+
     // MARK: - Cursor / Grok（snake_case 工具词表，两家几乎一致）
 
     /// Grok 的 `chat_history.jsonl` 里 `assistant.tool_calls[] = {id, name, arguments}`，

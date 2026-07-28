@@ -1,5 +1,7 @@
 import AppKit
+import EurekaIngest
 import EurekaKit
+import EurekaStore
 import SwiftUI
 
 /// 离屏渲染灵动岛各形态为 PNG：无需屏幕录制权限即可做视觉走查/自检。
@@ -241,6 +243,366 @@ enum PreviewRenderer {
              AgentsView(service: agents, usageService: usage, initialLayout: .cards))
         snap("knowledge-plans-list-dark",
              PlansView(service: plans, initialLayout: .list), dark: true)
+    }
+
+    /// 离屏渲染「外壳」：侧栏（含品牌区）与审计页，明/暗两版。
+    ///
+    /// 之所以需要它：侧栏与审计页此前**没有任何自动看图的办法**（只有灵动岛和徽标有渲染器），
+    /// 改 logo 尺寸、组标签数量、行内密度只能请人肉眼比。两个必查项也只有渲图能查：
+    ///  1. 品牌标是不是明显大于导航图标、有没有高光与投影（不是一块扁方块）；
+    ///  2. **最小窗高 540 下五个组标签 + 品牌脚注会不会被裁**
+    ///     —— `MainWindowController` 用的是 `hosting.sizingOptions = []`，内容超出是裁剪而不是撑窗。
+    @MainActor
+    static func renderShell(to directory: String) {
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // NSHostingView + cacheDisplay（同 renderKnowledge：ImageRenderer 离屏下会失真）
+        @MainActor func snap<V: View>(
+            _ name: String, _ view: V, dark: Bool = false,
+            width: CGFloat = 780, height: CGFloat = 980
+        ) {
+            let hosting = NSHostingView(rootView: ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                view
+            })
+            hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            hosting.frame = CGRect(x: 0, y: 0, width: width, height: height)
+            hosting.layoutSubtreeIfNeeded()
+            guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+            else { print("渲染失败: \(name)"); return }
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:])
+            else { print("编码失败: \(name)"); return }
+            try? png.write(to: dir.appendingPathComponent("\(name).png"))
+            print("已渲染 \(name).png")
+        }
+
+        // MARK: 侧栏
+        func sidebar(selected: PopoverRootView.Tab) -> some View {
+            SidebarView(
+                selected: selected,
+                limitsBadge: ("67%", Theme.gold),
+                appVersion: "0.15.0",
+                onSelect: { _ in })
+        }
+        // 品牌标放大后单独放一版对照（26 = 脚注，44 = 关于卡，18 = 旧尺寸基准）
+        snap("shell-logo-sizes", HStack(spacing: 24) {
+            ForEach([18.0, 26.0, 44.0, 88.0], id: \.self) { size in
+                VStack(spacing: 8) {
+                    LuluLogoTile(size: size)
+                    Text("\(Int(size))pt").font(.system(size: 10))
+                }
+            }
+        }
+        .padding(30), width: 320, height: 160)
+        snap("shell-sidebar", sidebar(selected: .audit), width: SidebarView.width, height: 980)
+        snap("shell-sidebar-dark", sidebar(selected: .audit), dark: true,
+             width: SidebarView.width, height: 980)
+        // 最小窗高实测。注意 `MainWindowController` 的 `window.minSize` 540 是**窗口 frame**，
+        // 含标题栏（~28pt）→ 内容区实际只有 ~512。再多渲一版 470 看还剩多少余量。
+        snap("shell-sidebar-min-height", sidebar(selected: .history),
+             width: SidebarView.width, height: 512)
+        snap("shell-sidebar-tight", sidebar(selected: .history),
+             width: SidebarView.width, height: 470)
+
+        // MARK: 审计页（真实本机数据）
+        let audit = AuditService()
+        let installer = InstallerService()
+        let settings = AppSettings()
+        let notifications = NotificationService()
+        audit.start()
+        installer.refresh()
+        // 服务在自己的串行队列上读库、@Published 回主线程，而 CLI 没有主 runloop → 手动泵。
+        // ⚠️ 必须**无条件**泵满一段时间：早先按 `while events.isEmpty` 泵，第二次换查询时
+        // events 还留着上一批（非空），循环立刻退出，于是截到的是**上一次查询的旧数据**
+        // ——「仅风险」那张图里 chip 是红的、列表却是全量。
+        @MainActor func loadAndSettle(_ query: AuditRepo.Query, seconds: Double = 2.5) {
+            audit.load(query: query, page: 1, pageSize: 100)
+            RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+        }
+        // 首次要等库打开 + 首轮扫描，给足时间
+        loadAndSettle(AuditRepo.Query(), seconds: 8)
+        print("审计读库：total=\(audit.total) risk=\(audit.riskTotal) "
+            + "sources=\(audit.sourceCounts.count) kinds=\(audit.kindCounts.count)")
+
+        func auditPage(riskOnly: Bool = false, keyword: String = "") -> some View {
+            AuditView(
+                service: audit, installer: installer, settings: settings,
+                notificationService: notifications,
+                initialRiskOnly: riskOnly, initialKeyword: keyword)
+        }
+        snap("shell-audit", auditPage())
+        snap("shell-audit-dark", auditPage(), dark: true)
+        // 宽窗：来源 chips 会不会挤成两行、行内标题行有没有互相顶
+        snap("shell-audit-wide", auditPage(), width: 1270)
+        // 侧栏 + 审计页并排（核对分隔线两侧的字号/留白衔接）。
+        // 放在改筛选之前：AuditService 是单例式共享状态，下面换查询后这张就变空了。
+        snap("shell-full", HStack(spacing: 0) {
+            sidebar(selected: .audit)
+            Divider()
+            auditPage()
+        }, width: SidebarView.width + 1 + 780)
+
+        // 仅风险：行内风险 TagChip 与总览卡的「风险 N」都要出得来
+        loadAndSettle(AuditRepo.Query(riskOnly: true))
+        print("仅风险：\(audit.events.count) 行 / total=\(audit.total)")
+        snap("shell-audit-risk", auditPage(riskOnly: true))
+        // 空态（筛不到）：确认走的是 EmptyStateView 而不是一片空白
+        let nonsense = "zzz-no-such-command-zzz"
+        loadAndSettle(AuditRepo.Query(keyword: nonsense))
+        print("空态：\(audit.events.count) 行 / total=\(audit.total)")
+        snap("shell-audit-empty", auditPage(keyword: nonsense), height: 520)
+
+        // 采集关闭：hooksHint 让位给 captureOffHint（两张提示卡不该同时出现）
+        loadAndSettle(AuditRepo.Query())
+        settings.auditEnabled = false
+        snap("shell-audit-capture-off", auditPage(), height: 620)
+        settings.auditEnabled = true  // 别把渲染副作用留在真实偏好里
+
+        // 齿轮浮层单独出图：popover 依赖真实窗口，整页离屏渲染时不会被光栅化。
+        // 这一版是「设置 → 审计」那张卡搬过来的 4 个开关，必须自带 switch/small/11.5 样式。
+        let auditView = AuditView(
+            service: audit, installer: installer, settings: settings,
+            notificationService: notifications)
+        snap("shell-audit-settings", auditView.settingsPopover, width: 340, height: 300)
+    }
+
+    /// 离屏渲染**轮次血缘图**。
+    ///
+    /// 输入用**手搓的 `TurnInput` 字面量**而不是本机真实会话：验收形态是一个具体形状
+    /// （提问→思考分叉→子代理回指已存在的 Read→Edit⇄build 重试环→汇聚回答），
+    /// 真实会话不可能稳定复现，而离屏渲染就是验收手段 ⇒ **基准必须可复现**。
+    /// 先例正是 `renderAll`：它渲灵动岛用的也全是手搓的 `AgentTask`/`SubagentInfo` 字面量。
+    @MainActor
+    static func renderLineage(to directory: String) {
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        @MainActor func snap<V: View>(
+            _ name: String, _ view: V, dark: Bool = false,
+            width: CGFloat = 780, height: CGFloat = 620
+        ) {
+            let hosting = NSHostingView(rootView: ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                view
+            })
+            hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            hosting.frame = CGRect(x: 0, y: 0, width: width, height: height)
+            hosting.layoutSubtreeIfNeeded()
+            guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+            else { print("渲染失败: \(name)"); return }
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:])
+            else { print("编码失败: \(name)"); return }
+            try? png.write(to: dir.appendingPathComponent("\(name).png"))
+            print("已渲染 \(name).png")
+        }
+
+        /// 画布 + 图例 + 一行统计，固定尺寸、无 ScrollView/无 Lazy → 光栅化风险最低
+        @MainActor func board(
+            _ turn: TurnInput, width: CGFloat, compact: Bool = false,
+            expandedSubagents: Set<String> = []
+        ) -> some View {
+            let metrics = compact
+                ? TurnGraphLayout.Metrics.compact(width: width)
+                : TurnGraphLayout.Metrics.standard(width: width)
+            let graph = TurnGraphBuilder.build(
+                turn, options: .init(
+                    maxColumns: metrics.maxColumns, expandedSubagents: expandedSubagents))
+            let result = TurnGraphLayout.layout(graph, metrics: metrics)
+            let diagnostics = TurnDiagnostics.evaluate(graph, promptChars: turn.promptText.count)
+            print("  \(turn.turnIndex): 节点 \(result.nodes.count) 层 \(result.layerCount) "
+                + "最宽 \(result.maxLayerWidth) 交叉 \(result.crossings) "
+                + "画布 \(Int(result.canvasSize.height)) "
+                + "降级 \(result.degraded.map { "\($0)" } ?? "无") "
+                + "信号 \(diagnostics.signals.map(\.rule))")
+            return TurnLineageBoardView(
+                result: result, diagnostics: diagnostics, hasThinking: graph.hasThinking)
+                .frame(width: width)
+        }
+
+        func step(
+            _ kind: ToolKind, _ name: String, _ detail: String = "",
+            batch: Int, index: Int, isError: Bool = false
+        ) -> TurnInput.Step {
+            TurnInput.Step(
+                kind: kind, name: name, detail: detail, isError: isError,
+                batch: batch, messageId: 1, stepIndex: index)
+        }
+
+        // 验收形态（用户选中的那张预览）
+        let accepted = TurnInput(
+            turnIndex: 7, promptMessageId: 0, promptText: "修一下审计页的分页",
+            thinkingTexts: ["先定位分页代码在哪，再决定改哪一层"],
+            steps: [
+                step(.search, "Grep", "paginationBar", batch: 1, index: 0),
+                step(.agent, "Explore", "定位分页实现", batch: 1, index: 1),
+                step(.read, "Read", "/w/AuditView.swift", batch: 2, index: 2),
+                step(.edit, "Edit", "/w/AuditView.swift", batch: 3, index: 3),
+                step(.command, "Bash", "swift build", batch: 4, index: 4, isError: true),
+                step(.read, "Read", "/w/AuditView.swift", batch: 5, index: 5),
+                step(.edit, "Edit", "/w/AuditView.swift", batch: 6, index: 6),
+                step(.command, "Bash", "swift build", batch: 7, index: 7),
+            ],
+            answerMessageIds: [9], answerText: "改好了，分页条现在有跳页输入框")
+        snap("lineage-golden-accepted", board(accepted, width: 780))
+        snap("lineage-golden-accepted-dark", board(accepted, width: 780), dark: true)
+        snap("lineage-golden-min-width", board(accepted, width: 674), height: 512)
+        snap("lineage-golden-wide", board(accepted, width: 1270), width: 1270)
+        snap("lineage-golden-compact", board(accepted, width: 780, compact: true))
+
+        // 子代理展开：内部步骤并进同一张图，且它读的文件与主流程去重 → 出现**跨界回读边**。
+        // 这条边正是「内联展开而不是画独立子图」的全部理由（独立子图会把它剪掉）。
+        var withSubagent = accepted
+        withSubagent.turnIndex = 8
+        withSubagent.steps[1].subSteps = [
+            TurnInput.Step(kind: .search, name: "Grep", detail: "PaginationBar", batch: 1),
+            TurnInput.Step(kind: .read, name: "Read", detail: "/w/AuditView.swift", batch: 2),
+            TurnInput.Step(kind: .read, name: "Read", detail: "/w/Styles.swift", batch: 2),
+        ]
+        snap("lineage-golden-subagent-collapsed", board(withSubagent, width: 780))
+        snap("lineage-golden-subagent-expanded", board(
+            withSubagent, width: 780,
+            expandedSubagents: ["Explore|定位分页实现"]), height: 700)
+
+        // Claude 形态：没有思考明文 → 不伪造思考节点，改用分叉点
+        var noThinking = accepted
+        noThinking.thinkingTexts = []
+        noThinking.turnIndex = 3
+        snap("lineage-golden-no-thinking", board(noThinking, width: 780))
+
+        // 纯链式：验脊线笔直
+        var chainSteps: [TurnInput.Step] = []
+        for index in 0..<7 {
+            chainSteps.append(step(
+                .read, "Read", "/w/File\(index).swift", batch: index + 1, index: index))
+        }
+        snap("lineage-golden-chain", board(TurnInput(
+            turnIndex: 1, promptMessageId: 0, promptText: "逐个看一遍",
+            steps: chainSteps, answerMessageIds: [1], answerText: "看完了"), width: 780))
+
+        // 一层 9 个同类：验折叠
+        var wideSteps: [TurnInput.Step] = []
+        for index in 0..<9 {
+            wideSteps.append(step(.search, "Grep", "pattern-\(index)", batch: 1, index: index))
+        }
+        snap("lineage-golden-fold", board(TurnInput(
+            turnIndex: 2, promptMessageId: 0, promptText: "全库找一遍",
+            steps: wideSteps, answerMessageIds: [1], answerText: "找到了"), width: 780))
+
+        // 60 节点最坏可读态
+        var bigSteps: [TurnInput.Step] = []
+        var cursor = 0
+        for batchIndex in 0..<12 {
+            for column in 0..<5 {
+                bigSteps.append(step(
+                    .read, "Read", "/w/mod\(batchIndex)/File\(column).swift",
+                    batch: batchIndex + 1, index: cursor))
+                cursor += 1
+            }
+        }
+        snap("lineage-golden-60", board(TurnInput(
+            turnIndex: 4, promptMessageId: 0, promptText: "通读整个模块",
+            steps: bigSteps, answerMessageIds: [1], answerText: "读完了"),
+            width: 780), height: 1100)
+
+        // 多条回读 + 多条重试：验左右分道与角标降级
+        var laneSteps: [TurnInput.Step] = []
+        cursor = 0
+        for index in 0..<5 {
+            laneSteps.append(step(
+                .read, "Read", "/w/A\(index).swift", batch: cursor + 1, index: cursor))
+            cursor += 1
+            laneSteps.append(step(
+                .edit, "Edit", "/w/A\(index).swift", batch: cursor + 1, index: cursor))
+            cursor += 1
+            laneSteps.append(step(
+                .command, "Bash", "swift build", batch: cursor + 1, index: cursor,
+                isError: index < 3))
+            cursor += 1
+            laneSteps.append(step(
+                .read, "Read", "/w/A\(index).swift", batch: cursor + 1, index: cursor))
+            cursor += 1
+        }
+        snap("lineage-golden-lanes", board(TurnInput(
+            turnIndex: 5, promptMessageId: 0, promptText: "把这几个文件都改了",
+            steps: laneSteps, answerMessageIds: [1], answerText: "都改完了"),
+            width: 780), height: 900)
+
+        // 超上限：验降级不排版
+        var hugeSteps: [TurnInput.Step] = []
+        for index in 0..<160 {
+            hugeSteps.append(step(
+                .command, "Bash", "echo \(index)", batch: index + 1, index: index))
+        }
+        snap("lineage-golden-degraded", board(TurnInput(
+            turnIndex: 6, promptMessageId: 0, promptText: "跑一堆命令",
+            steps: hugeSteps, answerMessageIds: [1], answerText: "跑完了"),
+            width: 780), height: 320)
+
+        // MARK: 真实数据（golden 是形态基准，live 是「真数据下会不会崩/难看」）
+        // 用默认 30 天窗口：`rangeAll = true` 会把窗口放到无穷、上限 2000，
+        // 离屏渲染等不起（也不是用户默认看到的样子）
+        let browser = SessionBrowserService()
+        browser.refresh()
+        // ⚠️ 先等 scanning 落定，再**无条件**多泵一段。
+        // 不能只按「结果非空」泵：切换数据时旧结果还在，循环会立刻退出、截到旧数据（上一轮踩过）
+        let deadline = Date().addingTimeInterval(90)
+        while browser.scanning, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        // 挑轮次最多的会话，规则可复现（不是「第一个」）
+        // 会话按排序档可能落在 flatSessions 或 groups 里（SessionsView 自己也是两者相加）
+        let candidates = browser.flatSessions + browser.groups.flatMap(\.sessions)
+        print("live 候选会话 \(candidates.count) 个")
+        var best: (session: AgentSessionInfo, turns: [TurnInput])?
+        for session in candidates.prefix(40) {
+            let messages = TranscriptReader.load(session: session).messages
+            let turns = TurnSlicer.slice(messages)
+            if turns.count > (best?.turns.count ?? 0) { best = (session, turns) }
+        }
+        guard let picked = best, !picked.turns.isEmpty else {
+            print("（本机没扫到可用会话，跳过 live 图）")
+            return
+        }
+        let worst = picked.turns.enumerated().max { lhs, rhs in
+            lhs.element.steps.count < rhs.element.steps.count
+        }?.offset ?? 0
+        print("live 会话 \(picked.session.id.prefix(8)) "
+            + "来源 \(picked.session.source.rawValue) 轮数 \(picked.turns.count) "
+            + "最长轮 #\(worst + 1)（\(picked.turns[worst].steps.count) 步）")
+
+        @MainActor func page(_ pane: TurnLineageView.Pane, turn: Int) -> some View {
+            TurnLineageView(
+                sessionName: picked.session.displayName, turns: picked.turns,
+                onBack: {}, initialPane: pane, initialTurn: turn)
+        }
+        // 跨会话诊断页：先跑一遍索引把 turn_metrics 填上，再截图。
+        // 同样**无条件泵满**（不能按「结果非空」泵：上一次的结果还在，会立刻退出）
+        // 只 load 不 rescan：全量重扫实测 **130s**（`TranscriptReader.load` 远不止裸解析），
+        // 离屏渲染等不起。库里没数据时就渲空态 —— 那也是用户首次进页面看到的样子。
+        // 想先把数据备好：`swift run eureka --diagnostics-snapshot`
+        let diagnostics = PromptDiagnosticsService()
+        diagnostics.load()
+        RunLoop.current.run(until: Date().addingTimeInterval(4))
+        print("诊断索引：全库 \(diagnostics.totalRows) 轮，"
+            + "窗口内 \(diagnostics.aggregate.turnCount) 轮，"
+            + "规则命中 \(diagnostics.aggregate.ruleHits)"
+            + " err=\(diagnostics.lastError ?? "无")")
+        snap(
+            "lineage-live-diagnostics",
+            PromptDiagnosticsView(service: diagnostics, sessionBrowser: browser),
+            height: 1000)
+        snap(
+            "lineage-live-diagnostics-dark",
+            PromptDiagnosticsView(service: diagnostics, sessionBrowser: browser),
+            dark: true, height: 1000)
+
+        snap("lineage-live-list", page(.list, turn: 0), height: 900)
+        snap("lineage-live-graph", page(.graph, turn: worst), height: 900)
+        snap("lineage-live-graph-dark", page(.graph, turn: worst), dark: true, height: 900)
     }
 
     /// 离屏渲染桌面吉祥物各状态(取每态首帧 + 贴纸卡 + 气泡)做视觉走查。

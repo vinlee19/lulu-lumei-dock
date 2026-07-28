@@ -98,6 +98,29 @@ public final class CodexAuditScanner {
                 let isStale = Date().timeIntervalSince(timestamp) > staleThreshold
 
                 switch (type, payload["type"] as? String) {
+                case ("response_item", "custom_tool_call"):
+                    // **当前 Codex 的命令/补丁主通道**（实勘 12 个最大 rollout：exec 1334 +
+                    // apply_patch 97）。以前完全没接 → 审计流水一直在少记 Codex 的命令。
+                    guard let name = payload["name"] as? String, !name.isEmpty else { continue }
+                    let op = AuditExtractor.codexCustomTool(
+                        name: name, input: payload["input"] as? String)
+                    let callId = payload["call_id"] as? String
+                    let event = AuditEvent(
+                        opId: callId ?? Self.synthOpId(path: path, line: line),
+                        source: .codex, sessionId: sessionId, timestamp: timestamp,
+                        kind: op.kind, tool: op.name, detail: op.detail, cwd: extra.cwd)
+                    let result = try pipeline.ingest(event, isStale: isStale)
+                    if result.inserted { inserted += 1 }
+                    if let alert = result.alert { alerts.append(alert) }
+
+                case ("response_item", "custom_tool_call_output"):
+                    guard let callId = payload["call_id"] as? String,
+                          let outcome = AuditExtractor.codexOutcome(payload["output"])
+                    else { continue }
+                    try pipeline.markOutcome(
+                        source: .codex, sessionId: sessionId, opId: callId,
+                        exitCode: outcome.exitCode, isError: outcome.isError)
+
                 case ("response_item", "function_call"):
                     // "_" 前缀 = MCP 重复项，跳过（同 CodexUsageScanner 口径；MCP 走 mcp_tool_call_end）
                     guard let name = payload["name"] as? String, !name.isEmpty, !name.hasPrefix("_")
@@ -114,16 +137,14 @@ public final class CodexAuditScanner {
                     if let alert = result.alert { alerts.append(alert) }
 
                 case ("response_item", "function_call_output"):
+                    // 两代格式都认：老 rollout 的 `metadata.exit_code` 优先，当前版本
+                    // 已无该字段（实勘 2624 条里 metadata 出现 0 次）→ 退回输出文本判据。
                     guard let callId = payload["call_id"] as? String,
-                          let output = payload["output"] as? String,
-                          let parsed = (try? JSONSerialization.jsonObject(
-                            with: Data(output.utf8))) as? [String: Any],
-                          let metadata = parsed["metadata"] as? [String: Any],
-                          let exitCode = metadata["exit_code"] as? Int
+                          let outcome = AuditExtractor.codexOutcome(payload["output"])
                     else { continue }
                     try pipeline.markOutcome(
                         source: .codex, sessionId: sessionId, opId: callId,
-                        exitCode: exitCode, isError: exitCode != 0)
+                        exitCode: outcome.exitCode, isError: outcome.isError)
 
                 case ("response_item", "web_search_call"):
                     let action = payload["action"] as? [String: Any]

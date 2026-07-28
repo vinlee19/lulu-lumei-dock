@@ -155,6 +155,21 @@ public enum KimiWireDecoder {
         return text
     }
 
+    /// loop 事件里的**明文思考**段（event.type=content.part 且 part.type=think）。
+    /// Kimi 不加密也不剥离：实勘单个 wire.jsonl 有 235 段，最长 19.5k 字符。
+    public static func thinkText(_ root: [String: Any]) -> String? {
+        guard root["type"] as? String == "context.append_loop_event",
+              let inner = root["event"] as? [String: Any],
+              inner["type"] as? String == "content.part",
+              let part = inner["part"] as? [String: Any],
+              part["type"] as? String == "think",
+              let text = (part["text"] as? String ?? part["think"] as? String)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty
+        else { return nil }
+        return text
+    }
+
     /// config.update / llm.request 的模型别名（如 "kimi-code/k3"）
     public static func modelAlias(_ root: [String: Any]) -> String? {
         if let alias = root["modelAlias"] as? String, !alias.isEmpty { return alias }

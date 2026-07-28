@@ -71,6 +71,14 @@ enum Theme {
         }
     }
 
+    /// 风险等级配色。以前 `.red`/`.orange` 在 AuditView 里硬编了三处、彼此还不一致。
+    static func riskColor(_ level: RiskLevel) -> Color {
+        switch level {
+        case .high: return failureRed
+        case .notice: return gold
+        }
+    }
+
     /// 用量占比阈值：<60 绿 / <85 橙 / 其余红（限额、ctx% 共用）
     static func percentColor(_ percent: Double) -> Color {
         switch percent {

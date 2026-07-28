@@ -14,6 +14,11 @@ final class AuditService: ObservableObject {
     @Published private(set) var riskTotal = 0
     @Published private(set) var lastError: String?
     @Published private(set) var exportMessage: String?
+    /// 按来源 / 类型分组的计数（筛选 chip 与总览卡的分布）。
+    /// ⚠️ `SourceFilterBar` 的 `count:` 闭包在渲染里**逐 chip 调用**，只能读这两个字典，
+    /// 绝不能每次都查库。
+    @Published private(set) var sourceCounts: [AgentSource: Int] = [:]
+    @Published private(set) var kindCounts: [ToolKind: Int] = [:]
 
     /// 命中高危规则时回调（主线程）：AppDelegate 转成岛卡 + 系统通知
     var onRiskAlert: ((RiskAlert) -> Void)?
@@ -141,10 +146,27 @@ final class AuditService: ObservableObject {
                 let rows = try store.audit.recent(
                     query, limit: pageSize, offset: (max(1, page) - 1) * pageSize)
                 let riskTotal = try store.audit.count(.init(riskOnly: true))
+                // 分布计数各自去掉自己那一维：否则选中某来源后其余 chip 全变 0，
+                // 用户就看不出「切过去还有多少条」。
+                var sourceQuery = query
+                sourceQuery.source = nil
+                var kindQuery = query
+                kindQuery.kind = nil
+                let bySource = try store.audit.counts(by: .source, sourceQuery)
+                let byKind = try store.audit.counts(by: .kind, kindQuery)
                 self.publish {
                     $0.events = rows
                     $0.total = total
                     $0.riskTotal = riskTotal
+                    $0.lastError = nil
+                    $0.sourceCounts = Dictionary(
+                        uniqueKeysWithValues: bySource.compactMap { key, value in
+                            AgentSource(rawValue: key).map { ($0, value) }
+                        })
+                    $0.kindCounts = Dictionary(
+                        uniqueKeysWithValues: byKind.compactMap { key, value in
+                            ToolKind(rawValue: key).map { ($0, value) }
+                        })
                 }
             } catch {
                 self.publish { $0.lastError = "读取审计流水失败: \(error)" }

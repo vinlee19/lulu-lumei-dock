@@ -258,6 +258,9 @@ eureka --usage-snapshot            # full scan → today's usage JSON (used by t
 eureka --limits-snapshot [--claude]# rate-limit snapshot (Codex + Grok local; --claude also hits the unofficial API)
 eureka --audit-snapshot            # dump the agent tool-call audit trail (--risk-only / --limit N)
 eureka --render-previews [dir]     # offscreen-render every island state to PNG
+eureka --render-shell [dir]        # offscreen-render the sidebar + audit page (light/dark)
+eureka --render-lineage [dir]      # offscreen-render the turn lineage graph (golden + live)
+eureka --diagnostics-snapshot      # scan and dump per-turn prompt-quality metrics
 eureka-relay inject --event stop --session demo   # inject a test event into the spool
 ```
 
@@ -265,7 +268,7 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (525 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (573 tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)

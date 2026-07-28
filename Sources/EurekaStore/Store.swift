@@ -13,6 +13,7 @@ public final class EurekaStore {
     public let toolCalls: ToolCallsRepo
     public let audit: AuditRepo
     public let search: SearchRepo
+    public let turnMetrics: TurnMetricsRepo
     public let limitSamples: LimitSamplesRepo
     public let sessionTerminals: SessionTerminalsRepo
 
@@ -30,6 +31,7 @@ public final class EurekaStore {
         toolCalls = ToolCallsRepo(db: db)
         audit = AuditRepo(db: db)
         search = SearchRepo(db: db)
+        turnMetrics = TurnMetricsRepo(db: db)
         limitSamples = LimitSamplesRepo(db: db)
         sessionTerminals = SessionTerminalsRepo(db: db)
     }
@@ -1136,6 +1138,29 @@ public final class AuditRepo {
         return try db.query(
             "SELECT COUNT(*) FROM audit_events \(whereClause)", bindings
         ) { Int($0.int(0)) }.first ?? 0
+    }
+
+    /// 按某一维度分组计数（筛选条 chip 与总览卡的分布用）。
+    ///
+    /// 只接受白名单列，**绝不把外部字符串拼进 SQL**。先例：同文件 `dailySeries` 的 GROUP BY。
+    /// 实测真实 25,576 行约 30ms（`source`/`kind` 无索引，全表扫）；`prune(keepingLast:)`
+    /// 的 20 万行上限下约 100–200ms —— 只在页面加载时算一次，**不能随输入逐次跑**。
+    public enum CountDimension: String {
+        case source
+        case kind
+    }
+
+    public func counts(
+        by dimension: CountDimension, _ query: Query = Query()
+    ) throws -> [String: Int] {
+        let (whereClause, bindings) = Self.filter(query)
+        let rows = try db.query("""
+        SELECT \(dimension.rawValue), COUNT(*) FROM audit_events \(whereClause)
+        GROUP BY \(dimension.rawValue)
+        """, bindings) { row in (row.text(0) ?? "", Int(row.int(1))) }
+        var result: [String: Int] = [:]
+        for (key, count) in rows where !key.isEmpty { result[key] = count }
+        return result
     }
 
     /// 保留策略：删早于 date 的行
