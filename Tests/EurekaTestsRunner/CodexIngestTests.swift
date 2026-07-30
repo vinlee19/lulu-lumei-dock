@@ -656,6 +656,83 @@ func sessionIndexerTests(_ t: TestRunner) {
         try expectEqual(sessions[0].name, "官方 Codex 会话标题")
     }
 
+    t.test("Codex 索引：一个文件里两条 session_meta，只认第一条（id 不被 resume 的 meta 覆盖）") {
+        // 复现真实 bug：resume / fork 出来的 rollout 会写入第二条 session_meta。
+        // 原来「id 与 name 都拿到才停」会一路扫到文件末尾，途中把 id 覆盖成**别的会话的 id**
+        // —— 本机 121 个 rollout 因此只解析出 91 个唯一 id，30 个会话在列表/索引里被错误合并。
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("eureka-cxidx-dualmeta-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dayDir = root.appendingPathComponent("2026/07/21", isDirectory: true)
+        try fm.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        func line(_ object: [String: Any]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        let file = dayDir.appendingPathComponent("rollout-2026-07-21T10-00-00-first-thread.jsonl")
+        try ([
+            try line([
+                "timestamp": "2026-07-21T08:00:00.000Z", "type": "session_meta",
+                "payload": ["id": "first-thread", "cwd": "/Users/me/work/first"],
+            ]),
+            try line([
+                "timestamp": "2026-07-21T08:00:01.000Z", "type": "event_msg",
+                "payload": ["type": "user_message", "message": "第一个会话的提问"],
+            ]),
+            // resume 带进来的第二条 meta：绝不能覆盖上面的 id/cwd
+            try line([
+                "timestamp": "2026-07-21T09:00:00.000Z", "type": "session_meta",
+                "payload": ["id": "second-thread", "cwd": "/Users/me/work/second"],
+            ]),
+        ].joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+
+        let sessions = CodexSessionIndexer.index(sessionsRoot: root)
+        try expectEqual(sessions.count, 1)
+        try expectEqual(sessions[0].id, "first-thread")
+        try expectEqual(sessions[0].cwd, "/Users/me/work/first")
+    }
+
+    t.test("Codex 索引：没有 user_message 的大文件不整文件扫（超出上界即放弃标题）") {
+        // 这类会话（子代理 / 自动化 / compact 后）实勘占 121 个里的 29 个。原来它们永远不满足
+        // 停止条件 → 整文件逐行 JSON 解析（单文件最大 70 MB）。现在超过 headScanLimit 就收手：
+        // id/cwd 仍来自第一行，name 退回 nil，UI 由 displayName 兜底显示「会话 <id前8>」。
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("eureka-cxidx-nouser-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let dayDir = root.appendingPathComponent("2026/07/21", isDirectory: true)
+        try fm.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        func line(_ object: [String: Any]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        var body = try line([
+            "timestamp": "2026-07-21T08:00:00.000Z", "type": "session_meta",
+            "payload": ["id": "no-user", "cwd": "/Users/me/work/auto"],
+        ]) + "\n"
+        // 填过 headScanLimit（1 MB）的无关行
+        let filler = try line([
+            "timestamp": "2026-07-21T08:00:02.000Z", "type": "response_item",
+            "payload": ["kind": String(repeating: "f", count: 4096)],
+        ]) + "\n"
+        while body.utf8.count < (1 << 20) + (64 << 10) { body += filler }
+        // 上界之后才出现的 user_message：**不该**被读到
+        body += try line([
+            "timestamp": "2026-07-21T09:00:00.000Z", "type": "event_msg",
+            "payload": ["type": "user_message", "message": "上界之外的标题不该出现"],
+        ]) + "\n"
+        let file = dayDir.appendingPathComponent("rollout-2026-07-21T10-00-00-no-user.jsonl")
+        try body.write(to: file, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+
+        let sessions = CodexSessionIndexer.index(sessionsRoot: root)
+        try expectEqual(sessions.count, 1)
+        try expectEqual(sessions[0].id, "no-user")
+        try expectEqual(sessions[0].cwd, "/Users/me/work/auto")
+        try expect(sessions[0].name == nil, "上界之外的 user_message 不该被读到")
+        try expectEqual(sessions[0].displayName, "会话 no-user")
+    }
+
     t.test("Codex 索引：resume 的旧会话（老日期目录 + 新 mtime）被索引；全量 window 不溢出") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory
