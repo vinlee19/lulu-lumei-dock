@@ -4,6 +4,124 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] - 2026-07-30
+
+### Added
+
+- **Memory libraries** — each project's `memory/` directory folds into one row (entry count, size,
+  latest change, how many origin sessions are still openable) and opens into its own page with a
+  type-distribution card and type filters. Searching expands libraries so a query still reaches
+  individual entries. Qwen's identically-shaped `projects/<encoded>/memory/` is covered too, and a
+  library holding only an index is labeled as such instead of showing "0".
+- **Memory graph** — a third layout beside list/icons, and a one-hop version on memory detail pages.
+  Nodes are the index, type swimlanes, entries, and **the session each memory was written in**;
+  edges are index→category, `[[wiki link]]` references (mutual ones merged into one bidirectional
+  edge), and memory→session. Clicking a session node jumps to the session page over the same
+  `eurekaRevealSession` channel the usage page uses; sessions whose transcript is gone
+  are drawn dashed-grey and are deliberately not clickable. Links that resolve to nothing and deleted
+  origin sessions are reported in the legend rather than silently omitted.
+- Graph construction and layout live in `EurekaKit` as pure functions (following `TurnGraph`), so both
+  are unit-testable and offscreen-renderable. The layout is a uniform grid — columns are type
+  swimlanes plus a session lane, rows are index/headers/entries — and **no edge segment ever crosses a
+  node** by construction: horizontal runs only travel row gutters, vertical runs only column gutters.
+  When lanes don't fit the viewport the canvas grows and scrolls horizontally; only a node count over
+  the limit degrades to "not drawn".
+- **An "指令" tab**, split out of Memory. Persistent instructions (`CLAUDE.md`, `AGENTS.md` with
+  `AGENTS.override.md` precedence, `GEMINI.md`, `QWEN.md`, `.cursor/rules/*.mdc`, Hermes `SOUL.md`) get
+  their own page, count, and global-vs-project breakdown; Memory now counts only what agents wrote
+  themselves. Locally that's 105 memories vs 19 instruction files — one number for both was
+  meaningless. Creation entries follow their page: Codex/Kimi/Gemini's fixed-name instruction files
+  moved to the new tab, per-CLI memory creation stayed on Memory.
+- **Memory library index drift.** `MEMORY.md` is what an agent reads to decide what to load, so a
+  memory file the index doesn't list is effectively dead — locally 2 of 72 in one library. Libraries now
+  report both directions (unlisted files, and index entries pointing at nothing) on the library row, in
+  a banner with a "show only unlisted" filter, and as dashed nodes in the graph.
+- **Codex memories now link to their sessions too.** Codex has no frontmatter; its `MEMORY.md` records
+  provenance in a `### rollout_summary_files` section, one `thread_id=` per line (15 locally, **15/15
+  still resolvable** — compare Claude's 37/84). Memory entries carry a list of session refs now, so the
+  row action and detail toolbar offer a single jump or a dropdown. `cwd=` is deliberately *not* used for
+  project attribution: one entry points at a sandbox working directory, not a repo root.
+- **A cross-source consistency card** on the audit page — the thing a "local agent CLI manager" should
+  do and nothing else does: reconcile 12 CLIs' instruction files, skill distribution, and memory index
+  health. Every threshold is *adaptive* (it checks conventions you already use, rather than an ideal
+  checklist) because the real risk here is noise, not wrong math: instruction gaps only count files you
+  use in ≥2 repos, and only for repos that actually have a memory library (`ProjectResolver` reports
+  sandbox working directories as repo roots — 5 of 17 locally); skill gaps are aggregated per source and
+  only reported when a skill is missing from exactly one comparable source. Locally that's 5 findings
+  instead of 18. `ConsistencyChecker` lives in `EurekaIngest` as a pure function so those thresholds are
+  pinned by tests.
+- `--render-knowledge` now also renders the library page, the graph (light + dark), a memory detail
+  page with its relation graph, and the instructions page; `--render-shell` renders the consistency card.
+
+### Removed
+
+- **The 诊断 (diagnostics) tab and its persistence layer.** Its value depended on someone reading the
+  cross-session aggregates and changing their prompting habits; it wasn't earning the cost. Gone:
+  `PromptDiagnosticsView` / `PromptDiagnosticsService`, `TurnMetricsIndexer`, `TurnMetricsRepo`, the
+  `turn_metrics` / `turn_files` tables (dropped by schema v19), and `--diagnostics-snapshot` — about
+  830 lines plus tests. The sidebar is back to 11 items.
+- **The turn lineage graph stays**, reachable from the session page header. It computes on demand from
+  `TurnSlicer.slice(transcript)` and never touched `turn_metrics`, so dropping the tables costs it
+  nothing; `TurnDiagnostics` is kept because the graph's header strip shows its re-read / retry /
+  rework counts. What's gone is only the cross-session aggregation and its persistent index —
+  which is also what made this the cheaper half to remove.
+
+### Fixed
+
+- **A 72-second scan ran every 60 seconds.** `AgentSessionDiscovery.forIndexing()` measured **72.8s**
+  and the usage timer called it on every tick, so the background queue was never idle — the app
+  averaged **29.5% CPU** over an 11-hour run. Of those 72 seconds, **Codex alone accounted for 65**
+  (121 sessions); Claude's 94 sessions took 0.41s. Three fixes, verified end to end:
+  `AgentSessionDiscovery.forIndexing()` **72.8s → 1.9s**, `ProjectRoots.recentCwds()` **58.3s → 3.5s**.
+  - **`CodexSessionIndexer.headInfo` read entire files.** Its stop condition required *both* an id and
+    a name, but the name comes from the first `event_msg/user_message` — and sessions without any user
+    message (subagent / automated / post-compact runs: **29 of 121** locally) never satisfied it, so it
+    JSON-parsed every line of files up to **70 MB**. Now it reads a bounded head (64 KB probe, 1 MB
+    cap), byte-scans for the two markers before paying for `JSONSerialization`, and walks lines with a
+    cursor instead of `split`. Session names are byte-identical before and after.
+  - **The same discovery ran four times during launch warm-up** (`SkillMemoryService` alone called it
+    twice). `ProjectScopeDiscovery` now shares one result behind a 60s TTL, invalidated on manual refresh.
+  - **Full-text indexing no longer shares the usage tick.** Search isn't real-time data and only pays
+    the discovery cost again; it runs every 5 minutes while usage, limits, and history stay at 60s.
+    (Per-turn indexing used to ride here too — it's gone entirely, see Removed.)
+- **Codex session ids were silently wrong for 30 sessions.** Because `headInfo` scanned to end of file,
+  a second `session_meta` — written when a rollout is resumed or forked, present in every file over
+  5 MB locally — **overwrote the id with another session's**. 121 rollout files yielded only 91 unique
+  ids, so those sessions collided in the session list and in `fts_docs`. Only the first `session_meta`
+  counts now, and schema v18 forces a re-index (fingerprints alone wouldn't).
+- Two per-frame hot paths: `sourcesByCount` called a full-table filter inside its sort comparator
+  (~10k array walks per frame), and the memory graph re-ran layout for 126 nodes inside `GeometryReader`.
+  Both are precomputed/cached now.
+
+- **Codex "memory" counted 20 files where only 3 are memories.** `~/.codex/memories` is a git repo
+  Codex maintains itself, and it mixes four unrelated things; the scan recursed through all of it. Only
+  the three top-level files are memories (`raw_memories.md` → `MEMORY.md` → `memory_summary.md`, a
+  pipeline). The rest were miscounted: 14 `rollout_summaries/*.md` are per-session summaries cited by
+  `MEMORY.md`, `extensions/ad_hoc/instructions.md` is meta-instruction telling Codex how to maintain
+  its own memory, and `skills/publish-draft-pr/SKILL.md` **is a skill** — it now shows up under Skills,
+  where it belongs. Codex has **no per-project memory** at all: project attribution lives inside the
+  content (`applies_to: cwd=…`), not in directories.
+- **Hermes' three files were all filed as instructions.** `memories/MEMORY.md` and `memories/USER.md`
+  are written *by the agent* (memories); only `SOUL.md` — its persona — is an instruction.
+- **Sidebar dropped the "系统 / 设置" group at minimum window height** once a 12th tab existed. Row and
+  group-label spacing each lost 1pt so everything fits the ~512pt content area again (the outer
+  `ScrollView` was already a backstop, but the settings entry should not require scrolling to find).
+  Removing the diagnostics tab later brought the count back to 11, leaving headroom.
+
+- **Memory page counted the wrong thing.** Claude's real memories —
+  `~/.claude/projects/<encoded>/memory/*.md`, agent-written, one `MEMORY.md` index plus one file per
+  fact — were indexed and then dropped by a filter in `SkillMemoryService.rebuild()`, so the page
+  total, source chips, scope breakdown, and size all excluded them (97 of 141 files on the author's
+  machine). Nothing is discarded now: standalone files stay in the list, library entries fold into one
+  row per library, and every statistic reads one shared set.
+- **Project names were being reverse-engineered out of a lossy encoding.** Claude turns `/`, `.` *and*
+  `_` into `-` when naming a project directory, so splitting on `-` gave `layer` for
+  `aftership-semantic-layer`. Names now come from encoding each known repo root *forward* and matching,
+  with a transcript-head `cwd` lookup as fallback.
+- **Memory rows showed the project name as their title**, which made every entry in a library
+  identically named. Titles come from frontmatter `name` (or the filename) now, with the project as a
+  chip; the row's second line prefers `description` over the path.
+
 ## [0.16.0] - 2026-07-28
 
 ### Added
@@ -921,6 +1039,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.17.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.17.0
 [0.16.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.16.0
 [0.15.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.15.0
 [0.14.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.14.0
