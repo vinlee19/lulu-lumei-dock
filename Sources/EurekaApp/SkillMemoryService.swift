@@ -10,7 +10,20 @@ import Foundation
 /// 自带后台扫描队列；编辑写前备份、删除进废纸篓、停用 = 移到 *.eureka-disabled 同级目录（均可逆）。
 final class SkillMemoryService: ObservableObject {
     @Published private(set) var skills: [SkillEntry] = []
+    /// 记忆列表里的**独立记忆条目**（各 CLI 的全局记忆目录）。两类东西不在这里：
+    /// 项目记忆库的条目折叠进 `libraries`（一个项目 70+ 条会把全局记忆冲掉）；
+    /// CLAUDE.md / AGENTS.md 这类**用户维护的持久指令**归 `instructions`，它们不是记忆。
     @Published private(set) var memories: [MemoryEntry] = []
+    /// 持久指令文件：CLAUDE.md / AGENTS.md / GEMINI.md / QWEN.md / `.cursor/rules` / Hermes SOUL。
+    /// 独立成「指令」页签 —— 它们是用户写给 agent 的规则，不是 agent 攒下来的记忆，
+    /// 混在一起统计会让「记忆有多少」这个数字失去意义。
+    @Published private(set) var instructions: [MemoryEntry] = []
+    /// 记忆库（Claude / Qwen 的 `projects/<encoded>/memory`）；搜索时为空（改为扁平展开命中条目）
+    @Published private(set) var libraries: [MemoryLibrary] = []
+    /// **统计唯一口径**：独立条目 + 全部库内文件（搜索时 = 命中集）。
+    /// 统计卡、来源 chips、搜索结果数都读它 —— 以前它们读的是被过滤后的列表数组，
+    /// 于是 97 条项目记忆一条都没算进去。
+    @Published private(set) var memoryEntries: [MemoryEntry] = []
     @Published private(set) var scanning = false
     /// 扫描中的阶段文案（列表已有数据时，仅靠搜索框那个小 spinner 看不出在扫）；扫完置 nil
     @Published private(set) var scanPhase: String?
@@ -25,6 +38,15 @@ final class SkillMemoryService: ObservableObject {
     private let resolver = ProjectResolver()
     private var allSkills: [SkillEntry] = []
     private var allMemories: [MemoryEntry] = []
+    private var allLibraries: [MemoryLibrary] = []
+    /// 本轮扫描发现的全部仓库根。一致性检查要靠它发现「**完全没有**指令文件」的仓库 ——
+    /// 那种仓库压根不会出现在 allMemories 里（实勘 starrocks 就是这样）。
+    private var allRepoRoots: [(root: URL, name: String)] = []
+    /// 记忆库 → 关系图。构图是纯函数但不便宜（semantic-layer 126 节点），
+    /// 而 SwiftUI 的 body 会反复求值 → 按库缓存，每次重扫清空。
+    private var graphCache: [String: MemoryGraph.Graph] = [:]
+    /// `"<库 key>|<画布宽度>"` → 排版结果（见 layout(for:width:)）
+    private var layoutCache: [String: MemoryGraphLayout.Result] = [:]
 
     // MARK: - 扫描
 
@@ -34,6 +56,8 @@ final class SkillMemoryService: ObservableObject {
     func refresh(force: Bool = false) {
         guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
+        // 用户点刷新就是要最新的：丢掉 cwd 发现缓存，否则 60s 内拿到的还是上次那份
+        if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
         scanPhase = "正在扫描技能与记忆…"
         queue.async { [weak self] in
@@ -63,6 +87,9 @@ final class SkillMemoryService: ObservableObject {
             let skills = SkillMemoryIndexer.indexSkills(
                 claudeSkillsRoot: SkillMemoryIndexer.claudeSkillsRoot(),
                 codexSkillsRoot: SkillMemoryIndexer.codexSkillsRoot(),
+                // Codex 把技能也塞进了 memories git 仓库；不在这里收，记忆页就会多出一条假记忆
+                codexMemorySkillsRoot: SkillMemoryIndexer.codexHome()
+                    .appendingPathComponent("memories/skills", isDirectory: true),
                 opencodeSkillsRoot: OpencodePaths.skillsRoot(),
                 grokSkillsRoot: GrokPaths.skillsRoot(),
                 kimiSkillsRoot: KimiPaths.skillsRoot(),
@@ -94,9 +121,14 @@ final class SkillMemoryService: ObservableObject {
                 qoderMemoriesRoot: QoderPaths.memoriesRoot(),
                 projectRoots: repoRoots,
                 codexInstructionScopes: codexInstructionScopes)
+            let libraries = MemoryLibrary.group(memories)
             DispatchQueue.main.async {
                 self.allSkills = skills
                 self.allMemories = memories
+                self.allLibraries = libraries
+                self.allRepoRoots = repoRoots
+                self.graphCache.removeAll()
+                self.layoutCache.removeAll()
                 self.scanning = false
                 self.scanPhase = nil
                 self.lastScanAt = Date()
@@ -109,21 +141,37 @@ final class SkillMemoryService: ObservableObject {
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         // 列表只展示用户自建/安装技能；内置(bundled) 仅供详情矩阵与跨源判定
         let userSkills = allSkills.filter { $0.origin == .user }
-        // 记忆页展示：全局记忆（任意类型）+ 各项目根的指令文件（CLAUDE.md/AGENTS.md/GEMINI.md…）。
-        // 排除 ~/.claude/projects/<enc>/memory/*.md 之类的会话级自建记忆（数量庞大、非管理对象）。
-        let visibleMemories = allMemories.filter { $0.projectName == nil || $0.kind == .instructions }
+        // 记忆分三路（**不丢弃任何条目**）：
+        //  1. 指令文件 → instructions（独立页签）
+        //  2. 不属于记忆库的独立记忆 → memories
+        //  3. 库内条目 → 折叠成 libraries 一行一库，但照样计入统计口径 memoryEntries
+        let standalone = allMemories.filter { $0.libraryKey == nil }
+        let standaloneMemories = standalone.filter { $0.kind != .instructions }
+        let instructionFiles = standalone.filter { $0.kind == .instructions }
+        let libraryFiles = allMemories.filter { $0.libraryKey != nil }
         guard !query.isEmpty else {
             skills = userSkills
-            memories = visibleMemories
+            memories = standaloneMemories
+            instructions = instructionFiles
+            libraries = allLibraries
+            memoryEntries = standaloneMemories + libraryFiles
             return
         }
         skills = userSkills.filter {
             [$0.name, $0.description, $0.path]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)
         }
-        memories = visibleMemories.filter {
-            "\($0.scope) \($0.path) \($0.projectName ?? "")".lowercased().contains(query)
-        }
+        // 搜索时**库要展开**：命中的库内条目扁平并入结果，否则用户搜一条记忆会什么都搜不到
+        let matched = (standaloneMemories + libraryFiles).filter { Self.matches($0, query: query) }
+        memories = matched
+        instructions = instructionFiles.filter { Self.matches($0, query: query) }
+        libraries = []
+        memoryEntries = matched
+    }
+
+    private static func matches(_ entry: MemoryEntry, query: String) -> Bool {
+        [entry.title, entry.scope, entry.path, entry.summary ?? "", entry.projectName ?? ""]
+            .joined(separator: " ").lowercased().contains(query)
     }
 
     // MARK: - 跨源配置矩阵 / 名称归一
@@ -152,6 +200,96 @@ final class SkillMemoryService: ObservableObject {
 
     func skills(for source: AgentSource) -> [SkillEntry] { skills.filter { $0.source == source } }
     func memories(for source: AgentSource) -> [MemoryEntry] { memories.filter { $0.source == source } }
+
+    // MARK: - 记忆统计（唯一口径：memoryEntries，含库内条目）
+
+    /// 记忆总数（独立条目 + 库内文件；搜索时 = 命中数）
+    var memoryTotal: Int { memoryEntries.count }
+
+    func memoryCount(for source: AgentSource) -> Int {
+        memoryEntries.filter { $0.source == source }.count
+    }
+
+    var memoryTotalBytes: UInt64 {
+        memoryEntries.reduce(UInt64(0)) { $0 + $1.sizeBytes }
+    }
+
+    /// 记忆的范围分布：全局记忆 / 项目记忆库（指令文件已不在记忆口径里）
+    var memoryScopeBreakdown: (global: Int, library: Int) {
+        var global = 0
+        var library = 0
+        for entry in memoryEntries {
+            if entry.libraryKey != nil { library += 1 } else { global += 1 }
+        }
+        return (global, library)
+    }
+
+    var memorySourceCount: Int { Set(memoryEntries.map(\.source)).count }
+
+    // MARK: - 指令统计（与记忆完全分开的一套）
+
+    var instructionTotal: Int { instructions.count }
+
+    func instructionCount(for source: AgentSource) -> Int {
+        instructions.filter { $0.source == source }.count
+    }
+
+    var instructionTotalBytes: UInt64 {
+        instructions.reduce(UInt64(0)) { $0 + $1.sizeBytes }
+    }
+
+    /// 指令的范围分布：全局（`~/.claude/CLAUDE.md` 之类）/ 项目根
+    var instructionScopeBreakdown: (global: Int, project: Int) {
+        let project = instructions.filter { $0.projectName != nil }.count
+        return (instructions.count - project, project)
+    }
+
+    var instructionSourceCount: Int { Set(instructions.map(\.source)).count }
+
+    func instructions(for source: AgentSource) -> [MemoryEntry] {
+        instructions.filter { $0.source == source }
+    }
+
+    func libraries(for source: AgentSource?) -> [MemoryLibrary] {
+        guard let source else { return libraries }
+        return libraries.filter { $0.source == source }
+    }
+
+    /// 某条记忆所属的记忆库（详情页的关联小图要拿整库的图再取一跳）
+    func library(containing entry: MemoryEntry) -> MemoryLibrary? {
+        guard let key = entry.libraryKey else { return nil }
+        return allLibraries.first { $0.key == key }
+    }
+
+    // MARK: - 跨源配置一致性
+
+    /// 计算在 `ConsistencyChecker`（EurekaIngest 的纯函数，阈值口径由单测钉住）。
+    /// 这里只负责把手上的四份数据递进去。
+    var consistencyReport: ConsistencyChecker.Report {
+        ConsistencyChecker.report(
+            skills: allSkills, memories: allMemories, libraries: allLibraries,
+            repoNames: allRepoRoots.map(\.name))
+    }
+
+    /// 记忆库的关系图（按库缓存；重扫时清空）
+    func graph(for library: MemoryLibrary) -> MemoryGraph.Graph {
+        if let cached = graphCache[library.key] { return cached }
+        let graph = MemoryGraphBuilder.build(library.graphInput())
+        graphCache[library.key] = graph
+        return graph
+    }
+
+    /// 记忆库图谱的**排版结果**（按库 + 画布宽度缓存）。
+    /// 排版是纯函数但不便宜（semantic-layer 126 节点 / 53 行），而它跑在 `GeometryReader`
+    /// 的 body 里 —— 不缓存就是每帧重排。宽度量化到整数点，避免浮点抖动让缓存永不命中。
+    func layout(for library: MemoryLibrary, width: CGFloat) -> MemoryGraphLayout.Result {
+        let key = "\(library.key)|\(Int(width.rounded()))"
+        if let cached = layoutCache[key] { return cached }
+        let result = MemoryGraphLayout.layout(
+            graph(for: library), metrics: .standard(width: width))
+        layoutCache[key] = result
+        return result
+    }
 
     // MARK: - 读
 

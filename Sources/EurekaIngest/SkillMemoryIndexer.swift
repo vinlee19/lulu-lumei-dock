@@ -66,6 +66,24 @@ public struct SkillEntry: Equatable, Sendable, Identifiable {
     }
 }
 
+/// 一条记忆指向的会话。
+///
+/// Claude 的记忆一条对一个会话（frontmatter `metadata.originSessionId`）；
+/// Codex 的 `MEMORY.md` 是**一个文件聚合多次会话**（正文 `### rollout_summary_files` 段落里
+/// 每行一个 `thread_id=`，实勘 15 个），所以这里必须是多值。
+public struct MemorySessionRef: Equatable, Sendable, Identifiable {
+    public var id: String { sessionId }
+    public var sessionId: String
+    /// transcript 的实际路径；nil = 记录文件已不在（UI 置灰、不可跳转）
+    public var path: String?
+    public var exists: Bool { path != nil }
+
+    public init(sessionId: String, path: String?) {
+        self.sessionId = sessionId
+        self.path = path
+    }
+}
+
 public enum MemoryEntryKind: String, Equatable, Sendable {
     /// CLAUDE.md / AGENTS.md 等用户维护的持久指令。
     case instructions
@@ -79,21 +97,62 @@ public enum MemoryEntryKind: String, Equatable, Sendable {
 public struct MemoryEntry: Equatable, Sendable, Identifiable {
     public var id: String { path }
     public var source: AgentSource
-    public var scope: String  // "全局" / 项目名 / 文件名（展示用）
+    /// 分组用的展示范围："全局" / 项目名 / 文件名。**不是标题** —— 同一项目的几十条记忆
+    /// 这里全是同一个项目名，拿它当标题会让整列重名（见 `title`）。
+    public var scope: String
     public var path: String
     public var kind: MemoryEntryKind
     /// 归属项目名；nil = 系统级记忆（全局 / 用户自建），非 nil = 该项目的记忆
     public var projectName: String?
     public var sizeBytes: UInt64
     public var modifiedAt: Date
+    /// 条目标题：frontmatter `name` 优先，否则文件名（去扩展名）
+    public var title: String
+    /// frontmatter `description`
+    public var summary: String?
+    /// frontmatter `metadata.type`；没写就是 `.other`
+    public var memoryType: MemoryType
+    /// frontmatter `metadata.originSessionId`：这条记忆诞生于哪次会话
+    public var originSessionId: String?
+    /// 来源会话 transcript 的实际路径；nil = 会话已被删除（图谱里置灰、不可跳转）
+    public var originSessionPath: String?
+    /// 这条记忆指向的**全部**会话。Claude 是 0/1 个（等于 originSessionId）；
+    /// Codex 的 MEMORY.md 聚合多次会话，实勘 15 个。UI 据此给单按钮或下拉列表。
+    public var relatedSessions: [MemorySessionRef]
+    /// 正文里的 `[[wiki 链接]]` 原文（解析成边在 EurekaKit 做，索引层只采集）
+    public var links: [String]
+    /// **仅索引文件**（MEMORY.md）有值：正文里以 markdown 链接列出的条目文件名。
+    /// 与目录里的实际文件对账，就能算出「未被收录的死记忆」与「指向空气的条目」。
+    /// 不并进 `links`：那会让索引在图谱里连出几十条 contains 边，把真正要看的引用边盖掉。
+    public var indexedTargets: [String]
+    /// 记忆库的索引文件（`<library>/MEMORY.md`）
+    public var isIndex: Bool
+    /// 所属记忆库：`"<source>:<encoded-project-dir>"`；nil = 不属于任何记忆库
+    public var libraryKey: String?
     public var isEditable: Bool { kind != .generated }
     public var isDeletable: Bool { kind != .generated }
+
+    /// `[[link]]` 的可匹配别名：文件 basename + frontmatter name
+    public var linkAliases: [String] {
+        let basename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        return [basename, title]
+    }
 
     public init(
         source: AgentSource, scope: String, path: String,
         projectName: String? = nil,
         kind: MemoryEntryKind = .userManaged,
-        sizeBytes: UInt64, modifiedAt: Date
+        sizeBytes: UInt64, modifiedAt: Date,
+        title: String? = nil,
+        summary: String? = nil,
+        memoryType: MemoryType = .other,
+        originSessionId: String? = nil,
+        originSessionPath: String? = nil,
+        relatedSessions: [MemorySessionRef] = [],
+        links: [String] = [],
+        indexedTargets: [String] = [],
+        isIndex: Bool = false,
+        libraryKey: String? = nil
     ) {
         self.source = source
         self.scope = scope
@@ -102,6 +161,20 @@ public struct MemoryEntry: Equatable, Sendable, Identifiable {
         self.projectName = projectName
         self.sizeBytes = sizeBytes
         self.modifiedAt = modifiedAt
+        self.title = title ?? URL(fileURLWithPath: path)
+            .deletingPathExtension().lastPathComponent
+        self.summary = summary
+        self.memoryType = memoryType
+        self.originSessionId = originSessionId
+        self.originSessionPath = originSessionPath
+        // Claude 那条单值来源也并进多值列表，UI 只认一个字段
+        self.relatedSessions = relatedSessions.isEmpty
+            ? (originSessionId.map { [MemorySessionRef(sessionId: $0, path: originSessionPath)] } ?? [])
+            : relatedSessions
+        self.links = links
+        self.indexedTargets = indexedTargets
+        self.isIndex = isIndex
+        self.libraryKey = libraryKey
     }
 }
 
@@ -236,6 +309,9 @@ public enum SkillMemoryIndexer {
 
     public static func indexSkills(
         claudeSkillsRoot: URL, codexSkillsRoot: URL,
+        /// `~/.codex/memories/skills`：Codex 把技能也放进了那个 memories git 仓库
+        /// （实勘 `publish-draft-pr`）。不收这里，它就会被记忆扫描当成一条"记忆"。
+        codexMemorySkillsRoot: URL? = nil,
         opencodeSkillsRoot: URL? = nil,
         grokSkillsRoot: URL? = nil,
         kimiSkillsRoot: URL? = nil,
@@ -258,6 +334,13 @@ public enum SkillMemoryIndexer {
         result += scanSkillRoot(codexSkillsRoot, source: .codex, enabled: true, scope: .system)
         result += scanSkillRoot(
             disabledRoot(for: codexSkillsRoot), source: .codex, enabled: false, scope: .system)
+        if let codexMemorySkillsRoot {
+            result += scanSkillRoot(
+                codexMemorySkillsRoot, source: .codex, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: codexMemorySkillsRoot), source: .codex, enabled: false,
+                scope: .system)
+        }
         if let opencodeSkillsRoot {
             result += scanSkillRoot(
                 opencodeSkillsRoot, source: .opencode, enabled: true, scope: .system)
@@ -456,20 +539,47 @@ public enum SkillMemoryIndexer {
         let fm = FileManager.default
         var result: [MemoryEntry] = []
 
+        /// `libraryKey` 非 nil = 这条属于某个记忆库；`sessionRoot` = 该库同级的会话目录
+        /// （`~/.claude/projects/<encoded>/`），用来判断来源会话的 transcript 还在不在。
         func add(
             _ url: URL, source: AgentSource, scope: String,
-            projectName: String? = nil, kind: MemoryEntryKind = .userManaged
+            projectName: String? = nil, kind: MemoryEntryKind = .userManaged,
+            libraryKey: String? = nil, sessionRoot: URL? = nil,
+            relatedSessions: [MemorySessionRef] = []
         ) {
             guard fm.fileExists(atPath: url.path),
                   let values = try? url.resourceValues(
                     forKeys: [.contentModificationDateKey, .fileSizeKey])
             else { return }
+            let isLibraryIndex = libraryKey != nil && url.lastPathComponent == "MEMORY.md"
+            let document = parseMemoryDocument(url, markdownLinks: isLibraryIndex)
+            let sessionId = document.fields["originsessionid"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var sessionPath: String?
+            if let sessionId, !sessionId.isEmpty, let sessionRoot {
+                let candidate = sessionRoot.appendingPathComponent("\(sessionId).jsonl")
+                if fm.fileExists(atPath: candidate.path) { sessionPath = candidate.path }
+            }
             result.append(MemoryEntry(
                 source: source, scope: scope, path: url.path,
                 projectName: projectName,
                 kind: kind,
                 sizeBytes: UInt64(values.fileSize ?? 0),
-                modifiedAt: values.contentModificationDate ?? .distantPast))
+                modifiedAt: values.contentModificationDate ?? .distantPast,
+                title: document.fields["name"].flatMap { $0.isEmpty ? nil : $0 },
+                summary: document.fields["description"].flatMap { $0.isEmpty ? nil : $0 },
+                memoryType: MemoryType(loose: document.fields["type"]),
+                originSessionId: (sessionId?.isEmpty ?? true) ? nil : sessionId,
+                originSessionPath: sessionPath,
+                relatedSessions: relatedSessions,
+                links: document.links,
+                // 只有索引文件才解析 markdown 链接（普通记忆正文里的 md 链接是引用外部文档，
+                // 不是"收录"语义）
+                indexedTargets: isLibraryIndex ? document.indexedTargets : [],
+                // 只有记忆库里的 MEMORY.md 才是索引。Hermes 的 memories/MEMORY.md 是它
+                // 自己写的记忆正文（不是任何库的目录），所以判据里必须带上 libraryKey。
+                isIndex: isLibraryIndex,
+                libraryKey: libraryKey))
         }
 
         /// Codex 每一级目录只加载 override/AGENTS 中第一个存在的文件。
@@ -494,24 +604,38 @@ public enum SkillMemoryIndexer {
         for file in enumerateMarkdown(claudeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .claude, scope: file.deletingPathExtension().lastPathComponent)
         }
-        // Claude 项目记忆：projects/<encoded>/memory/**/*.md（含 MEMORY.md）
-        let projectDirs = (try? fm.contentsOfDirectory(
-            at: claudeProjectsRoot, includingPropertiesForKeys: nil)) ?? []
+        // Claude 项目记忆库：projects/<encoded>/memory/**/*.md（MEMORY.md = 该库的索引）
+        let projectDirs = ((try? fm.contentsOfDirectory(
+            at: claudeProjectsRoot, includingPropertiesForKeys: nil)) ?? [])
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
         for proj in projectDirs {
             let memDir = proj.appendingPathComponent("memory", isDirectory: true)
             guard fm.fileExists(atPath: memDir.path) else { continue }
-            let projName = friendlyProject(fromEncoded: proj.lastPathComponent)
+            let projName = resolveProjectName(
+                projectDir: proj, knownRoots: projectRoots)
             for file in enumerateMarkdown(memDir) {
-                add(file, source: .claude, scope: projName, projectName: projName)
+                add(file, source: .claude, scope: projName, projectName: projName,
+                    libraryKey: "claude:\(proj.lastPathComponent)", sessionRoot: proj)
             }
         }
 
         // Codex 全局持久指令：AGENTS.override.md 优先于 AGENTS.md。
         addEffectiveCodexInstruction(directory: codexHome, scope: "全局")
-        // Codex memories/**/*.md 是后台生成状态，仅供查看。
-        for file in enumerateMarkdown(codexHome.appendingPathComponent("memories", isDirectory: true)) {
+        // Codex 记忆 = `~/.codex/memories/` **顶层**的 md（实勘为三层管道：
+        // raw_memories.md → MEMORY.md → memory_summary.md），后台生成、仅供查看。
+        //
+        // ⚠️ **只收顶层，绝不递归**：这个目录是 Codex 自建的 git 仓库，混装着三类非记忆内容 ——
+        // `rollout_summaries/`（每次会话的摘要，是 MEMORY.md 的证据附件）、
+        // `extensions/`（教 Codex 怎么维护记忆的元指令）、
+        // `skills/`（**技能**，见 indexSkills 的 codexMemorySkillsRoot）。
+        // 递归收一遍会把 20 个文件全算成记忆，其中 17 个不是。
+        for file in enumerateMarkdownShallow(
+            codexHome.appendingPathComponent("memories", isDirectory: true)) {
+            // Codex 没有 frontmatter，会话归属写在正文的 rollout_summary_files 段落里
+            let refs = readHead(file, bytes: 262_144).map(extractCodexSessionRefs) ?? []
             add(file, source: .codex,
-                scope: file.deletingPathExtension().lastPathComponent, kind: .generated)
+                scope: file.deletingPathExtension().lastPathComponent, kind: .generated,
+                relatedSessions: refs)
         }
 
         // opencode 全局 AGENTS.md（~/.config/opencode/AGENTS.md，遵循 AGENTS.md 标准）
@@ -547,15 +671,18 @@ public enum SkillMemoryIndexer {
                 qwenHome.appendingPathComponent("memories", isDirectory: true)) {
                 add(file, source: .qwen, scope: file.deletingPathExtension().lastPathComponent)
             }
-            let qwenProjects = (try? fm.contentsOfDirectory(
+            let qwenProjects = ((try? fm.contentsOfDirectory(
                 at: qwenHome.appendingPathComponent("projects", isDirectory: true),
-                includingPropertiesForKeys: nil)) ?? []
+                includingPropertiesForKeys: nil)) ?? [])
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
             for proj in qwenProjects {
                 let memDir = proj.appendingPathComponent("memory", isDirectory: true)
                 guard fm.fileExists(atPath: memDir.path) else { continue }
-                let projName = friendlyProject(fromEncoded: proj.lastPathComponent)
+                let projName = resolveProjectName(
+                    projectDir: proj, knownRoots: projectRoots)
                 for file in enumerateMarkdown(memDir) {
-                    add(file, source: .qwen, scope: projName, projectName: projName)
+                    add(file, source: .qwen, scope: projName, projectName: projName,
+                        libraryKey: "qwen:\(proj.lastPathComponent)", sessionRoot: proj)
                 }
             }
         }
@@ -566,10 +693,12 @@ public enum SkillMemoryIndexer {
         //   外部改坏格式或超限会触发 Hermes 的漂移保护：它存一份 .bak 后**拒绝后续写入**。
         if let hermesHome {
             let memories = hermesHome.appendingPathComponent("memories", isDirectory: true)
+            // MEMORY / USER 是 **agent 自己写的记忆**（不是用户维护的指令）→ 归记忆；
+            // SOUL 是人格身份设定，等价于系统提示 → 归指令。
             add(memories.appendingPathComponent("MEMORY.md"), source: .hermes,
-                scope: "MEMORY", kind: .instructions)
+                scope: "MEMORY", kind: .userManaged)
             add(memories.appendingPathComponent("USER.md"), source: .hermes,
-                scope: "USER", kind: .instructions)
+                scope: "USER", kind: .userManaged)
             add(hermesHome.appendingPathComponent("SOUL.md"), source: .hermes,
                 scope: "SOUL", kind: .instructions)
         }
@@ -652,6 +781,15 @@ public enum SkillMemoryIndexer {
         return files
     }
 
+    /// **只收直属子级**的 markdown（不进子目录）。
+    /// Codex 的 memories 目录用它：那是个混装记忆/会话摘要/扩展/技能的 git 仓库，递归即误收。
+    static func enumerateMarkdownShallow(_ dir: URL) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "md" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
     static func enumerateMarkdown(_ dir: URL) -> [URL] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
@@ -679,11 +817,186 @@ public enum SkillMemoryIndexer {
         return rel
     }
 
-    /// Claude 把 cwd 的 "/" 编码成 "-"；取末段作为项目名（含点的目录名会有损，但末段通常准确）
+    /// Claude 把 cwd 的 "/" 编码成 "-"；取末段作为项目名。
+    /// **有损**：`aftership-semantic-layer` 会被切成 `layer` —— 只在反查全失败时兜底用。
     static func friendlyProject(fromEncoded encoded: String) -> String {
         let trimmed = encoded.hasPrefix("-") ? String(encoded.dropFirst()) : encoded
         let parts = trimmed.split(separator: "-")
         return parts.last.map(String.init) ?? encoded
+    }
+
+    /// Claude / Qwen 的项目目录名编码规则（实勘 11 个目录全对）：`/`、`.`、`_` **都**变 `-`。
+    /// 多对一、不可反解 —— 所以项目名只能正向编码已知路径来比对，绝不能反着切字符串。
+    public static func encodeProjectDirName(_ path: String) -> String {
+        var encoded = ""
+        for character in path {
+            encoded.append(character == "/" || character == "." || character == "_" ? "-" : character)
+        }
+        return encoded
+    }
+
+    /// 记忆库的项目名：
+    ///  1. 把每个已知仓库根正向编码后与目录名全等比对（命中就用该根的名字）；
+    ///  2. 没命中就读该目录里最新一个 `*.jsonl` 的头部拿真实 cwd，取末段目录名；
+    ///  3. 都不行才退回有损的末段启发式。
+    /// 编码是多对一的，理论上可能多根命中同一目录名 —— 取 `knownRoots` 里第一个（调用方按最近活跃排序），
+    /// 保证同一次扫描结果稳定。
+    static func resolveProjectName(
+        projectDir: URL, knownRoots: [(root: URL, name: String)]
+    ) -> String {
+        let encoded = projectDir.lastPathComponent
+        for (root, name) in knownRoots
+        where encodeProjectDirName(root.standardizedFileURL.path) == encoded {
+            return name
+        }
+        if let cwd = newestSessionCwd(in: projectDir), !cwd.isEmpty {
+            let last = URL(fileURLWithPath: cwd).standardizedFileURL.lastPathComponent
+            if !last.isEmpty { return last }
+        }
+        return friendlyProject(fromEncoded: encoded)
+    }
+
+    /// 目录里最近改动的 transcript 头部记录的 cwd（`ClaudeSessionIndexer.headInfo` 同模块可用）。
+    /// 只读一个文件：这是「项目名反查」的兜底，不值得为它再全量扫一遍会话。
+    static func newestSessionCwd(in projectDir: URL) -> String? {
+        let files = ((try? FileManager.default.contentsOfDirectory(
+            at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.pathExtension == "jsonl" }
+        let newest = files.max {
+            let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            return lhs < rhs
+        }
+        guard let newest else { return nil }
+        return ClaudeSessionIndexer.headInfo(fileURL: newest).cwd
+    }
+
+    // MARK: - 记忆文档解析（frontmatter + 正文 wiki 链接）
+
+    /// 读一次文件（上限 64KB）拿到 frontmatter 键值与正文里的 `[[链接]]`。
+    /// 上限不能沿用 `readHead` 的 8KB：记忆库索引 MEMORY.md 实测 11.8KB，链接全在正文里，
+    /// 8KB 会把后半截链接整片吞掉。
+    static func parseMemoryDocument(
+        _ url: URL, bytes: Int = 65536, markdownLinks: Bool = false
+    ) -> (fields: [String: String], links: [String], indexedTargets: [String]) {
+        guard let text = readHead(url, bytes: bytes) else { return ([:], [], []) }
+        return (
+            parseFrontmatterFields(text),
+            extractWikiLinks(text),
+            markdownLinks ? extractMarkdownLinks(text) : [])
+    }
+
+    /// Codex `MEMORY.md` 正文里的会话引用。
+    ///
+    /// 它没有 frontmatter，项目与会话归属写在正文的 `### rollout_summary_files` 段落里，
+    /// 每行形如：
+    /// ```
+    /// - rollout_summaries/2026-07-27T…-xxx.md (cwd=…, rollout_path=/Users/…/rollout-….jsonl,
+    ///   updated_at=…, thread_id=019fa2f0-c124-7c03-a2d1-c6debaf69293, 状态描述)
+    /// ```
+    /// 取 `thread_id=` 作会话 id、`rollout_path=` 判断记录是否还在（实勘 15 条全部可达，
+    /// 比 Claude 的 `originSessionId` 37/84 可靠得多）。
+    ///
+    /// ⚠️ **不要用 `cwd=` 归项目**：实勘有一条指向 `~/.slock/agents/<uuid>`（sandbox 工作目录
+    /// 而非仓库根），按它归会造出一个不存在的项目。
+    public static func extractCodexSessionRefs(_ text: String) -> [MemorySessionRef] {
+        let fm = FileManager.default
+        var refs: [MemorySessionRef] = []
+        var seen = Set<String>()
+        for rawLine in text.components(separatedBy: "\n") {
+            guard let idValue = value(of: "thread_id=", in: rawLine), !idValue.isEmpty,
+                  seen.insert(idValue).inserted
+            else { continue }
+            let path = value(of: "rollout_path=", in: rawLine)
+            let existing = path.flatMap { fm.fileExists(atPath: $0) ? $0 : nil }
+            refs.append(MemorySessionRef(sessionId: idValue, path: existing))
+        }
+        return refs
+    }
+
+    /// 取 `key=value` 的 value，止于逗号 / 右括号 / 空白
+    private static func value(of key: String, in line: String) -> String? {
+        guard let start = line.range(of: key) else { return nil }
+        let rest = line[start.upperBound...]
+        let end = rest.firstIndex { $0 == "," || $0 == ")" || $0 == " " } ?? rest.endIndex
+        let value = String(rest[..<end]).trimmingCharacters(in: .whitespaces)
+        return value.isEmpty ? nil : value
+    }
+
+    /// markdown 链接的目标（`[标题](feedback_push.md)` → `feedback_push.md`）。
+    ///
+    /// 只给**记忆库索引**（MEMORY.md）用：Claude 的索引正文是「一行一条 markdown 链接」，
+    /// 靠它才能算出「哪些记忆文件没被索引收录」—— 那些条目 agent 根本读不到（实勘
+    /// semantic-layer 库 72 条里有 2 条如此）。只收 `.md` 目标，外链与图片一律跳过。
+    public static func extractMarkdownLinks(_ text: String) -> [String] {
+        let characters = Array(text)
+        var targets: [String] = []
+        var seen = Set<String>()
+        var index = 0
+        while index + 1 < characters.count {
+            // 找 "](" —— 链接文字与目标的交界
+            guard characters[index] == "]", characters[index + 1] == "(" else {
+                index += 1
+                continue
+            }
+            var cursor = index + 2
+            var buffer = ""
+            var closed = false
+            while cursor < characters.count {
+                if characters[cursor] == ")" { closed = true; break }
+                if characters[cursor] == "\n" || buffer.count > 300 { break }
+                buffer.append(characters[cursor])
+                cursor += 1
+            }
+            index = closed ? cursor + 1 : index + 1
+            guard closed else { continue }
+            // 去掉锚点/查询串；只要 .md
+            let target = buffer.trimmingCharacters(in: .whitespaces)
+                .split(separator: "#").first.map(String.init) ?? ""
+            guard target.lowercased().hasSuffix(".md"),
+                  !target.contains("://"),
+                  seen.insert(target.lowercased()).inserted
+            else { continue }
+            targets.append(target)
+        }
+        return targets
+    }
+
+    /// 正文里的 `[[目标]]`。跨行、超长（>120 字符）的一律不算 —— 那通常是正文里
+    /// 把 `[[…]]` 当强调号用（实勘 115 条链接里有 2 条如此），当成链接会造出假边。
+    public static func extractWikiLinks(_ text: String) -> [String] {
+        let characters = Array(text)
+        var links: [String] = []
+        var seen = Set<String>()
+        var index = 0
+        while index + 1 < characters.count {
+            guard characters[index] == "[", characters[index + 1] == "[" else {
+                index += 1
+                continue
+            }
+            var cursor = index + 2
+            var buffer = ""
+            var closed = false
+            while cursor + 1 < characters.count {
+                if characters[cursor] == "]", characters[cursor + 1] == "]" {
+                    closed = true
+                    break
+                }
+                if characters[cursor] == "\n" || buffer.count > 120 { break }
+                buffer.append(characters[cursor])
+                cursor += 1
+            }
+            guard closed else {
+                index += 1
+                continue
+            }
+            let value = buffer.trimmingCharacters(in: .whitespaces)
+            if !value.isEmpty, seen.insert(value.lowercased()).inserted { links.append(value) }
+            index = cursor + 2
+        }
+        return links
     }
 
     // MARK: - frontmatter 解析（纯函数，单测目标）
@@ -721,6 +1034,10 @@ public enum SkillMemoryIndexer {
     /// 解析 frontmatter 的全部简单键值（供 agent 定义等复用）。
     /// 支持：单行 `key: value`（去引号）；block scalar（`key: |` / `key: >`，收编后续更深缩进行）。
     /// 不解析嵌套 map / 复杂 YAML——超出即忽略。键统一小写。
+    ///
+    /// ⚠️ **嵌套 map 的子键会被当顶层键收下**（`metadata:` 下的 `type` / `originSessionId` 直接出现在
+    /// 返回值里）。记忆索引**有意**依赖这个行为拿 `metadata.*`：别把它"修正"成严格 YAML，
+    /// 那会让 MemoryEntry 的类型与来源会话整片变空。
     public static func parseFrontmatterFields(_ text: String) -> [String: String] {
         let lines = text.components(separatedBy: "\n")
         guard let first = lines.first,

@@ -111,6 +111,17 @@ final class UsageService: ObservableObject {
     private let queue = DispatchQueue(label: "com.vinlee.eureka.usage", qos: .utility)
     private var timer: DispatchSourceTimer?
 
+    /// 全文索引的节奏，**独立于用量的 60s**。
+    ///
+    /// 搜索不是实时数据，而它要付的会话发现是这条后台队列的一大开销。原来两者共用 60s：
+    /// 发现一轮曾要 72s（见 `CodexSessionIndexer.headScanLimit` 的注释），等于队列永不空闲。
+    /// 索引器内部有指纹水位，跑得再密也只是重复付发现成本，没有额外产出。
+    ///
+    /// 代价：全文搜索看到最新会话最多滞后 5 分钟。用量、限额、历史仍是 60s。
+    static let indexInterval: TimeInterval = 300
+    /// 上次跑索引的时间（只在 queue 上访问）。初值取 distantPast：启动后第一轮就索引。
+    private var lastIndexRun = Date.distantPast
+
     // 以下成员只在 queue 上访问
     private var store: EurekaStore?
     private var claudeScanner: ClaudeTranscriptScanner?
@@ -124,7 +135,6 @@ final class UsageService: ObservableObject {
     private var codeBuddyScanner: CodeBuddyUsageScanner?
     private var cursorScanner: CursorUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
-    private var turnIndexer: TurnMetricsIndexer?
     private var pricing = PricingTable(models: [])
 
     private static let claudeHealthName = "用量扫描 Claude"
@@ -190,7 +200,6 @@ final class UsageService: ObservableObject {
                             .map { ($0.id, $0.cwd, $0.lastActiveAt) }
                     })
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
-                self.turnIndexer = TurnMetricsIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
                     overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
@@ -547,23 +556,11 @@ final class UsageService: ObservableObject {
             if cursorNew > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
-            // 全文索引与用量同节奏增量跑（指纹无变化时近零开销）；开关默认开
-            // 会话发现约 60s（逐文件解析文件头），是索引的**主要成本** ——
-            // 发现一次喂给两个消费者，别各扫一遍。
-            let indexSessions = AgentSessionDiscovery.forIndexing()
-            if UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
-                searchIndexer?.indexOnce(sessions: indexSessions)
-            }
-            // 逐轮诊断指标同节奏增量跑。**不放 AuditService 的 2s 节奏**：这不是近实时数据，
-            // 而全量首扫要读 ~2GB。指纹无变化时近零开销。
-            //
-            // 单独 do/catch 而不是并进外层：它排在用量聚合之前，抛出去会**连累用量**
-            // （聚合与发布都不再执行）。诊断是附加能力，不该有这个权力。
-            // 同时把错误打到日志 —— 之前只写进 @Published lastError，日志里查不到任何线索。
-            do {
-                try turnIndexer?.indexOnce(sessions: indexSessions)
-            } catch {
-                print("[eureka] 逐轮指标索引失败: \(error)")
+            // 全文索引**不跟用量同节奏**：见 indexInterval。
+            if Date().timeIntervalSince(lastIndexRun) >= Self.indexInterval,
+               UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
+                lastIndexRun = Date()
+                searchIndexer?.indexOnce(sessions: AgentSessionDiscovery.forIndexing())
             }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             publish { $0.summary = summary }

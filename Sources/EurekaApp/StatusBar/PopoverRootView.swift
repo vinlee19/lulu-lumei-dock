@@ -23,7 +23,6 @@ struct PopoverRootView: View {
     @ObservedObject var syncService: SyncService
     @ObservedObject var cliToolsService: CLIToolsService
     @ObservedObject var auditService: AuditService
-    @ObservedObject var promptDiagnostics: PromptDiagnosticsService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var updateService: UpdateService
     @ObservedObject var navigation: PopoverNavigation
@@ -31,9 +30,11 @@ struct PopoverRootView: View {
     enum Tab: String, CaseIterable {
         case history = "历史"
         case sessions = "会话"
-        case diagnostics = "诊断"
         case skills = "Skills"
         case memory = "Memory"
+        /// CLAUDE.md / AGENTS.md 这类持久指令。与 Memory 分开：那是 agent 攒的记忆，
+        /// 这是用户写给 agent 的规则，混在一页会让「记忆有多少」这个数字失去意义。
+        case instructions = "指令"
         case plans = "Plans"
         case agents = "Agents"
         case usage = "用量"
@@ -46,9 +47,9 @@ struct PopoverRootView: View {
             switch self {
             case .history: return "clock.arrow.circlepath"
             case .sessions: return "bubble.left.and.bubble.right.fill"
-            case .diagnostics: return "waveform.path.ecg"
             case .skills: return "wand.and.stars"
             case .memory: return "brain.fill"
+            case .instructions: return "doc.plaintext.fill"
             case .plans: return "list.bullet.clipboard.fill"
             case .agents: return "person.crop.rectangle.stack.fill"
             case .usage: return "chart.bar.fill"
@@ -65,10 +66,8 @@ struct PopoverRootView: View {
         /// 以前 `.settings` 不在任何组里、靠 `Spacer` 之后手写一行沉底，样式与组内项完全一样
         /// 却没有任何分隔，读起来是个走失的孤项。现在归入「系统」，底部只留品牌脚注。
         static let sidebarGroups: [(label: String, tabs: [Tab])] = [
-            // 诊断归「活动」而不是新开一组：新增组标签会吃掉侧栏竖向空间，
-            // 而最小窗内容高只有 ~512（shell-sidebar-min-height 那张图就是为此存在的）。
-            ("活动", [.history, .sessions, .diagnostics]),
-            ("知识库", [.skills, .memory, .plans, .agents]),
+            ("活动", [.history, .sessions]),
+            ("知识库", [.skills, .memory, .instructions, .plans, .agents]),
             ("安全", [.audit]),
             ("用量", [.usage, .limits]),
             ("系统", [.settings]),
@@ -135,15 +134,15 @@ struct PopoverRootView: View {
                 terminals: sessionBrowser.terminals, settings: settings)
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings)
-        case .diagnostics:
-            PromptDiagnosticsView(
-                service: promptDiagnostics, sessionBrowser: sessionBrowser)
         case .skills:
             SkillMemoryView(
                 service: skillMemoryService, mode: .skills, usageService: usageService)
         case .memory:
             SkillMemoryView(
                 service: skillMemoryService, mode: .memory, usageService: usageService)
+        case .instructions:
+            SkillMemoryView(
+                service: skillMemoryService, mode: .instructions, usageService: usageService)
         case .plans:
             PlansView(service: plansService)
         case .agents:
@@ -155,7 +154,7 @@ struct PopoverRootView: View {
         case .audit:
             AuditView(
                 service: auditService, installer: installer, settings: settings,
-                notificationService: notificationService)
+                notificationService: notificationService, skillMemory: skillMemoryService)
         case .settings:
             SettingsView(
                 section: $navigation.settingsSection,

@@ -21,7 +21,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let syncService = SyncService()
     private let cliTools = CLIToolsService()
     private let auditService = AuditService()
-    private let promptDiagnostics = PromptDiagnosticsService()
     private let notificationService = NotificationService()
     private let updateService = UpdateService()
     private let navigation = PopoverNavigation()
@@ -57,7 +56,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             plansService: plans,
             agentConfigService: agentConfig, syncService: syncService,
             cliToolsService: cliTools, auditService: auditService,
-            promptDiagnostics: promptDiagnostics,
             notificationService: notificationService, updateService: updateService,
             navigation: navigation)
         mainWindow = window

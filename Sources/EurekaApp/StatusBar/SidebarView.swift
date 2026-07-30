@@ -32,18 +32,19 @@ struct SidebarView: View {
             // 下只剩十几 pt 余量，再加一组或系统放大字号就会把脚注切掉。
             // 包一层 ScrollView 后，无论多少组都不可能裁；有余量时内容自然顶到上边。
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(PopoverRootView.Tab.sidebarGroups.enumerated()), id: \.offset) {
                         _, group in
                         // 分组标签（小写灰强调，替代单纯分隔线）
-                        // 间距按最小窗高倒推：11 个条目 + 5 个组标签要在 ~512pt 内容高里
-                        // 尽量都露出来（露不全也不会裁 —— 外层 ScrollView 兜着）
+                        // 间距按最小窗高倒推：**12** 个条目 + 5 个组标签要在 ~512pt 内容高里
+                        // 尽量都露出来（露不全也不会裁 —— 外层 ScrollView 兜着）。
+                        // 加「指令」页签时这里连同 SidebarNavButton 的行高各收紧了 1pt：
+                        // 之前 512 下「系统 / 设置」整组会落到滚动区外，默认看不见设置入口。
                         Text(group.label)
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 10)
-                            .padding(.top, 3)
-                            .padding(.bottom, 1)
+                            .padding(.top, 2)
                         ForEach(group.tabs, id: \.self) { tab in
                             SidebarNavButton(
                                 title: tab.rawValue, icon: tab.icon, tileColor: tab.tileColor,

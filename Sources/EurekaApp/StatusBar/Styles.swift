@@ -67,9 +67,13 @@ struct CapsuleTabButton: View {
                             .font(.system(size: 10, weight: .semibold))
                     }
                 }
-                Text(title)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                    .lineLimit(1)
+                // 空标题 = 纯图标档（`LayoutToggle` 三档时如此）：连 Text 一起省掉，
+                // 否则 HStack 的 spacing 会给图标留出一段不对称的空白
+                if !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                        .lineLimit(1)
+                }
             }
             .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
             .padding(.horizontal, 10)
@@ -144,7 +148,9 @@ struct SidebarNavButton: View {
             }
             .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
             .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            // 4 而不是 5：12 个页签 + 5 个组标签 + 品牌脚注要挤进最小窗高的 ~512pt 内容区，
+            // 每行省 2pt 就是 24pt。行高 28pt 仍高于 macOS 侧栏的最小可点尺寸。
+            .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: Theme.radius.sidebar).fill(
                     isSelected
@@ -675,20 +681,38 @@ struct CardActionButton: View {
 enum KnowledgeLayout: String, CaseIterable {
     case list = "列表"
     case cards = "图标"
-    var icon: String { self == .cards ? "square.grid.2x2" : "list.bullet" }
+    /// 关系图谱：目前只有 Memory 页有（记忆之间有 `[[链接]]`、还指向来源会话；
+    /// 技能/计划/agent 之间没有这种关系，给它们这一档只会是个空图）
+    case graph = "图谱"
+
+    var icon: String {
+        switch self {
+        case .list: return "list.bullet"
+        case .cards: return "square.grid.2x2"
+        case .graph: return "point.3.filled.connected.trianglepath.dotted"
+        }
+    }
+
+    /// 有关系图的页面用它，其余页面用 `withoutGraph`
+    static let withoutGraph: [KnowledgeLayout] = [.list, .cards]
 }
 
-/// 顶部工具条右侧的「卡片 / 列表」分段切换（与全站分段控件同款）
+/// 顶部工具条右侧的「卡片 / 列表 / 图谱」分段切换（与全站分段控件同款）。
+/// `cases` 由调用方给：没有关系可画的页面不该凭空多出一档图谱。
 struct LayoutToggle: View {
     @Binding var layout: KnowledgeLayout
+    var cases: [KnowledgeLayout] = KnowledgeLayout.withoutGraph
 
     var body: some View {
+        // 三档时只留图标：顶栏在最小窗宽（840）下本就紧，带文字会把「列表」挤成省略号
+        let iconOnly = cases.count > 2
         CapsuleTabTray {
-            ForEach(KnowledgeLayout.allCases, id: \.self) { item in
+            ForEach(cases, id: \.self) { item in
                 CapsuleTabButton(
-                    title: item.rawValue, icon: item.icon, fillWidth: false,
+                    title: iconOnly ? "" : item.rawValue, icon: item.icon, fillWidth: false,
                     isSelected: layout == item
                 ) { layout = item }
+                    .help(item.rawValue)
             }
         }
     }

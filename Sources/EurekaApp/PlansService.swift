@@ -31,6 +31,7 @@ final class PlansService: ObservableObject {
     func refresh(force: Bool = false) {
         guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
+        if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
         scanPhase = "正在解析 Codex 会话…"
         queue.async { [weak self] in

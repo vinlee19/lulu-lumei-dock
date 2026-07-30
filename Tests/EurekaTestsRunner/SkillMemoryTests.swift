@@ -363,6 +363,319 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
             SkillMemoryIndexer.normalizeSkillName("superpowers:Brainstorming"), "brainstorming")
         try expectEqual(SkillMemoryIndexer.normalizeSkillName("Code-Review"), "code-review")
     }
+
+    // MARK: - 记忆库（Claude projects/<encoded>/memory）
+
+    t.test("目录名编码：/ 与 . 与 _ 全变 -（实勘 11 个目录的规则）") {
+        // 实勘用例：metric_flow / test_parameter 里的下划线在目录名里也是 -
+        try expectEqual(
+            SkillMemoryIndexer.encodeProjectDirName(
+                "/Users/x/w/metricflow-ci/metric_flow/models/test_parameter"),
+            "-Users-x-w-metricflow-ci-metric-flow-models-test-parameter")
+        try expectEqual(
+            SkillMemoryIndexer.encodeProjectDirName("/Users/x/w/repo/.worktrees/feat"),
+            "-Users-x-w-repo--worktrees-feat")
+    }
+
+    t.test("wiki 链接采集：去重、跨行不算、超长不算") {
+        let text = """
+        正文引用 [[project_alpha]] 与 [[feedback-beta]]，再引用一次 [[project_alpha]]。
+        强调号误用 [[这是一段
+        跨行文本]] 不该算链接。
+        """
+        let links = SkillMemoryIndexer.extractWikiLinks(text)
+        try expectEqual(links, ["project_alpha", "feedback-beta"])
+    }
+
+    t.test("项目记忆库：frontmatter/链接/来源会话/索引 全部落库，项目名不再被切成末段") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-memlib-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+
+        // 仓库根故意带连字符：旧的 friendlyProject 会把它切成 "layer"
+        let repo = base.appendingPathComponent("w/aftership-semantic-layer", isDirectory: true)
+        let encoded = SkillMemoryIndexer.encodeProjectDirName(repo.standardizedFileURL.path)
+        let projects = base.appendingPathComponent("projects", isDirectory: true)
+        let projectDir = projects.appendingPathComponent(encoded, isDirectory: true)
+        let memory = projectDir.appendingPathComponent("memory", isDirectory: true)
+        try fm.createDirectory(at: memory, withIntermediateDirectories: true)
+
+        try "# Memory Index\n- [feedback_push.md](feedback_push.md) — 钩子\n"
+            .write(to: memory.appendingPathComponent("MEMORY.md"),
+                   atomically: true, encoding: .utf8)
+        // 引用同库另一条（下划线文件名 ↔ 连字符 name 也要能对上）+ 一条解析不到的
+        try """
+        ---
+        name: feedback-push-to-origin
+        description: push 只推 origin
+        metadata:
+          node_type: memory
+          type: feedback
+          originSessionId: 11111111-2222-3333-4444-555555555555
+        ---
+
+        正文引用 [[project_alpha]]，以及 [[根本不存在的目标]]。
+        """.write(to: memory.appendingPathComponent("feedback_push.md"),
+                  atomically: true, encoding: .utf8)
+        try """
+        ---
+        name: project-alpha
+        description: 项目进展
+        metadata:
+          type: project
+          originSessionId: 99999999-8888-7777-6666-555555555555
+        ---
+
+        回指 [[feedback_push]]。
+        """.write(to: memory.appendingPathComponent("project_alpha.md"),
+                  atomically: true, encoding: .utf8)
+        // 只给第一条记忆留下会话记录文件：另一条的来源会话视作已删除
+        try "{\"type\":\"user\",\"cwd\":\"\(repo.path)\"}\n".write(
+            to: projectDir.appendingPathComponent(
+                "11111111-2222-3333-4444-555555555555.jsonl"),
+            atomically: true, encoding: .utf8)
+
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude-home", isDirectory: true),
+            codexHome: base.appendingPathComponent("codex-home", isDirectory: true),
+            opencodeHome: base.appendingPathComponent("oc-home", isDirectory: true),
+            claudeProjectsRoot: projects,
+            projectRoots: [(root: repo, name: "aftership-semantic-layer")])
+
+        try expectEqual(entries.count, 3)
+        try expect(entries.allSatisfy { $0.libraryKey == "claude:\(encoded)" })
+        try expect(
+            entries.allSatisfy { $0.projectName == "aftership-semantic-layer" },
+            "项目名必须靠正向编码反查出来，不能是被 - 切出来的末段")
+
+        let index = try requireMemory(entries, title: "MEMORY")
+        try expect(index.isIndex, "记忆库里的 MEMORY.md 应标成索引")
+
+        let push = try requireMemory(entries, title: "feedback-push-to-origin")
+        try expect(!push.isIndex)
+        try expectEqual(push.summary, "push 只推 origin")
+        try expectEqual(push.memoryType, .feedback)
+        try expectEqual(push.originSessionId, "11111111-2222-3333-4444-555555555555")
+        try expect(push.originSessionPath != nil, "同目录有 jsonl → 来源会话可跳转")
+        try expectEqual(push.links.count, 2)
+
+        let alpha = try requireMemory(entries, title: "project-alpha")
+        try expectEqual(alpha.memoryType, .project)
+        try expect(
+            alpha.originSessionPath == nil,
+            "会话记录文件不在时 originSessionPath 必须是 nil（UI 据此置灰）")
+
+        // 分组：2 条条目 + 1 份索引，可跳会话 1 个
+        let libraries = MemoryLibrary.group(entries)
+        try expectEqual(libraries.count, 1)
+        let library = libraries[0]
+        try expectEqual(library.count, 2)
+        try expect(library.index != nil)
+        try expectEqual(library.projectName, "aftership-semantic-layer")
+        try expectEqual(library.linkedSessionCount, 1)
+        try expectEqual(library.typeBreakdown[.feedback], 1)
+        try expectEqual(library.typeBreakdown[.project], 1)
+        try expect(library.allFiles.count == 3)
+    }
+
+    t.test("Codex 记忆只收 memories/ 顶层：会话摘要/扩展/技能都不是记忆") {
+        // 复现真实形态：~/.codex/memories 是个 git 仓库，混装
+        //   顶层三份记忆 + rollout_summaries/（会话摘要）+ extensions/（元指令）+ skills/（技能）
+        // 递归扫会把 20 个文件全算成记忆，其中 17 个不是。
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-codexmem-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+
+        let codexHome = base.appendingPathComponent("codex", isDirectory: true)
+        let memories = codexHome.appendingPathComponent("memories", isDirectory: true)
+        for sub in ["rollout_summaries", "extensions/ad_hoc", "skills/publish-draft-pr"] {
+            try fm.createDirectory(
+                at: memories.appendingPathComponent(sub, isDirectory: true),
+                withIntermediateDirectories: true)
+        }
+        for name in ["MEMORY.md", "raw_memories.md", "memory_summary.md"] {
+            try "记忆".write(
+                to: memories.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        try "会话摘要".write(
+            to: memories.appendingPathComponent(
+                "rollout_summaries/2026-07-28T08-28-57-FDKv-query_history_plan.md"),
+            atomically: true, encoding: .utf8)
+        try "元指令".write(
+            to: memories.appendingPathComponent("extensions/ad_hoc/instructions.md"),
+            atomically: true, encoding: .utf8)
+        try "---\nname: publish-draft-pr\n---\n".write(
+            to: memories.appendingPathComponent("skills/publish-draft-pr/SKILL.md"),
+            atomically: true, encoding: .utf8)
+
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude", isDirectory: true),
+            codexHome: codexHome,
+            opencodeHome: base.appendingPathComponent("oc", isDirectory: true),
+            claudeProjectsRoot: base.appendingPathComponent("projects", isDirectory: true))
+        let codexMemories = entries.filter { $0.source == .codex }
+        try expectEqual(
+            codexMemories.map(\.title).sorted(), ["MEMORY", "memory_summary", "raw_memories"])
+        try expect(
+            codexMemories.allSatisfy { $0.kind == .generated },
+            "Codex memories 由后台维护 → 只读")
+
+        // 那份 SKILL.md 该被技能扫描收走（否则它既不是记忆、也没人管）
+        let skills = SkillMemoryIndexer.indexSkills(
+            claudeSkillsRoot: base.appendingPathComponent("claude/skills", isDirectory: true),
+            codexSkillsRoot: codexHome.appendingPathComponent("skills", isDirectory: true),
+            codexMemorySkillsRoot: memories.appendingPathComponent("skills", isDirectory: true))
+        try expectEqual(skills.map(\.name), ["publish-draft-pr"])
+        try expectEqual(skills.first?.source, .codex)
+    }
+
+    t.test("Hermes：MEMORY/USER 是 agent 自记 → 记忆；SOUL 是人格设定 → 指令") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let hermes = base.appendingPathComponent("hermes", isDirectory: true)
+        try fm.createDirectory(
+            at: hermes.appendingPathComponent("memories", isDirectory: true),
+            withIntermediateDirectories: true)
+        for (path, body) in [
+            ("memories/MEMORY.md", "自记"), ("memories/USER.md", "画像"), ("SOUL.md", "人格"),
+        ] {
+            try body.write(
+                to: hermes.appendingPathComponent(path), atomically: true, encoding: .utf8)
+        }
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude", isDirectory: true),
+            codexHome: base.appendingPathComponent("codex", isDirectory: true),
+            opencodeHome: base.appendingPathComponent("oc", isDirectory: true),
+            claudeProjectsRoot: base.appendingPathComponent("projects", isDirectory: true),
+            hermesHome: hermes)
+        let byScope = Dictionary(
+            uniqueKeysWithValues: entries.filter { $0.source == .hermes }.map { ($0.scope, $0.kind) })
+        try expectEqual(byScope["MEMORY"], .userManaged)
+        try expectEqual(byScope["USER"], .userManaged)
+        try expectEqual(byScope["SOUL"], .instructions)
+    }
+
+    t.test("记忆库索引漂移：未被 MEMORY.md 收录的条目 / 指向空气的引用") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-drift-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let projects = base.appendingPathComponent("projects", isDirectory: true)
+        let memory = projects
+            .appendingPathComponent("-Users-me-w-demo", isDirectory: true)
+            .appendingPathComponent("memory", isDirectory: true)
+        try fm.createDirectory(at: memory, withIntermediateDirectories: true)
+
+        // 索引收录 a（下划线文件名）与 b（frontmatter name 形式），外加一条早已删掉的 gone
+        try """
+        # Memory Index
+
+        - [记忆 A](feedback_a.md) — 钩子
+        - [project-b](project_b.md) — 钩子
+        - [已删掉的](feedback_gone.md) — 钩子
+        """.write(to: memory.appendingPathComponent("MEMORY.md"),
+                  atomically: true, encoding: .utf8)
+        try "---\nname: feedback-a\n---\nA".write(
+            to: memory.appendingPathComponent("feedback_a.md"), atomically: true, encoding: .utf8)
+        try "---\nname: project-b\n---\nB".write(
+            to: memory.appendingPathComponent("project_b.md"), atomically: true, encoding: .utf8)
+        // 文件在、索引没列 → 死记忆
+        try "---\nname: orphan-note\n---\nC".write(
+            to: memory.appendingPathComponent("orphan_note.md"), atomically: true, encoding: .utf8)
+
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude", isDirectory: true),
+            codexHome: base.appendingPathComponent("codex", isDirectory: true),
+            opencodeHome: base.appendingPathComponent("oc", isDirectory: true),
+            claudeProjectsRoot: projects)
+        let libraries = MemoryLibrary.group(entries)
+        try expectEqual(libraries.count, 1)
+        let library = libraries[0]
+        try expectEqual(library.count, 3)
+        try expectEqual(library.index?.indexedTargets.count, 3)
+        // 下划线 ↔ 连字符归一后 a/b 都算收录，只有 orphan_note 未收录
+        try expectEqual(library.unindexedEntries.map(\.title), ["orphan-note"])
+        try expectEqual(library.danglingIndexRefs, ["feedback_gone.md"])
+        try expect(library.hasDrift)
+
+        // 图谱要把未收录的条目标出来（UI 据此画虚线 + 提示）
+        let graph = MemoryGraphBuilder.build(library.graphInput())
+        let flagged = graph.nodes.filter(\.isUnindexed).map(\.title)
+        try expectEqual(flagged, ["orphan-note"])
+    }
+
+    t.test("Codex MEMORY.md：从 rollout_summary_files 段落解析出多个来源会话") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-cxrefs-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        let codexHome = base.appendingPathComponent("codex", isDirectory: true)
+        let memories = codexHome.appendingPathComponent("memories", isDirectory: true)
+        try fm.createDirectory(at: memories, withIntermediateDirectories: true)
+        // 一个真实存在的 rollout + 一个已删除的
+        let live = base.appendingPathComponent("rollout-live.jsonl")
+        try "{}".write(to: live, atomically: true, encoding: .utf8)
+        let gone = base.appendingPathComponent("rollout-gone.jsonl")
+
+        try """
+        # Task Group: demo
+
+        applies_to: cwd=/Users/me/w/demo
+
+        ### rollout_summary_files
+
+        - rollout_summaries/a.md (cwd=/Users/me/w/demo, rollout_path=\(live.path), \
+        updated_at=2026-07-28T13:49:25+00:00, thread_id=019fa2f0-c124-7c03-a2d1-c6debaf69293, ok)
+        - rollout_summaries/b.md (cwd=/Users/me/.slock/agents/xxx, rollout_path=\(gone.path), \
+        thread_id=019fa772-b007-75e1-9c97-56eb93b67b43, sandbox cwd 不能用来归项目)
+        """.write(to: memories.appendingPathComponent("MEMORY.md"),
+                  atomically: true, encoding: .utf8)
+
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude", isDirectory: true),
+            codexHome: codexHome,
+            opencodeHome: base.appendingPathComponent("oc", isDirectory: true),
+            claudeProjectsRoot: base.appendingPathComponent("projects", isDirectory: true))
+        let index = try requireMemory(entries, title: "MEMORY")
+        try expectEqual(index.relatedSessions.count, 2)
+        try expectEqual(
+            index.relatedSessions.map(\.sessionId),
+            ["019fa2f0-c124-7c03-a2d1-c6debaf69293", "019fa772-b007-75e1-9c97-56eb93b67b43"])
+        try expect(index.relatedSessions[0].exists, "rollout 文件在 → 可跳转")
+        try expect(!index.relatedSessions[1].exists, "rollout 文件不在 → 置灰")
+    }
+
+    t.test("项目名兜底：目录名对不上已知仓库根时读 jsonl 头部的 cwd") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(
+            "eureka-memfallback-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+
+        let projects = base.appendingPathComponent("projects", isDirectory: true)
+        let projectDir = projects.appendingPathComponent(
+            "-Users-someone-w-my-cool-repo", isDirectory: true)
+        let memory = projectDir.appendingPathComponent("memory", isDirectory: true)
+        try fm.createDirectory(at: memory, withIntermediateDirectories: true)
+        try "记忆".write(
+            to: memory.appendingPathComponent("note.md"), atomically: true, encoding: .utf8)
+        try "{\"type\":\"user\",\"cwd\":\"/Users/someone/w/my_cool_repo\"}\n".write(
+            to: projectDir.appendingPathComponent("abc.jsonl"),
+            atomically: true, encoding: .utf8)
+
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: base.appendingPathComponent("claude-home", isDirectory: true),
+            codexHome: base.appendingPathComponent("codex-home", isDirectory: true),
+            opencodeHome: base.appendingPathComponent("oc-home", isDirectory: true),
+            claudeProjectsRoot: projects)
+        try expectEqual(entries.count, 1)
+        try expectEqual(entries[0].projectName, "my_cool_repo")
+        try expectEqual(entries[0].title, "note")
+        try expectEqual(entries[0].memoryType, .other)
+    }
 }
 
 private func writeSkill(_ root: URL, dir: String, body: String) throws {
@@ -370,6 +683,14 @@ private func writeSkill(_ root: URL, dir: String, body: String) throws {
     try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
     try body.write(
         to: skillDir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+}
+
+private func requireMemory(_ entries: [MemoryEntry], title: String) throws -> MemoryEntry {
+    guard let entry = entries.first(where: { $0.title == title }) else {
+        throw ExpectationError(
+            description: "未找到记忆 \(title)（实有：\(entries.map(\.title).joined(separator: ", "))）")
+    }
+    return entry
 }
 
 private func requireSkill(_ skills: [SkillEntry], named name: String) throws -> SkillEntry {

@@ -21,7 +21,6 @@ final class MainWindowController: NSWindowController {
         syncService: SyncService,
         cliToolsService: CLIToolsService,
         auditService: AuditService,
-        promptDiagnostics: PromptDiagnosticsService,
         notificationService: NotificationService,
         updateService: UpdateService,
         navigation: PopoverNavigation
@@ -60,7 +59,6 @@ final class MainWindowController: NSWindowController {
                 syncService: syncService,
                 cliToolsService: cliToolsService,
                 auditService: auditService,
-                promptDiagnostics: promptDiagnostics,
                 notificationService: notificationService,
                 updateService: updateService,
                 navigation: navigation))

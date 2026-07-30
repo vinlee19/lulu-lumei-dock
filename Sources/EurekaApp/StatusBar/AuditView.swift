@@ -21,6 +21,8 @@ struct AuditView: View {
     @ObservedObject var settings: AppSettings
     /// 只为「系统通知不可用」的降级提示（开发态 / 权限被拒）
     @ObservedObject var notificationService: NotificationService
+    /// 跨源配置一致性卡的数据源（技能 / 指令 / 记忆库都在它手上）
+    @ObservedObject var skillMemory: SkillMemoryService
 
     @State private var sourceFilter: AgentSource?
     @State private var kindFilter: ToolKind?
@@ -39,13 +41,14 @@ struct AuditView: View {
     /// 照 `PlansView(initialLayout:)` 的做法 —— 空态与「仅风险」态否则没法自动出图核对。
     init(
         service: AuditService, installer: InstallerService, settings: AppSettings,
-        notificationService: NotificationService,
+        notificationService: NotificationService, skillMemory: SkillMemoryService,
         initialRiskOnly: Bool = false, initialKeyword: String = ""
     ) {
         self._service = ObservedObject(wrappedValue: service)
         self._installer = ObservedObject(wrappedValue: installer)
         self._settings = ObservedObject(wrappedValue: settings)
         self._notificationService = ObservedObject(wrappedValue: notificationService)
+        self._skillMemory = ObservedObject(wrappedValue: skillMemory)
         self._riskOnly = State(initialValue: initialRiskOnly)
         self._keyword = State(initialValue: initialKeyword)
     }
@@ -200,6 +203,9 @@ struct AuditView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
+                // 配置一致性：与审计流水同页，因为两者回答的是同一类问题
+                // 「我这一堆 CLI 的配置到底是什么状态」。它不需要审计开关，也不受筛选影响。
+                ConsistencyCard(service: skillMemory)
                 sourceBar
                 kindBar
                 if !settings.auditEnabled {

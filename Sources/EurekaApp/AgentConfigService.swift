@@ -50,6 +50,7 @@ final class AgentConfigService: ObservableObject {
     func refresh(force: Bool = false) {
         guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
+        if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
         scanPhase = "正在扫描子代理…"
         queue.async { [weak self] in

@@ -185,8 +185,15 @@ enum PreviewRenderer {
         while (plans.scanning || skillMemory.scanning || agents.scanning), Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
+        // 记忆按「统计口径」打印：memoryTotal 含记忆库内条目，memories 只是列表里的独立条目
+        // —— 两个数字都要有，否则看不出折叠是否生效
         print("扫描结束：plans=\(plans.totalCount) "
-            + "skills=\(skillMemory.skills.count) memories=\(skillMemory.memories.count) "
+            + "skills=\(skillMemory.skills.count) "
+            + "memoryTotal=\(skillMemory.memoryTotal) "
+            + "standalone=\(skillMemory.memories.count) "
+            + "instructions=\(skillMemory.instructionTotal) "
+            + "libraries=\(skillMemory.libraries.count)"
+            + "(\(skillMemory.libraries.map { "\($0.projectName):\($0.count)" }.joined(separator: ","))) "
             + "claudeAgents=\(agents.claudeAgents.count) codexProfiles=\(agents.codexProfiles.count) "
             + "scanning=\(plans.scanning)/\(skillMemory.scanning)/\(agents.scanning)")
 
@@ -231,6 +238,28 @@ enum PreviewRenderer {
         snap("knowledge-memory-cards",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLayout: .cards))
+        // 记忆库二级页 + 图谱：两处都只有点击才能到，离屏渲染必须靠初始状态注入
+        snap("knowledge-memory-library",
+             SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
+                             initialLibraryKey: skillMemory.libraries.first?.key))
+        snap("knowledge-memory-graph",
+             SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
+                             initialLayout: .graph))
+        snap("knowledge-memory-graph-dark",
+             SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
+                             initialLayout: .graph), dark: true)
+        // 记忆详情 + 一跳关联小图：挑引用/来源最多的一条（关联为空时那张图不出现，就看不出问题了）
+        if let busiest = skillMemory.libraries.first?.entries
+            .max(by: { ($0.links.count + ($0.originSessionId == nil ? 0 : 1))
+                < ($1.links.count + ($1.originSessionId == nil ? 0 : 1)) }) {
+            snap("knowledge-memory-detail",
+                 SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
+                                 initialLibraryKey: skillMemory.libraries.first?.key,
+                                 initialMemoryPath: busiest.path))
+        }
+        snap("knowledge-instructions-list",
+             SkillMemoryView(service: skillMemory, mode: .instructions, usageService: usage,
+                             initialLayout: .list))
         // 搜索态：命中数胶囊 + 圆形清空键（聚焦渐变环需真实键盘焦点，离屏无法呈现）
         skillMemory.searchText = "arkcli"
         snap("knowledge-skills-search",
@@ -326,10 +355,21 @@ enum PreviewRenderer {
         print("审计读库：total=\(audit.total) risk=\(audit.riskTotal) "
             + "sources=\(audit.sourceCounts.count) kinds=\(audit.kindCounts.count)")
 
+        // 配置一致性卡要真实数据才有内容（它在 lastScanAt == nil 时不占版面）
+        let skillMemory = SkillMemoryService()
+        skillMemory.refresh()
+        let scanDeadline = Date().addingTimeInterval(180)
+        while skillMemory.scanning, Date() < scanDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        let consistency = skillMemory.consistencyReport
+        print("一致性检查：指令缺口 \(consistency.instructionGaps.count) "
+            + "技能缺口 \(consistency.skillGaps.count) 记忆漂移 \(consistency.libraryDrifts.count)")
+
         func auditPage(riskOnly: Bool = false, keyword: String = "") -> some View {
             AuditView(
                 service: audit, installer: installer, settings: settings,
-                notificationService: notifications,
+                notificationService: notifications, skillMemory: skillMemory,
                 initialRiskOnly: riskOnly, initialKeyword: keyword)
         }
         snap("shell-audit", auditPage())
@@ -364,7 +404,7 @@ enum PreviewRenderer {
         // 这一版是「设置 → 审计」那张卡搬过来的 4 个开关，必须自带 switch/small/11.5 样式。
         let auditView = AuditView(
             service: audit, installer: installer, settings: settings,
-            notificationService: notifications)
+            notificationService: notifications, skillMemory: skillMemory)
         snap("shell-audit-settings", auditView.settingsPopover, width: 340, height: 300)
     }
 
@@ -579,27 +619,6 @@ enum PreviewRenderer {
                 sessionName: picked.session.displayName, turns: picked.turns,
                 onBack: {}, initialPane: pane, initialTurn: turn)
         }
-        // 跨会话诊断页：先跑一遍索引把 turn_metrics 填上，再截图。
-        // 同样**无条件泵满**（不能按「结果非空」泵：上一次的结果还在，会立刻退出）
-        // 只 load 不 rescan：全量重扫实测 **130s**（`TranscriptReader.load` 远不止裸解析），
-        // 离屏渲染等不起。库里没数据时就渲空态 —— 那也是用户首次进页面看到的样子。
-        // 想先把数据备好：`swift run eureka --diagnostics-snapshot`
-        let diagnostics = PromptDiagnosticsService()
-        diagnostics.load()
-        RunLoop.current.run(until: Date().addingTimeInterval(4))
-        print("诊断索引：全库 \(diagnostics.totalRows) 轮，"
-            + "窗口内 \(diagnostics.aggregate.turnCount) 轮，"
-            + "规则命中 \(diagnostics.aggregate.ruleHits)"
-            + " err=\(diagnostics.lastError ?? "无")")
-        snap(
-            "lineage-live-diagnostics",
-            PromptDiagnosticsView(service: diagnostics, sessionBrowser: browser),
-            height: 1000)
-        snap(
-            "lineage-live-diagnostics-dark",
-            PromptDiagnosticsView(service: diagnostics, sessionBrowser: browser),
-            dark: true, height: 1000)
-
         snap("lineage-live-list", page(.list, turn: 0), height: 900)
         snap("lineage-live-graph", page(.graph, turn: worst), height: 900)
         snap("lineage-live-graph-dark", page(.graph, turn: worst), dark: true, height: 900)

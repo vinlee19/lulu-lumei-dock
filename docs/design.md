@@ -85,6 +85,81 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
     `message.part.updated.1`，`data` 含 `sessionID` + `info`/`part`。**opencode 无 hook/notify 子进程回调**，
     实时靠尾随 event 表（首扫定基线不重放；子会话事件按 session.parent_id 过滤）。**无订阅限额概念**（BYO provider）
 
+### Claude 记忆库 `~/.claude/projects/<encoded>/memory/`（本机 11 个库 / 97 个文件实勘）
+
+- 布局：`MEMORY.md`（索引，一行一条钩子）+ 每条记忆一个 `*.md`。Qwen 的
+  `~/.qwen/projects/<encoded>/memory/` 同构（本机三个库各只有一份空 MEMORY.md → UI 标「仅索引」）。
+- frontmatter：`name` / `description` + **嵌套** `metadata{node_type,type,originSessionId,modified}`。
+  `type` 四类 user/feedback/project/reference，缺省归 `other`（本机 97 个里 9 个没写）。
+  解析复用 `parseFrontmatterFields` —— 它把嵌套子键当顶层键收下，记忆索引**有意**依赖这一点。
+- **`originSessionId` 指向写下这条记忆的会话**（84/97 有），但同目录 `<uuid>.jsonl`
+  只剩 37 个 —— 会话会被删/轮转。所以 `MemoryEntry.originSessionPath` 为 nil 即「不可跳转」，
+  UI 必须置灰而不是给一个跳到空页面的入口。
+- 正文 `[[wiki 链接]]`：本机 115 处、113 处能解析到同库文件。匹配键要同时试**文件 basename**
+  （下划线）与 frontmatter **name**（连字符），故归一时 `_` 视作 `-`。解析不到的不造边、只计数
+  （其中 2 处是正文把 `[[…]]` 当强调号用）。
+- **目录名编码有损、不可反解**：`/`、`.`、`_` 三种字符**都**变 `-`（实勘 11 个目录全对，
+  例：`…/metricflow-ci/metric_flow/…/test_parameter` → `…-metric-flow-…-test-parameter`）。
+  项目名只能**正向**编码已知仓库根来比对（`resolveProjectName`），比不上再读一份 transcript 头部取 cwd；
+  按 `-` 切末段是错的（`aftership-semantic-layer` 会变成 `layer`）。
+- 图谱（`EurekaKit/MemoryGraph{,Layout}.swift`，纯函数、可单测、可离屏渲染）：
+  节点=索引/分类/条目/来源会话，边=收录/引用/来源；排版是均匀网格（列=分类泳道+会话道，
+  行=索引/泳道头/条目），**水平段只走行 gutter、竖直段只走列 gutter** ⇒「边不穿节点」可证。
+  泳道塞不进视口时画布变宽由调用方横向滚动，只有节点数超上限才降级不画。
+
+### Codex 记忆 `~/.codex/memories/`（**只有全局，没有项目级**；本机实勘）
+
+- 开关：`config.toml` 的 `[features] memories = true` + `[memories] generate_memories/use_memories`。
+- 位置唯一：`~/.codex/memories/`，是 Codex 自建的 **git 仓库**（baseline commit `Initialize Codex git baseline`）。
+  各仓库下**没有** `.codex/memories`；`.codex-global-state.json` 里也没有任何 per-project memory 键。
+- **项目归属写在内容里，不在目录上**：`MEMORY.md` 每个 Task Group 带 `applies_to: cwd=…`，
+  `raw_memories.md` 每条带 `cwd:`/`rollout_path:`/`thread_id:`。与 Claude 的「一项目一目录」正相反，
+  所以 Codex 这边**没有**可折叠成「记忆库」的结构。
+- 三层管道（文件 mtime 依次递增可印证）：`raw_memories.md`（stage-1 原始，按 thread 合并）→
+  `MEMORY.md`（Task Group 结构化，引用 rollout summary 作证据）→ `memory_summary.md`（用户画像+偏好）。
+- ⚠️ **这个目录只有顶层三份是记忆**，绝不能递归扫（递归会把 20 个文件全算成记忆，其中 17 个不是）：
+  `rollout_summaries/*.md` 是每次会话的摘要（MEMORY.md 的证据附件）、`extensions/` 是教 Codex
+  怎么维护记忆的元指令、`skills/` 里躺着**技能**（实勘 `publish-draft-pr`，归技能扫描收走）。
+
+### 记忆 vs 指令：两个页签，两套统计
+
+- **记忆** = agent 自己攒下来的：Claude/Qwen 的项目记忆库、`~/.claude/memories`、
+  Codex `memories/` 顶层三份、Hermes `memories/{MEMORY,USER}.md`、grok/codebuddy/qoder 的记忆目录。
+- **指令** = 用户写给 agent 的规则：`CLAUDE.md` / `AGENTS.md`（含 `AGENTS.override.md` 优先级）/
+  `GEMINI.md` / `QWEN.md` / `<repo>/.cursor/rules/*.mdc` / Hermes `SOUL.md`（人格身份）。
+- 两者混在一个数字里会让「记忆有多少」失去意义（本机 105 记忆 vs 19 指令），所以分页签、分统计口径。
+  Hermes 是唯一需要在同一目录里分开判的：`memories/MEMORY.md` 与 `USER.md` 是它自记 → 记忆；
+  `SOUL.md` 是人格设定 → 指令。
+
+### 会话发现的成本与节奏（实测，2026-07-30）
+
+发现 = 遍历各源会话目录 + 逐个读文件头拿 cwd/标题。它是**索引链路的主要成本**，必须共享与限频。
+
+- 修复前：`AgentSessionDiscovery.forIndexing()` **72.8 s**（269 会话 / 1095 MB），而用量 60 s 定时器
+  每轮都调 → 后台队列永不空闲，应用长跑平均 CPU **29.5%**。
+- 成本几乎全在 **Codex 一家**：65.09 s / 121 会话（Claude 94 个只要 0.41 s，其余 10 源合计 0.6 s）。
+  根因是 `headInfo` 为了等 `user_message` 一路读到文件末尾 —— 而 24% 的 rollout 压根没有用户消息，
+  单文件最大 70 MB。修法：定长头部（64 KB 探测 + 1 MB 上限）、字节预筛后再 JSON、游标逐行不用 `split`。
+- 修复后：`forIndexing()` **1.9 s**、`recentCwds()` **3.5 s**（原 58.3 s）。
+- 节奏：用量 / 限额 / 历史 60 s；**全文索引与逐轮诊断 5 分钟**（`UsageService.indexInterval`）——
+  它们不是实时数据，跑得再密也只是重复付发现成本。知识库四个服务共享 `ProjectScopeDiscovery` 的
+  60 s TTL 缓存（预热时它们会连着要四次）。
+
+顺带修掉一个**正确性** bug：resume/fork 的 rollout 里有第二条 `session_meta`，旧代码扫到末尾时会用它
+覆盖 id，于是 121 个文件只解析出 91 个唯一 id —— 30 个会话在列表、`turn_metrics`、`fts_docs` 里互相覆盖。
+现在只认第一条，并靠 schema v18 强制重扫（指纹没变不会自动重建）。
+
+### 跨源配置一致性（`EurekaIngest/ConsistencyChecker.swift`）
+
+审计页顶部一张卡，报三类能自动判定的横向缺口：项目指令文件配了一半、某源缺了别处已配的技能、
+记忆库索引漂移。**阈值口径由单测钉住**，因为这块的风险不是算错而是报太多：
+
+- 指令：只认「用户已在 ≥2 个仓库用过」的文件名；无指令的仓库只有**有记忆库**的才算活跃项目 ——
+  `ProjectResolver` 会把 `~/.slock/agents/<uuid>` 这类 sandbox cwd 认成仓库根（实测 17 个里 5 个）。
+- 技能：**按源聚合**，且只报「只差这一个源」的技能。逐条列会刷出 25 行说同一件事；
+  而「claude 48 个、cursor 23 个」这种差异多半是故意的，报了也没有可执行动作。
+- 收紧前后：18 项 → **5 项**（3 个仓库指令缺口 + 1 个源技能缺口 + 1 个库漂移）。
+
 ## 任务状态机
 
 - key = `source:sessionId`；状态 `running / waiting(permission|idle) / finished(success|error|interrupted)`

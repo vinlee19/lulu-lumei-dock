@@ -10,7 +10,7 @@ Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex C
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 573 tests
+make test       # swift run eureka-tests  — runs all 597 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release
@@ -30,7 +30,6 @@ swift run eureka --limits-snapshot --claude # rate-limit snapshot (--claude also
 swift run eureka --render-previews [dir]   # offscreen-render every island state to PNG
 swift run eureka --render-shell [dir]      # offscreen-render the sidebar + audit page (light/dark)
 swift run eureka --render-lineage [dir]    # offscreen-render the turn lineage graph (golden + live)
-swift run eureka --diagnostics-snapshot    # scan and dump per-turn prompt-quality metrics
 swift run eureka-relay inject --event stop --session demo  # inject a test event into the spool
 ```
 
@@ -57,9 +56,9 @@ Codex rollout token_count ────────────→ UsageEngine / 
 
 | Target | Role |
 |---|---|
-| `EurekaKit` | Pure domain layer: `TaskEvent`/`AgentTask` models, `TaskStore` state machine, `IslandState` projection, `IslandGeometry` pure functions. **No IO, no AppKit.** |
+| `EurekaKit` | Pure domain layer: `TaskEvent`/`AgentTask` models, `TaskStore` state machine, `IslandState` projection, `IslandGeometry` / `TurnGraph{,Layout}` / `MemoryGraph{,Layout}` pure functions. **No IO, no AppKit.** |
 | `EurekaStore` | SQLite (system `libsqlite3` + thin wrapper) with three repos: `task_history` / `usage_records` / `scan_state`. |
-| `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup, plus one tailer + session indexer + `*Paths` trio per non-Claude agent (`CodexRolloutTailer`, `OpencodeSessionTailer`, …, `HermesStateTailer`, `CursorStateTailer`). |
+| `EurekaIngest` | Event ingestion: `SpoolConsumer`, `ClaudeHookDecoder`, `ClaudeTranscriptWatcher`, `ClaudeErrorSniffer`, dedup, plus one tailer + session indexer + `*Paths` trio per non-Claude agent (`CodexRolloutTailer`, `OpencodeSessionTailer`, …, `HermesStateTailer`, `CursorStateTailer`). Also the knowledge-surface scanners: `SkillMemoryIndexer` + `MemoryLibrary` (Claude/Qwen `projects/<encoded>/memory` 记忆库), `ConsistencyChecker`, `AgentDefinitionIndexer`, `PlanMaterializer`. |
 | `EurekaUsage` | Ten incremental+dedup usage scanners — file-based ones tail transcripts/rollouts; `Opencode`/`Hermes`/`Cursor` read SQLite instead (Hermes diffs `session_model_usage` against a per-session snapshot; Cursor differences adjacent `tokenCount.inputTokens` because it re-sends the whole context each turn and reports no cache split; all `cursor/*` models are priced `unknown` → tokens counted, cost $0). Antigravity has no usage scanner (conversations are protobuf, no local token accounting). CodeBuddy's usage rides on its `function_call` transcript lines (`providerData.usage`); Qoder is excluded (CN backend reports zero tokens). Plus `PricingTable`, `RateLimitProvider` protocol + Codex/Claude/Grok impls. |
 | `EurekaInstall` | `settings.json` deep-merge / `config.toml` line-edit / `config.yaml` list-edit (`HermesConfigEditor`) installers, backup, diff preview, install-status detection. Pure text in/out, **zero deps**, independently testable. |
 | `eureka` (app) | AppKit shell: island `NSPanel`, `NSStatusItem`+popover, settings, `RelaySyncer`, CLI mode. |
@@ -81,6 +80,11 @@ Key = `source:sessionId`. Phases: `running` / `waiting(permission|idle)` / `idle
 - **Claude OAuth usage (rate limits) is unofficial, opt-in, default-off.** Any failure returns `nil` → the entire UI block hides. Keychain is read via the `/usr/bin/security` subprocess (avoids ACL re-prompts after ad-hoc re-signing).
 - **Cursor's `state.vscdb` must never be backed up or synced.** The same SQLite file that holds every Cursor session also holds `cursorAuth/accessToken` and `cursorAuth/refreshToken` in its `ItemTable`. `SyncSourceCatalog` only ever walks `~/.cursor/skills` for Cursor — never add the database or its parent directory.
 - **External agent databases are opened read-only, never with `immutable=1`.** Cursor / opencode / Hermes hold their libraries open in WAL mode; `immutable=1` would silently skip everything not yet checkpointed, so live sessions would look frozen.
+- **Never scan a Codex rollout to the end just to find a title.** `CodexSessionIndexer.headInfo` reads a bounded head (`headScanLimit`, 1 MB) because ~24% of rollouts have no `user_message` at all and files reach 70 MB — scanning to EOF cost 65s of a 72s discovery. It also **must take only the first `session_meta`**: resumed/forked rollouts contain a second one, and letting it win assigned another session's id to the file (121 files → 91 unique ids before the fix).
+- **Session discovery is expensive and must be shared.** `AgentSessionDiscovery.forIndexing()` feeds both indexers from one call; `ProjectScopeDiscovery` caches `recentCwds` for 60s because four knowledge services ask for it during warm-up. Full-text and per-turn indexing run on a 5-minute cadence (`UsageService.indexInterval`), not the 60s usage tick — they aren't real-time and only re-pay the discovery cost.
+- **`~/.codex/memories` is a git repo Codex maintains, and only its three top-level files are memories.** Never recurse it: `rollout_summaries/` are per-session summaries, `extensions/` is meta-instruction, and `skills/` holds a real skill. Codex has **no per-project memory** — attribution lives inside the content (`applies_to: cwd=…`). Memory vs instructions is a hard split app-wide: agent-written = Memory tab, user-written rules (`CLAUDE.md`/`AGENTS.md`/`GEMINI.md`/`QWEN.md`/`.cursor/rules`/Hermes `SOUL.md`) = 指令 tab, and the two never share a count.
+- **`~/.claude/projects/<encoded>` directory names are lossy — never reverse them.** Claude replaces `/`, `.` **and** `_` with `-` (verified against all 11 local dirs), so splitting on `-` turns `aftership-semantic-layer` into `layer`. Resolve project names by encoding known repo roots *forward* and matching (`SkillMemoryIndexer.resolveProjectName`), falling back to a transcript-head `cwd`.
+- **A memory's `metadata.originSessionId` often points at a session that no longer exists** (84 memories carry one locally, only 37 transcripts survive). `originSessionPath == nil` means "not navigable": grey it out instead of offering a jump into an empty session page.
 - **Dependency scope stays narrow:** Sparkle 2.9.2 is exact-pinned and only linked by the app target. SQLite still uses system `libsqlite3`, so the DB stays `sqlite3`-inspectable.
 
 ## Data & config locations

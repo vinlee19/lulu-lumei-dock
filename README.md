@@ -100,8 +100,30 @@ dedicated **usage‑analytics** view (list ↔ stats toggle):
   `Skill` calls with usage on the same record). Trigger‑time tokens ≈ the context size at the moment
   of invocation, not the skill's full execution cost — this is labeled in the UI.
 
-**Memory** — browse and edit `CLAUDE.md` / `AGENTS.md` and per‑project / per‑user memory files across
-tools, with in‑app markdown preview + edit (atomic save with timestamped backup).
+**Memory** — what the agents *wrote down themselves*, across tools, with in‑app markdown preview +
+edit (atomic save with timestamped backup). Persistent **instructions** you wrote for them
+(`CLAUDE.md` / `AGENTS.md` / …) live on their own tab — see **Instructions** below; keeping both in one
+number made "how much memory is there" meaningless.
+- Note on Codex: it has **no per‑project memory** — one global git repo at `~/.codex/memories` whose
+  three top‑level files form a pipeline (`raw_memories.md` → `MEMORY.md` → `memory_summary.md`), with
+  project attribution written *inside* (`applies_to: cwd=…`). Its sibling directories are deliberately
+  **not** memories: `rollout_summaries/` are per‑session summaries, `extensions/` is meta‑instruction,
+  and `skills/` holds an actual skill (indexed as a skill).
+- **Memory libraries** — Claude (and Qwen) keep agent‑written memories in
+  `projects/<encoded>/memory/`: one `MEMORY.md` index plus one file per fact. Each library folds into
+  a single row (entry count, size, how many origin sessions are still openable) and opens into its own
+  page with type filters. Counts include library entries — the page total is the real file count, not
+  just the handful of global files.
+- **Memory graph** — a third layout next to list/icons. Entries sit in swimlanes by
+  `metadata.type`, `[[wiki links]]` between them are drawn as edges, and each memory links to the
+  **session that wrote it** — click that node to jump straight to the session page. Links that resolve
+  to nothing and origin sessions whose transcript is gone are counted in the legend rather than
+  silently dropped. Memory detail pages carry the same graph scoped to one hop.
+
+**Instructions** — the persistent rules *you* wrote for the agents: `CLAUDE.md`, `AGENTS.md` (with
+`AGENTS.override.md` precedence), `GEMINI.md`, `QWEN.md`, `<repo>/.cursor/rules/*.mdc`, and Hermes'
+`SOUL.md`. Same browse/preview/edit workflow as Memory, with its own count and global-vs-project
+breakdown.
 
 **Agent** — manage agent / subagent definitions across tools, mirroring the skills workflow.
 
@@ -260,7 +282,6 @@ eureka --audit-snapshot            # dump the agent tool-call audit trail (--ris
 eureka --render-previews [dir]     # offscreen-render every island state to PNG
 eureka --render-shell [dir]        # offscreen-render the sidebar + audit page (light/dark)
 eureka --render-lineage [dir]      # offscreen-render the turn lineage graph (golden + live)
-eureka --diagnostics-snapshot      # scan and dump per-turn prompt-quality metrics
 eureka-relay inject --event stop --session demo   # inject a test event into the spool
 ```
 

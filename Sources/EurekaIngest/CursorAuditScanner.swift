@@ -45,12 +45,38 @@ public final class CursorAuditScanner {
         self.maxSessions = maxSessions
     }
 
+    /// 上一轮扫描时的库指纹；相同就整轮跳过（见 scanOnce）
+    private var lastFingerprint: String?
+
+    /// 库指纹 = 主库 + WAL 的 size/mtime。
+    ///
+    /// **必须带 `-wal`**：Cursor 以 WAL 模式持有这个库，新写入先落在 `state.vscdb-wal` 上，
+    /// 主库的 size/mtime 可以长时间不变 —— 只看主库会把正在活跃的会话判成"没变化"而漏采。
+    /// 不看 `-shm`：那是共享内存索引，读操作也会碰它，拿它当判据等于没有门控。
+    private static func fingerprint(_ dbPath: URL) -> String {
+        let fm = FileManager.default
+        return [dbPath.path, dbPath.path + "-wal"].map { path -> String in
+            guard let attrs = try? fm.attributesOfItem(atPath: path),
+                  let size = (attrs[.size] as? NSNumber)?.int64Value,
+                  let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970
+            else { return "-" }
+            return "\(size):\(mtime)"
+        }.joined(separator: "|")
+    }
+
     /// 扫一遍近窗会话，返回本轮新插入的审计行数。alertSink 接收高危告警。
+    ///
+    /// ⚡️ **库没变就立刻返回**。这一条门控是必须的：审计是 2 秒节奏，而这里每轮都要打开一个
+    /// **250 MB** 的 SQLite 库、再跑一整轮 `CursorSessionIndexer.index`（内部还会逐个打开
+    /// workspaceStorage 下的库）。实测这条路径是整个应用的 CPU 头号消耗
+    /// （`sample` 抓到 `AuditService.scanCursor → SQLiteDB.init → openDatabase` 常驻热点，
+    /// 应用长跑平均 CPU 25%）。Cursor 不活跃时现在是一次 stat 的成本。
     @discardableResult
     public func scanOnce(now: Date = Date(), alertSink: ((RiskAlert) -> Void)? = nil) throws -> Int {
-        guard FileManager.default.fileExists(atPath: dbPath.path),
-            let db = try? SQLiteDB(path: dbPath.path, readOnly: true)
-        else { return 0 }
+        guard FileManager.default.fileExists(atPath: dbPath.path) else { return 0 }
+        let fingerprint = Self.fingerprint(dbPath)
+        if let lastFingerprint, lastFingerprint == fingerprint { return 0 }
+        guard let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return 0 }
         let inode = Self.fileInode(path: dbPath.path)
         let sessions = CursorSessionIndexer.index(
             dbPath: dbPath, workspaceStorageRoot: workspaceStorageRoot,
@@ -61,6 +87,9 @@ public final class CursorAuditScanner {
             inserted += try scan(
                 session: session, db: db, inode: inode, now: now, alertSink: alertSink)
         }
+        // **只有整轮扫完才记指纹**（不能用 defer：抛错时也会执行，那会把没扫完的库当已完成，
+        // 下一轮门控直接跳过 ⇒ 静默丢审计）
+        lastFingerprint = fingerprint
         return inserted
     }
 

@@ -49,8 +49,6 @@ enum EurekaCLI {
                 limit: args.firstIndex(of: "--limit").flatMap { idx in
                     args.indices.contains(idx + 1) ? Int(args[idx + 1]) : nil
                 } ?? 50)
-        case "--diagnostics-snapshot":
-            diagnosticsSnapshot()
         case "--render-previews":
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-previews"
             MainActor.assumeIsolated {
@@ -246,34 +244,6 @@ enum EurekaCLI {
     }
 
     /// 审计快照：跑一次 Codex 审计扫描，再输出最近的操作流水（调试/脚本对拍用）
-    /// 一次性同步跑逐轮指标索引并输出统计（诊断页的数据来源；也是排查它的入口）
-    private static func diagnosticsSnapshot() {
-        do {
-            let store = try EurekaStore(path: EurekaStore.defaultURL())
-            let indexer = TurnMetricsIndexer(store: store)
-            let started = Date()
-            let rebuilt = try indexer.indexOnce()
-            let elapsed = Date().timeIntervalSince(started)
-            let total = try store.turnMetrics.count()
-            print(String(format: "重建 %d 个文件，耗时 %.1fs，共 %d 轮", rebuilt, elapsed, total))
-            let now = Date()
-            let aggregate = try store.turnMetrics.aggregate(
-                from: now.addingTimeInterval(-30 * 86400), to: now.addingTimeInterval(86400))
-            print("近 30 天 \(aggregate.turnCount) 轮："
-                + "干净 \(aggregate.cleanTurns) / 有提示 \(aggregate.noticeTurns) "
-                + "/ 有问题 \(aggregate.badTurns)")
-            print(String(format: "平均定位开销 %.0f%%", aggregate.averageExploreRatio * 100))
-            for (rule, hits) in aggregate.ruleHits.sorted(by: { $0.value > $1.value }) {
-                print("  \(rule): \(hits) 轮")
-            }
-            for (source, count) in aggregate.bySource.sorted(by: { $0.value > $1.value }) {
-                print("  [\(source)] \(count) 轮")
-            }
-        } catch {
-            print("失败: \(error)")
-            exit(1)
-        }
-    }
 
     private static func auditSnapshot(riskOnly: Bool, limit: Int) {
         do {
@@ -370,7 +340,6 @@ enum EurekaCLI {
           --render-previews [目录]   离屏渲染灵动岛各形态 PNG
           --render-shell [目录]      离屏渲染侧栏（含品牌区）与审计页，明/暗两版
           --render-lineage [目录]    离屏渲染轮次血缘图（golden 基准 + 真实数据）
-          --diagnostics-snapshot    扫描并输出逐轮诊断指标（提示词质量）
         """)
     }
 }

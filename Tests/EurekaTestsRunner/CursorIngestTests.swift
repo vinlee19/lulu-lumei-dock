@@ -911,6 +911,39 @@ private func cursorUsageScannerTests(_ t: TestRunner) {
 private func cursorAuditScannerTests(_ t: TestRunner) {
     t.suite("CursorAuditScanner · 工具轨迹")
 
+    t.test("库指纹门控：没变化就跳过，主库或 WAL 一动就必须重扫") {
+        // 这条门控是应用 CPU 的关键：审计是 2 秒节奏，而每轮要打开一个 250 MB 的库
+        // 再全量索引会话（sample 抓到它是头号热点）。但它一旦失效就是**静默丢审计**，
+        // 所以「变化后必须重扫」这半边比「没变就跳过」更要钉住。
+        let fixture = try CursorFixture()
+        defer { fixture.cleanUp() }
+        try fixture.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
+        try fixture.addComposer(
+            id: "c1", workspaceId: "ws1", name: "会话", status: "completed",
+            bubbles: [.tool("run_terminal_cmd", status: "completed",
+                            rawArgs: #"{"command":"echo one"}"#)])
+        CursorWorkspaceIndex.resetCacheForTesting()
+
+        let store = try EurekaStore(path: fixture.root.appendingPathComponent("eureka.sqlite"))
+        let scanner = fixture.makeAuditScanner(store: store)
+        try expectEqual(try scanner.scanOnce(), 1)
+        // 库没动 → 门控生效，直接 0（这一轮连库都不该打开）
+        try expectEqual(try scanner.scanOnce(), 0)
+
+        // 主库变了（新增一个会话）→ 必须重扫并采到新行
+        try fixture.addComposer(
+            id: "c2", workspaceId: "ws1", name: "会话二", status: "completed",
+            bubbles: [.tool("read_file_v2", status: "completed",
+                            rawArgs: #"{"target_file":"README.md"}"#)])
+        CursorWorkspaceIndex.resetCacheForTesting()
+        try expectEqual(try scanner.scanOnce(), 1, "主库变化后必须重扫，否则静默丢审计")
+        try expectEqual(try scanner.scanOnce(), 0)
+
+        // WAL 那半边（新写入落在 `-wal`、主库 size/mtime 都不动）在单测里造不出来 ——
+        // 普通 SQLite 写入会直接改主库，而"跳过"与"扫了但无新数据"都返回 0，无法区分。
+        // 那一半靠 `fingerprint` 把 `-wal` 纳入判据来保证，别在这里写假断言。
+    }
+
     t.test("toolFormerData 落成审计流水，参数按 Cursor 词表提取；重扫幂等") {
         let fixture = try CursorFixture()
         defer { fixture.cleanUp() }
