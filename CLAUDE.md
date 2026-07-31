@@ -10,7 +10,7 @@ Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex C
 
 ```bash
 make build      # swift build (debug)
-make test       # swift run eureka-tests  — runs all 597 tests
+make test       # swift run eureka-tests  — runs all 600 tests
 make run        # swift run eureka — runs the GUI app in dev mode
 make demo       # Scripts/demo-island.sh — injects fake events to show every island state
 make release    # swift build -c release

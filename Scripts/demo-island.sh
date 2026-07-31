@@ -29,11 +29,11 @@ step "demo2 完成 → 展开绿色完成卡，6 秒后自动收回 compact"
 "$BIN/eureka-relay" inject --event stop --session demo2
 sleep 9
 
-step "demo3 请求权限 → 橙色等待卡常驻（不自动收）"
+step "demo3 请求权限 → 橙色等待卡，约 10 秒后自动收回 compact（胶囊保持橙色警示）"
 "$BIN/eureka-relay" inject --event notification-permission --session demo3
-sleep 5
+sleep 13
 
-step "demo3 获批继续跑（心跳）→ 等待卡撤掉，回 compact"
+step "demo3 获批继续跑（心跳）→ 胶囊恢复常色"
 "$BIN/eureka-relay" inject --event post-tool-use --session demo3
 sleep 4
 

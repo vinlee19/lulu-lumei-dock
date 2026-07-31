@@ -172,6 +172,9 @@ func cardQueueTests(_ t: TestRunner) {
             startedAt: Date(timeIntervalSince1970: 900),
             phase: .waiting(.permission, since: Date(timeIntervalSince1970: 950))))
     }
+    func notice(_ id: String) -> IslandState.Card {
+        .notice(IslandNotice(id: id, emoji: "🧘", headline: "歇一歇", body: "站起来走两步"))
+    }
 
     t.test("完成卡按序排队逐显") {
         var queue = IslandCardQueue()
@@ -237,5 +240,35 @@ func cardQueueTests(_ t: TestRunner) {
         try expectEqual(queue.current, alert("op-9"))
         queue.advance()
         try expect(queue.isEmpty)
+    }
+
+    // MARK: - 自动收起时长（IslandViewModel 的两处计时共用这一份判据）
+
+    t.test("四类卡的自动收起偏移：完成 +0 / 等待 +4 / 提示 +5 / 告警 +6") {
+        try expectEqual(finished("a").autoDismissExtraSeconds, 0)
+        try expectEqual(waiting("a").autoDismissExtraSeconds, 4)
+        try expectEqual(notice("n").autoDismissExtraSeconds, 5)
+        try expectEqual(alert("op-1").autoDismissExtraSeconds, 6)
+    }
+
+    t.test("等待卡不再常驻 —— 四类卡全都自动收起") {
+        // 曾经 .waiting 返回 nil（常驻到手动点掉）。改成自动收之后，
+        // IslandViewModel.setHovering 那处原本硬列 case 的 switch 会漏掉它，
+        // 表现为「悬停过一次就退回常驻」；判据收进 Card 后两处不可能再漂移。
+        for card in [finished("a"), waiting("a"), notice("n"), alert("op-1")] {
+            try expect(card.autoDismisses, "\(card) 应自动收起")
+        }
+    }
+
+    t.test("偏移叠加在用户设置的基准秒数上，而不是写死绝对值") {
+        // 设置页滑块 3–15s 才是用户意图的载体：基准 6 时等待卡 10s，基准调到 12 就是 16s。
+        // 若写死 10s，滑块拉到 15 会出现「等待卡比完成卡收得还快」。
+        guard let waitingExtra = waiting("a").autoDismissExtraSeconds,
+              let finishedExtra = finished("a").autoDismissExtraSeconds
+        else { throw ExpectationError(description: "完成卡与等待卡都应有偏移值") }
+        try expectEqual(6 + waitingExtra, 10)
+        try expect(
+            waitingExtra > finishedExtra,
+            "等待卡该比完成卡多停一会（授权请求要看清）")
     }
 }

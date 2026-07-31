@@ -36,7 +36,8 @@ final class IslandViewModel: ObservableObject {
     var layout: IslandGeometry.Layout { IslandGeometry.layout(for: screen) }
     /// 当前屏 UI 缩放系数（字体/内边距/徽标用；pill 高度受刘海钉死，不适用）
     var uiScale: CGFloat { IslandGeometry.scaleFactor(for: screen) }
-    /// 完成/出错卡自动收起秒数（等待卡不自动收）
+    /// 卡片自动收起的**基准**秒数（设置页 3–15s 可调）。
+    /// 各类卡在此之上叠加自己的偏移，见 `IslandState.Card.autoDismissExtraSeconds`。
     var autoDismissSeconds: TimeInterval = 6
 
     /// 展示形态变化回调（panel 控制器据此显隐窗口）
@@ -45,6 +46,9 @@ final class IslandViewModel: ObservableObject {
     private var queue = IslandCardQueue()
     private var hovering = false
     private var dismissTimer: Timer?
+    /// 当前收起计时是为哪张卡排的。用来区分「换了卡」与「同一张卡被状态刷新重复投影」——
+    /// 后者绝不能重排计时，否则倒计时被无限拨回起点（见 refresh）。
+    private var timerCard: IslandState.Card?
 
     // MARK: - 输入
 
@@ -114,9 +118,12 @@ final class IslandViewModel: ObservableObject {
         hovering = value
         if !value {
             hoverExtensions = 0
-            // 真正移开后正常计时收起
+            // 真正移开后正常计时收起。**判据与 refresh() 共用 card.autoDismisses** ——
+            // 这里原本硬列 case，漏掉等待卡，导致它「悬停过一次就退回常驻」。
             switch display {
-            case .card(.finished), .card(.notice), .card(.alert), .taskList:
+            case .card(let card) where card.autoDismisses:
+                scheduleAutoDismiss(extraSeconds: card.autoDismissExtraSeconds ?? 0)
+            case .taskList:
                 scheduleAutoDismiss()
             default:
                 break
@@ -201,13 +208,20 @@ final class IslandViewModel: ObservableObject {
         }
         if let card = queue.current {
             setDisplay(.card(card))
-            switch card {
-            case .finished: scheduleAutoDismiss()
-            case .waiting: cancelAutoDismiss()  // 等待卡常驻到任务恢复/手动点掉
-            case .notice: scheduleAutoDismiss(extraSeconds: 5)  // 关怀文案给足阅读时间
-            case .alert: scheduleAutoDismiss(extraSeconds: 6)  // 安全告警多停一会，不常驻（审计页/通知中心留存）
+            // **只在换卡时重排计时**。refresh() 会被 updateActiveTasks 频繁调用（各源 tailer
+            // 2 秒一轮），无条件重排等于每 2 秒把倒计时拨回起点 —— 卡片于是永远收不掉。
+            // 实测：等待卡 15 秒里被刷新 6 次，一次都没收；完成卡只因 6 秒窗口短才偶尔抢在
+            // 两次刷新之间收掉，notice(11s) / alert(12s) 窗口更长，中招更稳。
+            if timerCard != card {
+                timerCard = card
+                if let extra = card.autoDismissExtraSeconds {
+                    scheduleAutoDismiss(extraSeconds: extra)
+                } else {
+                    cancelAutoDismiss()
+                }
             }
         } else {
+            timerCard = nil
             setDisplay(activeTasks.isEmpty ? .hidden : .compact)
         }
         queuedCount = queue.pendingCount

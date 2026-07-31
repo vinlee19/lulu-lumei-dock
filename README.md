@@ -66,8 +66,11 @@ sessions opened before hooks were installed are still visible.
 **Dynamic Island notifications**
 - A compact capsule pins to the top while tasks run (fuses with the notch, or drag it anywhere and
   it snaps back to center).
-- Finished / errored / interrupted cards auto‑dismiss (hover to pause); waiting‑for‑permission /
-  input cards stay until you deal with them.
+- Every card auto‑dismisses back to the capsule (hover to pause): finished / errored / interrupted
+  after the configured delay (6s by default, 3–15s in Settings), waiting‑for‑permission / input after
+  that plus 4s — long enough to read, short enough to stop owning your screen. Nothing is lost when a
+  waiting card collapses: the capsule stays amber, the task list still shows what it's waiting for, and
+  the system notification remains in Notification Center.
 - Multi‑task merged counts, queued finished cards shown one by one, click the capsule to expand the
   task list (current tool, context usage `ctx%`, idle sessions).
 - Toggle time display: elapsed duration ↔ the session's original start time (resolved across resume
