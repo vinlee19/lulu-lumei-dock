@@ -4,6 +4,30 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] - 2026-07-31
+
+### Changed
+
+- **Waiting-for-permission cards now collapse on their own after ~10s** instead of sitting there until
+  clicked. Nothing is lost when one collapses: the capsule stays amber, the task list still shows what
+  the session is waiting for (along with the "jump to terminal" button, which only ever lived there),
+  and the system notification remains in Notification Center. The delay is an offset on the existing
+  auto-dismiss setting (default 6s + 4s), so the Settings slider still governs it — a hardcoded 10s
+  would have made waiting cards dismiss *faster* than finished ones once the slider passed 10.
+
+### Fixed
+
+- **Auto-dismiss timers were being reset by unrelated state updates, so cards could hang around
+  indefinitely.** `refresh()` re-armed the timer on every call, and it's called whenever active tasks
+  change — which each source's tailer does every 2 seconds. A card's countdown was therefore pushed
+  back to full before it could ever elapse. Measured: a waiting card survived 6 refreshes in 15s
+  without dismissing. Finished cards (6s) sometimes slipped through between refreshes, and
+  notices (11s) / alerts (12s) had it worse. Timers are now re-armed only when the card actually
+  changes.
+- Hovering a card and moving away re-armed its timer with the **base** delay, dropping the card's own
+  offset — a notice or alert would collapse 5–6s early after any hover. Both the initial timer and the
+  post-hover one now read the same per-card offset.
+
 ## [0.17.0] - 2026-07-30
 
 ### Added
@@ -1039,6 +1063,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.18.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.18.0
 [0.17.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.17.0
 [0.16.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.16.0
 [0.15.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.15.0
