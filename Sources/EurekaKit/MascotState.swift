@@ -20,6 +20,48 @@ public enum MascotState: String, Sendable, CaseIterable {
     }
 }
 
+/// 吉祥物序列的播放方式。基础态循环，完成/点击/唤醒等瞬时态可只播一次并停在末帧。
+public enum MascotPlaybackMode: String, Sendable, Equatable {
+    case loop
+    case onceHoldLast
+
+    /// 根据本地播放时长返回帧下标。纯函数供渲染层和单测共用。
+    public func frameIndex(elapsed: TimeInterval, fps: Double, frameCount: Int) -> Int {
+        guard frameCount > 1 else { return 0 }
+        let safeElapsed = max(0, elapsed)
+        let safeFPS = max(0.1, fps)
+        let raw = Int(floor(safeElapsed * safeFPS))
+        switch self {
+        case .loop:
+            return raw % frameCount
+        case .onceHoldLast:
+            return min(raw, frameCount - 1)
+        }
+    }
+}
+
+/// 精灵图的逻辑网格。图片尺寸由 App 层读取，这里只负责安全的格子边界。
+public struct MascotSpriteGrid: Sendable, Equatable {
+    public var columns: Int
+    public var rows: Int
+
+    public init(columns: Int, rows: Int) {
+        self.columns = max(1, columns)
+        self.rows = max(1, rows)
+    }
+
+    public func contains(row: Int, column: Int) -> Bool {
+        (0..<rows).contains(row) && (0..<columns).contains(column)
+    }
+}
+
+/// 逐帧刷新只应在面板可见且系统清醒时运行。
+public enum MascotAnimationPolicy {
+    public static func shouldAnimate(isVisible: Bool, isAwake: Bool) -> Bool {
+        isVisible && isAwake
+    }
+}
+
 /// 基础态推导(纯函数,便于单测)。瞬时态(success/error/relax/poke/wake)由 ViewModel 按事件叠加。
 public enum MascotBaseResolver {
     public struct Input {

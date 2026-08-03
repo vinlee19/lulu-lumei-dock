@@ -55,4 +55,31 @@ func mascotStateTests(_ t: TestRunner) {
         try expectEqual(MascotState.success.fallback, .working)
         try expectEqual(MascotState.idle.fallback, .idle)
     }
+
+    t.test("精灵网格同时支持 v2 8×11 与 v3 4×12") {
+        let v2 = MascotSpriteGrid(columns: 8, rows: 11)
+        let v3 = MascotSpriteGrid(columns: 4, rows: 12)
+        try expect(v2.contains(row: 10, column: 7), "v2 最后一格应有效")
+        try expect(!v2.contains(row: 11, column: 0), "v2 越界行应拒绝")
+        try expect(v3.contains(row: 11, column: 3), "v3 最后一格应有效")
+        try expect(!v3.contains(row: 0, column: 4), "v3 越界列应拒绝")
+    }
+
+    t.test("播放模式:循环取模、单次停在末帧") {
+        try expectEqual(MascotPlaybackMode.loop.frameIndex(
+            elapsed: 1.25, fps: 4, frameCount: 4), 1)
+        try expectEqual(MascotPlaybackMode.onceHoldLast.frameIndex(
+            elapsed: 1.25, fps: 4, frameCount: 4), 3)
+        try expectEqual(MascotPlaybackMode.onceHoldLast.frameIndex(
+            elapsed: -1, fps: 4, frameCount: 4), 0)
+    }
+
+    t.test("动画门控:仅可见且清醒时刷新") {
+        try expect(MascotAnimationPolicy.shouldAnimate(isVisible: true, isAwake: true),
+                   "可见且清醒时应播放")
+        try expect(!MascotAnimationPolicy.shouldAnimate(isVisible: false, isAwake: true),
+                   "隐藏时应暂停")
+        try expect(!MascotAnimationPolicy.shouldAnimate(isVisible: true, isAwake: false),
+                   "系统休眠时应暂停")
+    }
 }

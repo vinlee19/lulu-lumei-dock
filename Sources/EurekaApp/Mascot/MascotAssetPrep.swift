@@ -1,11 +1,27 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import ImageIO
 
 /// 一次性资产预处理:从四角连通区域 flood-fill 抠掉"外圈纯色背景",
 /// 保留内部白色(眼睛/床品)。把模切贴纸转成透明浮动角色。
 /// 用法:`eureka --prep-mascot-assets <srcDir> <dstDir>`
 enum MascotAssetPrep {
+    private static let v3SheetNames = [
+        "00-idle-snack.png",
+        "01-working-pair.png",
+        "02-working-lumei-idea.png",
+        "03-waiting-lulu.png",
+        "04-success-high-five.png",
+        "05-error-lumei-comforts.png",
+        "06-error-lulu-encourages.png",
+        "07-relax-tea.png",
+        "08-sleeping-blanket.png",
+        "09-night-bedtime.png",
+        "10-poke-boop.png",
+        "11-wake.png",
+    ]
+
     static func run(srcDir: String, dstDir: String) {
         let fm = FileManager.default
         let src = URL(fileURLWithPath: srcDir)
@@ -89,6 +105,163 @@ enum MascotAssetPrep {
         let rep = NSBitmapImageRep(cgImage: cg)
         if let png = rep.representation(using: .png, properties: [:]) {
             try? png.write(to: url)
+        }
+    }
+
+    /// 把 12 张 2×2 透明分镜图按固定顺序打包为 4×12、每格 256px 的 v3 图集。
+    /// 输入只接受源目录的直接子文件，拒绝软链接和非 PNG 文件，避免路径越界。
+    static func packV3(srcDir: String, outputPath: String) throws {
+        let fm = FileManager.default
+        let sourceDirectory = URL(fileURLWithPath: srcDir, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: sourceDirectory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            throw MascotAssetPrepError.invalidSourceDirectory
+        }
+
+        let outputURL = URL(fileURLWithPath: outputPath).standardizedFileURL
+        guard outputURL.pathExtension.lowercased() == "png" else {
+            throw MascotAssetPrepError.invalidOutput
+        }
+        guard !fm.fileExists(atPath: outputURL.path) else {
+            throw MascotAssetPrepError.outputAlreadyExists
+        }
+
+        let sourceImages = try v3SheetNames.map { name -> NSImage in
+            let candidate = sourceDirectory.appendingPathComponent(name)
+                .standardizedFileURL
+            guard candidate.deletingLastPathComponent() == sourceDirectory,
+                  candidate.pathExtension.lowercased() == "png"
+            else {
+                throw MascotAssetPrepError.unsafeSource(name)
+            }
+            let values = try candidate.resourceValues(forKeys: [
+                .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey,
+            ])
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  let fileSize = values.fileSize, fileSize <= 32 * 1_024 * 1_024,
+                  candidate.resolvingSymlinksInPath().deletingLastPathComponent()
+                    == sourceDirectory,
+                  let imageSource = CGImageSourceCreateWithURL(candidate as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(
+                    imageSource, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                  width == height, width.isMultiple(of: 2),
+                  (512...4_096).contains(width),
+                  let cg = CGImageSourceCreateImageAtIndex(imageSource, 0, nil),
+                  cg.width == width, cg.height == height,
+                  hasTransparentCorners(cg)
+            else {
+                throw MascotAssetPrepError.invalidSheet(name)
+            }
+            return NSImage(
+                cgImage: cg,
+                size: NSSize(width: width, height: height))
+        }
+
+        let cellSize = 256
+        let atlasWidth = cellSize * 4
+        let atlasHeight = cellSize * v3SheetNames.count
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: atlasWidth,
+            height: atlasHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: atlasWidth * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else {
+            throw MascotAssetPrepError.cannotCreateAtlas
+        }
+        let graphics = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        graphics.imageInterpolation = .high
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: atlasWidth, height: atlasHeight).fill(using: .copy)
+        for (row, image) in sourceImages.enumerated() {
+            let halfWidth = image.size.width / 2
+            let halfHeight = image.size.height / 2
+            for frame in 0..<4 {
+                let sourceColumn = frame % 2
+                let sourceRow = frame / 2
+                let sourceRect = NSRect(
+                    x: CGFloat(sourceColumn) * halfWidth,
+                    y: sourceRow == 0 ? halfHeight : 0,
+                    width: halfWidth,
+                    height: halfHeight)
+                let targetRect = NSRect(
+                    x: frame * cellSize,
+                    y: atlasHeight - (row + 1) * cellSize,
+                    width: cellSize,
+                    height: cellSize)
+                image.draw(
+                    in: targetRect,
+                    from: sourceRect,
+                    operation: .sourceOver,
+                    fraction: 1,
+                    respectFlipped: false,
+                    hints: [.interpolation: NSImageInterpolation.high])
+            }
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let atlas = context.makeImage() else {
+            throw MascotAssetPrepError.cannotCreateAtlas
+        }
+        let bitmap = NSBitmapImageRep(cgImage: atlas)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw MascotAssetPrepError.cannotCreateAtlas
+        }
+        try fm.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try png.write(to: outputURL, options: .withoutOverwriting)
+        print("✓ v3 图集 \(atlasWidth)×\(atlasHeight): \(outputURL.path)")
+    }
+
+    private static func hasTransparentCorners(_ image: CGImage) -> Bool {
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        guard bitmap.hasAlpha else { return false }
+        let points = [
+            NSPoint(x: 0, y: 0),
+            NSPoint(x: image.width - 1, y: 0),
+            NSPoint(x: 0, y: image.height - 1),
+            NSPoint(x: image.width - 1, y: image.height - 1),
+        ]
+        return points.allSatisfy {
+            (bitmap.colorAt(x: Int($0.x), y: Int($0.y))?.alphaComponent ?? 1) < 0.05
+        }
+    }
+}
+
+private enum MascotAssetPrepError: LocalizedError {
+    case invalidSourceDirectory
+    case invalidOutput
+    case outputAlreadyExists
+    case unsafeSource(String)
+    case invalidSheet(String)
+    case cannotCreateAtlas
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSourceDirectory:
+            "源目录不存在或不是文件夹"
+        case .invalidOutput:
+            "输出路径必须是 PNG 文件"
+        case .outputAlreadyExists:
+            "输出文件已存在，为避免误覆盖已停止"
+        case .unsafeSource(let name):
+            "素材路径越界或格式不受支持：\(name)"
+        case .invalidSheet(let name):
+            "素材必须是 512...4096px、正方形、偶数尺寸、透明四角的普通 PNG：\(name)"
+        case .cannotCreateAtlas:
+            "无法创建 v3 图集"
         }
     }
 }

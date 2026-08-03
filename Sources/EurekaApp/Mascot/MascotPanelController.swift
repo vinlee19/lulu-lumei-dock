@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class MascotPanelController {
     let viewModel: MascotViewModel
+    let animationRuntime = MascotAnimationRuntime()
 
     /// 右键「隐藏吉祥物」→ 交给 AppDelegate 关掉设置开关(再由观察者隐藏)
     var onRequestHide: () -> Void = {}
@@ -41,9 +42,11 @@ final class MascotPanelController {
     func start() {
         let root = MascotRootView(
             viewModel: viewModel,
+            animationRuntime: animationRuntime,
             onHide: { [weak self] in self?.onRequestHide() },
             onOpenSettings: { [weak self] in self?.onOpenSettings() })
         panel.contentView = NSHostingView(rootView: root)
+        animationRuntime.start()
         viewModel.start()
         NotificationCenter.default.addObserver(
             self, selector: #selector(panelMoved),
@@ -58,6 +61,7 @@ final class MascotPanelController {
     }
 
     func setVisible(_ visible: Bool) {
+        animationRuntime.setVisible(visible)
         if visible {
             reposition()
             panel.orderFrontRegardless()

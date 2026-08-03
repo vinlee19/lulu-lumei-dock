@@ -7,8 +7,13 @@ import Foundation
 enum MascotAnimation: Equatable {
     case frames([URL], fps: Double)
     case animatedImage(URL)
-    /// v2 精灵图中的任意帧序列。用于同一行拆出多个微行为,也支持 16 向视线。
-    case spriteSequence(URL, cells: [MascotSpriteCell], fps: Double)
+    /// 精灵图中的任意帧序列。网格尺寸随图集携带，兼容 v2 与后续扩展。
+    case spriteSequence(MascotSpriteSheet, cells: [MascotSpriteCell], fps: Double)
+}
+
+struct MascotSpriteSheet: Equatable {
+    var url: URL
+    var grid: MascotSpriteGrid
 }
 
 struct MascotSpriteCell: Equatable {
@@ -23,6 +28,7 @@ struct MascotVariant: Equatable {
     var caption: String?
     var motion: MascotMotionProfile = .stateDefault
     var weight: Int = 1
+    var playback: MascotPlaybackMode = .loop
 }
 
 /// 变体级肢体语言。比按状态写死更适合表达眨眼、观察、提醒等微行为。
@@ -239,75 +245,203 @@ enum MascotPackLoader {
             ],
         ]
 
-        guard let atlas = AppResources.bundle.url(
+        if let atlas = AppResources.bundle.url(
             forResource: "lulu-lumei-duo-v2", withExtension: "png",
-            subdirectory: "mascots/lulu")
-        else { return pack }
+            subdirectory: "mascots/lulu") {
+            let v2Sheet = MascotSpriteSheet(
+                url: atlas, grid: MascotSpriteGrid(columns: 8, rows: 11))
+            func sprite(row: Int, columns: [Int], fps: Double) -> MascotAnimation {
+                .spriteSequence(
+                    v2Sheet,
+                    cells: columns.map { MascotSpriteCell(row: row, column: $0) },
+                    fps: fps)
+            }
 
-        func sprite(row: Int, columns: [Int], fps: Double) -> MascotAnimation {
-            .spriteSequence(
-                atlas,
-                cells: columns.map { MascotSpriteCell(row: row, column: $0) },
-                fps: fps)
+            // v2 行提供真正的双人动画；旧 3D 场景继续作为交替出现的单人变体。
+            pack.variants[.idle]?.insert(contentsOf: [
+                MascotVariant(id: "duo-breathing", animation: sprite(
+                    row: 0, columns: [0, 1, 2, 3, 4, 5], fps: 3),
+                    caption: nil, motion: .gentle, weight: 5),
+                MascotVariant(id: "duo-blink", animation: sprite(
+                    row: 0, columns: [0, 1, 0, 2, 0, 1], fps: 2.5),
+                    caption: "HI~", motion: .still, weight: 4),
+            ], at: 0)
+            pack.variants[.working]?.insert(contentsOf: [
+                MascotVariant(id: "duo-focus", animation: sprite(
+                    row: 7, columns: [0, 1, 2, 3, 4, 5], fps: 4),
+                    caption: "TOGETHER", motion: .focus, weight: 5),
+                MascotVariant(id: "duo-review", animation: sprite(
+                    row: 8, columns: [0, 1, 2, 3, 4, 5], fps: 3),
+                    caption: "CHECK", motion: .curious, weight: 4),
+            ], at: 0)
+            pack.variants[.waiting]?.insert(contentsOf: [
+                MascotVariant(id: "duo-awaiting", animation: sprite(
+                    row: 6, columns: [0, 1, 2, 3, 4, 5], fps: 3),
+                    caption: "NEED YOU", motion: .nudge, weight: 5),
+                MascotVariant(id: "duo-wave", animation: sprite(
+                    row: 3, columns: [0, 1, 2, 3], fps: 4),
+                    caption: "OVER HERE!", motion: .gentle, weight: 4),
+            ], at: 0)
+            pack.variants[.success] = [
+                MascotVariant(id: "duo-jump", animation: sprite(
+                    row: 4, columns: [0, 1, 2, 3, 4], fps: 5),
+                    caption: "WE DID IT!", motion: .celebrate, weight: 5,
+                    playback: .onceHoldLast),
+                MascotVariant(id: "duo-happy-wave", animation: sprite(
+                    row: 3, columns: [0, 1, 2, 3], fps: 4),
+                    caption: "YAY!", motion: .celebrate, weight: 3,
+                    playback: .onceHoldLast),
+                MascotVariant(id: "lulu-finished", animation: legacyStates[.success]!,
+                              caption: "DONE!", motion: .celebrate, weight: 2,
+                              playback: .onceHoldLast),
+            ]
+            pack.variants[.error] = [
+                MascotVariant(id: "duo-soft-fail", animation: sprite(
+                    row: 5, columns: Array(0..<8), fps: 4),
+                    caption: "TRY AGAIN", motion: .droop, weight: 5,
+                    playback: .onceHoldLast),
+                MascotVariant(id: "lumei-oops", animation: legacyStates[.error]!,
+                              caption: "OOPS", motion: .droop, weight: 2,
+                              playback: .onceHoldLast),
+            ]
+            pack.variants[.poke] = [
+                MascotVariant(id: "duo-startled", animation: sprite(
+                    row: 4, columns: [0, 1, 2, 3, 4], fps: 7),
+                    caption: "BOOP!", motion: .celebrate, weight: 3,
+                    playback: .onceHoldLast),
+                MascotVariant(id: "duo-wave-back", animation: sprite(
+                    row: 3, columns: [0, 1, 2, 3], fps: 6),
+                    caption: "HEHE~", motion: .gentle, weight: 2,
+                    playback: .onceHoldLast),
+            ]
+            pack.variants[.wake] = [
+                MascotVariant(id: "duo-wake-up", animation: sprite(
+                    row: 4, columns: [0, 1, 2, 3, 4], fps: 5),
+                    caption: "AWAKE!", motion: .gentle, weight: 1,
+                    playback: .onceHoldLast),
+            ]
+            pack.lookDirections = (0..<16).map { direction in
+                sprite(row: 9 + direction / 8, columns: [direction % 8], fps: 1)
+            }
         }
 
-        // v2 行提供真正的双人动画；旧 3D 场景继续作为交替出现的单人变体。
-        pack.variants[.idle]?.insert(contentsOf: [
-            MascotVariant(id: "duo-breathing", animation: sprite(
-                row: 0, columns: [0, 1, 2, 3, 4, 5], fps: 3),
-                caption: nil, motion: .gentle, weight: 5),
-            MascotVariant(id: "duo-blink", animation: sprite(
-                row: 0, columns: [0, 1, 0, 2, 0, 1], fps: 2.5),
-                caption: "HI~", motion: .still, weight: 4),
-        ], at: 0)
-        pack.variants[.working]?.insert(contentsOf: [
-            MascotVariant(id: "duo-focus", animation: sprite(
-                row: 7, columns: [0, 1, 2, 3, 4, 5], fps: 4),
-                caption: "TOGETHER", motion: .focus, weight: 5),
-            MascotVariant(id: "duo-review", animation: sprite(
-                row: 8, columns: [0, 1, 2, 3, 4, 5], fps: 3),
-                caption: "CHECK", motion: .curious, weight: 4),
-        ], at: 0)
-        pack.variants[.waiting]?.insert(contentsOf: [
-            MascotVariant(id: "duo-awaiting", animation: sprite(
-                row: 6, columns: [0, 1, 2, 3, 4, 5], fps: 3),
-                caption: "NEED YOU", motion: .nudge, weight: 5),
-            MascotVariant(id: "duo-wave", animation: sprite(
-                row: 3, columns: [0, 1, 2, 3], fps: 4),
-                caption: "OVER HERE!", motion: .gentle, weight: 4),
-        ], at: 0)
-        pack.variants[.success] = [
-            MascotVariant(id: "duo-jump", animation: sprite(
-                row: 4, columns: [0, 1, 2, 3, 4], fps: 5),
-                caption: "WE DID IT!", motion: .celebrate, weight: 5),
-            MascotVariant(id: "duo-happy-wave", animation: sprite(
-                row: 3, columns: [0, 1, 2, 3], fps: 4),
-                caption: "YAY!", motion: .celebrate, weight: 3),
-            MascotVariant(id: "lulu-finished", animation: legacyStates[.success]!,
-                          caption: "DONE!", motion: .celebrate, weight: 2),
-        ]
-        pack.variants[.error] = [
-            MascotVariant(id: "duo-soft-fail", animation: sprite(
-                row: 5, columns: Array(0..<8), fps: 4),
-                caption: "TRY AGAIN", motion: .droop, weight: 5),
-            MascotVariant(id: "lumei-oops", animation: legacyStates[.error]!,
-                          caption: "OOPS", motion: .droop, weight: 2),
-        ]
-        pack.variants[.poke] = [
-            MascotVariant(id: "duo-startled", animation: sprite(
-                row: 4, columns: [0, 1, 2, 3, 4], fps: 7),
-                caption: "BOOP!", motion: .celebrate, weight: 3),
-            MascotVariant(id: "duo-wave-back", animation: sprite(
-                row: 3, columns: [0, 1, 2, 3], fps: 6),
-                caption: "HEHE~", motion: .gentle, weight: 2),
-        ]
-        pack.variants[.wake] = [
-            MascotVariant(id: "duo-wake-up", animation: sprite(
-                row: 4, columns: [0, 1, 2, 3, 4], fps: 5),
-                caption: "AWAKE!", motion: .gentle, weight: 1),
-        ]
-        pack.lookDirections = (0..<16).map { direction in
-            sprite(row: 9 + direction / 8, columns: [direction % 8], fps: 1)
+        if let atlas = AppResources.bundle.url(
+            forResource: "lulu-lumei-duo-v3", withExtension: "png",
+            subdirectory: "mascots/lulu") {
+            let v3Sheet = MascotSpriteSheet(
+                url: atlas, grid: MascotSpriteGrid(columns: 4, rows: 12))
+            func v3(row: Int, fps: Double) -> MascotAnimation {
+                .spriteSequence(
+                    v3Sheet,
+                    cells: (0..<4).map { MascotSpriteCell(row: row, column: $0) },
+                    fps: fps)
+            }
+
+            pack.variants[.idle, default: []].insert(MascotVariant(
+                id: "duo-snack-share",
+                animation: v3(row: 0, fps: 2),
+                caption: "SNACK?",
+                motion: .gentle,
+                weight: 4), at: 0)
+            pack.variants[.working, default: []].insert(contentsOf: [
+                MascotVariant(
+                    id: "duo-pair-programming",
+                    animation: v3(row: 1, fps: 4),
+                    caption: "PAIRING",
+                    motion: .focus,
+                    weight: 4),
+                MascotVariant(
+                    id: "lumei-bright-idea",
+                    animation: v3(row: 2, fps: 3),
+                    caption: "GOT IT!",
+                    motion: .curious,
+                    weight: 3),
+            ], at: 0)
+            pack.variants[.waiting, default: []].insert(MascotVariant(
+                id: "lulu-checklist-reminder",
+                animation: v3(row: 3, fps: 3),
+                caption: "YOUR TURN",
+                motion: .nudge,
+                weight: 4), at: 0)
+            pack.variants[.success, default: []].insert(MascotVariant(
+                id: "duo-high-five",
+                animation: v3(row: 4, fps: 5),
+                caption: "HIGH FIVE!",
+                motion: .celebrate,
+                weight: 5,
+                playback: .onceHoldLast), at: 0)
+            pack.variants[.error, default: []].insert(contentsOf: [
+                MascotVariant(
+                    id: "lumei-comforts-lulu",
+                    animation: v3(row: 5, fps: 2.5),
+                    caption: "I'M HERE",
+                    motion: .gentle,
+                    weight: 4,
+                    playback: .onceHoldLast),
+                MascotVariant(
+                    id: "lulu-encourages-lumei",
+                    animation: v3(row: 6, fps: 3),
+                    caption: "ONE MORE",
+                    motion: .gentle,
+                    weight: 4,
+                    playback: .onceHoldLast),
+            ], at: 0)
+            pack.variants[.relax] = [
+                MascotVariant(
+                    id: "duo-tea-break",
+                    animation: v3(row: 7, fps: 2),
+                    caption: "TEA BREAK",
+                    motion: .sway,
+                    weight: 4),
+                MascotVariant(
+                    id: "lumei-relaxing",
+                    animation: legacyStates[.relax]!,
+                    caption: "RELAX",
+                    motion: .sway,
+                    weight: 2),
+            ]
+            pack.variants[.sleeping] = [
+                MascotVariant(
+                    id: "duo-cozy-sleep",
+                    animation: v3(row: 8, fps: 1.5),
+                    caption: "COZY",
+                    motion: .sleep,
+                    weight: 5),
+                MascotVariant(
+                    id: "lumei-sleeping",
+                    animation: legacyStates[.sleeping]!,
+                    caption: "ZZZ",
+                    motion: .sleep,
+                    weight: 2),
+            ]
+            pack.variants[.night] = [
+                MascotVariant(
+                    id: "duo-bedtime",
+                    animation: v3(row: 9, fps: 2),
+                    caption: "BEDTIME",
+                    motion: .sleep,
+                    weight: 5),
+                MascotVariant(
+                    id: "lulu-night-shift",
+                    animation: legacyStates[.night]!,
+                    caption: "SLEEPY",
+                    motion: .sleep,
+                    weight: 2),
+            ]
+            pack.variants[.poke, default: []].insert(MascotVariant(
+                id: "duo-soft-boop",
+                animation: v3(row: 10, fps: 6),
+                caption: "BOOP!",
+                motion: .gentle,
+                weight: 5,
+                playback: .onceHoldLast), at: 0)
+            pack.variants[.wake, default: []].insert(MascotVariant(
+                id: "duo-morning-stretch",
+                animation: v3(row: 11, fps: 4),
+                caption: "MORNING!",
+                motion: .gentle,
+                weight: 5,
+                playback: .onceHoldLast), at: 0)
         }
         return pack
     }

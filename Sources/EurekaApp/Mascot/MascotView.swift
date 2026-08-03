@@ -2,9 +2,51 @@ import AppKit
 import EurekaKit
 import SwiftUI
 
+private struct MascotAnimationsActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+private struct MascotAnimationEpochKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+private extension EnvironmentValues {
+    var mascotAnimationsActive: Bool {
+        get { self[MascotAnimationsActiveKey.self] }
+        set { self[MascotAnimationsActiveKey.self] = newValue }
+    }
+
+    var mascotAnimationEpoch: Int {
+        get { self[MascotAnimationEpochKey.self] }
+        set { self[MascotAnimationEpochKey.self] = newValue }
+    }
+}
+
+/// 统一逐帧时钟：最多 20fps，隐藏时只渲染一张静态帧，恢复时按 epoch 重锚。
+private struct MascotTimeline<Content: View>: View {
+    let interval: TimeInterval
+    var staticTime: TimeInterval = 0
+    @ViewBuilder var content: (TimeInterval) -> Content
+
+    @Environment(\.mascotAnimationsActive) private var animationsActive
+    @Environment(\.mascotAnimationEpoch) private var epoch
+
+    var body: some View {
+        if animationsActive {
+            TimelineView(.periodic(from: .now, by: max(0.05, interval))) { context in
+                content(context.date.timeIntervalSinceReferenceDate)
+            }
+            .id(epoch)
+        } else {
+            content(staticTime)
+        }
+    }
+}
+
 /// 桌面吉祥物根视图:圆角贴纸卡 + 气泡;随状态切动画。
 struct MascotRootView: View {
     @ObservedObject var viewModel: MascotViewModel
+    @ObservedObject var animationRuntime: MascotAnimationRuntime
     var onHide: () -> Void = {}
     var onOpenSettings: () -> Void = {}
 
@@ -27,13 +69,15 @@ struct MascotRootView: View {
             Button("打开设置") { onOpenSettings() }
             Button("隐藏吉祥物") { onHide() }
         }
+        .environment(\.mascotAnimationsActive, animationRuntime.animationsActive)
+        .environment(\.mascotAnimationEpoch, animationRuntime.epoch)
     }
 
     // 透明浮动角色(无白卡)+ 落地软阴影 + 状态切换大动作过场 + 点击俏皮反应
     private var card: some View {
         MotionContainer(state: viewModel.state, profile: viewModel.motionProfile) {
             mascot
-                .id("\(viewModel.variantID)-\(viewModel.lookDirection ?? -1)")
+                .id("\(viewModel.variantID)-\(viewModel.lookDirection ?? -1)-\(viewModel.playbackTick)")
                 .transition(.opacity)
         }
             .frame(width: cardSize, height: cardSize)
@@ -67,11 +111,12 @@ struct MascotRootView: View {
     private var mascot: some View {
         switch viewModel.animation {
         case .frames(let urls, let fps):
-            FrameAnimator(urls: urls, fps: fps)
+            FrameAnimator(urls: urls, fps: fps, playback: viewModel.playbackMode)
         case .animatedImage(let url):
             AnimatedImageView(url: url)
-        case .spriteSequence(let url, let cells, let fps):
-            SpriteSequenceAnimator(url: url, cells: cells, fps: fps)
+        case .spriteSequence(let sheet, let cells, let fps):
+            SpriteSequenceAnimator(
+                sheet: sheet, cells: cells, fps: fps, playback: viewModel.playbackMode)
         case .none:
             Image(systemName: "tortoise.fill")
                 .font(.system(size: 48))
@@ -80,45 +125,33 @@ struct MascotRootView: View {
     }
 }
 
-/// 从 8×11 v2 精灵图裁出任意帧序列。裁切只做一次，播放期间复用 NSImage。
+/// 从任意规则网格精灵图裁出帧序列。裁切只做一次，播放期间复用 NSImage。
 private struct SpriteSequenceAnimator: View {
-    let url: URL
+    let sheet: MascotSpriteSheet
     let cells: [MascotSpriteCell]
     let fps: Double
+    let playback: MascotPlaybackMode
     @State private var images: [NSImage] = []
 
     var body: some View {
-        TimelineView(.periodic(from: Date(), by: 1.0 / max(0.1, fps))) { context in
-            let idx = images.isEmpty
-                ? 0
-                : Int(context.date.timeIntervalSinceReferenceDate * fps) % images.count
-            Group {
-                if images.indices.contains(idx) {
-                    Image(nsImage: images[idx])
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                } else {
-                    Color.clear
-                }
-            }
-        }
-        .onAppear { reload() }
-        .onChange(of: url) { _, _ in reload() }
-        .onChange(of: cells) { _, _ in reload() }
+        FrameTimeline(images: images, fps: fps, playback: playback)
+            .onAppear { reload() }
+            .onChange(of: sheet) { _, _ in reload() }
+            .onChange(of: cells) { _, _ in reload() }
     }
 
     private func reload() {
-        images = MascotSpriteCache.frames(url: url, cells: cells)
+        images = MascotSpriteCache.frames(sheet: sheet, cells: cells)
     }
 }
 
 /// 鼠标扫过 16 向视线时会频繁换格；缓存整张图和裁切结果，避免反复从磁盘解码 4MB 图集。
-private enum MascotSpriteCache {
+enum MascotSpriteCache {
     private static let atlasCache = NSCache<NSURL, NSImage>()
     private static let frameCache = NSCache<NSString, NSImage>()
 
-    static func frames(url: URL, cells: [MascotSpriteCell]) -> [NSImage] {
+    static func frames(sheet: MascotSpriteSheet, cells: [MascotSpriteCell]) -> [NSImage] {
+        let url = sheet.url
         let source: NSImage
         if let cached = atlasCache.object(forKey: url as NSURL) {
             source = cached
@@ -128,15 +161,17 @@ private enum MascotSpriteCache {
         } else {
             return []
         }
+        let grid = sheet.grid
         guard let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              cg.width >= 8, cg.height >= 11
+              cg.width >= grid.columns, cg.height >= grid.rows
         else { return [] }
 
-        let cellWidth = cg.width / 8
-        let cellHeight = cg.height / 11
+        let cellWidth = cg.width / grid.columns
+        let cellHeight = cg.height / grid.rows
         return cells.compactMap { cell in
-            guard (0..<11).contains(cell.row), (0..<8).contains(cell.column) else { return nil }
-            let key = "\(url.path)#\(cell.row)#\(cell.column)" as NSString
+            guard grid.contains(row: cell.row, column: cell.column) else { return nil }
+            let key = "\(url.path)#\(grid.columns)x\(grid.rows)#\(cell.row)#\(cell.column)"
+                as NSString
             if let cached = frameCache.object(forKey: key) { return cached }
             guard let frame = cg.cropping(to: CGRect(
                 x: cell.column * cellWidth,
@@ -157,16 +192,36 @@ private enum MascotSpriteCache {
 private struct FrameAnimator: View {
     let urls: [URL]
     let fps: Double
+    let playback: MascotPlaybackMode
     @State private var images: [NSImage] = []
 
     var body: some View {
-        TimelineView(.periodic(from: Date(), by: 1.0 / max(0.1, fps))) { context in
-            let idx = images.isEmpty
-                ? 0
-                : Int(context.date.timeIntervalSinceReferenceDate * fps) % images.count
+        FrameTimeline(images: images, fps: fps, playback: playback)
+            .onAppear { reload(urls) }
+            .onChange(of: urls) { _, new in reload(new) }
+    }
+
+    private func reload(_ urls: [URL]) {
+        images = urls.compactMap { NSImage(contentsOf: $0) }
+    }
+}
+
+/// 帧序列使用本地起点计时，确保点击/唤醒可以从第 0 帧重新播放。
+private struct FrameTimeline: View {
+    let images: [NSImage]
+    let fps: Double
+    let playback: MascotPlaybackMode
+
+    @State private var startedAt = Date().timeIntervalSinceReferenceDate
+    @Environment(\.mascotAnimationEpoch) private var epoch
+
+    var body: some View {
+        MascotTimeline(interval: 1.0 / max(0.1, fps), staticTime: startedAt) { time in
+            let index = playback.frameIndex(
+                elapsed: time - startedAt, fps: fps, frameCount: images.count)
             Group {
-                if images.indices.contains(idx) {
-                    Image(nsImage: images[idx])
+                if images.indices.contains(index) {
+                    Image(nsImage: images[index])
                         .resizable()
                         .interpolation(.high)
                         .scaledToFit()
@@ -175,44 +230,43 @@ private struct FrameAnimator: View {
                 }
             }
         }
-        .onAppear { reload(urls) }
-        .onChange(of: urls) { _, new in reload(new) }
-    }
-
-    private func reload(_ urls: [URL]) {
-        images = urls.compactMap { NSImage(contentsOf: $0) }
+        .onAppear { startedAt = Date().timeIntervalSinceReferenceDate }
+        .onChange(of: epoch) { _, _ in
+            startedAt = Date().timeIntervalSinceReferenceDate
+        }
     }
 }
 
 /// GIF/APNG 用 NSImageView 原生播放
 private struct AnimatedImageView: NSViewRepresentable {
     let url: URL
+    @Environment(\.mascotAnimationsActive) private var animationsActive
 
     func makeNSView(context: Context) -> NSImageView {
         let view = NSImageView()
         view.imageScaling = .scaleProportionallyUpOrDown
-        view.animates = true
+        view.animates = animationsActive
         view.image = NSImage(contentsOf: url)
         return view
     }
 
     func updateNSView(_ view: NSImageView, context: Context) {
         view.image = NSImage(contentsOf: url)
-        view.animates = true
+        view.animates = animationsActive
     }
 }
 
-/// 给静态贴纸叠加"肢体语言":每状态不同的呼吸/抖动/小跳/摇摆,~30fps。
+/// 给静态贴纸叠加"肢体语言":每状态不同的呼吸/抖动/小跳/摇摆,最高 20fps。
 private struct MotionContainer<Content: View>: View {
     let state: MascotState
     let profile: MascotMotionProfile
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+        MascotTimeline(interval: 0.05) { time in
             let m = MascotMotion.transform(
                 for: state, profile: profile,
-                t: context.date.timeIntervalSinceReferenceDate)
+                t: time)
             content()
                 .scaleEffect(m.scale, anchor: .bottom)
                 .rotationEffect(m.rotation, anchor: .bottom)
@@ -256,8 +310,7 @@ struct ArtTextView: View {
     private let stroke: CGFloat = 1.6
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
+        MascotTimeline(interval: 0.05) { t in
             Group {
                 if style.motion == .waveRainbow {
                     rainbowLetters(t: t)

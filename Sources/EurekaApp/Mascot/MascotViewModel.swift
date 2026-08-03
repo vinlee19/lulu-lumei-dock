@@ -13,6 +13,8 @@ final class MascotViewModel: ObservableObject {
     @Published private(set) var variantID = ""
     /// 0...15 顺时针视线；nil 表示回到普通 idle。
     @Published private(set) var lookDirection: Int?
+    /// 每次重新播放序列时递增，确保瞬时动作从第 0 帧开始。
+    @Published private(set) var playbackTick = 0
     /// 状态切换时 +1,驱动视图播放一次"大动作"过场(旋转/跳/翻等)
     @Published private(set) var transitionTick = 0
     /// 当前过场风格(每次切换选定,视图读取)
@@ -52,6 +54,7 @@ final class MascotViewModel: ObservableObject {
         variantID = currentVariant?.id ?? ""
         lookDirection = nil
         nextVariantSwitchAt = nil
+        playbackTick &+= 1
     }
 
     /// 当前状态的英文艺术字标语
@@ -74,6 +77,11 @@ final class MascotViewModel: ObservableObject {
     var motionProfile: MascotMotionProfile {
         if state == .idle, lookDirection != nil { return .still }
         return currentVariant?.motion ?? .stateDefault
+    }
+
+    var playbackMode: MascotPlaybackMode {
+        if state == .idle, lookDirection != nil { return .loop }
+        return currentVariant?.playback ?? .loop
     }
 
     func variantCount(for state: MascotState) -> Int {
@@ -129,8 +137,14 @@ final class MascotViewModel: ObservableObject {
         transientUntil = Date().addingTimeInterval(seconds)
         pendingBubble = bubble
         apply()
-        // 连续完成/点击时也换一个表演，不重复播放完全相同的片段。
-        if replaySameState { selectVariant(force: true) }
+        // 连续完成/点击时也换一个表演，并重新触发过场与逐帧序列。
+        if replaySameState {
+            transitionStyle = MascotTransition.choose(
+                from: self.state, to: state, tick: transitionTick)
+            transitionTick &+= 1
+            selectVariant(force: true)
+            playbackTick &+= 1
+        }
     }
 
     private func recompute() {
@@ -170,6 +184,7 @@ final class MascotViewModel: ObservableObject {
         if stateChanged {
             nextVariantSwitchAt = nil
             selectVariant(force: true)
+            playbackTick &+= 1
         }
         updateVariantRotation()
     }
@@ -177,7 +192,9 @@ final class MascotViewModel: ObservableObject {
     /// 高频态会在多个变体间自然轮换，避免长任务一直重复同一张贴纸。
     private func updateVariantRotation() {
         let variants = pack.variants(for: state)
-        guard [.idle, .working, .waiting].contains(state), variants.count > 1 else {
+        guard [.idle, .working, .waiting, .sleeping, .night].contains(state),
+              variants.count > 1
+        else {
             nextVariantSwitchAt = nil
             return
         }
@@ -188,6 +205,7 @@ final class MascotViewModel: ObservableObject {
         }
         if now >= next {
             selectVariant(force: true)
+            playbackTick &+= 1
             nextVariantSwitchAt = now.addingTimeInterval(nextVariantInterval())
         }
     }
@@ -197,6 +215,8 @@ final class MascotViewModel: ObservableObject {
         case .idle: return Double.random(in: 7...13)
         case .working: return Double.random(in: 10...18)
         case .waiting: return Double.random(in: 5...9)
+        case .sleeping: return Double.random(in: 18...30)
+        case .night: return Double.random(in: 14...24)
         default: return 30
         }
     }

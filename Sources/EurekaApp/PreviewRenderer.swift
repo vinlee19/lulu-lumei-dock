@@ -624,35 +624,143 @@ enum PreviewRenderer {
         snap("lineage-live-graph-dark", page(.graph, turn: worst), dark: true, height: 900)
     }
 
-    /// 离屏渲染桌面吉祥物各状态(取每态首帧 + 贴纸卡 + 气泡)做视觉走查。
+    /// 离屏渲染桌面吉祥物全部状态、变体和分镜，生成逐变体接触表做视觉走查。
     static func renderMascot(to directory: String) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let pack = MascotPackLoader.builtIn()
-        let cases: [(MascotState, String?)] = [
-            (.idle, nil), (.working, nil), (.waiting, "等你确认一下 🙌"),
-            (.success, "搞定啦 🎉"), (.error, "出错了 😣"), (.sleeping, nil),
-            (.relax, "连续 2 小时了,起来伸个懒腰~"), (.night, "夜深了,早点歇 🌙"),
+        let bubbles: [MascotState: String] = [
+            .waiting: "等你确认一下 🙌",
+            .success: "搞定啦 🎉",
+            .error: "出错了 😣",
+            .relax: "连续 2 小时了，起来伸个懒腰～",
+            .night: "夜深了，早点歇 🌙",
+            .poke: "戳到啦",
+            .wake: "早上好",
         ]
-        for (state, bubble) in cases {
-            guard case .frames(let urls, _)? = pack.animation(for: state),
-                  let first = urls.first, let image = NSImage(contentsOf: first)
-            else { print("跳过(无素材) \(state.rawValue)"); continue }
-            let view = MascotPreviewCard(
-                image: image, bubble: bubble, caption: pack.captions[state], state: state)
-                .frame(width: 180, height: 210)
-                .background(Color(white: 0.62))  // 灰底:便于核对透明抠图
-            let renderer = ImageRenderer(content: view)
-            renderer.scale = 2
-            guard let nsImage = renderer.nsImage,
-                  let tiff = nsImage.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiff),
-                  let png = bitmap.representation(using: .png, properties: [:])
-            else { print("渲染失败: \(state.rawValue)"); continue }
-            let url = dir.appendingPathComponent("mascot-\(state.rawValue).png")
-            try? png.write(to: url)
-            print("已渲染 \(url.path)")
+
+        for state in MascotState.allCases {
+            let variants = pack.variants(for: state)
+            guard !variants.isEmpty else {
+                print("跳过（无素材）\(state.rawValue)")
+                continue
+            }
+            for variant in variants {
+                let images = mascotImages(for: variant.animation)
+                guard !images.isEmpty else {
+                    print("跳过（无法解码）\(state.rawValue)/\(variant.id)")
+                    continue
+                }
+                let safeID = variant.id.filter {
+                    $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_"
+                }
+                guard !safeID.isEmpty else { continue }
+                let sheet = MascotVariantPreviewSheet(
+                    images: images,
+                    state: state,
+                    variantID: variant.id,
+                    caption: variant.caption,
+                    playback: variant.playback)
+                writeMascotPreview(
+                    sheet,
+                    name: "mascot-\(state.rawValue)-\(safeID)",
+                    to: dir)
+            }
+
+            if let firstVariant = variants.first,
+               let image = mascotImages(for: firstVariant.animation).first {
+                let overview = MascotPreviewCard(
+                    image: image,
+                    bubble: bubbles[state],
+                    caption: firstVariant.caption,
+                    state: state)
+                    .frame(width: 180, height: 210)
+                    .background(Color(white: 0.62))
+                writeMascotPreview(
+                    overview,
+                    name: "mascot-\(state.rawValue)",
+                    to: dir)
+            }
         }
+    }
+
+    private static func mascotImages(for animation: MascotAnimation) -> [NSImage] {
+        switch animation {
+        case .frames(let urls, _):
+            urls.compactMap(NSImage.init(contentsOf:))
+        case .animatedImage(let url):
+            NSImage(contentsOf: url).map { [$0] } ?? []
+        case .spriteSequence(let sheet, let cells, _):
+            MascotSpriteCache.frames(sheet: sheet, cells: cells)
+        }
+    }
+
+    private static func writeMascotPreview<Content: View>(
+        _ content: Content,
+        name: String,
+        to directory: URL
+    ) {
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else {
+            print("渲染失败：\(name)")
+            return
+        }
+        let url = directory.appendingPathComponent("\(name).png")
+        do {
+            try png.write(to: url, options: .atomic)
+            print("已渲染 \(url.path)")
+        } catch {
+            print("写入失败：\(url.lastPathComponent)：\(error.localizedDescription)")
+        }
+    }
+}
+
+private struct MascotVariantPreviewSheet: View {
+    let images: [NSImage]
+    let state: MascotState
+    let variantID: String
+    let caption: String?
+    let playback: MascotPlaybackMode
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("\(state.rawValue) · \(variantID)")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                Spacer()
+                Text("\(images.count) 帧 · \(playback == .loop ? "循环" : "单次")")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(.white.opacity(0.92))
+
+            HStack(spacing: 0) {
+                ForEach(images.indices, id: \.self) { index in
+                    MascotPreviewCard(
+                        image: images[index],
+                        caption: caption,
+                        state: state)
+                        .frame(width: 160, height: 190)
+                        .overlay(alignment: .topLeading) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .padding(5)
+                                .foregroundStyle(.white)
+                                .background(Circle().fill(.black.opacity(0.45)))
+                                .padding(6)
+                        }
+                }
+            }
+            .background(Color(white: 0.62))
+        }
+        .frame(width: CGFloat(images.count * 160), height: 220)
     }
 }
 

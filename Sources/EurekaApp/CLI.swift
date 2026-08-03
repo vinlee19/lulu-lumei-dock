@@ -78,6 +78,17 @@ enum EurekaCLI {
             let src = args.count > 1 ? args[1] : "Sources/EurekaApp/Resources/mascots/lulu"
             let dst = args.count > 2 ? args[2] : "/tmp/lulu-cut"
             MascotAssetPrep.run(srcDir: src, dstDir: dst)
+        case "--pack-mascot-v3":
+            guard args.count == 3 else {
+                print("用法：eureka --pack-mascot-v3 <12张分镜目录> <输出PNG>")
+                exit(2)
+            }
+            do {
+                try MascotAssetPrep.packV3(srcDir: args[1], outputPath: args[2])
+            } catch {
+                print("打包失败：\(error.localizedDescription)")
+                exit(1)
+            }
         case "--render-badges":
             let badgesPath = args.count > 1 ? args[1] : "/tmp/eureka-badges.png"
             MainActor.assumeIsolated { BadgeSheetRenderer.render(to: badgesPath) }
@@ -338,6 +349,8 @@ enum EurekaCLI {
           --hooks-status            查看安装状态
           --audit-snapshot          扫描并输出 agent 操作审计流水（--risk-only 仅风险 / --limit N）
           --render-previews [目录]   离屏渲染灵动岛各形态 PNG
+          --render-mascot [目录]     离屏渲染全部吉祥物变体与分镜 PNG
+          --pack-mascot-v3 <目录> <文件>  将 12 张 2×2 分镜打包为 v3 图集
           --render-shell [目录]      离屏渲染侧栏（含品牌区）与审计页，明/暗两版
           --render-lineage [目录]    离屏渲染轮次血缘图（golden 基准 + 真实数据）
         """)
