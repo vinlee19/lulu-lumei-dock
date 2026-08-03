@@ -4,6 +4,21 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] - 2026-08-03
+
+### Added
+
+- **Optional Raft interface style** — a second, opt-in visual theme for the main window,
+  inspired by [raft.build](https://raft.build/)'s neo-brutalism: a cream `#FFFAEF` background,
+  2px ink `#141111` borders, zero-blur offset hard shadows, flat cyan/pink accents with no
+  gradients, small radii, and the original Space Grotesk / Space Mono typefaces bundled under
+  the OFL license. Pick it in 设置 → 通用 → 界面风格; switching applies instantly with no
+  restart. The classic indigo style stays the default and is pixel-identical to before, and
+  the dark appearance gets its own warm-black variant with cream lines. The Dynamic Island,
+  desktop companions, and per-agent vendor colors are intentionally not themed.
+- `--render-shell` now accepts `--raft`, so both interface styles can be offscreen-rendered
+  to PNG for visual walkthroughs.
+
 ## [0.19.0] - 2026-08-03
 
 ### Added
@@ -1087,6 +1102,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.20.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.0
 [0.19.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.19.0
 [0.18.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.18.0
 [0.17.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.17.0
