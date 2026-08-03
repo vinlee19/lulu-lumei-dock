@@ -4,6 +4,30 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] - 2026-08-03
+
+### Added
+
+- **Richer Lulu and Lumei desktop-companion expressions** — 12 new four-frame animations add
+  snack sharing, pair programming, a bright idea, a checklist reminder, a high five, mutual
+  encouragement, a tea break, cozy sleep, bedtime, a gentle boop, and a morning stretch. The
+  existing stickers and v2 directional atlas remain available, bringing the built-in pack to
+  41 weighted behavior variants.
+- A safe `--pack-mascot-v3` asset pipeline and expanded `--render-mascot` contact sheets make all
+  states, variants, and frames reproducible and visually inspectable without launching the app UI.
+
+### Changed
+
+- Mascot sequences can now either loop or play once and hold their final frame. Success, error,
+  poke, and wake reactions use the one-shot behavior, while everyday expressions keep looping.
+- Animation refresh is capped at 20 FPS, pauses while the companion is hidden or the Mac is
+  asleep, and restarts from the first frame when the companion returns.
+
+### Fixed
+
+- Repeating the same transient reaction — especially clicking the companion several times — now
+  restarts its transition and frame sequence instead of being ignored as an unchanged state.
+
 ## [0.18.0] - 2026-07-31
 
 ### Changed
@@ -1063,6 +1087,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.19.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.19.0
 [0.18.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.18.0
 [0.17.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.17.0
 [0.16.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.16.0
