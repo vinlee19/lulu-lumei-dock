@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         label: "com.vinlee.eureka.terminalprobe", qos: .utility)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // raft 主题字体（Space Grotesk/Mono）须先于任何 UI 渲染注册
+        ThemeFonts.register()
         // 每次启动把随包 relay 同步到稳定路径（升级 app 后 hooks 不断链）
         RelaySyncer.sync()
         // 模型上下文窗口覆盖表（ctx% 的分母；启动时一次性加载）

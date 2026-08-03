@@ -54,6 +54,7 @@ readonly PACKAGED_BUNDLE="$APP_PATH/Contents/Resources/eureka_eureka.bundle"
 ditto "$APP_BUNDLE" "$PACKAGED_BUNDLE"
 [[ -f "$PACKAGED_BUNDLE/pricing.json" ]] || { echo "✗ 资源包缺少 pricing.json" >&2; exit 1; }
 [[ -f "$PACKAGED_BUNDLE/mascots/lulu/idle-1.png" ]] || { echo "✗ 资源包缺少内置吉祥物素材" >&2; exit 1; }
+[[ -f "$PACKAGED_BUNDLE/Fonts/SpaceGrotesk-Bold.ttf" ]] || { echo "✗ 资源包缺少主题字体" >&2; exit 1; }
 
 if [[ -f Sources/EurekaApp/Resources/AppIcon.icns ]]; then
   cp Sources/EurekaApp/Resources/AppIcon.icns "$APP_PATH/Contents/Resources/AppIcon.icns"

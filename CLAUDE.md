@@ -28,7 +28,7 @@ swift run eureka --hooks-status            # Claude hooks + Codex notify install
 swift run eureka --usage-snapshot          # full scan → today's usage JSON (used by ccusage diff)
 swift run eureka --limits-snapshot --claude # rate-limit snapshot (--claude also hits unofficial API)
 swift run eureka --render-previews [dir]   # offscreen-render every island state to PNG
-swift run eureka --render-shell [dir]      # offscreen-render the sidebar + audit page (light/dark)
+swift run eureka --render-shell [dir] [--raft]  # offscreen-render the sidebar + audit page (light/dark; --raft = raft style)
 swift run eureka --render-lineage [dir]    # offscreen-render the turn lineage graph (golden + live)
 swift run eureka-relay inject --event stop --session demo  # inject a test event into the spool
 ```
@@ -64,6 +64,10 @@ Codex rollout token_count ────────────→ UsageEngine / 
 | `eureka` (app) | AppKit shell: island `NSPanel`, `NSStatusItem`+popover, settings, `RelaySyncer`, CLI mode. |
 | `eureka-relay` | `claude-hook` / `codex-notify` / `inject` subcommands; writes to the spool. |
 | `eureka-tests` | Hand-rolled assertion harness. |
+
+### UI theming (two selectable styles)
+
+The main-window UI has two styles: `classic` (default, indigo+gold) and `raft` (neo-brutalist: cream `#FFFAEF` / ink `#141111` 2px borders / zero-blur offset shadows / flat colors / Space Grotesk + Space Mono bundled under `Resources/Fonts/`, OFL). Mechanism: every `Theme.*` token is a `static var` dispatching on `ThemeStyle.current` (set from `AppSettings.themeStyle`); call sites never branch. Switching re-renders via `.id(settings.themeStyle)` on `PopoverRootView`'s root — child views must not cache theme values. **Invariant: the `classic` branch of every token must keep its pre-theming value exactly** (default style stays pixel-identical); only add new tokens (`cardBorderWidth`, `cardShadow`, `onBrand`, `windowBackground`, …) with classic = old behavior. Island/Mascot are intentionally outside `Theme` and unaffected; per-vendor agent brand colors are not theme tokens. Visual walkthrough: `--render-shell <dir>` vs `--render-shell <dir> --raft`.
 
 ### Task state machine (`EurekaKit/TaskStore.swift`)
 

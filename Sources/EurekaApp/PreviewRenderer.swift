@@ -282,7 +282,11 @@ enum PreviewRenderer {
     ///  2. **最小窗高 540 下五个组标签 + 品牌脚注会不会被裁**
     ///     —— `MainWindowController` 用的是 `hosting.sizingOptions = []`，内容超出是裁剪而不是撑窗。
     @MainActor
-    static func renderShell(to directory: String) {
+    static func renderShell(to directory: String, style: ThemeStyle = .classic) {
+        // raft 主题字体须先于任何视图渲染注册；注册失败自动回退系统字体
+        ThemeFonts.register()
+        ThemeStyle.current = style
+        defer { ThemeStyle.current = .classic }
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
@@ -292,7 +296,7 @@ enum PreviewRenderer {
             width: CGFloat = 780, height: CGFloat = 980
         ) {
             let hosting = NSHostingView(rootView: ZStack {
-                Color(nsColor: .windowBackgroundColor)
+                style == .raft ? Theme.windowBackground : Color(nsColor: .windowBackgroundColor)
                 view
             })
             hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -339,6 +343,8 @@ enum PreviewRenderer {
         let audit = AuditService()
         let installer = InstallerService()
         let settings = AppSettings()
+        // AppSettings.init 会按持久化偏好重置 ThemeStyle.current，这里重申渲染参数
+        ThemeStyle.current = style
         let notifications = NotificationService()
         audit.start()
         installer.refresh()

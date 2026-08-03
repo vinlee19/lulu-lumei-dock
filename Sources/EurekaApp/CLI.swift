@@ -65,9 +65,11 @@ enum EurekaCLI {
                 PreviewRenderer.renderKnowledge(to: dir)
             }
         case "--render-shell":
-            let dir = args.count > 1 ? args[1] : "/tmp/eureka-shell"
+            let dir = args.dropFirst().first(where: { !$0.hasPrefix("--") })
+                ?? "/tmp/eureka-shell"
             MainActor.assumeIsolated {
-                PreviewRenderer.renderShell(to: dir)
+                PreviewRenderer.renderShell(
+                    to: dir, style: args.contains("--raft") ? .raft : .classic)
             }
         case "--render-lineage":
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-lineage"

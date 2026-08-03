@@ -2,6 +2,29 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
+/// 主题硬阴影辅助：raft = 零模糊偏移墨影（brutalist）；classic = 不投影（原样）。
+extension View {
+    /// 卡片级硬阴影（4/4）
+    @ViewBuilder
+    func themeCardShadow() -> some View {
+        if let shadow = Theme.cardShadow {
+            self.shadow(color: shadow.color, radius: shadow.radius, x: shadow.x, y: shadow.y)
+        } else {
+            self
+        }
+    }
+
+    /// 小控件级硬阴影（2/2）；active = false 时不投（如未选中胶囊）
+    @ViewBuilder
+    func themeControlShadow(active: Bool = true) -> some View {
+        if active, let shadow = Theme.controlShadow {
+            self.shadow(color: shadow.color, radius: shadow.radius, x: shadow.x, y: shadow.y)
+        } else {
+            self
+        }
+    }
+}
+
 /// 统一区块卡片：可选标题 + 中性底圆角容器（主窗口各页签共用）。
 /// 替代改版前各页签自带的彩色 cardFill / settingCard / card helper。
 struct SectionCard<Content: View>: View {
@@ -17,7 +40,7 @@ struct SectionCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             if let title {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font.themed(13, .semibold))
             }
             VStack(alignment: .leading, spacing: Theme.spacing.row) {
                 content
@@ -29,8 +52,9 @@ struct SectionCard<Content: View>: View {
                     .fill(Theme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.radius.card)
-                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                            .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth)
                     )
+                    .themeCardShadow()
             )
         }
     }
@@ -71,11 +95,11 @@ struct CapsuleTabButton: View {
                 // 否则 HStack 的 spacing 会给图标留出一段不对称的空白
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                        .font(Theme.font.themed(11, isSelected ? .semibold : .medium))
                         .lineLimit(1)
                 }
             }
-            .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
+            .foregroundStyle(isSelected ? Theme.onBrand : (hovering ? .primary : .secondary))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .frame(maxWidth: fillWidth ? .infinity : nil)
@@ -84,6 +108,14 @@ struct CapsuleTabButton: View {
                     isSelected
                         ? AnyShapeStyle(Theme.brand.gradient)
                         : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
+                    .overlay(
+                        Group {
+                            if isSelected, ThemeStyle.current == .raft {
+                                Capsule().strokeBorder(Theme.ink, lineWidth: 2)
+                            }
+                        }
+                    )
+                    .themeControlShadow(active: isSelected)
             )
             .contentShape(Capsule())
         }
@@ -136,17 +168,17 @@ struct SidebarNavButton: View {
                         .frame(width: 20, height: 20)
                 }
                 Text(title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .font(Theme.font.themed(12, isSelected ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if let badge {
                     Text(badge)
-                        .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.9))
+                        .font(Theme.font.themedMono(9.5, .semibold))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(Theme.onBrand.opacity(0.9))
                                                     : AnyShapeStyle(badgeColor))
                 }
             }
-            .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
+            .foregroundStyle(isSelected ? Theme.onBrand : (hovering ? .primary : .secondary))
             .padding(.horizontal, 8)
             // 4 而不是 5：12 个页签 + 5 个组标签 + 品牌脚注要挤进最小窗高的 ~512pt 内容区，
             // 每行省 2pt 就是 24pt。行高 28pt 仍高于 macOS 侧栏的最小可点尺寸。
@@ -156,6 +188,15 @@ struct SidebarNavButton: View {
                     isSelected
                         ? AnyShapeStyle(Theme.brand.gradient)
                         : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
+                    .overlay(
+                        Group {
+                            if isSelected, ThemeStyle.current == .raft {
+                                RoundedRectangle(cornerRadius: Theme.radius.sidebar)
+                                    .strokeBorder(Theme.ink, lineWidth: 2)
+                            }
+                        }
+                    )
+                    .themeControlShadow(active: isSelected)
             )
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.sidebar))
         }
@@ -185,10 +226,10 @@ struct StatTile: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(value)
-                        .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                        .font(Theme.font.themedMono(17, .semibold))
                     if let sub {
                         Text(sub)
-                            .font(.system(size: 9.5).monospacedDigit())
+                            .font(Theme.font.themedMono(9.5))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
@@ -203,7 +244,7 @@ struct StatTile: View {
                         SourceBadge(source: source, size: 10)
                     }
                     Text(label)
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -219,9 +260,12 @@ struct StatTile: View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.container)
                     .strokeBorder(
-                        isSelected ? Theme.brand.opacity(0.7)
-                                   : (hovering ? Theme.brand.opacity(0.35) : Theme.cardBorder),
-                        lineWidth: isSelected ? 1 : 0.5))
+                        ThemeStyle.current == .raft
+                            ? (isSelected || hovering ? Theme.ink : Theme.cardBorder)
+                            : (isSelected ? Theme.brand.opacity(0.7)
+                                          : (hovering ? Theme.brand.opacity(0.35) : Theme.cardBorder)),
+                        lineWidth: ThemeStyle.current == .raft ? 2 : (isSelected ? 1 : 0.5)))
+            .themeControlShadow(active: isSelected)
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
         }
         .buttonStyle(.plain)
@@ -277,7 +321,7 @@ private struct KnowledgeCardActions: View {
         }
         .padding(.horizontal, 2)
         .background(Capsule(style: .continuous).fill(.regularMaterial))
-        .overlay(Capsule(style: .continuous).strokeBorder(Theme.cardBorder, lineWidth: 0.5))
+        .overlay(Capsule(style: .continuous).strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
     }
 }
 
@@ -307,8 +351,10 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .strokeBorder(
-                        hovering ? Theme.brand.opacity(0.6) : Theme.cardBorder,
-                        lineWidth: hovering ? 1 : 0.5))
+                        ThemeStyle.current == .raft
+                            ? Theme.ink
+                            : (hovering ? Theme.brand.opacity(0.6) : Theme.cardBorder),
+                        lineWidth: ThemeStyle.current == .raft ? 2 : (hovering ? 1 : 0.5)))
             .overlay(alignment: .bottomTrailing) {
                 if hovering, !actions.isEmpty {
                     KnowledgeCardActions(actions: actions)
@@ -317,7 +363,11 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius.card))
-            .shadow(color: .black.opacity(0.06), radius: 3, y: 1.5)
+            .shadow(
+                color: ThemeStyle.current == .raft ? .clear : .black.opacity(0.06),
+                radius: ThemeStyle.current == .raft ? 0 : 3,
+                y: ThemeStyle.current == .raft ? 0 : 1.5)
+            .themeCardShadow()
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.card))
             .onTapGesture { onOpen() }
             .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
@@ -341,7 +391,7 @@ struct TagChip: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 9, weight: .medium))
+            .font(Theme.font.themed(9, .medium))
             .lineLimit(1)
             .padding(.horizontal, 5)
             .padding(.vertical, 1.5)
@@ -384,11 +434,11 @@ struct EmptyStateView: View {
                 .font(.system(size: 34))
                 .foregroundStyle(Theme.brand.opacity(0.5))
             Text(title)
-                .font(.system(size: 12))
+                .font(Theme.font.themed(12))
                 .foregroundStyle(.secondary)
             if let hint {
                 Text(hint)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
@@ -426,7 +476,7 @@ struct SearchField: View {
             glyph
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(Theme.font.themed(12.5))
                 .tint(Theme.brand)  // 紫色光标与选区
                 .focused($focused)
             if scanning { ProgressView().controlSize(.mini) }
@@ -445,34 +495,55 @@ struct SearchField: View {
         .overlay(
             Capsule(style: .continuous)
                 .strokeBorder(
-                    LinearGradient(
-                        colors: [Theme.brand.opacity(focused ? 1 : 0.5),
-                                 Theme.gold.opacity(focused ? 1 : 0.5)],
-                        startPoint: .leading, endPoint: .trailing),
-                    lineWidth: focused ? 1.8 : 1))
-        .shadow(color: Theme.brand.opacity(focused ? 0.22 : 0), radius: 10, y: 2)
+                    ThemeStyle.current == .raft
+                        ? AnyShapeStyle(Theme.ink)
+                        : AnyShapeStyle(LinearGradient(
+                            colors: [Theme.brand.opacity(focused ? 1 : 0.5),
+                                     Theme.gold.opacity(focused ? 1 : 0.5)],
+                            startPoint: .leading, endPoint: .trailing)),
+                    lineWidth: ThemeStyle.current == .raft
+                        ? (focused ? 2.5 : 1.5)
+                        : (focused ? 1.8 : 1)))
+        .shadow(
+            color: ThemeStyle.current == .raft ? .clear : Theme.brand.opacity(focused ? 0.22 : 0),
+            radius: ThemeStyle.current == .raft ? 0 : 10,
+            y: ThemeStyle.current == .raft ? 0 : 2)
+        .themeControlShadow()
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.16), value: focused)
         .animation(.easeOut(duration: 0.16), value: hovering)
     }
 
-    /// 品牌渐变放大镜方块（与品牌标 / logo 方块同一套方块语言；金色留给聚焦描边环）
+    /// 品牌渐变放大镜方块（与品牌标 / logo 方块同一套方块语言；金色留给聚焦描边环）。
+    /// raft = cyan 平色方块 + 墨色描边 + 硬影。
     private var glyph: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
+        RoundedRectangle(cornerRadius: ThemeStyle.current == .raft ? 3 : 7, style: .continuous)
             .fill(Theme.brandTileGradient)
             .frame(width: 24, height: 24)
             .overlay(
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11.5, weight: .bold))
-                    .foregroundStyle(.white))
-            .shadow(color: Theme.brand.opacity(focused ? 0.38 : 0.18), radius: 3, y: 1)
+                    .foregroundStyle(Theme.onBrand))
+            .overlay(
+                Group {
+                    if ThemeStyle.current == .raft {
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .strokeBorder(Theme.ink, lineWidth: 1.5)
+                    }
+                }
+            )
+            .shadow(
+                color: ThemeStyle.current == .raft ? .clear : Theme.brand.opacity(focused ? 0.38 : 0.18),
+                radius: ThemeStyle.current == .raft ? 0 : 3,
+                y: ThemeStyle.current == .raft ? 0 : 1)
+            .themeControlShadow()
     }
 
     @ViewBuilder private var trailing: some View {
         if searching {
             if let resultCount {
                 Text("\(resultCount)")
-                    .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5, .semibold))
                     .foregroundStyle(Theme.brand)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
@@ -521,22 +592,22 @@ struct SourceSectionHeader: View {
                             .foregroundStyle(Theme.gold)
                     }
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Theme.font.themed(12, .semibold))
                     if let subtitle {
                         Text(subtitle)
-                            .font(.system(size: 11))
+                            .font(Theme.font.themed(11))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
                     Text("\(count)")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .font(Theme.font.themedMono(10, .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Theme.surfaceSecondary))
                     if let trailingNote {
                         Text(trailingNote)
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -563,7 +634,8 @@ struct MarkdownDocumentCard: View {
                         .fill(Theme.surface)
                         .overlay(
                             RoundedRectangle(cornerRadius: Theme.radius.card)
-                                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)))
+                                .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
+                        .themeCardShadow())
                 .frame(maxWidth: .infinity)
                 .padding(Theme.spacing.page)
         }
@@ -601,7 +673,9 @@ struct SourceLogoTile: View {
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-                    .strokeBorder(TileSpec.border(Theme.brand), lineWidth: 0.5))
+                    .strokeBorder(
+                        ThemeStyle.current == .raft ? Theme.ink : TileSpec.border(Theme.brand),
+                        lineWidth: ThemeStyle.current == .raft ? 1.5 : 0.5))
             .overlay(SourceBadge(source: source, size: size * 0.55))
     }
 }
@@ -616,10 +690,27 @@ struct MiniSwitch: View {
             Capsule()
                 .fill(isOn ? Theme.enabledGreen : Theme.disabledGray)
                 .frame(width: 30, height: 17)
+                .overlay(
+                    Group {
+                        if ThemeStyle.current == .raft {
+                            Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+                        }
+                    }
+                )
                 .overlay(alignment: isOn ? .trailing : .leading) {
                     Circle()
-                        .fill(.white)
-                        .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
+                        .fill(ThemeStyle.current == .raft ? Color(hex: "FFFAEF") : .white)
+                        .shadow(
+                            color: ThemeStyle.current == .raft ? .clear : .black.opacity(0.18),
+                            radius: ThemeStyle.current == .raft ? 0 : 1,
+                            y: ThemeStyle.current == .raft ? 0 : 0.5)
+                        .overlay(
+                            Group {
+                                if ThemeStyle.current == .raft {
+                                    Circle().strokeBorder(Theme.ink, lineWidth: 1.5)
+                                }
+                            }
+                        )
                         .frame(width: 13, height: 13)
                         .padding(2)
                 }
@@ -637,7 +728,7 @@ struct EnableToggle: View {
     var body: some View {
         HStack(spacing: 5) {
             Text(enabled ? "已启用" : "已停用")
-                .font(.system(size: 9.5, weight: .medium))
+                .font(Theme.font.themed(9.5, .medium))
                 .foregroundStyle(enabled ? Theme.enabledGreen : .secondary)
             MiniSwitch(isOn: enabled, onToggle: onToggle)
         }
@@ -666,7 +757,7 @@ struct CardActionButton: View {
                         .fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
                 .overlay(
                     RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5))
+                        .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
                 .contentShape(RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous))
         }
         .buttonStyle(.plain)
@@ -735,14 +826,14 @@ struct ScanStatusLabel: View {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)
                 Text(phase ?? "正在扫描…")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             .transition(.opacity)
         } else if let lastScanAt {
             Text("上次扫描 " + relativeFormatter.localizedString(for: lastScanAt, relativeTo: Date()))
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .help("进页面不再自动重扫；点刷新可强制全量重扫")
@@ -901,9 +992,13 @@ struct KnowledgeListContainer<Content: View>: View {
                     .fill(Theme.surface))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .strokeBorder(Theme.cardBorder, lineWidth: 0.5))
+                    .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous))
-            .shadow(color: .black.opacity(0.05), radius: 3, y: 1.5)
+            .shadow(
+                color: ThemeStyle.current == .raft ? .clear : .black.opacity(0.05),
+                radius: ThemeStyle.current == .raft ? 0 : 3,
+                y: ThemeStyle.current == .raft ? 0 : 1.5)
+            .themeCardShadow()
     }
 }
 
@@ -977,10 +1072,10 @@ struct StatOverviewCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(value).font(Theme.font.statNumber(28))
-                    Text(unit).font(.system(size: 12.5, weight: .medium)).foregroundStyle(.secondary)
+                    Text(unit).font(Theme.font.themed(12.5, .medium)).foregroundStyle(.secondary)
                 }
                 if let subtitle {
-                    Text(subtitle).font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
+                    Text(subtitle).font(Theme.font.themedMono(11)).foregroundStyle(.tertiary)
                 }
             }
             .frame(minWidth: 120, alignment: .leading)
@@ -989,7 +1084,7 @@ struct StatOverviewCard: View {
 
             VStack(alignment: .leading, spacing: 9) {
                 Text(distributionTitle)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                     .foregroundStyle(.secondary)
                 if showBar {
                     GeometryReader { geo in
@@ -1009,9 +1104,9 @@ struct StatOverviewCard: View {
                     ForEach(segments) { seg in
                         HStack(spacing: 5) {
                             Circle().fill(seg.color).frame(width: 8, height: 8)
-                            Text(seg.label).font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text(seg.label).font(Theme.font.themed(11)).foregroundStyle(.secondary)
                             Text("\(seg.count)")
-                                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                                .font(Theme.font.themedMono(11, .semibold))
                         }
                         // 兜底：图例条目过多时宁可整体溢出裁掉，也不能让「命令」「16,911」
                         // 逐字竖着折成一列（审计页 9 个 ToolKind 曾真实撞出这个形态）。
@@ -1021,7 +1116,7 @@ struct StatOverviewCard: View {
                     }
                     Spacer(minLength: 8)
                     if let trailingNote {
-                        Text(trailingNote).font(.system(size: 11).monospacedDigit())
+                        Text(trailingNote).font(Theme.font.themedMono(11))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -1035,8 +1130,12 @@ struct StatOverviewCard: View {
                 .fill(Theme.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.radius.card)
-                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)))
-        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+                        .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
+                .themeCardShadow())
+        .shadow(
+            color: ThemeStyle.current == .raft ? .clear : .black.opacity(0.05),
+            radius: ThemeStyle.current == .raft ? 0 : 2,
+            y: ThemeStyle.current == .raft ? 0 : 1)
     }
 
     private func barWidth(_ seg: Segment, in width: CGFloat) -> CGFloat {
@@ -1066,14 +1165,14 @@ struct SourceFilterChip: View {
                     Image(systemName: allIcon).font(.system(size: 11, weight: .semibold))
                 }
                 Text(label)
-                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                    .font(Theme.font.themed(11.5, isSelected ? .semibold : .medium))
                     .lineLimit(1)
                 Text("\(count)")
-                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.85))
+                    .font(Theme.font.themedMono(10.5, .medium))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(Theme.onBrand.opacity(0.85))
                                                 : AnyShapeStyle(.secondary))
             }
-            .foregroundStyle(isSelected ? .white : (hovering ? .primary : .secondary))
+            .foregroundStyle(isSelected ? Theme.onBrand : (hovering ? .primary : .secondary))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(
@@ -1083,7 +1182,11 @@ struct SourceFilterChip: View {
                         : AnyShapeStyle(hovering ? Theme.brandFill(0.06) : Theme.surface)))
             .overlay(
                 Capsule().strokeBorder(
-                    isSelected ? Color.clear : Theme.cardBorder, lineWidth: 0.8))
+                    ThemeStyle.current == .raft
+                        ? Theme.ink
+                        : (isSelected ? Color.clear : Theme.cardBorder),
+                    lineWidth: ThemeStyle.current == .raft ? 2 : 0.8))
+            .themeControlShadow(active: isSelected)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -1140,7 +1243,7 @@ struct ScopeBadge: View {
     var body: some View {
         let tint = isGlobal ? Theme.brand : Theme.gold
         Text(isGlobal ? "全局" : "项目")
-            .font(.system(size: 9.5, weight: .semibold))
+            .font(Theme.font.themed(9.5, .semibold))
             .foregroundStyle(tint)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
@@ -1163,7 +1266,7 @@ struct TerminalBadge: View {
             Image(systemName: "terminal")
                 .font(.system(size: 8, weight: .semibold))
             Text(binding.displayName)
-                .font(.system(size: 9.5, weight: .medium))
+                .font(Theme.font.themed(9.5, .medium))
                 .lineLimit(1)
         }
         .foregroundStyle(tint)
@@ -1204,7 +1307,9 @@ struct RoleAvatar: View {
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-                    .strokeBorder(TileSpec.border(Theme.brand), lineWidth: 0.5))
+                    .strokeBorder(
+                        ThemeStyle.current == .raft ? Theme.ink : TileSpec.border(Theme.brand),
+                        lineWidth: ThemeStyle.current == .raft ? 1.5 : 0.5))
             .overlay(
                 Text(role.glyph)
                     .font(.system(size: size * 0.42, weight: .semibold))
@@ -1219,7 +1324,7 @@ struct RoleTag: View {
     var body: some View {
         let color = Theme.roleColor(role)
         Text(role.displayName)
-            .font(.system(size: 9.5, weight: .medium))
+            .font(Theme.font.themed(9.5, .medium))
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
@@ -1233,7 +1338,7 @@ struct ModelChip: View {
 
     var body: some View {
         Text(model)
-            .font(.system(size: 10, weight: .medium))
+            .font(Theme.font.themed(10, .medium))
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .padding(.horizontal, 7)

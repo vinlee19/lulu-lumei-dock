@@ -94,9 +94,24 @@ struct SettingsView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 3) {
-                    appearanceOption("light", "浅色", icon: "sun.max")
-                    appearanceOption("dark", "深色", icon: "moon")
-                    appearanceOption("system", "跟随系统", icon: "display")
+                    capsuleOption($settings.appearanceMode, "light", "浅色", icon: "sun.max")
+                    capsuleOption($settings.appearanceMode, "dark", "深色", icon: "moon")
+                    capsuleOption($settings.appearanceMode, "system", "跟随系统", icon: "display")
+                }
+                .padding(3)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))
+                .fixedSize()
+            }
+
+            settingCard("界面风格") {
+                Text("选择面板的界面风格，立即生效；灵动岛与桌面伙伴不受影响。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 3) {
+                    capsuleOption($settings.themeStyle, "classic", "经典", icon: "paintpalette")
+                    capsuleOption(
+                        $settings.themeStyle, "raft", "Raft 硬朗",
+                        icon: "square.3.layers.3d.down.right")
                 }
                 .padding(3)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))
@@ -226,18 +241,21 @@ struct SettingsView: View {
         }
     }
 
-    private func appearanceOption(_ mode: String, _ label: String, icon: String) -> some View {
-        let selected = settings.appearanceMode == mode
+    /// 胶囊分段选项（外观主题 / 界面风格共用）：选中 = 品牌底 + onBrand 字（raft 下为墨字）
+    private func capsuleOption(
+        _ selection: Binding<String>, _ mode: String, _ label: String, icon: String
+    ) -> some View {
+        let selected = selection.wrappedValue == mode
         return Button {
-            settings.appearanceMode = mode
+            selection.wrappedValue = mode
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 10))
                 Text(label)
-                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .font(Theme.font.themed(11, selected ? .semibold : .regular))
             }
-            .foregroundStyle(selected ? .white : .secondary)
+            .foregroundStyle(selected ? Theme.onBrand : .secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(Capsule().fill(
