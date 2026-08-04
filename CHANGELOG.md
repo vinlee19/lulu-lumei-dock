@@ -4,6 +4,15 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.20.1] - 2026-08-04
+
+### Fixed
+
+- **Doubled glyphs on selected chips and tiles in the Raft interface style** — the zero-blur
+  hard shadows were painted on views containing text, so every glyph was ghosted at the
+  shadow offset (most visible on the selected 全部 filter chip, stat tiles, and the search
+  field). Shadows are now painted on the pure shape layers only.
+
 ## [0.20.0] - 2026-08-03
 
 ### Added
@@ -1102,6 +1111,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.20.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.1
 [0.20.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.0
 [0.19.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.19.0
 [0.18.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.18.0
