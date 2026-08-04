@@ -256,7 +256,9 @@ struct StatTile: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .fill(isSelected ? Theme.brandFill(0.10) : Theme.surface))
+                    .fill(isSelected ? Theme.brandFill(0.10) : Theme.surface)
+                    // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                    .themeControlShadow(active: isSelected))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.container)
                     .strokeBorder(
@@ -265,7 +267,6 @@ struct StatTile: View {
                             : (isSelected ? Theme.brand.opacity(0.7)
                                           : (hovering ? Theme.brand.opacity(0.35) : Theme.cardBorder)),
                         lineWidth: ThemeStyle.current == .raft ? 2 : (isSelected ? 1 : 0.5)))
-            .themeControlShadow(active: isSelected)
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
         }
         .buttonStyle(.plain)
@@ -491,7 +492,9 @@ struct SearchField: View {
                 .fill(Theme.surface)
                 .overlay(
                     Capsule(style: .continuous)
-                        .fill(Theme.brandFill(focused ? 0.10 : (hovering ? 0.06 : 0.035)))))
+                        .fill(Theme.brandFill(focused ? 0.10 : (hovering ? 0.06 : 0.035))))
+                // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                .themeControlShadow())
         .overlay(
             Capsule(style: .continuous)
                 .strokeBorder(
@@ -508,7 +511,6 @@ struct SearchField: View {
             color: ThemeStyle.current == .raft ? .clear : Theme.brand.opacity(focused ? 0.22 : 0),
             radius: ThemeStyle.current == .raft ? 0 : 10,
             y: ThemeStyle.current == .raft ? 0 : 2)
-        .themeControlShadow()
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.16), value: focused)
         .animation(.easeOut(duration: 0.16), value: hovering)
@@ -519,6 +521,8 @@ struct SearchField: View {
     private var glyph: some View {
         RoundedRectangle(cornerRadius: ThemeStyle.current == .raft ? 3 : 7, style: .continuous)
             .fill(Theme.brandTileGradient)
+            // 硬影在叠加放大镜图标之前画：只取方块轮廓，图标不会在偏移处留重影
+            .themeControlShadow()
             .frame(width: 24, height: 24)
             .overlay(
                 Image(systemName: "magnifyingglass")
@@ -536,7 +540,6 @@ struct SearchField: View {
                 color: ThemeStyle.current == .raft ? .clear : Theme.brand.opacity(focused ? 0.38 : 0.18),
                 radius: ThemeStyle.current == .raft ? 0 : 3,
                 y: ThemeStyle.current == .raft ? 0 : 1)
-            .themeControlShadow()
     }
 
     @ViewBuilder private var trailing: some View {
@@ -1179,14 +1182,15 @@ struct SourceFilterChip: View {
                 Capsule().fill(
                     isSelected
                         ? AnyShapeStyle(Theme.brand)
-                        : AnyShapeStyle(hovering ? Theme.brandFill(0.06) : Theme.surface)))
+                        : AnyShapeStyle(hovering ? Theme.brandFill(0.06) : Theme.surface))
+                    // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                    .themeControlShadow(active: isSelected))
             .overlay(
                 Capsule().strokeBorder(
                     ThemeStyle.current == .raft
                         ? Theme.ink
                         : (isSelected ? Color.clear : Theme.cardBorder),
                     lineWidth: ThemeStyle.current == .raft ? 2 : 0.8))
-            .themeControlShadow(active: isSelected)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
