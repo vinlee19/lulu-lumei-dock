@@ -86,7 +86,7 @@ struct PopoverRootView: View {
         }
         // 主窗口可缩放：填满窗口；最小尺寸与 MainWindowController.minSize 对齐（避免两处打架）
         .frame(minWidth: 840, maxWidth: .infinity, minHeight: 540, maxHeight: .infinity)
-        // 主题底色（classic = 透明沿用系统窗口底；raft = 奶油）
+        // 主题底色（classic = 透明沿用系统窗口底；brutal = 奶油）
         .background(Theme.windowBackground)
         // 切换界面风格时整树重建：Theme.* 是静态派发 token，重建才会重新取值
         .id(settings.themeStyle)

@@ -283,7 +283,7 @@ enum PreviewRenderer {
     ///     —— `MainWindowController` 用的是 `hosting.sizingOptions = []`，内容超出是裁剪而不是撑窗。
     @MainActor
     static func renderShell(to directory: String, style: ThemeStyle = .classic) {
-        // raft 主题字体须先于任何视图渲染注册；注册失败自动回退系统字体
+        // 主题字体（Space Grotesk/Mono）须先于任何视图渲染注册；注册失败自动回退系统字体
         ThemeFonts.register()
         ThemeStyle.current = style
         defer { ThemeStyle.current = .classic }
@@ -296,7 +296,7 @@ enum PreviewRenderer {
             width: CGFloat = 780, height: CGFloat = 980
         ) {
             let hosting = NSHostingView(rootView: ZStack {
-                style == .raft ? Theme.windowBackground : Color(nsColor: .windowBackgroundColor)
+                style == .classic ? Color(nsColor: .windowBackgroundColor) : Theme.windowBackground
                 view
             })
             hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)

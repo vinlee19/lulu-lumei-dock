@@ -65,11 +65,22 @@ enum EurekaCLI {
                 PreviewRenderer.renderKnowledge(to: dir)
             }
         case "--render-shell":
-            let dir = args.dropFirst().first(where: { !$0.hasPrefix("--") })
-                ?? "/tmp/eureka-shell"
+            // 参数解析：--style 的值不是位置参数；其余非 flag 参数第一个是输出目录
+            var positional = [String]()
+            var styleRaw = args.contains("--raft") ? "brutal" : "classic"  // --raft 是旧 flag，兼容
+            var i = 1
+            while i < args.count {
+                if args[i] == "--style", args.indices.contains(i + 1) {
+                    styleRaw = args[i + 1]
+                    i += 2
+                    continue
+                }
+                if !args[i].hasPrefix("--") { positional.append(args[i]) }
+                i += 1
+            }
+            let dir = positional.first ?? "/tmp/eureka-shell"
             MainActor.assumeIsolated {
-                PreviewRenderer.renderShell(
-                    to: dir, style: args.contains("--raft") ? .raft : .classic)
+                PreviewRenderer.renderShell(to: dir, style: ThemeStyle.resolve(styleRaw))
             }
         case "--render-lineage":
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-lineage"

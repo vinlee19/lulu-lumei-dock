@@ -98,12 +98,12 @@ final class AppSettings: ObservableObject {
     @Published var appearanceMode: String {
         didSet { defaults.set(appearanceMode, forKey: "appearanceMode") }
     }
-    /// 界面风格：classic=经典（默认）/ raft=硬朗新粗野风（参考 raft.build）。
+    /// 界面风格：classic=经典（默认）/ brutal=新粗野主义（Neo-Brutalism，参考 raft.build）。
     /// didSet 里同步 ThemeStyle.current，配合根视图 .id 整树重建即时生效。
     @Published var themeStyle: String {
         didSet {
             defaults.set(themeStyle, forKey: "themeStyle")
-            ThemeStyle.current = ThemeStyle(rawValue: themeStyle) ?? .classic
+            ThemeStyle.current = ThemeStyle.resolve(themeStyle)
         }
     }
     /// 桌面吉祥物（默认关，opt-in）
@@ -220,7 +220,7 @@ final class AppSettings: ObservableObject {
         auditRetentionDays = defaults.object(forKey: "auditRetentionDays") as? Int ?? 90
         launchAtLogin = SMAppService.mainApp.status == .enabled
         // 启动即同步界面风格（init 内 didSet 不触发，须在全部属性初始化后显式同步）
-        ThemeStyle.current = ThemeStyle(rawValue: themeStyle) ?? .classic
+        ThemeStyle.current = ThemeStyle.resolve(themeStyle)
     }
 
     /// SMAppService 对 ad-hoc/开发态注册可能不稳：失败给降级提示而不是静默

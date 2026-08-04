@@ -1,7 +1,7 @@
 import CoreText
 import SwiftUI
 
-/// raft 主题字体：Space Grotesk（正文）/ Space Mono（数字与等宽）。
+/// brutal 主题字体：Space Grotesk（正文）/ Space Mono（数字与等宽）。
 /// 字体文件随资源包分发（Resources/Fonts/，OFL 协议），启动时注册进进程字体表。
 /// 注册失败一律回退系统字体 —— 开发态字体缺失只降观感、不崩。
 enum ThemeFonts {

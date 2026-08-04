@@ -110,7 +110,7 @@ struct SettingsView: View {
                 HStack(spacing: 3) {
                     capsuleOption($settings.themeStyle, "classic", "经典", icon: "paintpalette")
                     capsuleOption(
-                        $settings.themeStyle, "raft", "Raft 硬朗",
+                        $settings.themeStyle, "brutal", "新粗野",
                         icon: "square.3.layers.3d.down.right")
                 }
                 .padding(3)
@@ -241,7 +241,7 @@ struct SettingsView: View {
         }
     }
 
-    /// 胶囊分段选项（外观主题 / 界面风格共用）：选中 = 品牌底 + onBrand 字（raft 下为墨字）
+    /// 胶囊分段选项（外观主题 / 界面风格共用）：选中 = 品牌底 + onBrand 字（brutal 下为墨字）
     private func capsuleOption(
         _ selection: Binding<String>, _ mode: String, _ label: String, icon: String
     ) -> some View {
