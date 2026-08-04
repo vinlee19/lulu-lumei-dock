@@ -4,6 +4,22 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] - 2026-08-04
+
+### Added
+
+- **Seven selectable color themes** for the main window — Catppuccin, Gruvbox, Nord,
+  Solarized, Rosé Pine, One Dark, and Kanagawa — joining 经典 and Neo-Brutalism in
+  设置 → 通用 → 界面风格. Palette themes use each ecosystem's official MIT/Apache-licensed
+  colors with matching light/dark flavors, keep the classic layout (radii, soft shadows,
+  thin borders), and only swap colors. Switching applies instantly.
+
+### Changed
+
+- **The neo-brutalist interface style is now named Neo-Brutalism.** The style is a public
+  design language, so the short-lived "Raft" label (another product's name) was renamed;
+  existing selections migrate automatically.
+
 ## [0.20.1] - 2026-08-04
 
 ### Fixed
@@ -1111,6 +1127,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.21.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.0
 [0.20.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.1
 [0.20.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.0
 [0.19.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.19.0
