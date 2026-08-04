@@ -65,9 +65,14 @@ Codex rollout token_count ────────────→ UsageEngine / 
 | `eureka-relay` | `claude-hook` / `codex-notify` / `inject` subcommands; writes to the spool. |
 | `eureka-tests` | Hand-rolled assertion harness. |
 
-### UI theming (two selectable styles)
+### UI theming (selectable styles)
 
-The main-window UI has two styles: `classic` (default, indigo+gold) and `brutal` (新粗野 / neo-brutalism in the visual language of raft.build: cream `#FFFAEF` / ink `#141111` 2px borders / zero-blur offset shadows / flat colors / Space Grotesk + Space Mono bundled under `Resources/Fonts/`, OFL). Mechanism: every `Theme.*` token is a `static var` dispatching on `ThemeStyle.current` (set from `AppSettings.themeStyle`, decoded via `ThemeStyle.resolve` — the 0.20.x releases persisted the id `"raft"`, which resolve still maps to `brutal`); call sites never branch. Switching re-renders via `.id(settings.themeStyle)` on `PopoverRootView`'s root — child views must not cache theme values. **Invariant: the `classic` branch of every token must keep its pre-theming value exactly** (default style stays pixel-identical); only add new tokens (`cardBorderWidth`, `cardShadow`, `onBrand`, `windowBackground`, …) with classic = old behavior. Zero-blur shadows are painted on pure shape layers only — never on views containing text (glyph ghosting, fixed in 0.20.1). Island/Mascot are intentionally outside `Theme` and unaffected; per-vendor agent brand colors are not theme tokens. Visual walkthrough: `--render-shell <dir>` vs `--render-shell <dir> --style brutal`.
+The main-window UI has selectable styles, switched in 设置 → 通用 → 界面风格 (persisted as `AppSettings.themeStyle`, decoded via `ThemeStyle.resolve` — the 0.20.x releases persisted the id `"raft"`, which resolve still maps to `brutal`). Two kinds:
+
+- **`classic`** (default, indigo+gold) and **`brutal`** (shown as **Neo-Brutalism**; cream `#FFFAEF` / ink `#141111` 2px borders / zero-blur offset shadows / flat colors / Space Grotesk + Space Mono bundled under `Resources/Fonts/`, OFL — the visual language of raft.build). Brutal is the only *structural* style (`isHardEdged`): it changes radii, borders, shadows, and fonts.
+- **Palette themes** — Catppuccin, Gruvbox, Nord, Solarized, Rosé Pine, One Dark, Kanagawa (official palettes, MIT/Apache). These keep the classic structure and only swap colors: each is one entry in the `palettes` table in `Theme.swift` (`ThemePalette`), so adding/removing one touches only the enum, `resolve`, the table, and the Settings picker.
+
+Mechanism: every `Theme.*` token is a `static var` dispatching on `ThemeStyle.current`; call sites never branch. Switching re-renders via `.id(settings.themeStyle)` on `PopoverRootView`'s root — child views must not cache theme values. **Invariant: the `classic` branch of every token must keep its pre-theming value exactly** (default style stays pixel-identical). Zero-blur shadows are painted on pure shape layers only — never on views containing text (glyph ghosting, fixed in 0.20.1). Island/Mascot are intentionally outside `Theme` and unaffected; per-vendor agent brand colors are not theme tokens. Visual walkthrough: `--render-shell <dir> [--style <id>]`.
 
 ### Task state machine (`EurekaKit/TaskStore.swift`)
 

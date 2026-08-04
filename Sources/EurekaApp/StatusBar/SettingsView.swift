@@ -107,11 +107,20 @@ struct SettingsView: View {
                 Text("选择面板的界面风格，立即生效；灵动岛与桌面伙伴不受影响。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                HStack(spacing: 3) {
+                FlowLayout(spacing: 3, lineSpacing: 3) {
                     capsuleOption($settings.themeStyle, "classic", "经典", icon: "paintpalette")
                     capsuleOption(
-                        $settings.themeStyle, "brutal", "新粗野",
+                        $settings.themeStyle, "brutal", "Neo-Brutalism",
                         icon: "square.3.layers.3d.down.right")
+                    Group {
+                        capsuleOption($settings.themeStyle, "catppuccin", "Catppuccin", icon: "swatchpalette")
+                        capsuleOption($settings.themeStyle, "gruvbox", "Gruvbox", icon: "swatchpalette")
+                        capsuleOption($settings.themeStyle, "nord", "Nord", icon: "swatchpalette")
+                        capsuleOption($settings.themeStyle, "solarized", "Solarized", icon: "swatchpalette")
+                        capsuleOption($settings.themeStyle, "rosepine", "Rosé Pine", icon: "swatchpalette")
+                        capsuleOption($settings.themeStyle, "onedark", "One Dark", icon: "swatchpalette")
+                        capsuleOption($settings.themeStyle, "kanagawa", "Kanagawa", icon: "swatchpalette")
+                    }
                 }
                 .padding(3)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))

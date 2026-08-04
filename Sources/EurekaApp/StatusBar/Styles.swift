@@ -2,9 +2,9 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 主题硬阴影辅助：brutal = 零模糊偏移墨影（brutalist）；classic = 不投影（原样）。
+/// 主题阴影辅助：brutal = 零模糊偏移墨影（brutalist）；classic / 配色主题 = 不投影（原样）。
 extension View {
-    /// 卡片级硬阴影（4/4）
+    /// 卡片级阴影（4/4）
     @ViewBuilder
     func themeCardShadow() -> some View {
         if let shadow = Theme.cardShadow {
@@ -14,7 +14,7 @@ extension View {
         }
     }
 
-    /// 小控件级硬阴影（2/2）；active = false 时不投（如未选中胶囊）
+    /// 小控件级阴影（2/2）；active = false 时不投（如未选中胶囊）
     @ViewBuilder
     func themeControlShadow(active: Bool = true) -> some View {
         if active, let shadow = Theme.controlShadow {
@@ -110,8 +110,8 @@ struct CapsuleTabButton: View {
                         : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
                     .overlay(
                         Group {
-                            if isSelected, ThemeStyle.current == .brutal {
-                                Capsule().strokeBorder(Theme.ink, lineWidth: 2)
+                            if isSelected, let outline = Theme.controlOutline {
+                                Capsule().strokeBorder(outline.color, lineWidth: outline.width)
                             }
                         }
                     )
@@ -190,9 +190,9 @@ struct SidebarNavButton: View {
                         : AnyShapeStyle(hovering ? Color.primary.opacity(0.06) : .clear))
                     .overlay(
                         Group {
-                            if isSelected, ThemeStyle.current == .brutal {
+                            if isSelected, let outline = Theme.controlOutline {
                                 RoundedRectangle(cornerRadius: Theme.radius.sidebar)
-                                    .strokeBorder(Theme.ink, lineWidth: 2)
+                                    .strokeBorder(outline.color, lineWidth: outline.width)
                             }
                         }
                     )
@@ -262,11 +262,13 @@ struct StatTile: View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.container)
                     .strokeBorder(
-                        ThemeStyle.current == .brutal
+                        ThemeStyle.current.isHardEdged
                             ? (isSelected || hovering ? Theme.ink : Theme.cardBorder)
                             : (isSelected ? Theme.brand.opacity(0.7)
                                           : (hovering ? Theme.brand.opacity(0.35) : Theme.cardBorder)),
-                        lineWidth: ThemeStyle.current == .brutal ? 2 : (isSelected ? 1 : 0.5)))
+                        lineWidth: ThemeStyle.current.isHardEdged
+                            ? Theme.cardBorderWidth
+                            : (isSelected ? 1 : 0.5)))
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
         }
         .buttonStyle(.plain)
@@ -352,10 +354,12 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .strokeBorder(
-                        ThemeStyle.current == .brutal
-                            ? Theme.ink
+                        ThemeStyle.current.isHardEdged
+                            ? (hovering ? Theme.ink : Theme.cardBorder)
                             : (hovering ? Theme.brand.opacity(0.6) : Theme.cardBorder),
-                        lineWidth: ThemeStyle.current == .brutal ? 2 : (hovering ? 1 : 0.5)))
+                        lineWidth: ThemeStyle.current.isHardEdged
+                            ? Theme.cardBorderWidth
+                            : (hovering ? 1 : 0.5)))
             .overlay(alignment: .bottomTrailing) {
                 if hovering, !actions.isEmpty {
                     KnowledgeCardActions(actions: actions)
@@ -365,9 +369,9 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius.card))
             .shadow(
-                color: ThemeStyle.current == .brutal ? .clear : .black.opacity(0.06),
-                radius: ThemeStyle.current == .brutal ? 0 : 3,
-                y: ThemeStyle.current == .brutal ? 0 : 1.5)
+                color: ThemeStyle.current.isHardEdged ? .clear : .black.opacity(0.06),
+                radius: ThemeStyle.current.isHardEdged ? 0 : 3,
+                y: ThemeStyle.current.isHardEdged ? 0 : 1.5)
             .themeCardShadow()
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.card))
             .onTapGesture { onOpen() }
@@ -498,28 +502,29 @@ struct SearchField: View {
         .overlay(
             Capsule(style: .continuous)
                 .strokeBorder(
-                    ThemeStyle.current == .brutal
+                    ThemeStyle.current.isHardEdged
                         ? AnyShapeStyle(Theme.ink)
                         : AnyShapeStyle(LinearGradient(
                             colors: [Theme.brand.opacity(focused ? 1 : 0.5),
                                      Theme.gold.opacity(focused ? 1 : 0.5)],
                             startPoint: .leading, endPoint: .trailing)),
-                    lineWidth: ThemeStyle.current == .brutal
-                        ? (focused ? 2.5 : 1.5)
+                    lineWidth: ThemeStyle.current.isHardEdged
+                        ? (focused ? Theme.cardBorderWidth + 0.5 : max(1, Theme.cardBorderWidth - 0.5))
                         : (focused ? 1.8 : 1)))
         .shadow(
-            color: ThemeStyle.current == .brutal ? .clear : Theme.brand.opacity(focused ? 0.22 : 0),
-            radius: ThemeStyle.current == .brutal ? 0 : 10,
-            y: ThemeStyle.current == .brutal ? 0 : 2)
+            color: ThemeStyle.current.isHardEdged ? .clear : Theme.brand.opacity(focused ? 0.22 : 0),
+            radius: ThemeStyle.current.isHardEdged ? 0 : 10,
+            y: ThemeStyle.current.isHardEdged ? 0 : 2)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.16), value: focused)
         .animation(.easeOut(duration: 0.16), value: hovering)
     }
 
     /// 品牌渐变放大镜方块（与品牌标 / logo 方块同一套方块语言；金色留给聚焦描边环）。
-    /// brutal = cyan 平色方块 + 墨色描边 + 硬影。
+    /// 主题化风格 = 品牌平色方块 + 各派描边与阴影。
     private var glyph: some View {
-        RoundedRectangle(cornerRadius: ThemeStyle.current == .brutal ? 3 : 7, style: .continuous)
+        RoundedRectangle(
+            cornerRadius: ThemeStyle.current.isHardEdged ? Theme.radius.tile : 7, style: .continuous)
             .fill(Theme.brandTileGradient)
             // 硬影在叠加放大镜图标之前画：只取方块轮廓，图标不会在偏移处留重影
             .themeControlShadow()
@@ -530,16 +535,16 @@ struct SearchField: View {
                     .foregroundStyle(Theme.onBrand))
             .overlay(
                 Group {
-                    if ThemeStyle.current == .brutal {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .strokeBorder(Theme.ink, lineWidth: 1.5)
+                    if let outline = Theme.controlOutline {
+                        RoundedRectangle(cornerRadius: Theme.radius.tile, style: .continuous)
+                            .strokeBorder(outline.color, lineWidth: max(1, outline.width - 0.5))
                     }
                 }
             )
             .shadow(
-                color: ThemeStyle.current == .brutal ? .clear : Theme.brand.opacity(focused ? 0.38 : 0.18),
-                radius: ThemeStyle.current == .brutal ? 0 : 3,
-                y: ThemeStyle.current == .brutal ? 0 : 1)
+                color: ThemeStyle.current.isHardEdged ? .clear : Theme.brand.opacity(focused ? 0.38 : 0.18),
+                radius: ThemeStyle.current.isHardEdged ? 0 : 3,
+                y: ThemeStyle.current.isHardEdged ? 0 : 1)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -677,8 +682,8 @@ struct SourceLogoTile: View {
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current == .brutal ? Theme.ink : TileSpec.border(Theme.brand),
-                        lineWidth: ThemeStyle.current == .brutal ? 1.5 : 0.5))
+                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(SourceBadge(source: source, size: size * 0.55))
     }
 }
@@ -695,22 +700,24 @@ struct MiniSwitch: View {
                 .frame(width: 30, height: 17)
                 .overlay(
                     Group {
-                        if ThemeStyle.current == .brutal {
-                            Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+                        if let outline = Theme.controlOutline {
+                            Capsule().strokeBorder(
+                                outline.color, lineWidth: max(1, outline.width - 0.5))
                         }
                     }
                 )
                 .overlay(alignment: isOn ? .trailing : .leading) {
                     Circle()
-                        .fill(ThemeStyle.current == .brutal ? Color(hex: "FFFAEF") : .white)
+                        .fill(Theme.controlKnob)
                         .shadow(
-                            color: ThemeStyle.current == .brutal ? .clear : .black.opacity(0.18),
-                            radius: ThemeStyle.current == .brutal ? 0 : 1,
-                            y: ThemeStyle.current == .brutal ? 0 : 0.5)
+                            color: ThemeStyle.current.isHardEdged ? .clear : .black.opacity(0.18),
+                            radius: ThemeStyle.current.isHardEdged ? 0 : 1,
+                            y: ThemeStyle.current.isHardEdged ? 0 : 0.5)
                         .overlay(
                             Group {
-                                if ThemeStyle.current == .brutal {
-                                    Circle().strokeBorder(Theme.ink, lineWidth: 1.5)
+                                if let outline = Theme.controlOutline {
+                                    Circle().strokeBorder(
+                                        outline.color, lineWidth: max(1, outline.width - 0.5))
                                 }
                             }
                         )
@@ -998,9 +1005,9 @@ struct KnowledgeListContainer<Content: View>: View {
                     .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous))
             .shadow(
-                color: ThemeStyle.current == .brutal ? .clear : .black.opacity(0.05),
-                radius: ThemeStyle.current == .brutal ? 0 : 3,
-                y: ThemeStyle.current == .brutal ? 0 : 1.5)
+                color: ThemeStyle.current.isHardEdged ? .clear : .black.opacity(0.05),
+                radius: ThemeStyle.current.isHardEdged ? 0 : 3,
+                y: ThemeStyle.current.isHardEdged ? 0 : 1.5)
             .themeCardShadow()
     }
 }
@@ -1136,9 +1143,9 @@ struct StatOverviewCard: View {
                         .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
                 .themeCardShadow())
         .shadow(
-            color: ThemeStyle.current == .brutal ? .clear : .black.opacity(0.05),
-            radius: ThemeStyle.current == .brutal ? 0 : 2,
-            y: ThemeStyle.current == .brutal ? 0 : 1)
+            color: ThemeStyle.current.isHardEdged ? .clear : .black.opacity(0.05),
+            radius: ThemeStyle.current.isHardEdged ? 0 : 2,
+            y: ThemeStyle.current.isHardEdged ? 0 : 1)
     }
 
     private func barWidth(_ seg: Segment, in width: CGFloat) -> CGFloat {
@@ -1187,10 +1194,10 @@ struct SourceFilterChip: View {
                     .themeControlShadow(active: isSelected))
             .overlay(
                 Capsule().strokeBorder(
-                    ThemeStyle.current == .brutal
-                        ? Theme.ink
+                    ThemeStyle.current.isHardEdged
+                        ? Theme.cardBorder
                         : (isSelected ? Color.clear : Theme.cardBorder),
-                    lineWidth: ThemeStyle.current == .brutal ? 2 : 0.8))
+                    lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.8))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -1312,8 +1319,8 @@ struct RoleAvatar: View {
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current == .brutal ? Theme.ink : TileSpec.border(Theme.brand),
-                        lineWidth: ThemeStyle.current == .brutal ? 1.5 : 0.5))
+                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Text(role.glyph)
                     .font(.system(size: size * 0.42, weight: .semibold))
