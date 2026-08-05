@@ -41,6 +41,8 @@ struct SkillMemoryView: View {
     @ObservedObject var service: SkillMemoryService
     let mode: Mode
     @ObservedObject var usageService: UsageService
+    /// 技能详情页「最近调用会话」跳转用；nil 时该卡片按不可达灰显（兼容 PreviewRenderer 等既有构造点）
+    var sessionBrowser: SessionBrowserService? = nil
 
     /// 内嵌技能详情（卡片点击进入；nil = 列表）
     @State private var detail: SkillDetailTarget?
@@ -62,12 +64,14 @@ struct SkillMemoryView: View {
     /// 离屏渲染/预览专用：指定初始布局与直接展开的记忆库
     /// （二级页没有别的入口能被离屏渲染器点到 —— 它只会渲第一帧）
     init(service: SkillMemoryService, mode: Mode, usageService: UsageService,
+         sessionBrowser: SessionBrowserService? = nil,
          initialLayout: KnowledgeLayout = .list,
          initialLibraryKey: String? = nil,
          initialMemoryPath: String? = nil) {
         self._service = ObservedObject(wrappedValue: service)
         self.mode = mode
         self._usageService = ObservedObject(wrappedValue: usageService)
+        self.sessionBrowser = sessionBrowser
         self._layout = State(initialValue: initialLayout)
         let library = initialLibraryKey.flatMap { key in
             service.libraries.first { $0.key == key }
@@ -86,7 +90,8 @@ struct SkillMemoryView: View {
                 SkillDetailView(
                     target: target, service: service, usageService: usageService,
                     onBack: { withAnimation(.easeOut(duration: 0.15)) { detail = nil } },
-                    onDelete: { deleting = .skill($0) })
+                    onDelete: { deleting = .skill($0) },
+                    sessionBrowser: sessionBrowser)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else if let memory = memoryDetail {
                 MemoryDetailView(

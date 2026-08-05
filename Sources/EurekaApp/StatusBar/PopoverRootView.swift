@@ -160,13 +160,16 @@ struct PopoverRootView: View {
             SessionsView(service: sessionBrowser, settings: settings)
         case .skills:
             SkillMemoryView(
-                service: skillMemoryService, mode: .skills, usageService: usageService)
+                service: skillMemoryService, mode: .skills, usageService: usageService,
+                sessionBrowser: sessionBrowser)
         case .memory:
             SkillMemoryView(
-                service: skillMemoryService, mode: .memory, usageService: usageService)
+                service: skillMemoryService, mode: .memory, usageService: usageService,
+                sessionBrowser: sessionBrowser)
         case .instructions:
             SkillMemoryView(
-                service: skillMemoryService, mode: .instructions, usageService: usageService)
+                service: skillMemoryService, mode: .instructions, usageService: usageService,
+                sessionBrowser: sessionBrowser)
         case .plans:
             PlansView(service: plansService)
         case .agents:

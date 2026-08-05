@@ -22,6 +22,8 @@ struct SkillDetailView: View {
     @ObservedObject var usageService: UsageService
     let onBack: () -> Void
     let onDelete: (SkillEntry) -> Void
+    /// 「最近调用会话」行跳转用；nil 时行按不可达灰显（兼容既有构造点）
+    var sessionBrowser: SessionBrowserService? = nil
 
     /// 详情分段：概览（统计矩阵）/ 预览（SKILL.md 渲染）/ 编辑（原文）
     enum Pane: String, CaseIterable { case overview = "概览", preview = "预览", edit = "编辑" }
@@ -33,6 +35,8 @@ struct SkillDetailView: View {
 
     /// 本周排名（金块；nil = 本周无调用）
     @State private var weeklyRank: Int?
+    /// 最近调用过该技能的会话（详情页「最近调用会话」卡）
+    @State private var recentSessions: [(sessionId: String, lastTs: Date, count: Int)] = []
 
     /// 实时条目：启停会移动技能目录（路径变化），从 service 按
     /// 来源 + 项目 + 目录名回查最新条目，保证开关/编辑始终作用于当前路径。
@@ -88,6 +92,9 @@ struct SkillDetailView: View {
             usageService.loadSkillWeeklyRank(
                 source: target.source, name: stat?.name ?? target.name
             ) { weeklyRank = $0 }
+            usageService.loadSkillSessions(
+                source: target.source, name: stat?.name ?? target.name
+            ) { recentSessions = $0 }
         }
     }
 
@@ -284,7 +291,43 @@ struct SkillDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 12)
             }
+            if !recentSessions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    sectionTitle("最近调用会话")
+                    ForEach(recentSessions, id: \.sessionId) { row in
+                        recentSessionRow(row)
+                    }
+                }
+            }
         }
+    }
+
+    private func recentSessionRow(
+        _ row: (sessionId: String, lastTs: Date, count: Int)
+    ) -> some View {
+        let info = sessionBrowser?.sessionsById[row.sessionId]
+        return HStack(spacing: 6) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 10))
+                .foregroundStyle(info == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Theme.brandFg))
+            Text(info?.displayName ?? "会话 \(row.sessionId.prefix(8))（已不可达）")
+                .font(Theme.font.themed(11.5))
+                .foregroundStyle(info == nil ? .secondary : .primary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text("\(row.count) 次")
+                .font(Theme.font.themedMono(10.5))
+                .foregroundStyle(.tertiary)
+            Text(relativeFormatter.localizedString(for: row.lastTs, relativeTo: Date()))
+                .font(Theme.font.themed(10.5))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard info != nil else { return }
+            NotificationCenter.default.post(name: .eurekaRevealSession, object: row.sessionId)
+        }
+        .help(info == nil ? "会话记录已删除或不在当前索引范围" : "跳到该会话")
     }
 
     @ViewBuilder

@@ -449,6 +449,22 @@ final class UsageService: ObservableObject {
         }
     }
 
+    /// 某技能最近调用会话（详情页「最近调用会话」卡；回调回主线程）
+    func loadSkillSessions(
+        source: AgentSource, name: String, limit: Int = 8,
+        completion: @escaping ([(sessionId: String, lastTs: Date, count: Int)]) -> Void
+    ) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let rows = (try? store.toolCalls.recentSkillSessions(
+                source: source, name: name, limit: limit)) ?? []
+            DispatchQueue.main.async { completion(rows) }
+        }
+    }
+
     /// 模型统计（选中区间的完整分项，token 降序）——同时是英雄卡/四宫格/命中率的数据源
     func loadModelTotals(from: Date, to: Date) {
         queue.async { [weak self] in
