@@ -49,6 +49,7 @@ struct PlansView: View {
             consumeFocus()
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
+        .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
         .confirmationDialog(
             deleting.map { "删除计划「\($0.title)」？文件会移入废纸篓，可恢复。" } ?? "",
             isPresented: Binding(

@@ -120,6 +120,7 @@ struct SkillMemoryView: View {
             consumeFocus()
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
+        .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
         .alert("新建" + (creating?.label ?? ""), isPresented: creatingBinding) {
             TextField("名称", text: $newName)
             Button("创建") {
@@ -535,17 +536,22 @@ struct SkillMemoryView: View {
         }
     }
 
-    /// 跨页直达落点：按路径找到本签条目并打开详情（找不到不清空——可能属于别的签）
+    /// 跨页直达落点：按路径找到本签条目并打开详情（找不到不清空——可能属于别的签，或扫描还没跑完）。
+    /// 用 `knowledgeSnapshot()`（全集）而非 `service.skills`/`memoryEntries`/`instructions`：
+    /// 那三个是搜索过滤过的当前视图，⌘K 索引口径本就是全集，消费口径必须与之一致，否则
+    /// 带着 searchText 残留切页会导致明明存在的条目查不到。
     private func consumeFocus() {
         guard let path = service.focusPath else { return }
+        let snap = service.knowledgeSnapshot()
         if mode == .skills {
-            guard let skill = service.skills.first(where: { $0.path == path }) else { return }
-            detail = SkillDetailTarget(source: skill.source, name: skill.name, entry: skill)
+            guard let skill = snap.skills.first(where: { $0.path == path }) else { return }
+            withAnimation(.easeOut(duration: 0.15)) {
+                detail = SkillDetailTarget(source: skill.source, name: skill.name, entry: skill)
+            }
             service.focusPath = nil
         } else {
-            let pool = service.memoryEntries + service.instructions
-            guard let memory = pool.first(where: { $0.path == path }) else { return }
-            memoryDetail = memory
+            guard let memory = snap.memories.first(where: { $0.path == path }) else { return }
+            withAnimation(.easeOut(duration: 0.15)) { memoryDetail = memory }
             service.focusPath = nil
         }
     }

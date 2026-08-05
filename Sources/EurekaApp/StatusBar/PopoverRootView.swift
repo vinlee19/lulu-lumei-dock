@@ -132,6 +132,9 @@ struct PopoverRootView: View {
             limitsBadge: limitsBadge,
             appVersion: appVersion,
             onSelect: { tab in
+                // 用户手动导航即视为放弃未消费的跨页 reveal，收敛残留窗口到一次 reveal 生命周期
+                skillMemoryService.focusPath = nil
+                plansService.focusPath = nil
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                     navigation.tab = tab
                 }
