@@ -907,7 +907,7 @@ public final class SyncRunsRepo {
     }
 }
 
-/// 工具/技能/插件/子代理调用计数（按 日×来源×kind×name 聚合，用量扫描器顺路计数）
+/// 工具/技能/插件/子代理调用计数（按 日×来源×kind×name×会话 聚合，会话维度仅 Claude 写真实值；用量扫描器顺路计数）
 public final class ToolCallsRepo {
     private let db: SQLiteDB
 

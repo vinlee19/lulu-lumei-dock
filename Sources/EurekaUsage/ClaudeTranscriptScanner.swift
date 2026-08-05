@@ -110,6 +110,8 @@ public final class ClaudeTranscriptScanner {
         }
 
         var newCount = 0
+        // 会话 = 文件（文件名即 session id），事务内多处复用
+        let sessionId = url.deletingPathExtension().lastPathComponent
         try store.scanState.transaction {
             // 去重必须跨文件全局：dedup_keys 表持久化
             let existing = try store.scanState.existingDedupKeys(order)
@@ -142,7 +144,7 @@ public final class ClaudeTranscriptScanner {
                         for call in calls {
                             try store.toolCalls.bump(
                                 day: day, source: .claude, kind: call.kind, name: call.name,
-                                ts: ts, tokens: lineTokens)
+                                ts: ts, tokens: lineTokens, session: sessionId)
                         }
                     }
                 }
@@ -155,7 +157,8 @@ public final class ClaudeTranscriptScanner {
                     let dkey = "s:\(command.uuid)"
                     guard existingCommands[dkey] == nil else { continue }
                     try store.toolCalls.bump(
-                        day: command.day, source: .claude, kind: "command", name: command.name)
+                        day: command.day, source: .claude, kind: "command", name: command.name,
+                        session: sessionId)
                     try store.scanState.upsertDedupKey(
                         dkey, recordId: nil, outputTokens: 0, at: now)
                 }
@@ -163,10 +166,10 @@ public final class ClaudeTranscriptScanner {
             try store.scanState.setFileState(
                 path: path,
                 .init(inode: info.inode, offset: Int64(chunk.newOffset)))
-            // 会话 = 文件（文件名即 session id）；offset==0 是全量重扫 → 覆盖而非累加
+            // offset==0 是全量重扫 → 覆盖而非累加
             try store.sessionStats.recordPrompts(
                 path: path,
-                sessionId: url.deletingPathExtension().lastPathComponent,
+                sessionId: sessionId,
                 count: promptCount,
                 reset: offset == 0)
         }
