@@ -86,6 +86,119 @@ func claudeScannerTests(_ t: TestRunner) {
         try expect(totals.allSatisfy { $0.source == .claude })
     }
 
+    t.test("同消息分多行的 tool_use 都要计数（末次覆盖会丢 Skill）") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-claude-tc2-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // Claude Code 每个 content block 单独写一行，却共享同一 (requestId, message.id)：
+        // text 行 → Skill 行 → Bash 行。按消息键末次覆盖时 Skill 会被 Bash 顶掉。
+        func line(_ uuid: String, _ blocks: String, output: Int) -> String {
+            """
+            {"type":"assistant","uuid":"\(uuid)","timestamp":"2026-07-06T10:00:00.000Z","requestId":"req_A","message":{"id":"msg_A","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":100,"output_tokens":\(output),"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[\(blocks)]},"sessionId":"s","cwd":"/w"}
+            """
+        }
+        let textLine = line("u1", #"{"type":"text","text":"先想想"}"#, output: 5)
+        let skillLine = line(
+            "u2", #"{"type":"tool_use","id":"toolu_skill","name":"Skill","input":{"skill":"tdd"}}"#,
+            output: 12)
+        let bashLine = line(
+            "u3", #"{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{}}"#, output: 20)
+        // 末行再重复一次 Skill 行（流式重复写）→ 同 id 文件内只能算一次
+        let content = [textLine, skillLine, bashLine, skillLine].joined(separator: "\n") + "\n"
+        try content.write(
+            to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
+
+        let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
+        _ = try scanner.scanOnce()
+        _ = try scanner.scanOnce()  // 二次扫描不应翻倍
+
+        let totals = try store.toolCalls.totals(
+            from: Date(timeIntervalSince1970: 0),
+            to: Date(timeIntervalSince1970: 4_000_000_000))
+        func count(_ kind: String, _ name: String) -> Int {
+            totals.first { $0.kind == kind && $0.name == name }?.count ?? 0
+        }
+        try expectEqual(count("skill", "tdd"), 1, "同消息里的 Skill 不能被后面的 Bash 行顶掉")
+        try expectEqual(count("tool", "Bash"), 1)
+        // tokens 取"该 tool_use 所在行"的合计，不是消息合并后的那行
+        let skill = try store.toolCalls.skillStats(source: .claude).first { $0.name == "tdd" }
+        try expectEqual(skill?.tokens, 100 + 12, "tokens 应来自 Skill 自己那行")
+    }
+
+    t.test("tool_use 计数与消息级用量去重解耦：先只见 text 行，后补的 tool_use 行仍要计数") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-claude-tc3-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("s1.jsonl")
+
+        func line(_ uuid: String, _ blocks: String) -> String {
+            """
+            {"type":"assistant","uuid":"\(uuid)","timestamp":"2026-07-06T11:00:00.000Z","requestId":"req_B","message":{"id":"msg_B","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":80,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[\(blocks)]},"sessionId":"s","cwd":"/w"}
+
+            """
+        }
+        // 第一轮只读到消息的 text 行 → 消息级去重键已被消费
+        try Data(line("u1", #"{"type":"text","text":"稍等"}"#).utf8).write(to: file)
+        let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
+        try expectEqual(try scanner.scanOnce(), 1)
+
+        // 第二轮才落盘同消息的 tool_use 行（走"已记录过"回填分支）
+        let handle = try FileHandle(forWritingTo: file)
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: Data(
+            line("u2", #"{"type":"tool_use","id":"toolu_late","name":"Skill","input":{"skill":"research"}}"#).utf8))
+        try handle.close()
+        try expectEqual(try scanner.scanOnce(), 0, "消息键已存在 → 不算新用量")
+
+        let totals = try store.toolCalls.totals(
+            from: Date(timeIntervalSince1970: 0),
+            to: Date(timeIntervalSince1970: 4_000_000_000))
+        try expectEqual(
+            totals.first { $0.kind == "skill" && $0.name == "research" }?.count, 1,
+            "回填分支也必须计工具调用")
+    }
+
+    t.test("子代理转录的调用归属父会话（agent-<hash> 不是可跳转会话）") {
+        let store = try makeStore()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-claude-tc4-\(UUID().uuidString)", isDirectory: true)
+        let subDir = root
+            .appendingPathComponent("-Users-me-work-demo")
+            .appendingPathComponent("parent-session-1")
+            .appendingPathComponent("subagents")
+        // subagents 下还会再套一层 workflows/wf_<id>/（本机实测存在）
+        let workflowDir = subDir
+            .appendingPathComponent("workflows")
+            .appendingPathComponent("wf_910931c7")
+        try FileManager.default.createDirectory(at: workflowDir, withIntermediateDirectories: true)
+        func subLine(_ uuid: String, tool: String, skill: String) -> String {
+            """
+            {"type":"assistant","uuid":"\(uuid)","timestamp":"2026-07-06T12:00:00.000Z","requestId":"req_\(uuid)","message":{"id":"msg_\(uuid)","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":60,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[{"type":"tool_use","id":"\(tool)","name":"Skill","input":{"skill":"\(skill)"}}]},"sessionId":"parent-session-1","cwd":"/w"}
+
+            """
+        }
+        try Data(subLine("u1", tool: "toolu_sub", skill: "grilling").utf8).write(
+            to: subDir.appendingPathComponent("agent-a5c2b4b1e7ae52f9c.jsonl"))
+        try Data(subLine("u2", tool: "toolu_wf", skill: "prototype").utf8).write(
+            to: workflowDir.appendingPathComponent("agent-af3640f76d13182cf.jsonl"))
+
+        let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
+        _ = try scanner.scanOnce()
+
+        for skill in ["grilling", "prototype"] {
+            let sessions = try store.toolCalls.recentSkillSessions(source: .claude, name: skill)
+            try expectEqual(sessions.count, 1, skill)
+            try expectEqual(
+                sessions.first?.sessionId, "parent-session-1",
+                "\(skill) 应归到父会话而非 agent-<hash>")
+        }
+    }
+
     t.test("跨扫描回填：第一轮记了部分 output，第二轮见到更大值要更新") {
         let store = try makeStore()
         let root = FileManager.default.temporaryDirectory

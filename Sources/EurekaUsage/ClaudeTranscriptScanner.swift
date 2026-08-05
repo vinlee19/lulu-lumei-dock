@@ -73,8 +73,13 @@ public final class ClaudeTranscriptScanner {
         var merged: [String: UsageRecord] = [:]
         var order: [String] = []
         var promptCount = 0
-        // 工具/技能/插件调用：按 assistant 去重键收集（末次覆盖，取完整那份）
-        var toolsByKey: [String: [(kind: String, name: String)]] = [:]
+        // 工具/技能/插件调用：**逐 tool_use id 累积**，不按 assistant 去重键归并 ——
+        // Claude Code 每个 content block 单独写一行却共享同一 (requestId, message.id)，
+        // 按 key 覆盖会让同消息的 Skill 行被后面的 Bash 行顶掉（本机实测 78 条技能调用丢 10 条）。
+        var toolCalls: [(
+            id: String, kind: String, name: String, day: String, ts: Double, tokens: Int
+        )] = []
+        var seenToolIds: Set<String> = []
         // 斜杠命令：(uuid, day, name)，用 s:<uuid> 去重后计数
         var commands: [(uuid: String, day: String, name: String)] = []
         for line in chunk.lines {
@@ -96,8 +101,18 @@ public final class ClaudeTranscriptScanner {
             // 项目名按仓库根归组（子目录/子模块的会话归到仓库名下）
             record.project = projectResolver.projectName(forCwd: record.project) ?? record.project
             if let message = root["message"] as? [String: Any] {
-                let calls = Self.extractToolCalls(message)
-                if !calls.isEmpty { toolsByKey[key] = calls }  // 末次（完整）覆盖
+                // 触发时 token = 该 assistant 行 token 合计（≈调用时上下文规模，仅 Claude 可得）；
+                // 同行多 tool_use 时按行归给每个调用，技能场景重叠可忽略
+                let lineTokens = record.inputTokens + record.outputTokens
+                    + record.cacheCreationTokens + record.cacheReadTokens
+                let day = Self.dayFormatter.string(from: record.timestamp)
+                let ts = record.timestamp.timeIntervalSince1970
+                for call in Self.extractToolCalls(message) {
+                    // 无 id 的 tool_use 无法去重（重扫会翻倍）→ 保守不计数
+                    guard let id = call.id, !id.isEmpty else { continue }
+                    guard seenToolIds.insert(id).inserted else { continue }  // 文件内同 id 只算一次
+                    toolCalls.append((id, call.kind, call.name, day, ts, lineTokens))
+                }
             }
             if let prior = merged[key] {
                 if record.outputTokens > prior.outputTokens {
@@ -110,8 +125,10 @@ public final class ClaudeTranscriptScanner {
         }
 
         var newCount = 0
-        // 会话 = 文件（文件名即 session id），事务内多处复用
+        // 会话 = 文件（文件名即 session id）；对话数按文件计，口径不随归属改写
         let sessionId = url.deletingPathExtension().lastPathComponent
+        // 调用计数归属的会话：子代理转录归到父会话（见 attributionSessionId）
+        let callSessionId = Self.attributionSessionId(for: url, root: projectsRoot)
         try store.scanState.transaction {
             // 去重必须跨文件全局：dedup_keys 表持久化
             let existing = try store.scanState.existingDedupKeys(order)
@@ -133,20 +150,22 @@ public final class ClaudeTranscriptScanner {
                         key, recordId: recordId,
                         outputTokens: record.outputTokens, at: now)
                     newCount += 1
-                    // 仅对首次入库的 assistant 行计工具/技能/插件调用（与用量同门去重）
-                    if let calls = toolsByKey[key] {
-                        let day = Self.dayFormatter.string(from: record.timestamp)
-                        let ts = record.timestamp.timeIntervalSince1970
-                        // 触发时 token = 该 assistant 行 token 合计（≈调用时上下文规模，仅 Claude 可得）；
-                        // 同行多 tool_use 时按行归给每个调用，技能场景重叠可忽略
-                        let lineTokens = record.inputTokens + record.outputTokens
-                            + record.cacheCreationTokens + record.cacheReadTokens
-                        for call in calls {
-                            try store.toolCalls.bump(
-                                day: day, source: .claude, kind: call.kind, name: call.name,
-                                ts: ts, tokens: lineTokens, session: sessionId)
-                        }
-                    }
+                }
+            }
+            // 工具/技能/插件/子代理调用：用 tc:<tool_use id> 跨文件去重，**与消息级用量去重解耦** ——
+            // 挂在"首次入库"分支上会漏：某轮只读到消息的 thinking/text 行就消费了消息级键，
+            // 下轮读到同消息的 tool_use 行时走回填分支，调用永久无归属。
+            if !toolCalls.isEmpty {
+                let callKeys = toolCalls.map { "tc:\($0.id)" }
+                let existingCalls = try store.scanState.existingDedupKeys(callKeys)
+                for call in toolCalls {
+                    let dkey = "tc:\(call.id)"
+                    guard existingCalls[dkey] == nil else { continue }
+                    try store.toolCalls.bump(
+                        day: call.day, source: .claude, kind: call.kind, name: call.name,
+                        ts: call.ts, tokens: call.tokens, session: callSessionId)
+                    try store.scanState.upsertDedupKey(
+                        dkey, recordId: nil, outputTokens: 0, at: now)
                 }
             }
             // 斜杠命令：用 s:<uuid> 跨文件去重，新键才计数
@@ -158,7 +177,7 @@ public final class ClaudeTranscriptScanner {
                     guard existingCommands[dkey] == nil else { continue }
                     try store.toolCalls.bump(
                         day: command.day, source: .claude, kind: "command", name: command.name,
-                        session: sessionId)
+                        session: callSessionId)
                     try store.scanState.upsertDedupKey(
                         dkey, recordId: nil, outputTokens: 0, at: now)
                 }
@@ -176,16 +195,36 @@ public final class ClaudeTranscriptScanner {
         return newCount
     }
 
-    /// assistant 行的 tool_use 块 → (kind, name)：
-    /// Skill→(skill,技能名) / mcp__ 前缀→(mcp, server.tool) / Task|Agent→(agent,子代理类型) / 其余→(tool,工具名)
-    static func extractToolCalls(_ message: [String: Any]) -> [(kind: String, name: String)] {
+    /// 调用计数归属的会话 id：子代理转录（`<父会话>/subagents/**/agent-*.jsonl`）归到**父会话**。
+    /// 文件名派生的 `agent-<hash>` 不是真会话，`ClaudeSessionIndexer` 只枚举一层、永远解析不到，
+    /// 直接用它做反查会给死跳转。父会话就是 `subagents` 目录的上一级 —— 注意 subagents 下还会
+    /// 再套一层 `workflows/wf_<id>/`（本机 4 个目录如此），所以必须按路径组件定位 subagents，
+    /// 只看父目录名会漏掉这一形态。查找从项目根之下开始，免得根路径自己带同名目录时误判。
+    static func attributionSessionId(for url: URL, root: URL) -> String {
+        let fileName = url.deletingPathExtension().lastPathComponent
+        let components = url.pathComponents
+        let rootDepth = root.pathComponents.count
+        guard components.count > rootDepth,
+              let marker = components[rootDepth...].firstIndex(of: "subagents"),
+              marker > rootDepth
+        else { return fileName }
+        return components[marker - 1]
+    }
+
+    /// assistant 行的 tool_use 块 → (id, kind, name)：
+    /// Skill→(skill,技能名) / mcp__ 前缀→(mcp, server.tool) / Task|Agent→(agent,子代理类型) / 其余→(tool,工具名)。
+    /// id 是 tool_use 块自带的唯一标识（`toolu_xxx`），调用计数按它去重；缺失则为 nil。
+    static func extractToolCalls(
+        _ message: [String: Any]
+    ) -> [(id: String?, kind: String, name: String)] {
         guard let blocks = message["content"] as? [[String: Any]] else { return [] }
-        var result: [(String, String)] = []
+        var result: [(String?, String, String)] = []
         for block in blocks where block["type"] as? String == "tool_use" {
             guard let name = block["name"] as? String, !name.isEmpty else { continue }
+            let id = block["id"] as? String
             let input = block["input"] as? [String: Any]
             if name == "Skill" {
-                result.append(("skill", (input?["skill"] as? String) ?? "?"))
+                result.append((id, "skill", (input?["skill"] as? String) ?? "?"))
             } else if name.hasPrefix("mcp__") {
                 let comps = name.components(separatedBy: "__").filter { !$0.isEmpty }
                 var server = comps.count >= 2 ? comps[1] : name
@@ -193,11 +232,11 @@ public final class ClaudeTranscriptScanner {
                     server = String(server.dropFirst("claude_ai_".count))
                 }
                 let tool = comps.count >= 3 ? comps[2...].joined(separator: "__") : ""
-                result.append(("mcp", tool.isEmpty ? server : "\(server).\(tool)"))
+                result.append((id, "mcp", tool.isEmpty ? server : "\(server).\(tool)"))
             } else if name == "Task" || name == "Agent" {
-                result.append(("agent", (input?["subagent_type"] as? String) ?? "?"))
+                result.append((id, "agent", (input?["subagent_type"] as? String) ?? "?"))
             } else {
-                result.append(("tool", name))
+                result.append((id, "tool", name))
             }
         }
         return result
