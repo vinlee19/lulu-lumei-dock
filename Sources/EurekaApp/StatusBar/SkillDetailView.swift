@@ -1,4 +1,5 @@
 import Charts
+import Combine
 import EurekaIngest
 import EurekaKit
 import EurekaStore
@@ -37,6 +38,9 @@ struct SkillDetailView: View {
     @State private var weeklyRank: Int?
     /// 最近调用过该技能的会话（详情页「最近调用会话」卡）
     @State private var recentSessions: [(sessionId: String, lastTs: Date, count: Int)] = []
+    /// sessionBrowser 是普通 optional 存储属性（非 @ObservedObject），索引刷新后视图不会自动重渲；
+    /// 靠这个计数器订阅它的 objectWillChange 手动触发子区块重建，让灰显行在索引建好后自愈为可点。
+    @State private var sessionIndexVersion = 0
 
     /// 实时条目：启停会移动技能目录（路径变化），从 service 按
     /// 来源 + 项目 + 目录名回查最新条目，保证开关/编辑始终作用于当前路径。
@@ -95,6 +99,16 @@ struct SkillDetailView: View {
             usageService.loadSkillSessions(
                 source: target.source, name: stat?.name ?? target.name
             ) { recentSessions = $0 }
+            // 冷启动会话索引可能还没建，「最近调用会话」会先全灰；照 UsageDashboardView 的先例补建一次
+            if let sessionBrowser, sessionBrowser.sessionsById.isEmpty {
+                sessionBrowser.refresh()
+            }
+        }
+        .onReceive(
+            sessionBrowser?.objectWillChange.eraseToAnyPublisher()
+                ?? Empty<Void, Never>().eraseToAnyPublisher()
+        ) { _ in
+            sessionIndexVersion &+= 1
         }
     }
 
@@ -298,6 +312,9 @@ struct SkillDetailView: View {
                         recentSessionRow(row)
                     }
                 }
+                // sessionBrowser 索引建好后 sessionIndexVersion 变化，强制这个子区块重建
+                // 以重新计算每行的 info（否则灰显的不可达行不会自愈为可点）
+                .id(sessionIndexVersion)
             }
         }
     }

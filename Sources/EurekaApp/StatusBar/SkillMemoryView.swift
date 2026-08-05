@@ -92,6 +92,9 @@ struct SkillMemoryView: View {
                     onBack: { withAnimation(.easeOut(duration: 0.15)) { detail = nil } },
                     onDelete: { deleting = .skill($0) },
                     sessionBrowser: sessionBrowser)
+                    // detail 从技能 A 直切技能 B 时（⌘K 直达）target 变了但 view identity 不变，
+                    // SwiftUI 会复用旧状态；用 target.id 强制重建，让 onAppear 重新加载四个状态
+                    .id(target.id)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else if let memory = memoryDetail {
                 MemoryDetailView(
