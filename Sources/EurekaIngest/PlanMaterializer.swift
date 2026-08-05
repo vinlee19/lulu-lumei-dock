@@ -73,6 +73,8 @@ public enum PlanMaterializer {
         public var status: PlanStatus
         /// 一句话摘要（正文首个有意义行）
         public var summary: String?
+        /// 来源会话 id（物化计划由 sessions.json 边车提供；真实文件计划为 nil）
+        public var sessionId: String?
 
         /// 完成占比（无清单 → nil）
         public var progress: Double? {
@@ -86,7 +88,8 @@ public enum PlanMaterializer {
             project: String? = nil,
             stepsDone: Int = 0, stepsTotal: Int = 0,
             status: PlanStatus = .document,
-            summary: String? = nil
+            summary: String? = nil,
+            sessionId: String? = nil
         ) {
             self.source = source
             self.title = title
@@ -99,6 +102,7 @@ public enum PlanMaterializer {
             self.stepsTotal = stepsTotal
             self.status = status
             self.summary = summary
+            self.sessionId = sessionId
         }
     }
 
@@ -223,6 +227,16 @@ public enum PlanMaterializer {
             try? fm.createDirectory(at: outDir, withIntermediateDirectories: true)
             try? data.write(to: stateURL, options: .atomic)
         }
+
+        // 边车覆盖该轮所有仍存在的物化产物（含指纹跳过、未重写的），两个来源合一：
+        // 新解析的走 artifact.sessionId，跳过的走缓存 state 里同样携带的 sessionId。
+        var smap: [String: String] = [:]
+        for entry in newState.files.values {
+            if let output = entry.output, let sessionId = entry.sessionId {
+                smap[output] = sessionId
+            }
+        }
+        writeSessionMap(smap, outDir: outDir)
         return changed
     }
 
@@ -373,6 +387,7 @@ public enum PlanMaterializer {
         }
 
         var written = 0
+        var smap: [String: String] = [:]
         for sessionId in order {
             guard let messageIds = bySession[sessionId] else { continue }
             var pieces: [String] = []
@@ -386,7 +401,9 @@ public enum PlanMaterializer {
             if writeIfChanged(markdown, to: outDir.appendingPathComponent(sessionId + ".md")) {
                 written += 1
             }
+            smap[sessionId + ".md"] = sessionId
         }
+        writeSessionMap(smap, outDir: outDir)
         return written
     }
 
@@ -425,6 +442,7 @@ public enum PlanMaterializer {
         let fm = FileManager.default
         let outDir = stagingRoot.appendingPathComponent("grok", isDirectory: true)
         var written = 0
+        var smap: [String: String] = [:]
         let cwdDirs = (try? fm.contentsOfDirectory(
             at: sessionsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         for cwdDir in cwdDirs where isDirectory(cwdDir) {
@@ -439,8 +457,10 @@ public enum PlanMaterializer {
                 if writeIfChanged(content, to: outDir.appendingPathComponent(uuid + ".md")) {
                     written += 1
                 }
+                smap[uuid + ".md"] = uuid
             }
         }
+        writeSessionMap(smap, outDir: outDir)
         return written
     }
 
@@ -547,6 +567,7 @@ public enum PlanMaterializer {
         }) ?? []
 
         var written = 0
+        var smap: [String: String] = [:]
         for (composerId, name, todosJSON) in rows where !composerId.isEmpty {
             guard let data = todosJSON.data(using: .utf8),
                 let todos = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
@@ -557,7 +578,9 @@ public enum PlanMaterializer {
             if writeIfChanged(content, to: outDir.appendingPathComponent("\(composerId).md")) {
                 written += 1
             }
+            smap["\(composerId).md"] = composerId
         }
+        writeSessionMap(smap, outDir: outDir)
         return written
     }
 
@@ -601,22 +624,25 @@ public enum PlanMaterializer {
         for dir in hermesPlansDirs {
             collect(dir: dir, source: .hermes, into: &result)
         }
-        collect(dir: stagingRoot.appendingPathComponent("codex", isDirectory: true),
-                source: .codex, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("opencode", isDirectory: true),
-                source: .opencode, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("grok", isDirectory: true),
-                source: .grok, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("kimi", isDirectory: true),
-                source: .kimi, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("gemini", isDirectory: true),
-                source: .gemini, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("qwen", isDirectory: true),
-                source: .qwen, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("qoder", isDirectory: true),
-                source: .qoder, into: &result)
-        collect(dir: stagingRoot.appendingPathComponent("cursor", isDirectory: true),
-                source: .cursor, into: &result)
+        // 物化暂存源：各自读 sessions.json 边车补 sessionId（kimi/gemini/qwen/qoder 没有边车文件，
+        // sessionMap(dir:) 读不到就返回空表，传了也无害）。
+        let codexDir = stagingRoot.appendingPathComponent("codex", isDirectory: true)
+        collect(dir: codexDir, source: .codex, into: &result, sessionMap: sessionMap(dir: codexDir))
+        let opencodeDir = stagingRoot.appendingPathComponent("opencode", isDirectory: true)
+        collect(dir: opencodeDir, source: .opencode, into: &result,
+                sessionMap: sessionMap(dir: opencodeDir))
+        let grokDir = stagingRoot.appendingPathComponent("grok", isDirectory: true)
+        collect(dir: grokDir, source: .grok, into: &result, sessionMap: sessionMap(dir: grokDir))
+        let kimiDir = stagingRoot.appendingPathComponent("kimi", isDirectory: true)
+        collect(dir: kimiDir, source: .kimi, into: &result, sessionMap: sessionMap(dir: kimiDir))
+        let geminiDir = stagingRoot.appendingPathComponent("gemini", isDirectory: true)
+        collect(dir: geminiDir, source: .gemini, into: &result, sessionMap: sessionMap(dir: geminiDir))
+        let qwenDir = stagingRoot.appendingPathComponent("qwen", isDirectory: true)
+        collect(dir: qwenDir, source: .qwen, into: &result, sessionMap: sessionMap(dir: qwenDir))
+        let qoderDir = stagingRoot.appendingPathComponent("qoder", isDirectory: true)
+        collect(dir: qoderDir, source: .qoder, into: &result, sessionMap: sessionMap(dir: qoderDir))
+        let cursorDir = stagingRoot.appendingPathComponent("cursor", isDirectory: true)
+        collect(dir: cursorDir, source: .cursor, into: &result, sessionMap: sessionMap(dir: cursorDir))
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
@@ -752,7 +778,10 @@ public enum PlanMaterializer {
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    private static func collect(dir: URL, source: AgentSource, into result: inout [PlanEntry]) {
+    private static func collect(
+        dir: URL, source: AgentSource, into result: inout [PlanEntry],
+        sessionMap: [String: String] = [:]
+    ) {
         let fm = FileManager.default
         let items = (try? fm.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? []
@@ -771,7 +800,8 @@ public enum PlanMaterializer {
                 modifiedAt: values?.contentModificationDate ?? .distantPast,
                 stepsDone: check.done, stepsTotal: check.total,
                 status: deriveStatus(done: check.done, total: check.total),
-                summary: PlanParsing.summary(body)))
+                summary: PlanParsing.summary(body),
+                sessionId: sessionMap[url.lastPathComponent]))
         }
     }
 
@@ -818,6 +848,23 @@ public enum PlanMaterializer {
     }
 
     // MARK: - 工具
+
+    /// 物化目录「文件名 → 会话 id」边车（collect 读取；仅物化器知道会话归属）
+    static func writeSessionMap(_ map: [String: String], outDir: URL) {
+        let url = outDir.appendingPathComponent("sessions.json")
+        guard !map.isEmpty else { try? FileManager.default.removeItem(at: url); return }
+        guard let data = try? JSONSerialization.data(withJSONObject: map, options: [.sortedKeys])
+        else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func sessionMap(dir: URL) -> [String: String] {
+        let url = dir.appendingPathComponent("sessions.json")
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+        else { return [:] }
+        return obj
+    }
 
     /// 内容与磁盘相同则不写（保持 mtime 稳定）；否则原子写入。
     @discardableResult

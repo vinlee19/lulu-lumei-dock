@@ -302,4 +302,22 @@ func planMaterializerTests(_ t: TestRunner) {
         try expect(titles.contains("字段映射方案"))
         try expect(titles.contains("b"), "无 # 标题回退文件名")
     }
+
+    t.test("collect：sessions.json 边车给 staged 计划标会话") {
+        let fm = FileManager.default
+        let staging = temp("smap")
+        let codexDir = staging.appendingPathComponent("codex", isDirectory: true)
+        try fm.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: staging) }
+        try "# 标题\n\n- [x] 完成项\n".write(
+            to: codexDir.appendingPathComponent("rollout-x.md"), atomically: true, encoding: .utf8)
+        try #"{"rollout-x.md": "sess-42"}"#.write(
+            to: codexDir.appendingPathComponent("sessions.json"), atomically: true, encoding: .utf8)
+        let entries = PlanMaterializer.index(
+            claudePlansDir: staging.appendingPathComponent("nope"),
+            stagingRoot: staging, hermesPlansDirs: [])
+        let codexEntries = entries.filter { $0.source == .codex }
+        try expectEqual(codexEntries.count, 1)
+        try expectEqual(codexEntries[0].sessionId, "sess-42")
+    }
 }
