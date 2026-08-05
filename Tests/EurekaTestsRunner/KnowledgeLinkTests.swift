@@ -1,3 +1,4 @@
+import EurekaIngest
 import EurekaKit
 import EurekaStore
 import Foundation
@@ -90,5 +91,37 @@ func knowledgeLinkTests(_ t: TestRunner) {
             path: "/tmp/c/plan.md", kind: "plan", source: "codex",
             title: "对比度修复", project: nil, size: 10, mtime: 1, body: "修复对比度问题")
         try expectEqual(try store.knowledge.search("修复").count, 1)
+    }
+
+    t.test("indexer：条目映射成 doc（kind / title / project 各归各位）") {
+        let skill = SkillEntry(
+            source: .claude, name: "tdd", description: nil,
+            path: "/tmp/s/SKILL.md", directory: "/tmp/s", enabled: true,
+            sizeBytes: 10, modifiedAt: Date(timeIntervalSince1970: 1))
+        let memory = MemoryEntry(
+            source: .claude, scope: "eureka", path: "/tmp/m.md",
+            projectName: "eureka", kind: .userManaged,
+            sizeBytes: 20, modifiedAt: Date(timeIntervalSince1970: 2),
+            title: "worktree 约定", summary: nil, memoryType: .other,
+            originSessionId: nil, originSessionPath: nil,
+            relatedSessions: [], links: [], indexedTargets: [], isIndex: false, libraryKey: nil)
+        let instruction = MemoryEntry(
+            source: .claude, scope: "全局", path: "/tmp/CLAUDE.md",
+            projectName: nil, kind: .instructions,
+            sizeBytes: 5, modifiedAt: Date(timeIntervalSince1970: 3),
+            title: "CLAUDE", summary: nil, memoryType: .other,
+            originSessionId: nil, originSessionPath: nil,
+            relatedSessions: [], links: [], indexedTargets: [], isIndex: false, libraryKey: nil)
+        let plan = PlanMaterializer.PlanEntry(
+            source: .codex, title: "对比度修复", path: "/tmp/p.md",
+            sizeBytes: 30, modifiedAt: Date(timeIntervalSince1970: 4), sessionId: "sess-1")
+        let docs = KnowledgeSearchIndexer.docs(
+            skills: [skill], memories: [memory, instruction], plans: [plan])
+        try expectEqual(docs.count, 4)
+        try expectEqual(docs.first { $0.path == "/tmp/s/SKILL.md" }?.kind, "skill")
+        try expectEqual(docs.first { $0.path == "/tmp/m.md" }?.kind, "memory")
+        try expectEqual(docs.first { $0.path == "/tmp/m.md" }?.project, "eureka")
+        try expectEqual(docs.first { $0.path == "/tmp/CLAUDE.md" }?.kind, "instruction")
+        try expectEqual(docs.first { $0.path == "/tmp/p.md" }?.kind, "plan")
     }
 }

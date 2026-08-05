@@ -232,6 +232,7 @@ final class UsageService: ObservableObject {
     func clearSearchIndex() {
         queue.async { [weak self] in
             try? self?.store?.search.clearAll()
+            try? self?.store?.knowledge.clearAll()
         }
     }
 

@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notificationService = NotificationService()
     private let updateService = UpdateService()
     private let navigation = PopoverNavigation()
+    private let knowledgeIndexer = KnowledgeSearchIndexer()
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
@@ -89,6 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$appearanceMode
             .dropFirst()
             .sink { mode in Self.applyAppearance(mode) }
+            .store(in: &cancellables)
+
+        // 知识面扫描完成 → 事件驱动重建全文索引（搜索新鲜度 = 列表新鲜度）
+        skillMemory.$lastScanAt.compactMap { $0 }.removeDuplicates()
+            .sink { [weak self] _ in self?.reindexKnowledge() }
+            .store(in: &cancellables)
+        plans.$lastScanAt.compactMap { $0 }.removeDuplicates()
+            .sink { [weak self] _ in self?.reindexKnowledge() }
             .store(in: &cancellables)
 
         usageService.start()
@@ -291,6 +300,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    /// 知识面全文索引重建：技能/记忆/指令/计划的最新快照喂给索引器（索引器自己做增量 diff）
+    private func reindexKnowledge() {
+        let snapshot = skillMemory.knowledgeSnapshot()
+        knowledgeIndexer.index(
+            skills: snapshot.skills, memories: snapshot.memories,
+            plans: plans.knowledgeSnapshot())
     }
 
     /// 外观主题：system=跟随系统（nil）/ light / dark

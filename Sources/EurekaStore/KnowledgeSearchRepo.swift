@@ -49,6 +49,14 @@ public final class KnowledgeSearchRepo {
         }
     }
 
+    /// 清空全部索引（设置页「清空全文索引」应同时覆盖知识面索引）
+    public func clearAll() throws {
+        try db.execute("""
+        DELETE FROM knowledge_fts;
+        DELETE FROM knowledge_docs;
+        """)
+    }
+
     /// 清理已消失的文件
     public func prune(keeping existingPaths: Set<String>) throws {
         let indexed = try db.query("SELECT path FROM knowledge_docs") { $0.text(0) ?? "" }
