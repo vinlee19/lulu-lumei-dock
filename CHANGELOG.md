@@ -4,6 +4,18 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.21.1] - 2026-08-05
+
+### Fixed
+
+- **Hard-to-read accent text in the Neo-Brutalism style's light mode** — the fluorescent
+  cyan/pink block colors were also used for fine text, icons, and badges, where they read
+  at only 1.8–2.4:1 against cream/white. Accents now have a darker text tier (≥4.5:1 WCAG
+  contrast), the semantic status colors (green/red/warn) are deepened to match, the shared
+  neutral grays are warmed so they no longer look dirty on the cream background, and cost
+  figures use a flat cobalt instead of the system blue. Fills, chips, and the dark mode
+  keep the original fluorescent palette; the classic style stays pixel-identical.
+
 ## [0.21.0] - 2026-08-04
 
 ### Added
@@ -1127,6 +1139,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.21.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.1
 [0.21.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.0
 [0.20.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.1
 [0.20.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.0
