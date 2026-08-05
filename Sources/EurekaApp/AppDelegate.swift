@@ -99,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         plans.$lastScanAt.compactMap { $0 }.removeDuplicates()
             .sink { [weak self] _ in self?.reindexKnowledge() }
             .store(in: &cancellables)
+        // 设置页「清空全文索引」清掉 knowledge 索引后没人会自愈——补一脚重建
+        // （此时两个 lastScanAt 必已非 nil：清空只可能发生在启动扫描之后）
+        usageService.onSearchIndexCleared = { [weak self] in self?.reindexKnowledge() }
 
         usageService.start()
         limitsService.start()
@@ -302,8 +305,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// 知识面全文索引重建：技能/记忆/指令/计划的最新快照喂给索引器（索引器自己做增量 diff）
+    /// 知识面全文索引重建：技能/记忆/指令/计划的最新快照喂给索引器（索引器自己做增量 diff）。
+    /// 两个 lastScanAt 都非 nil 才动手——只要有一方还没扫完，它的 knowledgeSnapshot() 就是空集，
+    /// index() 的 prune 会把另一方已持久化的全部 doc 当"已消失"删光，启动时先扫完的那个会
+    /// 触发一次误清空、每次启动都全量重建。
     private func reindexKnowledge() {
+        guard skillMemory.lastScanAt != nil, plans.lastScanAt != nil else { return }
         let snapshot = skillMemory.knowledgeSnapshot()
         knowledgeIndexer.index(
             skills: snapshot.skills, memories: snapshot.memories,

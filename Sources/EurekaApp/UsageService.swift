@@ -228,11 +228,16 @@ final class UsageService: ObservableObject {
         }
     }
 
+    /// 知识面索引被清空后的回调（AppDelegate 装配为重新触发一次 reindex——
+    /// 知识面侧只挂 lastScanAt 事件驱动，清空后没有定时器会自愈，必须显式踢一脚）
+    var onSearchIndexCleared: (() -> Void)?
+
     /// 清空全文索引（设置页「清空全文索引」；下轮扫描按开关状态自动重建）
     func clearSearchIndex() {
         queue.async { [weak self] in
             try? self?.store?.search.clearAll()
             try? self?.store?.knowledge.clearAll()
+            DispatchQueue.main.async { self?.onSearchIndexCleared?() }
         }
     }
 

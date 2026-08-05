@@ -49,12 +49,16 @@ public final class KnowledgeSearchRepo {
         }
     }
 
-    /// 清空全部索引（设置页「清空全文索引」应同时覆盖知识面索引）
+    /// 清空全部索引（设置页「清空全文索引」应同时覆盖知识面索引）。
+    /// 包一层事务：与 replaceDoc 对 fts/docs 两表对齐的承诺对称，防两条 DELETE 之间
+    /// 被另一连接的写插入，留下孤儿行。
     public func clearAll() throws {
-        try db.execute("""
-        DELETE FROM knowledge_fts;
-        DELETE FROM knowledge_docs;
-        """)
+        try db.transaction {
+            try db.execute("""
+            DELETE FROM knowledge_fts;
+            DELETE FROM knowledge_docs;
+            """)
+        }
     }
 
     /// 清理已消失的文件

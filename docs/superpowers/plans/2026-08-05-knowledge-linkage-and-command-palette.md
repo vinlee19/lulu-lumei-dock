@@ -750,6 +750,19 @@ final class KnowledgeSearchIndexer {
 
 - [ ] **Step 3: AppDelegate 装配**
 
+> **勘误（Task 6 实测踩坑，2026-08-05）：** `KnowledgeSearchIndexer` 实际落在
+> `Sources/EurekaIngest/KnowledgeSearchIndexer.swift`，不是本节标题写的 `Sources/EurekaApp/`——
+> `eureka-tests` 依赖 `eureka`（两者都是 `.executableTarget`）时，类型检查能过，但
+> `swift run eureka-tests`（`make test` 的实际路径）链接期拿不到 `eureka` 的目标码，稳定报
+> `Undefined symbols`。索引器只依赖 `EurekaStore`/`Foundation`，挪去和 `SkillMemoryIndexer`/
+> `PlanMaterializer` 同层即可，`AppDelegate.swift` 本就 `import EurekaIngest`，零改动可引用。
+> 下面的装配代码另外补了两处生命周期修复（质量审查发现）：
+> 1. `reindexKnowledge()` 必须等 `skillMemory`/`plans` 都扫完一轮才能动手——只要有一方的
+>    `knowledgeSnapshot()` 还是空集，`index()` 内的 `prune` 就会把另一方已持久化的 doc
+>    当"已消失"整批删掉，造成每次启动先扫完的一方触发一次误清空。
+> 2. 设置页「清空全文索引」清空 `knowledge_docs`/`knowledge_fts` 后，没有定时器会重建
+>    ——`UsageService` 需要一个 `onSearchIndexCleared` 回调，装配到 `reindexKnowledge()`。
+
 `Sources/EurekaApp/AppDelegate.swift`：服务属性区（`:19` 附近）加
 
 ```swift
@@ -766,16 +779,52 @@ skillMemory.$lastScanAt.compactMap { $0 }.removeDuplicates()
 plans.$lastScanAt.compactMap { $0 }.removeDuplicates()
     .sink { [weak self] _ in self?.reindexKnowledge() }
     .store(in: &cancellables)
+// 设置页「清空全文索引」清掉 knowledge 索引后没人会自愈——补一脚重建
+// （此时两个 lastScanAt 必已非 nil：清空只可能发生在启动扫描之后）
+usageService.onSearchIndexCleared = { [weak self] in self?.reindexKnowledge() }
 ```
 
 方法区加：
 
 ```swift
+/// 两个 lastScanAt 都非 nil 才动手——只要有一方还没扫完，它的 knowledgeSnapshot() 就是空集，
+/// index() 的 prune 会把另一方已持久化的全部 doc 当"已消失"删光，启动时先扫完的那个会
+/// 触发一次误清空、每次启动都全量重建。
 private func reindexKnowledge() {
+    guard skillMemory.lastScanAt != nil, plans.lastScanAt != nil else { return }
     let snapshot = skillMemory.knowledgeSnapshot()
     knowledgeIndexer.index(
         skills: snapshot.skills, memories: snapshot.memories,
         plans: plans.knowledgeSnapshot())
+}
+```
+
+`Sources/EurekaApp/UsageService.swift` 的 `clearSearchIndex()`（约 :231-236）加回调属性并在清空后触发：
+
+```swift
+/// 知识面索引被清空后的回调（AppDelegate 装配为重新触发一次 reindex——
+/// 知识面侧只挂 lastScanAt 事件驱动，清空后没有定时器会自愈，必须显式踢一脚）
+var onSearchIndexCleared: (() -> Void)?
+
+func clearSearchIndex() {
+    queue.async { [weak self] in
+        try? self?.store?.search.clearAll()
+        try? self?.store?.knowledge.clearAll()
+        DispatchQueue.main.async { self?.onSearchIndexCleared?() }
+    }
+}
+```
+
+`Sources/EurekaStore/KnowledgeSearchRepo.swift` 的 `clearAll()` 包一层 `db.transaction`（与 `replaceDoc` 对 fts/docs 两表对齐的承诺对称，防两条 DELETE 之间被另一连接的写插入）：
+
+```swift
+public func clearAll() throws {
+    try db.transaction {
+        try db.execute("""
+        DELETE FROM knowledge_fts;
+        DELETE FROM knowledge_docs;
+        """)
+    }
 }
 ```
 
