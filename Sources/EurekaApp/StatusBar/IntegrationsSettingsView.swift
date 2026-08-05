@@ -60,7 +60,7 @@ struct IntegrationsSettingsView: View {
         HStack(alignment: .top, spacing: 5) {
             Image(systemName: icon)
                 .font(.system(size: 9))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
                 .frame(width: 12)
             Text(text)
                 .font(.system(size: 10))
@@ -75,7 +75,7 @@ struct IntegrationsSettingsView: View {
         return HStack(alignment: .top, spacing: 5) {
             Image(systemName: "person.2")
                 .font(.system(size: 9))
-                .foregroundStyle(Theme.gold)
+                .foregroundStyle(Theme.goldFg)
                 .frame(width: 12)
             Text("检测到其它工具的 hook：\(report.tools.joined(separator: "、"))"
                 + "（\(report.events.count) 个事件）。它们与我们并存，不会被改动。")
@@ -194,7 +194,7 @@ struct IntegrationsSettingsView: View {
                     + installer.autoUpdateSkipped.map(\.title).joined(separator: "、")
                     + " —— 原因见上方各项说明。")
                     .font(.system(size: 10))
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.goldFg)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

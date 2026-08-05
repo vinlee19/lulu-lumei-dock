@@ -60,7 +60,7 @@ private struct LimitCard: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Theme.brandFill(0.14)))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandFg)
                 }
                 Spacer()
                 if snapshot.isStale {

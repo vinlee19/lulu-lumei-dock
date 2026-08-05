@@ -385,10 +385,10 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
 /// 统一小标签（项目名 = 金；中性 = 灰）。替换各页复制的项目 chip / 「只读」/「内置」pill。
 struct TagChip: View {
     let text: String
-    var tint: Color = Theme.gold
+    var tint: Color = Theme.goldFg
     var neutral = false
 
-    init(_ text: String, tint: Color = Theme.gold, neutral: Bool = false) {
+    init(_ text: String, tint: Color = Theme.goldFg, neutral: Bool = false) {
         self.text = text
         self.tint = tint
         self.neutral = neutral
@@ -437,7 +437,7 @@ struct EmptyStateView: View {
         VStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 34))
-                .foregroundStyle(Theme.brand.opacity(0.5))
+                .foregroundStyle(Theme.brandFg.opacity(0.5))
             Text(title)
                 .font(Theme.font.themed(12))
                 .foregroundStyle(.secondary)
@@ -552,7 +552,7 @@ struct SearchField: View {
             if let resultCount {
                 Text("\(resultCount)")
                     .font(Theme.font.themedMono(10.5, .semibold))
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.brandFg)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Theme.brandFill(0.14)))
@@ -561,7 +561,7 @@ struct SearchField: View {
             Button { text = "" } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.brandFg)
                     .frame(width: 19, height: 19)
                     .background(Circle().fill(Theme.brandFill(0.14)))
                     .contentShape(Circle())
@@ -597,7 +597,7 @@ struct SourceSectionHeader: View {
                     } else if let icon {
                         Image(systemName: icon)
                             .font(.system(size: 11))
-                            .foregroundStyle(Theme.gold)
+                            .foregroundStyle(Theme.goldFg)
                     }
                     Text(title)
                         .font(Theme.font.themed(12, .semibold))
@@ -863,7 +863,7 @@ struct RefreshButton: View {
         Button(action: action) {
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
                 .frame(width: 26, height: 26)
                 .background(Circle().fill(Theme.brandFill(hovering ? 0.18 : 0.10)))
                 .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
@@ -1324,7 +1324,7 @@ struct RoleAvatar: View {
             .overlay(
                 Text(role.glyph)
                     .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(Theme.brand))
+                    .foregroundStyle(Theme.brandFg))
     }
 }
 

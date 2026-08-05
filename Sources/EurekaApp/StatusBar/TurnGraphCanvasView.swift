@@ -62,11 +62,11 @@ struct TurnGraphCanvasView: View {
 
     private func color(_ role: TurnGraph.EdgeRole) -> Color {
         switch role {
-        case .causal: return Theme.brand.opacity(0.35)
-        case .dataFlow: return Theme.brand.opacity(0.6)
+        case .causal: return Theme.brandFg.opacity(0.35)
+        case .dataFlow: return Theme.brandFg.opacity(0.6)
         case .retry: return Theme.failureRed.opacity(0.8)
-        case .rework: return Theme.gold.opacity(0.85)
-        case .spawn: return Theme.brand.opacity(0.55)
+        case .rework: return Theme.goldFg.opacity(0.85)
+        case .spawn: return Theme.brandFg.opacity(0.55)
         }
     }
 
@@ -162,7 +162,7 @@ struct TurnGraphNodeView: View {
             if node.occurrences > 1 {
                 Text("×\(node.occurrences)")
                     .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.goldFg)
                     .fixedSize()
             }
             if node.isError {
@@ -188,7 +188,7 @@ struct TurnGraphNodeView: View {
             if !overflowBadges.isEmpty {
                 Text("↩︎\(overflowBadges.count)")
                     .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.goldFg)
                     .padding(.horizontal, 3)
                     .background(Capsule().fill(Theme.gold.opacity(0.18)))
                     .offset(x: 4, y: -5)
@@ -219,10 +219,10 @@ struct TurnGraphNodeView: View {
     private var tint: Color {
         switch node.kind {
         case .error: return Theme.failureRed
-        case .prompt, .answer: return Theme.brand
-        case .thinking, .fork: return Theme.brand.opacity(0.7)
-        case .subagent: return Theme.gold
-        case .tool, .folded: return node.isError ? Theme.failureRed : Theme.brand.opacity(0.8)
+        case .prompt, .answer: return Theme.brandFg
+        case .thinking, .fork: return Theme.brandFg.opacity(0.7)
+        case .subagent: return Theme.goldFg
+        case .tool, .folded: return node.isError ? Theme.failureRed : Theme.brandFg.opacity(0.8)
         }
     }
 
@@ -237,8 +237,8 @@ struct TurnGraphNodeView: View {
     }
 
     private var borderColor: Color {
-        if isSelected { return Theme.brand }
-        if hovering { return Theme.brand.opacity(0.6) }
+        if isSelected { return Theme.brandFg }
+        if hovering { return Theme.brandFg.opacity(0.6) }
         if node.isError { return Theme.failureRed.opacity(0.5) }
         return Theme.cardBorder
     }

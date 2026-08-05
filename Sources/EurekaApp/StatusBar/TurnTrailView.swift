@@ -39,7 +39,7 @@ struct TurnTrailRowView: View {
                         .font(.system(size: 10, weight: .medium))
                     Text(kindSummary)
                         .font(.system(size: 9.5))
-                        .foregroundStyle(Theme.gold.opacity(0.75))
+                        .foregroundStyle(Theme.goldFg.opacity(0.75))
                         .lineLimit(1)
                     if errorCount > 0 {
                         HStack(spacing: 2) {
@@ -51,7 +51,7 @@ struct TurnTrailRowView: View {
                         .foregroundStyle(Theme.failureRed)
                     }
                 }
-                .foregroundStyle(Theme.gold)
+                .foregroundStyle(Theme.goldFg)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 3.5)
                 .background(Capsule().fill(Theme.gold.opacity(0.15)))
@@ -81,10 +81,10 @@ struct TurnTrailRowView: View {
             Image(systemName: step.kind.icon)
                 .font(.system(size: 8.5))
                 .frame(width: 12)
-                .foregroundStyle(step.isError ? Color.red.opacity(0.8) : Theme.brand.opacity(0.55))
+                .foregroundStyle(step.isError ? Color.red.opacity(0.8) : Theme.brandFg.opacity(0.55))
             Text(step.name)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(step.isError ? Color.red.opacity(0.9) : Theme.brand.opacity(0.75))
+                .foregroundStyle(step.isError ? Color.red.opacity(0.9) : Theme.brandFg.opacity(0.75))
                 .lineLimit(1)
             if !step.detail.isEmpty {
                 Text(step.detail)
@@ -177,7 +177,7 @@ struct ThinkingRowView: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    .foregroundStyle(Theme.brand.opacity(0.7))
+                    .foregroundStyle(Theme.brandFg.opacity(0.7))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

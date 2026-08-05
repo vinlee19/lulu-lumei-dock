@@ -206,7 +206,7 @@ struct SkillMemoryView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
                 .frame(width: 26, height: 26)
                 .background(Circle().fill(Theme.brandFill(0.10)))
                 .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
@@ -681,7 +681,7 @@ private struct SkillCard: View {
                     if let stat, stat.count > 0 {
                         Text("命中 \(stat.count) 次")
                             .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandFg)
                     }
                     if let project = skill.scope.projectName { TagChip(project) }
                     Spacer(minLength: 0)
@@ -746,7 +746,7 @@ private struct SkillListRow: View {
                     }
                 Text("\(stat.count) 次")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.brandFg)
             }
             if let last = stat?.lastTs {
                 Text(relativeFormatter.localizedString(for: last, relativeTo: Date()))
@@ -961,7 +961,7 @@ private struct MemoryLibraryMeta: View {
                     Text("\(library.linkedSessionCount)")
                         .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
                 }
-                .foregroundStyle(Theme.gold)
+                .foregroundStyle(Theme.goldFg)
                 .help("\(library.linkedSessionCount) 个来源会话的记录还在，可以点开")
             }
             Text(formatBytes(library.sizeBytes))
@@ -1158,7 +1158,7 @@ private struct MemoryDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                    .font(.system(size: 10)).foregroundStyle(Theme.brand)
+                    .font(.system(size: 10)).foregroundStyle(Theme.brandFg)
                 Text("关联").font(.system(size: 11, weight: .semibold))
                 Text("\(relation.graph.nodes.count - 1) 处")
                     .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
@@ -1232,7 +1232,7 @@ private struct MemoryDetailView: View {
             if jumpable.count == 1, let ref = jumpable.first {
                 Button { revealSession(ref.sessionId) } label: { sessionLabel("来源会话") }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.goldFg)
                     .help("跳到写下这条记忆的那次会话")
             } else if jumpable.count > 1 {
                 Menu {
@@ -1245,7 +1245,7 @@ private struct MemoryDetailView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .foregroundStyle(Theme.gold)
+                .foregroundStyle(Theme.goldFg)
                 .help("这条记忆聚合了 \(jumpable.count) 次会话")
             }
             if memory.isEditable {
@@ -1396,7 +1396,7 @@ private struct MemoryLibraryView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11)).foregroundStyle(Theme.gold)
+                        .font(.system(size: 11)).foregroundStyle(Theme.goldFg)
                     Text("索引与目录不一致").font(.system(size: 11.5, weight: .semibold))
                     Spacer(minLength: 8)
                     if !unindexed.isEmpty {

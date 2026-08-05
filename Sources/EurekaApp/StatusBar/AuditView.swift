@@ -154,7 +154,7 @@ struct AuditView: View {
                 if let hint = notificationHint, settings.auditSystemNotifyEnabled {
                     Text(hint)
                         .font(Theme.font.caption)
-                        .foregroundStyle(Theme.gold)
+                        .foregroundStyle(Theme.goldFg)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
@@ -500,7 +500,7 @@ struct AuditView: View {
             .overlay(
                 Image(systemName: kind.icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.brand))
+                    .foregroundStyle(Theme.brandFg))
             .help(kind.label)
     }
 

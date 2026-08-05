@@ -63,7 +63,7 @@ struct HistoryView: View {
             VStack(spacing: 8) {
                 Image(systemName: "tray")
                     .font(.system(size: 28))
-                    .foregroundStyle(Theme.brand.opacity(0.45))
+                    .foregroundStyle(Theme.brandFg.opacity(0.45))
                 Text("还没有任务记录")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)

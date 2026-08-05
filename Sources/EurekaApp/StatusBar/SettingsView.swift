@@ -194,7 +194,7 @@ struct SettingsView: View {
                             + "空闲 \(idleCount) · 工作 \(workingCount) · 等待 \(waitingCount) · "
                             + "\(builtIn.lookDirections.count) 向视线")
                             .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandFg)
                     }
                     Text("自定义包放 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）；"
                         + "拖动可移动位置，空闲时会看向鼠标，右键可隐藏。")

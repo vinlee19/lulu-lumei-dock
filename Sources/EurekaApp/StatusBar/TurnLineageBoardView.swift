@@ -47,13 +47,13 @@ struct TurnLineageBoardView: View {
                 statChip("\(diagnostics.stepCount) 步")
                 statChip("\(result.nodes.count) 节点")
                 if diagnostics.rereadCount > 0 {
-                    statChip("回读 \(diagnostics.rereadCount)", tint: Theme.brand)
+                    statChip("回读 \(diagnostics.rereadCount)", tint: Theme.brandFg)
                 }
                 if diagnostics.retryMax > 0 {
                     statChip("重试 \(diagnostics.retryMax)", tint: Theme.failureRed)
                 }
                 if diagnostics.reworkCount > 0 {
-                    statChip("返工 \(diagnostics.reworkCount)", tint: Theme.gold)
+                    statChip("返工 \(diagnostics.reworkCount)", tint: Theme.goldFg)
                 }
                 Spacer(minLength: 0)
                 if !hasThinking {
@@ -100,7 +100,7 @@ struct TurnLineageBoardView: View {
     private func severityColor(_ severity: TurnDiagnostics.Severity) -> Color {
         switch severity {
         case .clean: return Theme.enabledGreen
-        case .notice: return Theme.gold
+        case .notice: return Theme.goldFg
         case .bad: return Theme.failureRed
         }
     }
@@ -109,11 +109,11 @@ struct TurnLineageBoardView: View {
 
     private var legend: some View {
         FlowLayout(spacing: 12, lineSpacing: 5) {
-            legendItem("推进", color: Theme.brand.opacity(0.45), dashed: false)
-            legendItem("回读同一处", color: Theme.brand.opacity(0.7), dashed: true)
+            legendItem("推进", color: Theme.brandFg.opacity(0.45), dashed: false)
+            legendItem("回读同一处", color: Theme.brandFg.opacity(0.7), dashed: true)
             legendItem("失败重试", color: Theme.failureRed.opacity(0.85), dashed: true)
-            legendItem("改完回看", color: Theme.gold, dashed: true)
-            legendItem("派生子代理", color: Theme.brand.opacity(0.6), dashed: false)
+            legendItem("改完回看", color: Theme.goldFg, dashed: true)
+            legendItem("派生子代理", color: Theme.brandFg.opacity(0.6), dashed: false)
         }
     }
 
@@ -144,12 +144,12 @@ struct TurnLineageBoardView: View {
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "chevron.right.circle.fill")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(node.title).font(Theme.font.monoSkillName(11.5, weight: .semibold))
                     if node.occurrences > 1 {
-                        TagChip("出现 \(node.occurrences) 次", tint: Theme.gold)
+                        TagChip("出现 \(node.occurrences) 次", tint: Theme.goldFg)
                     }
                     if node.isError { TagChip("有失败", tint: Theme.failureRed) }
                     Spacer(minLength: 0)
@@ -196,7 +196,7 @@ struct TurnLineageBoardView: View {
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "rectangle.compress.vertical")
                 .font(.system(size: 12))
-                .foregroundStyle(Theme.gold)
+                .foregroundStyle(Theme.goldFg)
             Text(text)
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)

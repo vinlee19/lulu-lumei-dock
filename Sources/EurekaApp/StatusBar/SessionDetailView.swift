@@ -55,7 +55,7 @@ struct SessionDetailView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
                         .font(.system(size: 32))
-                        .foregroundStyle(Theme.brand.opacity(0.4))
+                        .foregroundStyle(Theme.brandFg.opacity(0.4))
                     Text("选择左侧会话查看对话记录")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -399,7 +399,7 @@ struct SessionDetailView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Theme.brand.opacity(0.12)))
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.brandFg)
                 if service.transcriptTruncated {
                     Text("仅显示前 \(service.transcript.count) 条")
                         .font(.system(size: 9.5))
@@ -474,7 +474,7 @@ struct SessionDetailView: View {
                             HStack(alignment: .top, spacing: 6) {
                                 Text("\(index + 1)")
                                     .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                                    .foregroundStyle(Theme.brand)
+                                    .foregroundStyle(Theme.brandFg)
                                     .frame(width: 16, height: 16)
                                     .background(Circle().fill(Theme.brand.opacity(0.1)))
                                 VStack(alignment: .leading, spacing: 1) {
@@ -529,7 +529,7 @@ private struct MessageRowView: View {
             HStack(spacing: 5) {
                 Text(message.text)
                     .font(.system(size: 10))
-                    .foregroundStyle(Theme.brand.opacity(0.65))
+                    .foregroundStyle(Theme.brandFg.opacity(0.65))
                 Spacer(minLength: 0)
             }
             .padding(.leading, 8)

@@ -278,7 +278,7 @@ struct TurnLineageView: View {
     private func severityColor(_ severity: TurnDiagnostics.Severity) -> Color {
         switch severity {
         case .clean: return Theme.enabledGreen
-        case .notice: return Theme.gold
+        case .notice: return Theme.goldFg
         case .bad: return Theme.failureRed
         }
     }

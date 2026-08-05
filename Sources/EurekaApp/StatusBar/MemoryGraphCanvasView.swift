@@ -91,7 +91,7 @@ struct MemoryGraphCanvasView: View {
                         Text("\(rail.title) \(rail.count)")
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.goldFg)
                     .padding(.top, 6)
                 }
             }
@@ -245,7 +245,7 @@ struct MemoryGraphNodeView: View {
                 if node.degree > 1, case .entry = node.kind {
                     Text("\(node.degree)")
                         .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandFg)
                         .fixedSize()
                 }
             }

@@ -258,7 +258,7 @@ struct SkillDetailView: View {
             sectionTitle("调用统计")
             if let stat {
                 HStack(spacing: 8) {
-                    metricTile("累计调用", "\(stat.count) 次", valueColor: Theme.brand)
+                    metricTile("累计调用", "\(stat.count) 次", valueColor: Theme.brandFg)
                     if target.source == .claude {
                         metricTile("触发时 token", formatTokens(stat.tokens))
                     }
@@ -345,10 +345,10 @@ struct SkillDetailView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.system(size: 9))
-                .foregroundStyle(gold ? Theme.gold.opacity(0.9) : Color.primary.opacity(0.35))
+                .foregroundStyle(gold ? Theme.goldFg.opacity(0.9) : Color.primary.opacity(0.35))
             Text(value)
                 .font(Theme.font.statNumber(18))
-                .foregroundStyle(gold ? Theme.gold : valueColor)
+                .foregroundStyle(gold ? Theme.goldFg : valueColor)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)

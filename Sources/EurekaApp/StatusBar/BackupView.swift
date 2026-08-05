@@ -459,7 +459,7 @@ struct BackupView: View {
                 } else {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(Theme.brand.opacity(0.7))
+                        .foregroundStyle(Theme.brandFg.opacity(0.7))
                 }
                 Text(group.category)
                     .font(.system(size: 10.5, weight: .semibold))
@@ -536,7 +536,7 @@ struct BackupView: View {
         VStack(spacing: 10) {
             Image(systemName: "icloud.and.arrow.up")
                 .font(.system(size: 34))
-                .foregroundStyle(Theme.brand.opacity(0.5))
+                .foregroundStyle(Theme.brandFg.opacity(0.5))
             Text("开启自动备份后，技能、记忆、计划与全部会话记录会增量上传到你的云端存储")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -793,7 +793,7 @@ private struct BackupConfigSheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
                         .font(.system(size: 10))
-                        .foregroundStyle(Theme.brand.opacity(0.8))
+                        .foregroundStyle(Theme.brandFg.opacity(0.8))
                     Text(folder.path)
                         .font(.system(size: 10).monospaced())
                         .lineLimit(1)

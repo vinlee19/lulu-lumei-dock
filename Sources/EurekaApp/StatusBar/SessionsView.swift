@@ -217,7 +217,7 @@ struct SessionsView: View {
                     } else {
                         Image(systemName: "tray")
                             .font(.system(size: 28))
-                            .foregroundStyle(Theme.brand.opacity(0.45))
+                            .foregroundStyle(Theme.brandFg.opacity(0.45))
                         Text(service.isSearching
                             ? "没有匹配的会话"
                             : (settings.sessionRangeAll ? "没有会话" : "近 30 天没有会话"))
@@ -284,7 +284,7 @@ struct SessionsView: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(searchFocused ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(searchFocused ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
             TextField("搜索会话 / 项目 / id", text: $service.searchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
@@ -359,7 +359,7 @@ struct SessionsView: View {
                     SourceBadge(source: filter, size: 12)
                     Text(filter.displayName)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandFg)
                         .lineLimit(1)
                         .fixedSize()
                 } else {
@@ -429,11 +429,11 @@ struct SessionsView: View {
                 Spacer(minLength: 8)
                 Text("\(count)")
                     .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(selected ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.tertiary))
+                    .foregroundStyle(selected ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
                 if selected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandFg)
                 }
             }
             .padding(.horizontal, 7)
@@ -473,7 +473,7 @@ struct SessionsView: View {
             HStack(spacing: 6) {
                 Image(systemName: "text.magnifyingglass")
                     .font(.system(size: 10))
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.goldFg)
                 Text("对话内容命中")
                     .font(.system(size: 11, weight: .semibold))
                 Text("\(service.fullTextHits.count)")
@@ -537,7 +537,7 @@ private struct ProjectHeaderRow: View {
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 Image(systemName: "folder.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.brand.opacity(0.8))
+                    .foregroundStyle(Theme.brandFg.opacity(0.8))
                 Text(group.name)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
@@ -583,7 +583,7 @@ private struct SessionRow: View {
                     Image(systemName: isChecked ? "checkmark.square.fill" : "square")
                         .font(.system(size: 12))
                         .foregroundStyle(session.source.supportsSessionDeletion
-                            ? (isChecked ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(.secondary))
+                            ? (isChecked ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.secondary))
                             : AnyShapeStyle(.tertiary))
                 }
                 .buttonStyle(.borderless)

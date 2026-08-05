@@ -304,7 +304,7 @@ private struct PlanRow: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(planAccentColor(plan.status))
             if plan.status == .document {
-                Image(systemName: "doc.text").font(.system(size: 11)).foregroundStyle(Theme.gold)
+                Image(systemName: "doc.text").font(.system(size: 11)).foregroundStyle(Theme.goldFg)
             } else if let progress = plan.progress {
                 PlanProgressBar(progress: progress, width: 66)
                 Text("\(Int((progress * 100).rounded()))%")
@@ -338,7 +338,7 @@ private struct PlanIconTile: View {
             .overlay(
                 Image(systemName: kind == .projectDocument ? "folder.fill" : "doc.text")
                     .font(.system(size: size * 0.42))
-                    .foregroundStyle(Theme.gold))
+                    .foregroundStyle(Theme.goldFg))
     }
 }
 

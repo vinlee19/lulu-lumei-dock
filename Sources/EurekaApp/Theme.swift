@@ -149,8 +149,28 @@ enum Theme {
             : NSColor(srgbRed: 0.78, green: 0.62, blue: 0.15, alpha: 1)
     }))
 
-    /// 金额恒蓝（沿用既有约定，各风格一致）
-    static let cost = Color.blue
+    /// 强调色文字档：细字 / 图标前景用（色块底继续用 brand / gold 本体）。
+    /// brutal 的荧光 cyan/pink 在奶油底上只有 1.8–2.4:1，做前景必须加深到 ≥4.5:1；
+    /// classic / 配色主题与本体同值（逐像素不变），brutal 深色本体已达标、沿用。
+    static var brandFg: Color {
+        ThemeStyle.current == .brutal
+            ? dynamic(light: hexRGB("0E7490"), dark: hexRGB("27CCF3"))
+            : brand
+    }
+
+    static var goldFg: Color {
+        ThemeStyle.current == .brutal
+            ? dynamic(light: hexRGB("C2185B"), dark: hexRGB("FE7DA8"))
+            : gold
+    }
+
+    /// 金额蓝：classic / 配色主题恒系统蓝（沿用既有约定）；
+    /// brutal 用平色钴蓝（浅 6.7:1 / 深 5.8:1，与 cyan 品牌色拉开色距）。
+    static var cost: Color {
+        ThemeStyle.current == .brutal
+            ? dynamic(light: hexRGB("1D4ED8"), dark: hexRGB("6C9EF8"))
+            : .blue
+    }
 
     /// 墨色：brutal 的描边 / 硬阴影 / 强调字色（浅色 #141111、深色奶油 #FFFAEF）。
     /// 配色主题里 ink = 各派正文前景色（选中描边等场景用）。
@@ -214,33 +234,44 @@ enum Theme {
         switch ThemeStyle.current {
         case .classic:
             return Color(.sRGB, red: 0.20, green: 0.78, blue: 0.35, opacity: 1)
-        case .brutal:  // brutal lime（深色提亮）
-            return dynamic(light: hexRGB("4E8A2E"), dark: hexRGB("A9D877"))
+        case .brutal:  // brutal 绿（浅色压深到 5.0:1 保小字可读，深色提亮）
+            return dynamic(light: hexRGB("3F7A25"), dark: hexRGB("A9D877"))
         default: return themedColor(\.green)
         }
     }
-    /// 停用灰（中性灰阶，各风格一致）
-    static let disabledGray = Color(.sRGB, red: 0.86, green: 0.86, blue: 0.88, opacity: 1)
+    /// 停用灰：classic / 配色主题 = 冷灰；brutal = 同明度暖灰（冷灰压暖奶油底显脏）
+    static var disabledGray: Color {
+        ThemeStyle.current.isHardEdged
+            ? Color(hex: "DBD5C6")
+            : Color(.sRGB, red: 0.86, green: 0.86, blue: 0.88, opacity: 1)
+    }
     /// 失败红
     static var failureRed: Color {
         switch ThemeStyle.current {
         case .classic:
             return Color(.sRGB, red: 0.82, green: 0.27, blue: 0.23, opacity: 1)
-        case .brutal: return Color(hex: "F97264")
+        case .brutal:  // 浅色 #F97264 只有 2.8:1，压深；深色保留原珊瑚红
+            return dynamic(light: hexRGB("C92A2A"), dark: hexRGB("F97264"))
         default: return themedColor(\.red)
         }
     }
-    /// 自动清理灰（中性灰阶，各风格一致）
-    static let autoCleanGray = Color(.sRGB, red: 0.64, green: 0.64, blue: 0.66, opacity: 1)
-    /// 草稿灰（计划状态；palette #CFCFD6，各风格一致）
-    static let draftGray = Color(hex: "CFCFD6")
+    /// 自动清理灰：classic / 配色主题 = 冷灰；brutal = 同明度暖灰
+    static var autoCleanGray: Color {
+        ThemeStyle.current.isHardEdged
+            ? Color(hex: "A49E90")
+            : Color(.sRGB, red: 0.64, green: 0.64, blue: 0.66, opacity: 1)
+    }
+    /// 草稿灰（计划状态）：classic / 配色主题 = 冷灰 #CFCFD6；brutal = 同明度暖灰
+    static var draftGray: Color {
+        ThemeStyle.current.isHardEdged ? Color(hex: "CFC8B8") : Color(hex: "CFCFD6")
+    }
 
     /// 警示橙
     private static var warnColor: Color {
         switch ThemeStyle.current {
         case .classic: return .orange
-        case .brutal:  // 浅色 #D96F32（奶油底上可读），深色 #F8A16F
-            return dynamic(light: hexRGB("D96F32"), dark: hexRGB("F8A16F"))
+        case .brutal:  // 浅色压深到 4.8:1（#D96F32 仅 3.2:1），深色 #F8A16F
+            return dynamic(light: hexRGB("B45309"), dark: hexRGB("F8A16F"))
         default: return themedColor(\.warn)
         }
     }
@@ -265,7 +296,7 @@ enum Theme {
     static func riskColor(_ level: RiskLevel) -> Color {
         switch level {
         case .high: return failureRed
-        case .notice: return gold
+        case .notice: return goldFg  // 徽标细字场景，取文字档
         }
     }
 
@@ -442,13 +473,13 @@ enum Theme {
         }
     }
 
-    /// 计划状态色：完成绿 / 进行紫 / 草稿灰 / 文档金
+    /// 计划状态色：完成绿 / 进行紫 / 草稿灰 / 文档金（徽标细字场景，强调色取文字档）
     static func planStatusColor(_ status: PlanMaterializer.PlanStatus) -> Color {
         switch status {
         case .complete: return enabledGreen
-        case .inProgress: return brand
+        case .inProgress: return brandFg
         case .draft: return draftGray
-        case .document: return gold
+        case .document: return goldFg
         }
     }
 

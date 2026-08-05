@@ -65,7 +65,7 @@ struct MarkdownRichText: View {
                 } else {
                     Text(ordered ? "\(index)." : "•")
                         .font(.system(size: 12.5).monospacedDigit())
-                        .foregroundStyle(Theme.brand.opacity(0.8))
+                        .foregroundStyle(Theme.brandFg.opacity(0.8))
                 }
                 Text(Self.inline(text))
                     .font(.system(size: 13))
@@ -155,7 +155,7 @@ struct MarkdownRichText: View {
                 attributed[run.range].backgroundColor = Color.primary.opacity(0.07)
             }
             if run.link != nil {
-                attributed[run.range].foregroundColor = Theme.brand
+                attributed[run.range].foregroundColor = Theme.brandFg
                 attributed[run.range].underlineStyle = .single
             }
         }

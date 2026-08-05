@@ -206,7 +206,7 @@ struct UsageDashboardView: View {
                 .padding(.vertical, 3)
                 .background(Capsule().fill(
                     selected ? Theme.brandFill(0.16) : Color.primary.opacity(0.05)))
-                .foregroundStyle(selected ? Theme.brand : .secondary)
+                .foregroundStyle(selected ? Theme.brandFg : .secondary)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -244,7 +244,7 @@ struct UsageDashboardView: View {
                 .foregroundStyle(.tertiary)
             Text("\(row.count)")
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
                 .frame(width: 42, alignment: .trailing)
         }
         .padding(.horizontal, 10)
@@ -478,7 +478,7 @@ struct UsageDashboardView: View {
             .padding(.vertical, 4)
             .background(Capsule().fill(
                 selected ? Theme.brandFill(0.16) : Color.primary.opacity(0.05)))
-            .foregroundStyle(selected ? Theme.brand : .secondary)
+            .foregroundStyle(selected ? Theme.brandFg : .secondary)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -490,7 +490,7 @@ struct UsageDashboardView: View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: "bolt.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
                 .frame(width: 40, height: 40)
                 .background(Circle().fill(Theme.brandFill(0.12)))
             VStack(alignment: .leading, spacing: 2) {
@@ -544,7 +544,7 @@ struct UsageDashboardView: View {
             metricCard("新增输入", totalInput, icon: "arrow.down.to.line", tint: .blue)
             metricCard("输出", totalOutput, icon: "arrow.up.to.line", tint: .purple)
             metricCard("缓存创建", totalCacheWrite, icon: "externaldrive.badge.plus", tint: .orange)
-            metricCard("缓存命中", totalCacheRead, icon: "sparkles", tint: Theme.brand)
+            metricCard("缓存命中", totalCacheRead, icon: "sparkles", tint: Theme.brandFg)
         }
     }
 
@@ -577,7 +577,7 @@ struct UsageDashboardView: View {
                 Spacer()
                 Text(String(format: "%.1f%%", cacheHitRate * 100))
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.brandFg)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
@@ -1101,7 +1101,7 @@ struct UsageDashboardView: View {
                     HStack {
                         Image(systemName: "folder.fill")
                             .font(.system(size: 9))
-                            .foregroundStyle(Theme.brand.opacity(0.7))
+                            .foregroundStyle(Theme.brandFg.opacity(0.7))
                         Text(line.name)
                             .font(.system(size: 11))
                             .lineLimit(1)

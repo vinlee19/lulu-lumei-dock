@@ -128,7 +128,7 @@ struct AgentsView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(Theme.brandFg)
                 .frame(width: 26, height: 26)
                 .background(Circle().fill(Theme.brandFill(0.10)))
                 .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
