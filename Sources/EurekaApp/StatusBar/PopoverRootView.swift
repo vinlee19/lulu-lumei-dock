@@ -98,6 +98,23 @@ struct PopoverRootView: View {
             }
             sessionBrowser.reveal(sessionId: sessionId)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealKnowledge)) { note in
+            guard let path = note.object as? String else { return }
+            let kind = note.userInfo?["kind"] as? String ?? "memory"
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                switch kind {
+                case "skill": navigation.tab = .skills
+                case "instruction": navigation.tab = .instructions
+                default: navigation.tab = .memory
+                }
+            }
+            skillMemoryService.focusPath = path
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealPlan)) { note in
+            guard let path = note.object as? String else { return }
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { navigation.tab = .plans }
+            plansService.focusPath = path
+        }
     }
 
     // MARK: - 左侧边栏（视图在 SidebarView.swift；这里只算注入它的三个值）

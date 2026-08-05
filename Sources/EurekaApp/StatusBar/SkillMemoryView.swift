@@ -117,7 +117,9 @@ struct SkillMemoryView: View {
                 // 本周命中总数（统计卡副标题）：全来源、本周窗口，一次性拉取
                 usageService.loadSkillRanking(source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
             }
+            consumeFocus()
         }
+        .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .alert("新建" + (creating?.label ?? ""), isPresented: creatingBinding) {
             TextField("名称", text: $newName)
             Button("创建") {
@@ -530,6 +532,21 @@ struct SkillMemoryView: View {
     private func openSkillDetail(_ skill: SkillEntry) {
         withAnimation(.easeOut(duration: 0.15)) {
             detail = SkillDetailTarget(source: skill.source, name: skill.name, entry: skill)
+        }
+    }
+
+    /// 跨页直达落点：按路径找到本签条目并打开详情（找不到不清空——可能属于别的签）
+    private func consumeFocus() {
+        guard let path = service.focusPath else { return }
+        if mode == .skills {
+            guard let skill = service.skills.first(where: { $0.path == path }) else { return }
+            detail = SkillDetailTarget(source: skill.source, name: skill.name, entry: skill)
+            service.focusPath = nil
+        } else {
+            let pool = service.memoryEntries + service.instructions
+            guard let memory = pool.first(where: { $0.path == path }) else { return }
+            memoryDetail = memory
+            service.focusPath = nil
         }
     }
 

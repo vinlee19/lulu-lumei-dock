@@ -1156,4 +1156,10 @@ extension Notification.Name {
     /// 用量"按会话"排行 → 切到会话页签并选中（携带 session id）。
     /// 用通知而非透传 navigation：设置页里的用量面板也能跳转。
     static let eurekaRevealSession = Notification.Name("eurekaRevealSession")
+    /// 跨页直达：知识面条目（object = 文件路径 String；userInfo["kind"] = skill/memory/instruction）
+    static let eurekaRevealKnowledge = Notification.Name("eurekaRevealKnowledge")
+    /// 跨页直达：计划条目（object = 文件路径 String）
+    static let eurekaRevealPlan = Notification.Name("eurekaRevealPlan")
+    /// ⌘K 全局搜索面板开关（MainMenu 发、PopoverRootView 收）
+    static let eurekaToggleCommandPalette = Notification.Name("eurekaToggleCommandPalette")
 }

@@ -44,7 +44,11 @@ struct PlansView: View {
                 }
             }
         }
-        .onAppear { service.refresh() }
+        .onAppear {
+            service.refresh()
+            consumeFocus()
+        }
+        .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .confirmationDialog(
             deleting.map { "删除计划「\($0.title)」？文件会移入废纸篓，可恢复。" } ?? "",
             isPresented: Binding(
@@ -145,6 +149,13 @@ struct PlansView: View {
 
     private func open(_ plan: PlanMaterializer.PlanEntry) {
         withAnimation(.easeOut(duration: 0.15)) { detail = plan }
+    }
+
+    /// 跨页直达落点：按路径找到计划并打开详情（找不到不清空——扫描可能还没跑到）
+    private func consumeFocus() {
+        guard let path = service.focusPath, let entry = service.entry(atPath: path) else { return }
+        withAnimation(.easeOut(duration: 0.15)) { detail = entry }
+        service.focusPath = nil
     }
 
     @ViewBuilder
