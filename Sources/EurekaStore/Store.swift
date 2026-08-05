@@ -13,6 +13,7 @@ public final class EurekaStore {
     public let toolCalls: ToolCallsRepo
     public let audit: AuditRepo
     public let search: SearchRepo
+    public let knowledge: KnowledgeSearchRepo
     public let limitSamples: LimitSamplesRepo
     public let sessionTerminals: SessionTerminalsRepo
 
@@ -30,6 +31,7 @@ public final class EurekaStore {
         toolCalls = ToolCallsRepo(db: db)
         audit = AuditRepo(db: db)
         search = SearchRepo(db: db)
+        knowledge = KnowledgeSearchRepo(db: db)
         limitSamples = LimitSamplesRepo(db: db)
         sessionTerminals = SessionTerminalsRepo(db: db)
     }
