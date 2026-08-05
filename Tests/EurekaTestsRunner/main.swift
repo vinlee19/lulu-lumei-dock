@@ -99,5 +99,6 @@ cursorIngestTests(t)
 syncCompositionTests(t)
 codexHooksTests(t)
 projectRootsTests(t)
+knowledgeLinkTests(t)
 
 t.finish()

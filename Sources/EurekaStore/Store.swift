@@ -932,22 +932,22 @@ public final class ToolCallsRepo {
         public var id: String { "\(source.rawValue):\(name)" }
     }
 
-    /// 累加计数（同 日/来源/kind/name 合并）；last_ts 取较大值、tokens 累加。
-    /// ts=触发时刻（unix epoch）；tokens=触发时 token（仅 Claude 技能传真实值，其余传 0）。
+    /// 累加计数（同 日/来源/kind/name/session 合并）；last_ts 取较大值、tokens 累加。
+    /// session：触发会话 id（仅 Claude 扫描器传真实值，其余默认空 —— 与逐技能数据仅 Claude 的现状一致）。
     public func bump(
         day: String, source: AgentSource, kind: String, name: String,
-        by count: Int = 1, ts: Double = 0, tokens: Int = 0
+        by count: Int = 1, ts: Double = 0, tokens: Int = 0, session: String = ""
     ) throws {
         guard count > 0, !name.isEmpty else { return }
         try db.run("""
-        INSERT INTO tool_calls (day, source, kind, name, count, last_ts, tokens)
-        VALUES (?,?,?,?,?,?,?)
-        ON CONFLICT(day, source, kind, name) DO UPDATE SET
+        INSERT INTO tool_calls (day, source, kind, name, session_id, count, last_ts, tokens)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(day, source, kind, name, session_id) DO UPDATE SET
             count = count + excluded.count,
             last_ts = MAX(last_ts, excluded.last_ts),
             tokens = tokens + excluded.tokens
         """, [
-            .text(day), .text(source.rawValue), .text(kind), .text(name),
+            .text(day), .text(source.rawValue), .text(kind), .text(name), .text(session),
             .int(Int64(count)), .real(ts), .int(Int64(tokens)),
         ])
     }
@@ -1053,6 +1053,21 @@ public final class ToolCallsRepo {
             let day = row.text(0).flatMap { formatter.date(from: $0) }
                 ?? Date(timeIntervalSince1970: 0)
             return (day, Int(row.int(1)))
+        }
+    }
+
+    /// 某技能最近出现过的会话（全时；kind 固定 'skill'）。空 session 的历史行不计。
+    public func recentSkillSessions(
+        source: AgentSource, name: String, limit: Int = 10
+    ) throws -> [(sessionId: String, lastTs: Date, count: Int)] {
+        try db.query("""
+        SELECT session_id, MAX(last_ts), SUM(count) FROM tool_calls
+        WHERE kind = 'skill' AND source = ? AND name = ? AND session_id != ''
+        GROUP BY session_id ORDER BY MAX(last_ts) DESC LIMIT ?
+        """, [.text(source.rawValue), .text(name), .int(Int64(limit))]) { row in
+            (sessionId: row.text(0) ?? "",
+             lastTs: Date(timeIntervalSince1970: row.real(1)),
+             count: Int(row.int(2)))
         }
     }
 }

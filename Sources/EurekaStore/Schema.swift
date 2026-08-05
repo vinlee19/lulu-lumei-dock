@@ -1,6 +1,8 @@
 import Foundation
 
 enum Schema {
+    /// v20：tool_calls 主键加 session_id（技能→会话反查；派生表升级重建全量回填）；
+    ///      新增 knowledge_fts + knowledge_docs（知识面全文搜索，扫描完成后事件驱动重索引）
     /// v19：移除逐轮诊断（`turn_metrics` / `turn_files`）—— 诊断页与它的落库链路已删除，
     ///      两张表连同索引一起丢掉，不再随扫描重建。
     /// v18：Codex 会话 id 解析修复 —— 旧版 `CodexSessionIndexer.headInfo` 会被 resume 写入的
@@ -19,7 +21,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 19
+    static let version: Int64 = 20
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -37,6 +39,8 @@ enum Schema {
             DROP TABLE IF EXISTS fts_files;
             DROP TABLE IF EXISTS turn_metrics;
             DROP TABLE IF EXISTS turn_files;
+            DROP TABLE IF EXISTS knowledge_fts;
+            DROP TABLE IF EXISTS knowledge_docs;
             """)
         }
         // v15 建的 session_terminals 主键含可空列，upsert 失效攒了重复行。该表尚未随任何
@@ -106,15 +110,17 @@ enum Schema {
 
         -- 工具/技能/插件/子代理调用计数（按日聚合，派生表：可由 transcript 重扫恢复，升级重建）
         -- last_ts：该日该项最近一次调用时间（unix epoch）；tokens：触发时 token 累计（仅 Claude 有值，其余 0）
+        -- session_id：触发会话 id（仅 Claude 扫描器传真实值，其余默认空串），主键维度之一 → 支持"技能→最近调用会话"反查
         CREATE TABLE IF NOT EXISTS tool_calls (
             day TEXT NOT NULL,
             source TEXT NOT NULL,
             kind TEXT NOT NULL,
             name TEXT NOT NULL,
+            session_id TEXT NOT NULL DEFAULT '',
             count INTEGER NOT NULL DEFAULT 0,
             last_ts REAL NOT NULL DEFAULT 0,
             tokens INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (day, source, kind, name)
+            PRIMARY KEY (day, source, kind, name, session_id)
         );
         CREATE INDEX IF NOT EXISTS idx_tool_calls_day ON tool_calls(day);
 
@@ -207,6 +213,20 @@ enum Schema {
         -- 已索引文件指纹（size+mtime 变更即整文件重建 docs；截断/改写天然覆盖）
         CREATE TABLE IF NOT EXISTS fts_files (
             path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime REAL NOT NULL
+        );
+
+        -- 知识面全文搜索（技能/记忆/指令/计划正文；派生表，升级重建）。
+        -- 一文件一 doc、指纹列内联（与逐消息的 fts_docs 不同）。knowledge_fts.rowid == knowledge_docs.id。
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(text, tokenize='trigram');
+        CREATE TABLE IF NOT EXISTS knowledge_docs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL,
+            title TEXT NOT NULL,
+            project TEXT,
             size INTEGER NOT NULL,
             mtime REAL NOT NULL
         );
