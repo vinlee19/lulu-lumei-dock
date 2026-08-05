@@ -18,6 +18,8 @@ final class PlansService: ObservableObject {
     @Published private(set) var totalCount = 0
     @Published private(set) var totalBytes: UInt64 = 0
 
+    /// 跨页直达：待聚焦计划的文件路径（PopoverRootView 写入，PlansView 消费后清空）
+    @Published var focusPath: String?
     @Published var searchText = "" {
         didSet { rebuild() }
     }
@@ -124,6 +126,21 @@ final class PlansService: ObservableObject {
             }
         }
         return (complete, inProgress, draft, document)
+    }
+
+    // MARK: - 跨页联动（主线程）
+
+    /// 知识面快照（全文索引用；搜索过滤前的全集）
+    func knowledgeSnapshot() -> [PlanMaterializer.PlanEntry] { all }
+
+    /// 某会话产出的计划（会话详情「本会话产出」用）
+    func plans(forSession sessionId: String) -> [PlanMaterializer.PlanEntry] {
+        all.filter { $0.sessionId == sessionId }
+    }
+
+    /// 按路径找条目（跨页直达消费用）
+    func entry(atPath path: String) -> PlanMaterializer.PlanEntry? {
+        all.first { $0.path == path }
     }
 
     func readContent(path: String) -> String? {

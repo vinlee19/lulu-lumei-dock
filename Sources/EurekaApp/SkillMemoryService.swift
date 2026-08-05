@@ -30,6 +30,8 @@ final class SkillMemoryService: ObservableObject {
     /// 上次扫完的时间。nil = 从未扫过（refresh 的判据）；UI 用它显示「上次扫描 X 前」
     @Published private(set) var lastScanAt: Date?
     @Published private(set) var lastError: String?
+    /// 跨页直达：待聚焦条目的文件路径（PopoverRootView 写入，对应页签消费后清空）
+    @Published var focusPath: String?
     @Published var searchText = "" {
         didSet { rebuild() }
     }
@@ -574,6 +576,21 @@ final class SkillMemoryService: ObservableObject {
                 }
             }
             DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
+        }
+    }
+
+    // MARK: - 跨页联动（主线程；与 rebuild 同一约束）
+
+    /// 知识面快照（全文索引用）：用户技能 + 全部记忆（含库内条目与指令）。搜索过滤前的全集。
+    func knowledgeSnapshot() -> (skills: [SkillEntry], memories: [MemoryEntry]) {
+        (allSkills.filter { $0.origin == .user }, allMemories)
+    }
+
+    /// 与某会话相关的记忆（originSessionId 或 relatedSessions 命中；会话详情「本会话产出」用）
+    func memories(relatedTo sessionId: String) -> [MemoryEntry] {
+        allMemories.filter { entry in
+            entry.originSessionId == sessionId
+                || entry.relatedSessions.contains { $0.sessionId == sessionId }
         }
     }
 
