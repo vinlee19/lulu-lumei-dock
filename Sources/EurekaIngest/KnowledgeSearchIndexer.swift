@@ -66,17 +66,28 @@ public final class KnowledgeSearchIndexer {
             }
             guard let store = self.store else { return }
             let fingerprints = (try? store.knowledge.fileFingerprints()) ?? [:]
+            var failures = 0
             for doc in docs {
                 if let old = fingerprints[doc.path],
                    old.size == doc.size, old.mtime == doc.mtime { continue }
                 guard var body = try? String(contentsOfFile: doc.path, encoding: .utf8)
-                else { continue }
-                if body.utf8.count > Self.bodyCap { body = String(body.prefix(Self.bodyCap)) }
-                try? store.knowledge.replaceDoc(
-                    path: doc.path, kind: doc.kind, source: doc.source, title: doc.title,
-                    project: doc.project, size: doc.size, mtime: doc.mtime, body: body)
+                else { failures += 1; continue }
+                if body.utf8.count > Self.bodyCap {
+                    // 按字节截断（prefix 按 Character 数，纯中文会超上限 ~3 倍）；
+                    // 尾部可能出一个 U+FFFD，对索引无害
+                    body = String(decoding: body.utf8.prefix(Self.bodyCap), as: UTF8.self)
+                }
+                do {
+                    try store.knowledge.replaceDoc(
+                        path: doc.path, kind: doc.kind, source: doc.source, title: doc.title,
+                        project: doc.project, size: doc.size, mtime: doc.mtime, body: body)
+                } catch { failures += 1 }
             }
             try? store.knowledge.prune(keeping: Set(docs.map(\.path)))
+            // 降级保持静默（面板退回元数据搜索），但失败要可诊断（磁盘满/库损坏/非 UTF-8）
+            if failures > 0 {
+                NSLog("KnowledgeSearchIndexer: %d/%d 篇正文索引失败", failures, docs.count)
+            }
         }
     }
 }

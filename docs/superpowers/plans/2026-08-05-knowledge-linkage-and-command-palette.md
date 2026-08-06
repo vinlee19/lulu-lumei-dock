@@ -774,10 +774,10 @@ cancellables 装配区（`:82-130` 一带的 `.store(in: &cancellables)` 同伴�
 ```swift
 // 知识面扫描完成 → 事件驱动重建全文索引（搜索新鲜度 = 列表新鲜度）
 skillMemory.$lastScanAt.compactMap { $0 }.removeDuplicates()
-    .sink { [weak self] _ in self?.reindexKnowledge() }
+    .sink { [weak self] _ in DispatchQueue.main.async { self?.reindexKnowledge() } }  // @Published 是 willSet 发射，必须推迟到 didSet 后再读守卫
     .store(in: &cancellables)
 plans.$lastScanAt.compactMap { $0 }.removeDuplicates()
-    .sink { [weak self] _ in self?.reindexKnowledge() }
+    .sink { [weak self] _ in DispatchQueue.main.async { self?.reindexKnowledge() } }  // @Published 是 willSet 发射，必须推迟到 didSet 后再读守卫
     .store(in: &cancellables)
 // 设置页「清空全文索引」清掉 knowledge 索引后没人会自愈——补一脚重建
 // （此时两个 lastScanAt 必已非 nil：清空只可能发生在启动扫描之后）

@@ -41,7 +41,7 @@
 
 - FTS 写入失败：静默降级为元数据搜索，面板不挂，log 记录。
 - 单文件正文索引截断 256KB。
-- 跳转前存在性校验：目标已删则轻提示并触发对应页刷新。
+- 跳转目标暂不可达时：静默保留 focusPath 等下轮扫描重试（onChange(lastScanAt) 兜底），用户手动切签即放弃——比 toast 提示更安静（实施时的既定偏差）。
 - 不涉及 classic 主题 invariant；Island/Mascot 不碰。
 
 ## 测试
@@ -57,3 +57,8 @@
 - 计划 → 会话的反向跳转入口（数据字段本期已备好，UI 二期顺手）
 - 系统级全局热键（用户选定主窗口内 ⌘K）
 - 知识面文件系统监听（FSEvents）——与本期正交，另行立项
+
+## 实施后记（2026-08-06）
+
+- 结果排序：知识面正文命中按 `mtime DESC`（非 rank——trigram FTS 的 rank 对短查询区分度有限）；面板行是**类型徽标 + 来源副标题**。
+- 二期候选：gemini/kimi 物化计划的 sessions.json 边车（会话 id 在手但文件名映射需改造）；brutal 风格下面板的硬边视觉语言；SessionDetailView 的 kind 字面量并入 `CommandPalette.Kind` 常量。

@@ -95,12 +95,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { mode in Self.applyAppearance(mode) }
             .store(in: &cancellables)
 
-        // 知识面扫描完成 → 事件驱动重建全文索引（搜索新鲜度 = 列表新鲜度）
+        // 知识面扫描完成 → 事件驱动重建全文索引（搜索新鲜度 = 列表新鲜度）。
+        // @Published 在 willSet 发射：sink 里同步读 lastScanAt 拿到的是**旧值**，
+        // 启动首扫时 reindexKnowledge 的双非 nil 守卫会把两次发射都吃掉、索引永不构建。
+        // 用 main.async 推迟到 didSet 之后再读，守卫才见到新值。
         skillMemory.$lastScanAt.compactMap { $0 }.removeDuplicates()
-            .sink { [weak self] _ in self?.reindexKnowledge() }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.reindexKnowledge() } }
             .store(in: &cancellables)
         plans.$lastScanAt.compactMap { $0 }.removeDuplicates()
-            .sink { [weak self] _ in self?.reindexKnowledge() }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.reindexKnowledge() } }
             .store(in: &cancellables)
         // 设置页「清空全文索引」清掉 knowledge 索引后没人会自愈——补一脚重建
         // （此时两个 lastScanAt 必已非 nil：清空只可能发生在启动扫描之后）
