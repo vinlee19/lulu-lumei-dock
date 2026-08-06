@@ -76,16 +76,26 @@ public enum CommandPalette {
         return Kind.allCases.flatMap { byKind[$0] ?? [] }
     }
 
-    /// 就近裁剪：命中词前后各 radius 字符
+    /// 就近裁剪：命中词前后各 radius 字符。先在原文定位命中区间、切出窗口，只对窗口内容
+    /// 压平换行/制表符——正文最长可到 256KB，对整份原文先 `replacingOccurrences` 再定位纯属浪费。
     public static func snippet(_ text: String, query: String, radius: Int = 40) -> String {
-        let flat = text.replacingOccurrences(of: "\n", with: " ")
-        guard let range = flat.range(of: query, options: .caseInsensitive) else {
-            return String(flat.prefix(radius * 2))
+        guard let range = text.range(of: query, options: .caseInsensitive) else {
+            let end = text.index(
+                text.startIndex, offsetBy: radius * 2, limitedBy: text.endIndex) ?? text.endIndex
+            return flatten(text[text.startIndex..<end])
         }
-        let start = flat.index(
-            range.lowerBound, offsetBy: -radius, limitedBy: flat.startIndex) ?? flat.startIndex
-        let end = flat.index(
-            range.upperBound, offsetBy: radius, limitedBy: flat.endIndex) ?? flat.endIndex
-        return String(flat[start..<end])
+        let start = text.index(
+            range.lowerBound, offsetBy: -radius, limitedBy: text.startIndex) ?? text.startIndex
+        let end = text.index(
+            range.upperBound, offsetBy: radius, limitedBy: text.endIndex) ?? text.endIndex
+        return flatten(text[start..<end])
+    }
+
+    /// 窗口内压平换行/回车/制表符为空格（正文里三种都可能出现）
+    private static func flatten(_ window: Substring) -> String {
+        String(window)
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
     }
 }

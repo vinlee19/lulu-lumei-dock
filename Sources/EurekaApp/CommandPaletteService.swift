@@ -63,9 +63,15 @@ final class CommandPaletteService: ObservableObject {
         // 1) 主线程取元数据命中（services 的发布数据只能主线程读）
         let lowered = query.lowercased()
         var metadata: [Hit] = []
-        for session in sessionBrowser.sessionsById.values
+        // sessionsById 是字典迭代序（无序）；merge 按到达顺序给每组截 perKindCap 条，不先排序的话
+        // 随机哪几个会话能进前 6 名额，可能把 FTS 那边带 messageIdx 的正文命中活活饿死。按
+        // lastActiveAt 降序排，既保证截断留下最近会话，也让同一份数据每次结果稳定、可复现。
+        // id 匹配收紧为 hasPrefix（保留"贴 id 前缀"场景，消除两字符子串命中一堆 UUID 的噪音）；
+        // displayName 是人读的标题，contains 更符合直觉，维持不变。
+        let sortedSessions = sessionBrowser.sessionsById.values.sorted { $0.lastActiveAt > $1.lastActiveAt }
+        for session in sortedSessions
         where session.displayName.lowercased().contains(lowered)
-            || session.id.lowercased().contains(lowered) {
+            || session.id.lowercased().hasPrefix(lowered) {
             metadata.append(Hit(
                 kind: .session, key: session.id, title: session.displayName,
                 subtitle: session.cwd.map { URL(fileURLWithPath: $0).lastPathComponent },
