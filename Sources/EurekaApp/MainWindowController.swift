@@ -23,7 +23,8 @@ final class MainWindowController: NSWindowController {
         auditService: AuditService,
         notificationService: NotificationService,
         updateService: UpdateService,
-        navigation: PopoverNavigation
+        navigation: PopoverNavigation,
+        palette: CommandPaletteService
     ) {
         self.usageService = usageService
         self.limitsService = limitsService
@@ -61,7 +62,8 @@ final class MainWindowController: NSWindowController {
                 auditService: auditService,
                 notificationService: notificationService,
                 updateService: updateService,
-                navigation: navigation))
+                navigation: navigation,
+                palette: palette))
         // 不让 SwiftUI 理想尺寸反向重设窗口 frame（否则首开被压到最小宽高、内容挤压重叠）
         hosting.sizingOptions = []
         window.contentViewController = hosting

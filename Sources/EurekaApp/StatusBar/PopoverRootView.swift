@@ -26,6 +26,10 @@ struct PopoverRootView: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var updateService: UpdateService
     @ObservedObject var navigation: PopoverNavigation
+    @ObservedObject var palette: CommandPaletteService
+
+    /// ⌘K 全局搜索浮层的开关（MainMenu 经通知触发；面板本身不持有导航状态）
+    @State private var paletteVisible = false
 
     enum Tab: String, CaseIterable {
         case history = "历史"
@@ -79,10 +83,28 @@ struct PopoverRootView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Divider()
-            content
+        ZStack {
+            HStack(spacing: 0) {
+                sidebar
+                Divider()
+                content
+            }
+            if paletteVisible {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
+                    .onTapGesture { closePalette() }
+                VStack {
+                    CommandPaletteView(
+                        service: palette,
+                        onClose: { closePalette() },
+                        onRevealMessage: { id, idx in
+                            sessionBrowser.revealMessage(sessionId: id, messageIdx: idx)
+                        })
+                    .padding(.top, 90)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
         }
         // 主窗口可缩放：填满窗口；最小尺寸与 MainWindowController.minSize 对齐（避免两处打架）
         .frame(minWidth: 840, maxWidth: .infinity, minHeight: 540, maxHeight: .infinity)
@@ -115,6 +137,19 @@ struct PopoverRootView: View {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { navigation.tab = .plans }
             plansService.focusPath = path
         }
+        .onReceive(NotificationCenter.default.publisher(for: .eurekaToggleCommandPalette)) { _ in
+            if paletteVisible {
+                closePalette()
+            } else {
+                withAnimation(.easeOut(duration: 0.12)) { paletteVisible = true }
+            }
+        }
+    }
+
+    /// 关闭面板并清空查询/结果，避免下次打开残留上次搜索
+    private func closePalette() {
+        withAnimation(.easeOut(duration: 0.12)) { paletteVisible = false }
+        palette.reset()
     }
 
     // MARK: - 左侧边栏（视图在 SidebarView.swift；这里只算注入它的三个值）

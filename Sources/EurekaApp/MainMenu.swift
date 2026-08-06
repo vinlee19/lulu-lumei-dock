@@ -36,6 +36,18 @@ enum MainMenu {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q")
 
+        // 查找菜单：⌘K 全局搜索（动作经通知转发给 SwiftUI 层——菜单无法直接触达视图状态）
+        let findItem = NSMenuItem()
+        mainMenu.addItem(findItem)
+        let findMenu = NSMenu(title: "查找")
+        findItem.submenu = findMenu
+        let paletteItem = NSMenuItem(
+            title: "全局搜索…",
+            action: #selector(MenuActions.togglePalette(_:)),
+            keyEquivalent: "k")
+        paletteItem.target = MenuActions.shared
+        findMenu.addItem(paletteItem)
+
         // 窗口菜单
         let windowItem = NSMenuItem()
         mainMenu.addItem(windowItem)
@@ -63,5 +75,14 @@ enum MainMenu {
         NSApp.windowsMenu = windowMenu
 
         return mainMenu
+    }
+}
+
+/// 菜单动作的 NSObject 落点（菜单项必须有 target/selector；只做通知转发）
+final class MenuActions: NSObject {
+    static let shared = MenuActions()
+
+    @objc func togglePalette(_ sender: Any?) {
+        NotificationCenter.default.post(name: .eurekaToggleCommandPalette, object: nil)
     }
 }

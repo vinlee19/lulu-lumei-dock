@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updateService = UpdateService()
     private let navigation = PopoverNavigation()
     private let knowledgeIndexer = KnowledgeSearchIndexer()
+    // ⌘K 全局搜索：依赖三个已就绪的服务实例，用 lazy 延后到首次访问（此时它们都已构造完毕）
+    private lazy var palette = CommandPaletteService(
+        sessionBrowser: sessionBrowser, skillMemory: skillMemory, plans: plans, settings: settings)
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
@@ -60,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agentConfigService: agentConfig, syncService: syncService,
             cliToolsService: cliTools, auditService: auditService,
             notificationService: notificationService, updateService: updateService,
-            navigation: navigation)
+            navigation: navigation, palette: palette)
         mainWindow = window
 
         statusController = StatusItemController(
