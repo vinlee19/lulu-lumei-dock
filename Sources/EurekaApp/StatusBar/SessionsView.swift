@@ -7,6 +7,9 @@ import SwiftUI
 struct SessionsView: View {
     @ObservedObject var service: SessionBrowserService
     @ObservedObject var settings: AppSettings
+    /// 会话「本会话产出」区依赖：默认 nil（兼容既有构造点），仅 PopoverRootView 传实值
+    var skillMemory: SkillMemoryService? = nil
+    var plans: PlansService? = nil
     /// 项目视图中手动收起的分组（默认全展开）
     @State private var collapsed: Set<String> = []
     /// 多选模式与选中集合（存 session id）
@@ -75,6 +78,8 @@ struct SessionsView: View {
                 .frame(minWidth: 250, idealWidth: 300, maxWidth: 420)
             SessionDetailView(
                 service: service,
+                skillMemory: skillMemory,
+                plans: plans,
                 onOpenLineage: { pane in
                     withAnimation(.easeOut(duration: 0.15)) {
                         lineage = pane == .graph ? .graph(turn: 0) : .list

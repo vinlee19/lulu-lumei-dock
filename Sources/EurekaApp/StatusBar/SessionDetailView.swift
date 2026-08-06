@@ -6,6 +6,9 @@ import SwiftUI
 /// 会话详情：头部信息 + resume 命令条 + 恢复/删除动作 + 对话记录流 + 对话目录（可折叠右栏）
 struct SessionDetailView: View {
     @ObservedObject var service: SessionBrowserService
+    /// 「本会话产出」区依赖：默认 nil（兼容既有构造点），仅 SessionsView 从 PopoverRootView 透传实值
+    var skillMemory: SkillMemoryService? = nil
+    var plans: PlansService? = nil
     /// 打开血缘下钻（由 SessionsView 提供 —— 下钻要替换整个内容区才有足够宽度）
     var onOpenLineage: ((TurnLineageView.Pane) -> Void)?
 
@@ -183,6 +186,7 @@ struct SessionDetailView: View {
                 Spacer(minLength: 0)
             }
             terminalHistoryRow(session)
+            artifactsRow(session)
             // resume 命令条
             HStack(spacing: 6) {
                 Text(service.resumeCommand(for: session))
@@ -240,6 +244,58 @@ struct SessionDetailView: View {
                 }
             }
         }
+    }
+
+    /// 本会话产出：记忆（originSessionId/relatedSessions 命中）+ 计划（物化边车 sessionId 命中）
+    @ViewBuilder
+    private func artifactsRow(_ session: AgentSessionInfo) -> some View {
+        let memories = skillMemory?.memories(relatedTo: session.id) ?? []
+        let planEntries = plans?.plans(forSession: session.id) ?? []
+        if !memories.isEmpty || !planEntries.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("本会话产出")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                ForEach(memories) { memory in
+                    artifactLine(
+                        icon: "brain", title: memory.title,
+                        note: memory.kind == .instructions ? "指令" : "记忆"
+                    ) {
+                        NotificationCenter.default.post(
+                            name: .eurekaRevealKnowledge, object: memory.path,
+                            userInfo: ["kind": memory.kind == .instructions ? "instruction" : "memory"])
+                    }
+                }
+                ForEach(planEntries) { plan in
+                    artifactLine(icon: "list.bullet.clipboard", title: plan.title, note: "计划") {
+                        NotificationCenter.default.post(name: .eurekaRevealPlan, object: plan.path)
+                    }
+                }
+            }
+        }
+    }
+
+    private func artifactLine(
+        icon: String, title: String, note: String, action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.brandFg)
+            Text(title)
+                .font(Theme.font.themed(11))
+                .lineLimit(1)
+            Text(note)
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.up.forward")
+                .font(.system(size: 8.5))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .help("在对应页面打开")
     }
 
     /// 跳转按钮：只把终端**应用**带到前台（不选标签页，因此不需要自动化/辅助功能权限）

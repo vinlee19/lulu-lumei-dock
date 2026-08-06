@@ -157,7 +157,8 @@ struct PopoverRootView: View {
                 tasks: usageService.recentHistory,
                 terminals: sessionBrowser.terminals, settings: settings)
         case .sessions:
-            SessionsView(service: sessionBrowser, settings: settings)
+            SessionsView(service: sessionBrowser, settings: settings,
+                         skillMemory: skillMemoryService, plans: plansService)
         case .skills:
             SkillMemoryView(
                 service: skillMemoryService, mode: .skills, usageService: usageService,
