@@ -78,11 +78,18 @@ enum MainMenu {
     }
 }
 
-/// 菜单动作的 NSObject 落点（菜单项必须有 target/selector；只做通知转发）
+/// 菜单动作的 NSObject 落点（菜单项必须有 target/selector）。
 final class MenuActions: NSObject {
     static let shared = MenuActions()
 
+    /// 不直接 post 通知：主窗口不可见时，PopoverRootView 的 onReceive 仍会收到通知并
+    /// 悄悄翻转 paletteVisible——用户看不见窗口，也就看不见这次翻转，等下次窗口露面时
+    /// 面板开关状态会跟用户预期对不上。经 AppDelegate 先把主窗口前置显示，再发通知，
+    /// 保证这次翻转发生在用户看得见的地方。菜单动作只能是同步 @objc 方法（不能 await），
+    /// AppKit 保证在主线程调用，用 assumeIsolated 越过 AppDelegate 的 @MainActor 隔离。
     @objc func togglePalette(_ sender: Any?) {
-        NotificationCenter.default.post(name: .eurekaToggleCommandPalette, object: nil)
+        MainActor.assumeIsolated {
+            (NSApp.delegate as? AppDelegate)?.showPalette()
+        }
     }
 }

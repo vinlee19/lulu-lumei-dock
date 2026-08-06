@@ -45,7 +45,8 @@ struct CommandPaletteView: View {
                     .frame(maxHeight: 380)
                     .onChange(of: selection) { _, idx in proxy.scrollTo(idx) }
                 }
-            } else if service.query.count >= 2, !service.searching {
+            } else if service.query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2,
+                !service.searching {
                 Divider()
                 Text("没有匹配结果")
                     .font(Theme.font.themed(12))

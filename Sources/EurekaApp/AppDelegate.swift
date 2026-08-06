@@ -335,6 +335,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// ⌘K 菜单入口：先前置显示主窗口，再发面板开关通知——主窗口不可见时通知仍会送达
+    /// PopoverRootView（视图树不因 orderOut 销毁），若只 post 不显示窗口，paletteVisible
+    /// 会在用户看不见的地方悄悄翻转。这里保证翻转发生时窗口已经可见。
+    func showPalette() {
+        mainWindow?.show()
+        NotificationCenter.default.post(name: .eurekaToggleCommandPalette, object: nil)
+    }
+
     private func handle(_ event: TaskEvent, isStale: Bool) {
         // 终端归属先落库，且**不受 isStale 影响**：它是历史事实（这个会话确实在那个终端跑过），
         // 与写 history 同待遇。放在过期闸门之前，否则积压事件带来的绑定会被丢掉。
