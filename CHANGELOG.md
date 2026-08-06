@@ -4,6 +4,38 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.22.0] - 2026-08-06
+
+### Added
+
+- **⌘K global search** — one palette searches every knowledge surface at once: sessions,
+  skills, memories, instructions, and plans. Press ⌘K in the main window, type at least two
+  characters, and results arrive grouped by type, matched on both metadata and document
+  bodies. ↑↓ moves, Enter jumps straight to the target page with the item already open, Esc
+  closes. A session hit from transcript text lands on the exact message. Knowledge bodies
+  live in a new FTS5 trigram index that is rebuilt incrementally whenever a knowledge scan
+  finishes, so search freshness always matches what the lists show.
+- **Recent invoking sessions on skill detail** — the stats section now lists which sessions
+  triggered a skill, with call counts and relative times; clicking one opens that session.
+  Sessions that no longer exist are greyed out instead of offering a dead jump. Call records
+  now carry a session dimension (`tool_calls` gained `session_id`), backfilled automatically
+  on upgrade. Per-skill data remains Claude-only.
+- **Session artifacts on session detail** — a session now shows what it produced: memories
+  written during it and plans materialized from it, each linking to its own detail page.
+  Long lists collapse after five entries.
+
+### Fixed
+
+- **Tool and skill call counts were undercounted** — three separate defects: calls sharing
+  one message id overwrote each other (Claude Code writes one line per content block, so a
+  Skill call followed by a Bash call in the same message lost the Skill), calls seen after
+  their message had already been deduplicated were never counted at all, and subagent
+  transcripts attributed calls to a synthetic `agent-<hash>` id that resolves to no real
+  session. Counting now dedupes per tool-use id independently of usage dedup, and subagent
+  calls attribute to their parent session. Locally this corrected skill calls from 68 to 78
+  — an exact match against the transcripts — with similar corrections for agent, MCP, and
+  tool counts. The derived tables rebuild on upgrade, so historical counts are corrected too.
+
 ## [0.21.1] - 2026-08-05
 
 ### Fixed
@@ -1139,6 +1171,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.22.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.22.0
 [0.21.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.1
 [0.21.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.0
 [0.20.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.20.1
