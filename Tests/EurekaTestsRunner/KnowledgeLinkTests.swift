@@ -124,4 +124,29 @@ func knowledgeLinkTests(_ t: TestRunner) {
         try expectEqual(docs.first { $0.path == "/tmp/CLAUDE.md" }?.kind, "instruction")
         try expectEqual(docs.first { $0.path == "/tmp/p.md" }?.kind, "plan")
     }
+
+    // CommandPaletteService（Sources/EurekaApp）的 Kind/Hit/merge/snippet 实际转发自
+    // EurekaKit.CommandPalette——eureka-tests 链不到 app 壳目标码（同 KnowledgeSearchIndexer
+    // 挪层的教训），纯逻辑测这层即可，服务只是薄壳转发。
+    t.test("palette：合并去重（同目标取先出现者）并按组截断") {
+        let a = CommandPalette.Hit(
+            kind: .skill, key: "/tmp/s.md", title: "tdd", subtitle: "claude", snippet: nil,
+            sessionId: nil, messageIdx: nil)
+        let dup = CommandPalette.Hit(
+            kind: .skill, key: "/tmp/s.md", title: "tdd", subtitle: "claude", snippet: "正文命中",
+            sessionId: nil, messageIdx: nil)
+        let b = CommandPalette.Hit(
+            kind: .session, key: "sess-1", title: "会话一", subtitle: nil, snippet: nil,
+            sessionId: "sess-1", messageIdx: nil)
+        let merged = CommandPalette.merge([a, b, dup], perKindCap: 5)
+        try expectEqual(merged.count, 2)
+        try expectEqual(merged.filter { $0.kind == .skill }.count, 1)
+    }
+
+    t.test("palette：snippet 就近裁剪，命中词在窗口内") {
+        let text = String(repeating: "前", count: 200) + "关键词" + String(repeating: "后", count: 200)
+        let snippet = CommandPalette.snippet(text, query: "关键词", radius: 30)
+        try expect(snippet.contains("关键词"))
+        try expect(snippet.count <= 70)
+    }
 }
