@@ -137,10 +137,12 @@ struct PopoverRootView: View {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { navigation.tab = .plans }
             plansService.focusPath = path
         }
-        .onReceive(NotificationCenter.default.publisher(for: .eurekaToggleCommandPalette)) { _ in
-            if paletteVisible {
+        .onReceive(NotificationCenter.default.publisher(for: .eurekaToggleCommandPalette)) { note in
+            // forceOpen：窗口刚被 ⌘K 唤起时只开不切（残留的 paletteVisible=true 不该反向关闭）
+            let forceOpen = note.userInfo?["forceOpen"] as? Bool == true
+            if paletteVisible && !forceOpen {
                 closePalette()
-            } else {
+            } else if !paletteVisible {
                 withAnimation(.easeOut(duration: 0.12)) { paletteVisible = true }
             }
         }

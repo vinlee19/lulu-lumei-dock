@@ -339,8 +339,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// PopoverRootView（视图树不因 orderOut 销毁），若只 post 不显示窗口，paletteVisible
     /// 会在用户看不见的地方悄悄翻转。这里保证翻转发生时窗口已经可见。
     func showPalette() {
-        mainWindow?.show()
-        NotificationCenter.default.post(name: .eurekaToggleCommandPalette, object: nil)
+        // 窗口已是 key 时纯 toggle，不重复 show()——show() 搭车 usage/limits 刷新，
+        // 纯 UI 开关不该每次背这个负载。窗口不可见/非 key 时才唤起，并用 forceOpen
+        // 强制"只开不切"：⌘W 关窗可能残留 paletteVisible=true，toggle 会反向变成关闭。
+        let windowWasKey = mainWindow?.window?.isKeyWindow == true
+        if !windowWasKey { mainWindow?.show() }
+        NotificationCenter.default.post(
+            name: .eurekaToggleCommandPalette, object: nil,
+            userInfo: windowWasKey ? nil : ["forceOpen": true])
     }
 
     private func handle(_ event: TaskEvent, isStale: Bool) {
