@@ -7,9 +7,9 @@ import SwiftUI
 struct SessionsView: View {
     @ObservedObject var service: SessionBrowserService
     @ObservedObject var settings: AppSettings
-    /// 会话「本会话产出」区依赖：默认 nil（兼容既有构造点），仅 PopoverRootView 传实值
-    var skillMemory: SkillMemoryService? = nil
-    var plans: PlansService? = nil
+    /// 会话「本会话产出」区依赖：全仓只有 PopoverRootView 一处构造点，非 optional 让扫描完成后能正常刷新
+    @ObservedObject var skillMemory: SkillMemoryService
+    @ObservedObject var plans: PlansService
     /// 项目视图中手动收起的分组（默认全展开）
     @State private var collapsed: Set<String> = []
     /// 多选模式与选中集合（存 session id）

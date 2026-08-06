@@ -6,9 +6,9 @@ import SwiftUI
 /// 会话详情：头部信息 + resume 命令条 + 恢复/删除动作 + 对话记录流 + 对话目录（可折叠右栏）
 struct SessionDetailView: View {
     @ObservedObject var service: SessionBrowserService
-    /// 「本会话产出」区依赖：默认 nil（兼容既有构造点），仅 SessionsView 从 PopoverRootView 透传实值
-    var skillMemory: SkillMemoryService? = nil
-    var plans: PlansService? = nil
+    /// 「本会话产出」区依赖：全仓只有两处构造点且都传实值，非 optional 让扫描完成后能正常刷新
+    @ObservedObject var skillMemory: SkillMemoryService
+    @ObservedObject var plans: PlansService
     /// 打开血缘下钻（由 SessionsView 提供 —— 下钻要替换整个内容区才有足够宽度）
     var onOpenLineage: ((TurnLineageView.Pane) -> Void)?
 
@@ -21,6 +21,8 @@ struct SessionDetailView: View {
     @State private var exportNote: String?
     /// 已展开的轨迹消息 id（切会话时清空，避免新会话同 id 意外展开）
     @State private var expandedTrails: Set<Int> = []
+    /// 「本会话产出」是否展开全部（默认只显示前 5 条，避免几十条产出把对话区压没）
+    @State private var artifactsExpanded = false
 
     enum RoleFilter: String, CaseIterable {
         case all = "全部"
@@ -69,6 +71,7 @@ struct SessionDetailView: View {
         // 挂在 Group 上：经由"清空选择"中转的切换也能清空轨迹展开态（新会话同 id 不误展开）
         .onChange(of: service.selected?.id) { _, _ in
             expandedTrails = []
+            artifactsExpanded = false
         }
         // 全文命中跳转：transcript 加载完成后滚到目标消息（延迟一拍等 LazyVStack 布局）
         .onChange(of: service.transcriptLoading) { _, loading in
@@ -246,31 +249,66 @@ struct SessionDetailView: View {
         }
     }
 
+    /// 「本会话产出」的一条：记忆或计划，合并排序/分页用同一列表
+    private enum Artifact: Identifiable {
+        case memory(MemoryEntry)
+        case plan(PlanMaterializer.PlanEntry)
+
+        var id: String {
+            switch self {
+            case .memory(let entry): return "memory:\(entry.path)"
+            case .plan(let entry): return "plan:\(entry.path)"
+            }
+        }
+    }
+
+    /// 每次最多展示的产出条数；header 在 ScrollView 外，几十条产出会把对话区压没
+    private static let artifactsPageSize = 5
+
     /// 本会话产出：记忆（originSessionId/relatedSessions 命中）+ 计划（物化边车 sessionId 命中）
     @ViewBuilder
     private func artifactsRow(_ session: AgentSessionInfo) -> some View {
-        let memories = skillMemory?.memories(relatedTo: session.id) ?? []
-        let planEntries = plans?.plans(forSession: session.id) ?? []
-        if !memories.isEmpty || !planEntries.isEmpty {
+        let memories = skillMemory.memories(relatedTo: session.id)
+        let planEntries = plans.plans(forSession: session.id)
+        let items: [Artifact] = memories.map(Artifact.memory) + planEntries.map(Artifact.plan)
+        if !items.isEmpty {
+            let visible = artifactsExpanded ? items : Array(items.prefix(Self.artifactsPageSize))
+            let hiddenCount = items.count - visible.count
             VStack(alignment: .leading, spacing: 3) {
                 Text("本会话产出")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
-                ForEach(memories) { memory in
-                    artifactLine(
-                        icon: "brain", title: memory.title,
-                        note: memory.kind == .instructions ? "指令" : "记忆"
-                    ) {
-                        NotificationCenter.default.post(
-                            name: .eurekaRevealKnowledge, object: memory.path,
-                            userInfo: ["kind": memory.kind == .instructions ? "instruction" : "memory"])
-                    }
+                ForEach(visible) { item in
+                    artifactLine(item)
                 }
-                ForEach(planEntries) { plan in
-                    artifactLine(icon: "list.bullet.clipboard", title: plan.title, note: "计划") {
-                        NotificationCenter.default.post(name: .eurekaRevealPlan, object: plan.path)
-                    }
+                if hiddenCount > 0 {
+                    Text("还有 \(hiddenCount) 条")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .contentShape(Rectangle())
+                        .onTapGesture { artifactsExpanded = true }
+                        .help("展开全部本会话产出")
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func artifactLine(_ item: Artifact) -> some View {
+        switch item {
+        case .memory(let memory):
+            let isInstruction = memory.kind == .instructions
+            artifactLine(
+                icon: "brain", title: memory.title,
+                note: isInstruction ? "指令" : "记忆"
+            ) {
+                NotificationCenter.default.post(
+                    name: .eurekaRevealKnowledge, object: memory.path,
+                    userInfo: ["kind": isInstruction ? "instruction" : "memory"])
+            }
+        case .plan(let plan):
+            artifactLine(icon: "list.bullet.clipboard", title: plan.title, note: "计划") {
+                NotificationCenter.default.post(name: .eurekaRevealPlan, object: plan.path)
             }
         }
     }
