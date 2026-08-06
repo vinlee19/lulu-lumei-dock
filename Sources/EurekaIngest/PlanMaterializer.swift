@@ -443,8 +443,11 @@ public enum PlanMaterializer {
         let outDir = stagingRoot.appendingPathComponent("grok", isDirectory: true)
         var written = 0
         var smap: [String: String] = [:]
-        let cwdDirs = (try? fm.contentsOfDirectory(
-            at: sessionsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        // 源目录读不到（权限抖动/未安装 grok）时早退，保留既有暂存与边车——
+        // 否则空 smap 会删掉 sessions.json，而 .md 仍在，计划会暂时丢会话归属。
+        guard let cwdDirs = try? fm.contentsOfDirectory(
+            at: sessionsRoot, includingPropertiesForKeys: [.isDirectoryKey])
+        else { return 0 }
         for cwdDir in cwdDirs where isDirectory(cwdDir) {
             let sessionDirs = (try? fm.contentsOfDirectory(
                 at: cwdDir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
@@ -855,6 +858,9 @@ public enum PlanMaterializer {
         guard !map.isEmpty else { try? FileManager.default.removeItem(at: url); return }
         guard let data = try? JSONSerialization.data(withJSONObject: map, options: [.sortedKeys])
         else { return }
+        // 内容不变则不重写：边车不参与云备份（markdownOnly 过滤），mtime 稳定性
+        // 并非硬约束，但与 writeIfChanged 的约定对称，也省掉每轮无谓写盘。
+        if let existing = try? Data(contentsOf: url), existing == data { return }
         try? data.write(to: url, options: .atomic)
     }
 
