@@ -4,8 +4,13 @@ import EurekaKit
 
 /// 把 Claude Code PostToolUse hook payload 解码为审计事件。
 /// 只认 PostToolUse；tool_response/tool_output 正文丢弃，仅嗅探 is_error 布尔。
+///
+/// Trae CN 复用同一条路径（`source: .trae`）：它的 hook 载荷与 Claude 同形，
+/// 连 `tool_response` 都在（见 `ClaudeHookDecoder` 的说明）。
 public enum ClaudeAuditDecoder {
-    public static func decode(payload: [String: Any], receivedAt: Date) -> AuditEvent? {
+    public static func decode(
+        payload: [String: Any], receivedAt: Date, source: AgentSource = .claude
+    ) -> AuditEvent? {
         guard payload["hook_event_name"] as? String == "PostToolUse",
               let sessionId = payload["session_id"] as? String,
               let toolName = payload["tool_name"] as? String
@@ -16,10 +21,12 @@ public enum ClaudeAuditDecoder {
         // PostToolUse 无 per-call 唯一 ID（官方确认），合成稳定键：
         // receivedAtMs 使同命令的不同调用互不碰撞，且随 spool 文件体重放稳定。
         let opId = (payload["tool_use_id"] as? String)
-            ?? synthOpId(sessionId: sessionId, toolName: toolName, input: input, receivedAt: receivedAt)
+            ?? synthOpId(
+                sessionId: sessionId, toolName: toolName, input: input,
+                receivedAt: receivedAt, source: source)
 
         return AuditEvent(
-            opId: opId, source: .claude, sessionId: sessionId, timestamp: receivedAt,
+            opId: opId, source: source, sessionId: sessionId, timestamp: receivedAt,
             kind: op.kind, tool: op.name, detail: op.detail,
             cwd: payload["cwd"] as? String,
             isError: sniffError(payload["tool_response"] ?? payload["tool_output"]))
@@ -34,7 +41,8 @@ public enum ClaudeAuditDecoder {
     }
 
     private static func synthOpId(
-        sessionId: String, toolName: String, input: [String: Any]?, receivedAt: Date
+        sessionId: String, toolName: String, input: [String: Any]?, receivedAt: Date,
+        source: AgentSource
     ) -> String {
         let inputJSON = input.flatMap {
             try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys])
@@ -44,6 +52,7 @@ public enum ClaudeAuditDecoder {
         hasher.update(data: Data("\(sessionId)\u{1}\(toolName)\u{1}\(ms)\u{1}".utf8))
         hasher.update(data: inputJSON)
         let hex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        return "claude:" + hex.prefix(32)
+        // 前缀带 source：Claude 与 Trae 的 session id 空间互不相关，同一 hash 也不该撞键
+        return source.rawValue + ":" + hex.prefix(32)
     }
 }

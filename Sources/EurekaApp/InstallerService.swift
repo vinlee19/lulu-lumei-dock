@@ -17,6 +17,7 @@ final class InstallerService: ObservableObject {
         case claudeHooks
         case codexNotify
         case codexHooks
+        case traeHooks
 
         var id: String { rawValue }
 
@@ -25,6 +26,7 @@ final class InstallerService: ObservableObject {
             case .claudeHooks: return "Claude Code hooks"
             case .codexNotify: return "Codex notify"
             case .codexHooks: return "Codex hooks"
+            case .traeHooks: return "Trae hooks"
             }
         }
 
@@ -34,6 +36,8 @@ final class InstallerService: ObservableObject {
             case .claudeHooks: return EurekaCLI.claudeSettingsURL
             case .codexNotify: return EurekaCLI.codexConfigURL
             case .codexHooks: return EurekaCLI.codexHooksURL
+            // 只有 CN 版有 hooks（国际版的 ai-agent 里没有 hooks 模块）
+            case .traeHooks: return EurekaCLI.traeHooksURL
             }
         }
 
@@ -42,6 +46,7 @@ final class InstallerService: ObservableObject {
             case .claudeHooks: return .claude
             case .codexNotify: return .codex
             case .codexHooks: return .codex
+            case .traeHooks: return .trae
             }
         }
 
@@ -56,6 +61,15 @@ final class InstallerService: ObservableObject {
                 // 装它的主要理由就是等待授权：Codex 的 rollout 不落授权事件，
                 // 不装 hooks 这个状态对 Codex 永远不可见
                 return "等待授权提醒、实时任务卡、精确的会话所在终端"
+            case .traeHooks:
+                // Trae 的会话库是 SQLCipher 加密的、也没有明文转录 → **不装 hooks，
+                // 灵动岛就完全看不见 Trae**（这是唯一破了「不装 hooks 也能看见」惯例的源）。
+                // 刻意不写"等待授权提醒"：Trae 没有权限请求类 hook 事件。
+                //
+                // ⚠️ Trae 的 hooks 是**按账号灰度**的服务端开关（见 `TraeHooksInstaller` 的说明），
+                // 没放开时装了也不会触发 —— 文案必须把这件事说在前面，否则用户会以为是我们坏了。
+                return "实时任务卡（Trae 唯一的实时通道）、工具调用审计、会话所在终端"
+                    + "；需 Trae 已对你的账号开放 hooks（设置里能看到 Hooks 页即已开放）"
             }
         }
     }
@@ -80,6 +94,7 @@ final class InstallerService: ObservableObject {
     var claudeSettingsURL: URL { EurekaCLI.claudeSettingsURL }
     var codexConfigURL: URL { EurekaCLI.codexConfigURL }
     var codexHooksURL: URL { EurekaCLI.codexHooksURL }
+    var traeHooksURL: URL { EurekaCLI.traeHooksURL }
 
     /// relay 稳定路径。hooks/notify 配置永远只该引用这里。
     var stableRelayPath: String { RelaySyncer.stableRelayURL.path }
@@ -102,9 +117,14 @@ final class InstallerService: ObservableObject {
         diagnoses[.codexHooks] = CodexHooksInstaller.diagnose(
             json: codexHooksJSON, expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
-        // 两份配置里他人的条目合并展示（本机 ~/.codex/hooks.json 正被 Otty 占用）
+        let traeHooksJSON = ConfigFile.read(traeHooksURL)
+        diagnoses[.traeHooks] = TraeHooksInstaller.diagnose(
+            json: traeHooksJSON, expectedRelayPath: relay,
+            relayIsExecutable: relayIsExecutable)
+        // 三份配置里他人的条目合并展示（本机 ~/.codex/hooks.json 正被 Otty 占用）
         foreignHooks = ClaudeHooksInstaller.foreignHooks(in: claudeJSON)
             .merging(CodexHooksInstaller.foreignHooks(in: codexHooksJSON))
+            .merging(TraeHooksInstaller.foreignHooks(in: traeHooksJSON))
     }
 
     func diagnosis(for integration: Integration) -> HookDiagnosis {
@@ -160,6 +180,7 @@ final class InstallerService: ObservableObject {
             case .claudeHooks: updated = try ClaudeHooksInstaller.uninstall(from: original)
             case .codexNotify: updated = CodexNotifyInstaller.uninstall(from: original)
             case .codexHooks: updated = try CodexHooksInstaller.uninstall(from: original)
+            case .traeHooks: updated = try TraeHooksInstaller.uninstall(from: original)
             }
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
             message = "\(integration.title) 已卸载（只移除了我们自己的条目）"
@@ -180,6 +201,8 @@ final class InstallerService: ObservableObject {
             updated = try CodexNotifyInstaller.install(into: original, relayPath: relayPath)
         case .codexHooks:
             updated = try CodexHooksInstaller.install(into: original, relayPath: relayPath)
+        case .traeHooks:
+            updated = try TraeHooksInstaller.install(into: original, relayPath: relayPath)
         }
         try ConfigFile.backupThenWrite(path: url, newContent: updated)
     }

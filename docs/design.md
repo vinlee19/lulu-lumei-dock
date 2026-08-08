@@ -127,9 +127,11 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
 ### 记忆 vs 指令：两个页签，两套统计
 
 - **记忆** = agent 自己攒下来的：Claude/Qwen 的项目记忆库、`~/.claude/memories`、
-  Codex `memories/` 顶层三份、Hermes `memories/{MEMORY,USER}.md`、grok/codebuddy/qoder 的记忆目录。
+  Codex `memories/` 顶层三份、Hermes `memories/{MEMORY,USER}.md`、grok/codebuddy/qoder 的记忆目录、
+  Trae `~/.trae-cn/memory/{user_profile.md, projects/<encoded>/{project_memory.md, <YYYYMMDD>/topics.md}}`。
 - **指令** = 用户写给 agent 的规则：`CLAUDE.md` / `AGENTS.md`（含 `AGENTS.override.md` 优先级）/
-  `GEMINI.md` / `QWEN.md` / `<repo>/.cursor/rules/*.mdc` / Hermes `SOUL.md`（人格身份）。
+  `GEMINI.md` / `QWEN.md` / `<repo>/.cursor/rules/*.mdc` / Hermes `SOUL.md`（人格身份）/
+  Trae `<dataFolder>/user_rules.md` + `<dataFolder>/user_rules/*.md` + `<repo>/.trae/rules/*.md`。
 - 两者混在一个数字里会让「记忆有多少」失去意义（本机 105 记忆 vs 19 指令），所以分页签、分统计口径。
   Hermes 是唯一需要在同一目录里分开判的：`memories/MEMORY.md` 与 `USER.md` 是它自记 → 记忆；
   `SOUL.md` 是人格设定 → 指令。
@@ -162,6 +164,39 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
 - 技能：**按源聚合**，且只报「只差这一个源」的技能。逐条列会刷出 25 行说同一件事；
   而「claude 48 个、cursor 23 个」这种差异多半是故意的，报了也没有可执行动作。
 - 收紧前后：18 项 → **5 项**（3 个仓库指令缺口 + 1 个源技能缺口 + 1 个库漂移）。
+
+### Trae（CN 3.3.84 / 国际版 3.5.35 实勘）
+
+**会话正文读不到，这是硬结论。** `~/Library/Application Support/Trae CN/ModularData/ai-agent/database.db`
+前 16 字节是随机 salt（SQLCipher），`sqlite3` 报 `file is not a database`；`state.vscdb` 里只有 UI 状态
+（`memento/icube-ai-agent-storage` 的 currentSessionId、`ai-chat:sessionRelation:modelMap` 的模型名），
+没有消息。全机没有任何明文转录。所以 **没有正文 / token / 成本 / 限额**。
+
+- **hooks（只有 CN 有）**：全局 `~/.trae-cn/hooks.json` + 项目 `<repo>/.trae/hooks.json`。
+  路径出处是前端资产表 `{assetType:"hook",projectRelPath:".trae/hooks.json",globalRelPath:"hooks.json"}`，
+  global 根 = `pathService.userHome` + `productService.dataFolderName`（`.trae-cn`）。
+  载荷与输出契约都是 Claude 那套（`hook_event_name` / `session_id` / `cwd` / `tool_input` /
+  `tool_response`；`hookSpecificOutput` / `permissionDecision` / `additionalContext` / `stopReason`），
+  二进制里还带 `import_claude_folders` / `global_import_claude_enabled` / `CLAUDE_PROJECT_DIR`
+  —— 它是刻意做的 Claude 兼容。事件名：`UserPromptSubmit` / `PreToolUse` / `PostToolUse` / `Stop` /
+  `PreCompact` / `PostCompact`；**没有** `SessionEnd` / `Notification`（→ 等待授权对 Trae 不可见）。
+  **没有** `transcript_path`。
+- **记忆库（只有 CN 有）**：`~/.trae-cn/memory/user_profile.md`、
+  `memory/projects/<encoded>--p<N>-<hash>/project_memory.md`、
+  `.../<YYYYMMDD>/topics.md`、`.../<YYYYMMDD>/session_memory_<sessionId>.jsonl`。
+  `topics.md` 实勘是**单行无换行**的 `[session_id: <id> | topic_summary_time: yyyy-MM-dd HH:mm:ss]<叙述>`，
+  多个块可能紧邻相连 → 必须用「下一个块头的起点」定界，不能按行切。
+  `session_memory_*.jsonl` 每回合一行（`intent` / `actions` / `outcome` / `learned` /
+  `message_summary_time` / `compact_summary_meta.created_at_ms`），只取时间戳。
+- **cwd 反查**：`<appSupport>/User/workspaceStorage/<hash>/workspace.json` 的 `folder` 字段
+  （`file://` URI）是唯一非有损来源；记忆库目录名要**正向编码**这些真实路径去比对。
+- **技能**：`<dataFolder>/skills`、`builtin_skills`、`builtin/global/skills`（后两处内容不同，
+  都要扫）、`<repo>/.trae/skills`；文件是标准 `SKILL.md` + `name`/`description` frontmatter。
+- **计划**：`<repo>/.trae/documents/plan_<yyyyMMdd>_<HHmmss>.md`，本就是 markdown，
+  同 Hermes 就地索引不物化；同目录还有别的文档，按 `plan_` 前缀收窄。
+- **明确不用的数据源**：`logs/<启动时间>/Modular/ai-agent_*_stdout.log` 里确实有完整生命周期
+  （`[ChatService] chat start`、`service:"chat", method:"chat"`、`[Hooks] … hook completed`），
+  但它是内部 Rust tracing、100MB/1.5h、目录名每次启动变、格式随版本改 —— 不作为数据源。
 
 ## 任务状态机
 

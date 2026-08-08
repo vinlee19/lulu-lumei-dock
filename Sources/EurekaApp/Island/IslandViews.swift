@@ -199,6 +199,9 @@ extension AgentSource {
                 ? NSColor(srgbRed: 0.92, green: 0.92, blue: 0.94, alpha: 1)
                 : NSColor(srgbRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
         }))
+        // TRAE 官方标是薄荷绿方括号。与 Qoder 的 #2ADB5C 同为绿系但更偏青，
+        // 排在一起要能分开 —— 改这里之后务必 `--render-badges` 看图核对。
+        case .trae: return Color(red: 0.196, green: 0.941, blue: 0.549)      // TRAE 绿 #32F08C
         }
     }
 }
@@ -420,6 +423,8 @@ enum SourceLogo {
         case .codebuddy: name = "logo-codebuddy"
         case .qoder: name = dark ? "logo-qoder-dark" : "logo-qoder"
         case .cursor: name = dark ? "logo-cursor-dark" : "logo-cursor"
+        // TRAE 官方标本身是薄荷绿（#32F08C），浅底深底都看得见 → 不需要 -dark 变体
+        case .trae: name = "logo-trae"
         case .opencode: return nil  // 无资产：由 SourceBadge 走代码绘制分支
         }
         lock.lock()
@@ -495,6 +500,10 @@ struct SourceBadge: View {
         case .cursor:
             // 兜底实心六边形（官方是等距立方，9pt 下细描边会糊，故走实心剪影）
             CursorMarkShape().fill(source.brandColor)
+        case .trae:
+            // 兜底方块（官方标是方括号取景框，同 CursorMarkShape 的规矩走实心而非描边，
+            // 仅 logo-trae.svg 缺失时才会走到这里）
+            RoundedRectangle(cornerRadius: size * 0.18).fill(source.brandColor)
         case .opencode:
             EmptyView()
         }

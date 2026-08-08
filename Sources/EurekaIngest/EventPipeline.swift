@@ -59,12 +59,16 @@ public final class EventPipeline {
         let resolvedSessionIndexURL = codexSessionIndexURL
             ?? CodexThreadNameIndex.resolvedURL(for: codexSessionsRoot)
         self.codexThreadNames = CodexThreadNameIndex.load(resolvedSessionIndexURL)
-        // 只审计 Claude hook 通道的 PostToolUse（inject 也走此通道）
+        // 只审计 hook 通道的 PostToolUse（inject 也走这两个通道）。
+        // Trae CN 的载荷与 Claude 同形，同一个解码器换 source 即可。
+        let hookAuditSources: [String: AgentSource] = [
+            "claude-hook": .claude, "trae-hook": .trae,
+        ]
         let rawObserver: SpoolConsumer.RawObserver? = auditHandler.map { audit in
             { raw, isStale in
-                guard raw.channel == "claude-hook",
+                guard let source = hookAuditSources[raw.channel],
                       let event = ClaudeAuditDecoder.decode(
-                        payload: raw.payload, receivedAt: raw.receivedAt)
+                        payload: raw.payload, receivedAt: raw.receivedAt, source: source)
                 else { return }
                 audit(event, isStale)
             }

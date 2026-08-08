@@ -172,6 +172,8 @@ final class SessionBrowserService: ObservableObject {
                 projectsRoot: QoderPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             // cursor：会话全在 state.vscdb（IDE 无 transcript 文件）
             indexed += CursorSessionIndexer.index(window: window, maxSessions: maxSessions)
+            // trae：会话库是 SQLCipher 加密的，标题/时间只能从明文记忆库反推（延迟、可能为空）
+            indexed += TraeSessionIndexer.index(window: window, maxSessions: maxSessions)
             // 按 id 去重（Claude 嵌套子代理目录等可能重复索引同一会话；
             // ForEach 重复 id 会导致列表渲染出空白行）
             var seenIds = Set<String>()
@@ -437,6 +439,10 @@ final class SessionBrowserService: ObservableObject {
             // Cursor 是 IDE，没有「恢复某个会话」的命令行入口——只能把工作区打开，
             // 会话在侧栏历史里自己挑。`cursor` 命令要在 IDE 内 Cmd+Shift+P 安装。
             return session.cwd.map { "cursor '\($0)'" } ?? "cursor"
+        case .trae:
+            // Trae 同 Cursor：IDE，无按会话恢复的命令行入口，只能打开工作区。
+            // 会话来自 CN 版的记忆库（国际版没有记忆目录），所以固定用 `trae-cn`。
+            return session.cwd.map { "trae-cn '\($0)'" } ?? "trae-cn"
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume

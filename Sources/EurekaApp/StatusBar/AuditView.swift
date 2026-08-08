@@ -389,7 +389,8 @@ struct AuditView: View {
         noticeCard(
             icon: "exclamationmark.triangle.fill", tint: Theme.gold,
             text: "Claude hooks 未安装，Claude 的操作暂未被审计采集"
-                + "（Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen 不受影响）。",
+                + "（Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen 不受影响；"
+                + "Trae 同样依赖 hooks，见 设置 → 集成）。",
             // 装卸结果必须回显：否则被拒（配置解析不了 / 路径被手改）时毫无反馈
             detail: installer.message
         ) {

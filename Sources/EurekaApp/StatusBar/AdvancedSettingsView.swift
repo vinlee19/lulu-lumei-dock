@@ -52,6 +52,9 @@ struct AdvancedSettingsView: View {
         pathRow("CodeBuddy", home.appendingPathComponent(".codebuddy"))
         pathRow("Qoder", home.appendingPathComponent(".qoder-cn"))
         pathRow("Cursor", home.appendingPathComponent(".cursor"))
+        // Trae 是两个独立应用：CN 版与国际版各自一套目录，数据不互通
+        pathRow("Trae", home.appendingPathComponent(".trae-cn"))
+        pathRow("Trae（国际版）", home.appendingPathComponent(".trae"))
         pathRow("lulu-lumei-dock 数据", SpoolPaths.root())
     }
 

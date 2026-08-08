@@ -71,6 +71,18 @@ public struct SyncRoots {
     public var cursorSkills: URL?
     /// ~/.cursor/agents（子代理定义 <name>.md）
     public var cursorAgents: URL?
+    /// trae 可备份的根：(本地根, 远端类目)。Trae 有**两个渠道**（CN `~/.trae-cn` 与
+    /// 国际版 `~/.trae`），技能与用户规则各自一套，所以用数组而不是固定字段。
+    /// 由 app 侧按已装渠道注入（见 `SyncService.traeRoots`）。
+    ///
+    /// ⚠️ **白名单，且只能是白名单。** 绝不加 `~/.trae-cn` 本身，也绝不加
+    /// `~/Library/Application Support/Trae CN`：
+    ///   - `<dataFolder>/trae-jwt-token` 是 JWT；
+    ///   - `<dataFolder>/mcp.json` 可能含 API key；
+    ///   - `<appSupport>/Cookies`、`<appSupport>/ModularData/ai-agent/database.db`
+    ///     （SQLCipher 加密的全部会话）含鉴权与会话正文。
+    /// 与 `cursorSkills` 上那条注释同性质：会话库跟凭据同处一地，一律不纳入。
+    public var traeRoots: [(root: URL, category: String)] = []
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
     public var customDirs: [(root: URL, category: String)] = []
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
@@ -320,6 +332,24 @@ public enum SyncSourceCatalog {
         if let antigravitySkills = roots.antigravitySkills {
             walk(root: antigravitySkills, category: "antigravity/skills", priority: 0,
                  include: markdownOnly)
+        }
+
+        // trae：只有技能 / 记忆 / 用户规则三类明文 markdown 可备份，且都是显式白名单根。
+        // 会话在 SQLCipher 加密库里，与 trae-jwt-token / mcp.json 同处一地 → 一律不纳入。
+        // 计划（`<repo>/.trae/documents/plan_*.md`）在用户仓库里，跟 Hermes 一样不代管。
+        //
+        // 条目可能是目录（skills / user_rules / memory）也可能是单文件
+        // （`<dataFolder>/user_rules.md` —— 它就躺在 dataFolder 根下，而那个目录里还有
+        // trae-jwt-token，所以只能像 hermes 的 SOUL.md 一样单点加入，绝不 walk 它的父目录）。
+        for (root, category) in roots.traeRoots {
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(
+                atPath: root.path, isDirectory: &isDirectory)
+            if exists, !isDirectory.boolValue {
+                add(root, category: category, relativePath: root.lastPathComponent, priority: 0)
+            } else {
+                walk(root: root, category: category, priority: 0, include: markdownOnly)
+            }
         }
 
         // 用户自定义目录：远端类目由用户指定（custom/<名>），全部常规文件（隐藏文件仍跳过）

@@ -3,8 +3,19 @@ import EurekaKit
 
 /// 把 Claude Code hook stdin payload 解码为领域事件。
 /// 宽松解码：缺字段/不认识的事件返回 nil，绝不抛错。
+///
+/// **Trae CN 复用同一条解码路径**：它的 hooks 是刻意做的 Claude 兼容实现——stdin 键
+/// (`hook_event_name` / `session_id` / `cwd` / `tool_input` / `tool_response`) 与输出契约
+/// (`hookSpecificOutput` / `permissionDecision` / `additionalContext` / `stopReason`) 都一致，
+/// 二进制里还带着 `import_claude_folders` / `CLAUDE_PROJECT_DIR`。差异只有三处，靠
+/// `source` 参数与 `default: return nil` 自然吸收：
+/// - Trae 没有 `SessionEnd` / `Notification`（→ 「等待授权」对 Trae 永远不可见）；
+/// - Trae 多一个 `PostCompact`（Claude 没有）；
+/// - Trae 不给 `transcript_path`（会话库加密，没有明文转录）。
 public enum ClaudeHookDecoder {
-    public static func decode(payload: [String: Any], receivedAt: Date) -> TaskEvent? {
+    public static func decode(
+        payload: [String: Any], receivedAt: Date, source: AgentSource = .claude
+    ) -> TaskEvent? {
         guard
             let name = payload["hook_event_name"] as? String,
             let sessionId = payload["session_id"] as? String
@@ -34,6 +45,10 @@ public enum ClaudeHookDecoder {
                 tool: step.name, detail: step.detail.isEmpty ? nil : step.detail)
         case "PreCompact":
             kind = .compacting
+        case "PostCompact":
+            // 仅 Trae 有。压缩结束 → 走无工具名的心跳：`TaskStore` 的 `.activity` 分支
+            // 本来就会在「有动静」时把 isCompacting 复位，不必新增 case。
+            kind = .activity(tool: nil)
         case "PostToolUse":
             kind = .activity(tool: payload["tool_name"] as? String)
         case "SessionStart":
@@ -45,7 +60,7 @@ public enum ClaudeHookDecoder {
         }
 
         return TaskEvent(
-            source: .claude,
+            source: source,
             sessionId: sessionId,
             kind: kind,
             timestamp: receivedAt,

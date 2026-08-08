@@ -84,7 +84,24 @@ public enum TranscriptReader {
             return loadCursor(
                 dbPath: session.transcriptPath, composerId: session.id,
                 maxMessages: maxMessages)
+        case .trae:
+            return loadTrae()
         }
+    }
+
+    // MARK: - Trae（会话库加密，只能给一句说明）
+
+    /// Trae 的会话正文在 `ModularData/ai-agent/database.db` 里，而那个库是 **SQLCipher
+    /// 加密**的（文件头 16 字节是随机 salt，`sqlite3` 直接报 "file is not a database"），
+    /// 全机也没有任何明文转录文件。所以正文永远拿不到 —— 同 Antigravity 的口径，
+    /// 给一句说明而不是一个空白页。会话本身仍可见（标题/时间来自明文记忆库，见
+    /// `TraeSessionIndexer`）。
+    public static func loadTrae() -> Result {
+        Result(
+            messages: [TranscriptMessage(
+                id: 0, role: .toolNote,
+                text: "🔒 Trae 的会话库经 SQLCipher 加密，正文无法读取；本页信息来自 Trae 的明文记忆库")],
+            truncated: false)
     }
 
     // MARK: - Cursor（state.vscdb 只读：composerData 给气泡顺序，bubbleId 行给正文）

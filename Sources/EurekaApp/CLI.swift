@@ -24,6 +24,9 @@ enum EurekaCLI {
             .appendingPathComponent(".codex/hooks.json")
     }
 
+    /// Trae 的全局 hooks 配置。**只有 CN 版有 hooks**，所以固定指向 `~/.trae-cn`。
+    static var traeHooksURL: URL { TraePaths.hooksConfig() }
+
     /// 返回 true 表示已按 CLI 处理，调用方应直接退出
     static func runIfNeeded() -> Bool {
         let args = Array(CommandLine.arguments.dropFirst())
@@ -192,9 +195,14 @@ enum EurekaCLI {
 
     private static func printStatus() {
         let claude = ClaudeHooksInstaller.status(of: ConfigFile.read(claudeSettingsURL))
-        let codex = CodexNotifyInstaller.status(of: ConfigFile.read(codexConfigURL))
+        let codexNotify = CodexNotifyInstaller.status(of: ConfigFile.read(codexConfigURL))
+        // Codex hooks 与 Trae hooks 都是独立文件，与上面两项互不相干
+        let codexHooks = CodexHooksInstaller.status(of: ConfigFile.read(codexHooksURL))
+        let trae = TraeHooksInstaller.status(of: ConfigFile.read(traeHooksURL))
         print("Claude hooks: \(claude.rawValue)")
-        print("Codex notify: \(codex.rawValue)")
+        print("Codex notify: \(codexNotify.rawValue)")
+        print("Codex hooks: \(codexHooks.rawValue)")
+        print("Trae hooks: \(trae.rawValue)  (\(traeHooksURL.path))")
         print("relay 稳定路径: \(RelaySyncer.stableRelayURL.path)")
     }
 

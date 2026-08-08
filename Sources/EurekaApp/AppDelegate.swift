@@ -226,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pipeline = EventPipeline(
             spoolRoot: SpoolPaths.root(),
             auditHandler: { [weak auditService] event, isStale in
-                auditService?.ingestClaude(event, isStale: isStale)
+                auditService?.ingestHook(event, isStale: isStale)
             }
         ) { [weak self] event, isStale in
             DispatchQueue.main.async {

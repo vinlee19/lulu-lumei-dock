@@ -5,7 +5,7 @@
 **把本地 AI 编码助手装进 macOS 菜单栏的一座「灵动岛」。**
 
 把任务活动实时呈现,配上 ccusage 级精度的用量账本、订阅限额余量,以及会话 / 技能 / agent / 记忆管理、
-操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor**,全在一处。
+操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor · Trae**,全在一处。
 
 `Swift 5.10 + SwiftPM` · `唯一第三方依赖为 Sparkle` · `核心数据留在本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
@@ -48,8 +48,8 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 `lulu-lumei-dock` 是一个原生 macOS 菜单栏应用:它监视本地 AI 编码助手的日志,把任务活动实时装进刘海
 旁的一座「灵动岛」,并提供一个完整面板——用量分析、订阅限额,以及会话 / 技能 / agent / 记忆的管理。
 
-开箱支持十二种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
-Qwen Code、Hermes Agent、CodeBuddy、Qoder、Cursor**,核心功能**零网络**:
+开箱支持十三种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
+Qwen Code、Hermes Agent、CodeBuddy、Qoder、Cursor、Trae**,核心功能**零网络**:
 一切都靠读取本地 transcript / rollout / session / 数据库文件推导。唯一的联网功能是 Claude 订阅限额(非官方
 接口,默认关闭,可在设置里 opt‑in)。此外，更新器默认会访问本仓库的 GitHub Releases feed 检查新版，
 可在「设置 → 关于」关闭。
@@ -97,7 +97,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
   (选「始终允许」)。
 
 **审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带风险标记。
-覆盖 Claude Code 与 Codex(hook/notify 通道),以及 CodeBuddy、Qoder(transcript 扫描)与 Cursor(SQLite 扫描)。
+覆盖 Claude Code 与 Codex(hook/notify 通道)、Trae(hook 通道),以及 CodeBuddy、Qoder(transcript 扫描)与 Cursor(SQLite 扫描)。
 
 **备份** —— 可选:把本地数据备份到 S3 兼容的云存储(SigV4 签名)。
 
@@ -120,6 +120,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅(记忆) |
 | **Qoder** | ✅ | —² | — | ✅ | ✅(记忆/计划) |
 | **Cursor** | ✅³ | ✅(不计费)³ | — | ✅ | ✅ |
+| **Trae** | 仅 hooks⁴ | —⁴ | — | ✅(来自记忆库)⁴ | ✅(技能/记忆/规则/计划) |
 
 ¹ Grok 是订阅制、Antigravity 会话是 protobuf,两者本地都不暴露 per‑request token 账,只能给活动量
 (调用 / 会话)。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
@@ -148,6 +149,35 @@ Cursor 的知识面位置和别家都不一样,单独写清(约定取自 Cursor 
   按 codex 的 `update_plan` 同一套路合成 markdown 清单。
 全文搜索与会话删除同 opencode/Hermes 一样跳过——所有会话共用一个库文件。
 该库里同时存着 `cursorAuth/*` token,**绝不纳入备份**,Cursor 只备份 `~/.cursor/skills`。
+
+⁴ Trae 也是 IDE,而且是**两个各自独立的应用**,本 app 把它们并成同一个来源:
+Trae CN(`~/.trae-cn` + `~/Library/Application Support/Trae CN`)与国际版
+(`~/.trae` + `.../Trae`)。两者并不对称——**只有 CN 版有 hooks 和记忆库**。
+
+它的会话库(`ModularData/ai-agent/database.db`)是 **SQLCipher 加密**的(文件头 16 字节是随机
+salt,`sqlite3` 直接拒绝),而且全机没有任何明文转录。所以**没有消息正文、没有 token 账、
+没有成本、没有限额**——那几列是空的,不是还没做。启用前有两件事值得先知道:
+
+- **实时卡片依赖 hooks,而 hooks 是按账号灰度的。** Trae CN 实现了一套 Claude Code 兼容的
+  hook 运行时(stdin 载荷同为 `hook_event_name` / `session_id` / `cwd` / `tool_input`,输出
+  契约同为 `hookSpecificOutput` / `permissionDecision`),所以在 设置 → 集成 里可以把
+  `eureka-relay trae-hook` 装进 `~/.trae-cn/hooks.json`——opt‑in、只动带自有标记的条目、
+  写前照例备份。**但 hooks 能不能跑是服务端开关**(`dynamicConfig.iCubeApp.hooks.enable`,
+  或 ByteDance scope 账号):没放开时 Trae 连配置文件都不会去读,装了也是空转。判断方法:
+  Trae 自己的设置里能看到 **Hooks** 页就是已放开,看不到就说明装了没用。hooks 不生效时
+  Trae 仍会出现在知识面与会话浏览里,但**永远不上灵动岛**——它是唯一没有转录兜底的来源。
+  Trae 也没有权限请求类 hook 事件,所以「等待授权」对它永远不可见。
+- **会话来自记忆库。** `memory/projects/<encoded>/<YYYYMMDD>/topics.md` 里每个会话有一段带
+  session id 与时间的叙述式摘要,会话列表的标题和时间就来自这里。这份摘要是**异步生成**的,
+  所以有延迟;把 Trae 的记忆功能关掉就完全没有。
+
+知识面位置:技能在 `<dataFolder>/{skills,builtin_skills,builtin/global/skills}` 与
+`<repo>/.trae/skills`(标准 `SKILL.md` frontmatter);记忆在 `~/.trae-cn/memory/`
+(`user_profile.md`、按项目的 `project_memory.md`、按天的 `topics.md`);用户手写规则——
+`user_rules.md`、`user_rules/*.md` 与 `<repo>/.trae/rules/*.md`——归**指令**,绝不并进记忆计数;
+计划在 `<repo>/.trae/documents/plan_*.md`,同 Hermes 一样就地索引而不物化。备份是严格白名单,
+只收上面这三类 markdown:`~/.trae-cn` 本身绝不遍历,因为 `trae-jwt-token` 是 JWT、
+`mcp.json` 可能带 API key。斜杠命令(`<dataFolder>/commands`)不索引——任何来源的都不索引。
 
 ## 快速上手
 

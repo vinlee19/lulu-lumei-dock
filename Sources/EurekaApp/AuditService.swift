@@ -5,7 +5,7 @@ import EurekaStore
 import Foundation
 
 /// 安全审计服务：持有独立 SQLite 连接 + AuditPipeline + Codex/CodeBuddy/Qoder 审计扫描器。
-/// Claude 操作经 EventPipeline 旁路送入（ingestClaude），其余靠定时扫描 jsonl。
+/// Claude 与 Trae 的操作经 EventPipeline 旁路送入（ingestHook），其余靠定时扫描 jsonl。
 /// store/pipeline/scanner 只在内部串行队列上触碰；@Published 只在主线程更新。
 final class AuditService: ObservableObject {
     /// 审计面板当前页（倒序）与总条数
@@ -108,14 +108,15 @@ final class AuditService: ObservableObject {
     }
 
     /// Claude PostToolUse 旁路事件（EventPipeline 队列回调 → 切到审计队列串行处理）
-    func ingestClaude(_ event: AuditEvent, isStale: Bool) {
+    /// hook 通道（Claude / Trae）的 PostToolUse 旁路入口。事件自带 source，此处不区分。
+    func ingestHook(_ event: AuditEvent, isStale: Bool) {
         queue.async { [weak self] in
             guard let self, self.captureEnabled, let pipeline = self.pipeline else { return }
             do {
                 let result = try pipeline.ingest(event, isStale: isStale)
                 if let alert = result.alert { self.emit(alert) }
             } catch {
-                self.publish { $0.lastError = "Claude 审计写入失败: \(error)" }
+                self.publish { $0.lastError = "\(event.source.displayName) 审计写入失败: \(error)" }
             }
         }
     }

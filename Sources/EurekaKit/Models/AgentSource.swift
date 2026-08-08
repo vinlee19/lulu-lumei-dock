@@ -14,6 +14,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case codebuddy
     case qoder
     case cursor
+    case trae
 
     public var displayName: String {
         switch self {
@@ -29,14 +30,16 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         case .codebuddy: return "CodeBuddy"
         case .qoder: return "Qoder"
         case .cursor: return "Cursor"
+        case .trae: return "Trae"
         }
     }
 
     /// 会话是否存在一个**共享数据库文件**里（opencode / hermes 各自只有一个 `.db`，
-    /// cursor 全部会话都在 `state.vscdb` 一个库里）。
+    /// cursor 全部会话都在 `state.vscdb` 一个库里，trae 全部会话都在
+    /// `ModularData/ai-agent/database.db` 一个库里 —— 而且那个库是 SQLCipher 加密的）。
     /// 由此派生两件事：不支持单条删除，且没有「本会话的转录文件」可展示。
     public var usesSharedSessionDatabase: Bool {
-        self == .opencode || self == .hermes || self == .cursor
+        self == .opencode || self == .hermes || self == .cursor || self == .trae
     }
 
     /// 是否支持单条删除会话。共享库的源一律不支持：删文件会连坐全部会话，

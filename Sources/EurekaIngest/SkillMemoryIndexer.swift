@@ -232,6 +232,9 @@ public enum SkillMemoryIndexer {
             roots.append(ProjectScopedRoot(
                 root: root.appendingPathComponent(".qoder/skills", isDirectory: true),
                 source: .qoder, projectName: name))
+            roots.append(ProjectScopedRoot(
+                root: TraePaths.projectSkillsRoot(repoRoot: root),
+                source: .trae, projectName: name))
         }
         return roots
     }
@@ -323,6 +326,9 @@ public enum SkillMemoryIndexer {
         cursorSkillsRoot: URL? = nil,
         codeBuddySkillsRoot: URL? = nil,
         qoderSkillsRoot: URL? = nil,
+        /// trae 的**可写**技能根，两个渠道各一个（`~/.trae-cn/skills`、`~/.trae/skills`）。
+        /// 只读的 `builtin_skills` / `builtin/global/skills` 走 `bundledRoots`。
+        traeSkillsRoots: [URL] = [],
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
     ) -> [SkillEntry] {
@@ -404,6 +410,14 @@ public enum SkillMemoryIndexer {
                 qoderSkillsRoot, source: .qoder, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: qoderSkillsRoot), source: .qoder, enabled: false, scope: .system)
+        }
+        // trae：`<dataFolder>/skills`（SKILL.md 与 Claude 同构：frontmatter 的 name/description）。
+        // 两个渠道（CN / 国际版）可能同时装着，各扫一遍；同名技能在两边是两条，
+        // 因为它们确实是两个应用各自的配置，不该合并计数。
+        for root in traeSkillsRoots {
+            result += scanSkillRoot(root, source: .trae, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: root), source: .trae, enabled: false, scope: .system)
         }
         // hermes：分类目录树，启停看 config.yaml 而非目录位置（详见 scanHermesSkillTree）
         if let hermesSkillsRoot {
@@ -533,6 +547,11 @@ public enum SkillMemoryIndexer {
         hermesHome: URL? = nil,
         codeBuddyMemoryRoot: URL? = nil,
         qoderMemoriesRoot: URL? = nil,
+        /// `~/.trae-cn/memory`（只有 CN 版有记忆库）
+        traeMemoryRoot: URL? = nil,
+        /// trae 各渠道的 dotfile 根（`~/.trae-cn`、`~/.trae`）。用户手写规则有两种形态并存：
+        /// `<root>/user_rules.md` 单文件（Trae 前端叫 legacy）与 `<root>/user_rules/*.md` 目录。
+        traeRulesHomes: [URL] = [],
         projectRoots: [(root: URL, name: String)] = [],
         codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
     ) -> [MemoryEntry] {
@@ -720,6 +739,60 @@ public enum SkillMemoryIndexer {
             }
         }
 
+        // trae 记忆库（**只有 CN 版有**）：
+        //   memory/user_profile.md                        ← 全局用户画像
+        //   memory/projects/<encoded>/project_memory.md   ← 项目记忆
+        //   memory/projects/<encoded>/<YYYYMMDD>/topics.md ← 每日会话话题摘要（只读流水）
+        // 三者都是 Trae 自己写的 → 归**记忆**；用户手写规则在下面单独归**指令**。
+        // 不收 `session_memory_<id>.jsonl`：那是逐回合流水且不是 markdown。
+        if let traeMemoryRoot {
+            add(traeMemoryRoot.appendingPathComponent("user_profile.md"),
+                source: .trae, scope: "全局", kind: .userManaged)
+            let projectsRoot = traeMemoryRoot
+                .appendingPathComponent("projects", isDirectory: true)
+            for projectDir in subdirectories(of: projectsRoot) {
+                let projectName = resolveTraeProjectName(
+                    projectDir: projectDir, knownRoots: projectRoots)
+                let libraryKey = "trae:\(projectDir.lastPathComponent)"
+                add(projectDir.appendingPathComponent("project_memory.md"),
+                    source: .trae, scope: projectName, projectName: projectName,
+                    kind: .userManaged, libraryKey: libraryKey)
+                for dayDir in subdirectories(of: projectDir) {
+                    let topics = dayDir.appendingPathComponent("topics.md")
+                    // 这份摘要覆盖了哪些会话。path 一律 nil —— Trae 没有可跳转的转录文件，
+                    // UI 会据此置灰（同 CLAUDE.md 里「originSessionPath == nil 就置灰」那条）。
+                    let refs = TraeSessionIndexer.parseTopics(fileURL: topics)
+                        .map { MemorySessionRef(sessionId: $0.sessionId, path: nil) }
+                    add(topics, source: .trae,
+                        scope: "\(projectName) · \(dayDir.lastPathComponent)",
+                        projectName: projectName, kind: .generated,
+                        libraryKey: libraryKey, relatedSessions: refs)
+                }
+            }
+        }
+
+        // trae 用户手写规则 → **指令**（两个渠道各自一套，scope 用 dotfile 目录名区分）
+        for home in traeRulesHomes {
+            let scope = home.lastPathComponent
+            add(home.appendingPathComponent("user_rules.md"),
+                source: .trae, scope: scope, kind: .instructions)
+            for file in enumerateMarkdown(
+                home.appendingPathComponent("user_rules", isDirectory: true)) {
+                add(file, source: .trae,
+                    scope: "\(scope) · \(file.deletingPathExtension().lastPathComponent)",
+                    kind: .instructions)
+            }
+        }
+
+        // trae 项目规则 <repo>/.trae/rules/*.md（含旧的单文件名 project_rules.md）→ 指令
+        for (root, name) in projectRoots {
+            for file in enumerateMarkdown(TraePaths.projectRulesRoot(repoRoot: root)) {
+                add(file, source: .trae,
+                    scope: file.deletingPathExtension().lastPathComponent,
+                    projectName: name, kind: .instructions)
+            }
+        }
+
         // cursor 项目规则 <repo>/.cursor/rules/*.mdc（官方 create-rule 技能里的约定）：
         // 这是 Cursor 唯一的本地"记忆"形态——它没有全局记忆目录，`cursor/memoriesEnabled`
         // 指的是服务端记忆。.mdc 就是带 YAML frontmatter 的 markdown，按扩展名单独收。
@@ -783,6 +856,30 @@ public enum SkillMemoryIndexer {
 
     /// **只收直属子级**的 markdown（不进子目录）。
     /// Codex 的 memories 目录用它：那是个混装记忆/会话摘要/扩展/技能的 git 仓库，递归即误收。
+    /// 直属子目录（按名字排序，保证同一次扫描结果稳定）
+    static func subdirectories(of dir: URL) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Trae 记忆库的项目名。目录名是 `<正向编码路径>--p<N>-<hash>`，比 Claude 多一个后缀，
+    /// 所以先剥后缀再走同一套「正向编码已知根再比对」的逻辑（`-` 不可反解，见 CLAUDE.md）。
+    static func resolveTraeProjectName(
+        projectDir: URL, knownRoots: [(root: URL, name: String)]
+    ) -> String {
+        let encoded = projectDir.lastPathComponent
+        let stripped = TraeSessionIndexer.stripProjectSuffix(encoded)
+        for (root, name) in knownRoots {
+            let candidate = encodeProjectDirName(root.standardizedFileURL.path)
+            if candidate == stripped || candidate == encoded { return name }
+        }
+        // 比不中就退回有损的末段启发式 —— 但要用**剥掉后缀之后**的串，
+        // 否则末段会是那串 hash（`friendlyProject` 只取最后一段）。
+        return friendlyProject(fromEncoded: stripped)
+    }
+
     static func enumerateMarkdownShallow(_ dir: URL) -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil)) ?? [])

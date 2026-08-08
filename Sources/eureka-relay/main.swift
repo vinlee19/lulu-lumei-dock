@@ -4,12 +4,18 @@ import Foundation
 //
 // 子命令：
 //   eureka-relay claude-hook            # 读 stdin 的 hook JSON
+//   eureka-relay trae-hook              # 同上（Trae CN 的 hooks 是 Claude 兼容实现）
 //   eureka-relay codex-notify '<json>'  # 读 argv 的 notify JSON
-//   eureka-relay inject --event <名> --session <id> [--source claude|codex]
+//   eureka-relay inject --event <名> --session <id> [--source claude|codex|trae]
 //                       [--cwd <路径>] [--title <文本>]   # 测试注入
 //
 // 硬约束：永远 exit 0；stdout/stderr 绝对静默（UserPromptSubmit 的 stdout 会注入
 // 模型上下文）；全程 <50ms；stdin 限读 1MB。错误只写 relay-error.log。
+//
+// 静默这条对 **Claude / Codex / Trae 三家一视同仁**：三家的 PreToolUse /
+// PermissionRequest 都把 stdout 当放行/拦截决策读（Trae 的 hook 输出契约里明确认
+// `hookSpecificOutput` 与 `permissionDecision`），任何一个字节都可能放行或拦掉
+// 一次工具调用。我们只报告，从不参与决策。
 
 let maxStdinBytes = 1_048_576
 
@@ -153,11 +159,14 @@ func runInject(_ args: [String]) {
     let cwd = options["cwd"] ?? FileManager.default.currentDirectoryPath
     let title = options["title"]
 
+    // --source trae 时走 trae-hook 通道（载荷同形，app 侧只据 channel 判 source）
+    let hookChannel = options["source"] == "trae" ? "trae-hook" : "claude-hook"
+
     func emitClaude(_ extra: [String: Any]) {
         var payload: [String: Any] = ["session_id": session, "cwd": cwd]
         payload.merge(extra) { _, new in new }
         if let data = try? JSONSerialization.data(withJSONObject: payload) {
-            writeEvent(channel: "claude-hook", payloadJSON: data)
+            writeEvent(channel: hookChannel, payloadJSON: data)
         }
     }
 
@@ -215,6 +224,13 @@ case "claude-hook":
     let stdin = readStdin(limit: maxStdinBytes)
     if !stdin.isEmpty {
         writeEvent(channel: "claude-hook", payloadJSON: stdin)
+    }
+case "trae-hook":
+    // Trae CN 的 hook 载荷自带 hook_event_name（不像 Codex 要从 argv 补事件名），
+    // 所以这里与 claude-hook 逐字同构，只换 channel。
+    let stdin = readStdin(limit: maxStdinBytes)
+    if !stdin.isEmpty {
+        writeEvent(channel: "trae-hook", payloadJSON: stdin)
     }
 case "codex-hook":
     // Codex hooks 与 Claude 同样把载荷 JSON 走 stdin 传进来，但**不带事件名**

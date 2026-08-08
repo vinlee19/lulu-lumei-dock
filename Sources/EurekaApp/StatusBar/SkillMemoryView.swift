@@ -198,6 +198,7 @@ struct SkillMemoryView: View {
                 Button("Cursor 技能") { startCreate(.cursor, isSkill: true, "Cursor 技能") }
                 Button("CodeBuddy 技能") { startCreate(.codebuddy, isSkill: true, "CodeBuddy 技能") }
                 Button("Qoder 技能") { startCreate(.qoder, isSkill: true, "Qoder 技能") }
+                Button("Trae 技能") { startCreate(.trae, isSkill: true, "Trae 技能") }
             } else if mode == .memory {
                 Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                 Button("OpenCode 记忆") { startCreate(.opencode, isSkill: false, "OpenCode 记忆") }
@@ -207,12 +208,19 @@ struct SkillMemoryView: View {
                 Button("Qoder 记忆") { startCreate(.qoder, isSkill: false, "Qoder 记忆") }
                 // hermes 记忆 = 固定 memories/MEMORY.md（name 忽略，见 createMemory）
                 Button("Hermes 记忆（MEMORY.md）") { service.createMemory(source: .hermes, name: "MEMORY") }
+                // trae 记忆 = 固定 memory/user_profile.md（只有 CN 版有记忆库，见 createMemory）
+                Button("Trae 记忆（user_profile.md）") {
+                    service.createMemory(source: .trae, name: "user_profile")
+                }
             } else {
                 // 指令文件：这三个 CLI 的"全局记忆"其实就是一份固定名字的指令文件，
                 // 所以创建入口跟着指令页走（Claude 的 CLAUDE.md 由用户自己或 /init 生成，不在这提供）
                 Button("Codex 指令（AGENTS.md）") { service.createMemory(source: .codex, name: "AGENTS") }
                 Button("Kimi 指令（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
                 Button("Gemini 指令（GEMINI.md）") { service.createMemory(source: .gemini, name: "GEMINI") }
+                Button("Trae 指令（user_rules.md）") {
+                    service.createMemory(source: .trae, name: "user_rules")
+                }
             }
         } label: {
             Image(systemName: "plus")

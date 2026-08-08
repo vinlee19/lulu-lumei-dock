@@ -79,6 +79,14 @@ final class CLIToolsService: ObservableObject {
              installCommand: "从 https://cursor.com 下载安装 Cursor（命令行入口在 IDE 内 "
                  + "Cmd+Shift+P → Install 'cursor' command）",
              updateCommand: ""),
+        // Trae 也是 IDE。命令行入口由客户端自己装到 /usr/local/bin：CN 版是 `trae-cn`、
+        // 国际版是 `trae`（两个都可能装着，这里报已装渠道的第一个，CN 优先）。
+        // 应用自身走内置更新器 → updateCommand 留空。
+        Tool(id: "trae", name: "Trae", source: .trae,
+             command: TraePaths.installedChannels().first?.cliCommand ?? "trae-cn",
+             npmPackage: "",
+             installCommand: "从 https://trae.cn（国内）或 https://trae.ai 下载安装 Trae",
+             updateCommand: ""),
     ]
     @Published private(set) var detected = false
 

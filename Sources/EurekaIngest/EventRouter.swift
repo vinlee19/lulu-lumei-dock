@@ -9,6 +9,11 @@ public enum EventRouter {
         case "claude-hook":
             events = ClaudeHookDecoder.decode(payload: raw.payload, receivedAt: raw.receivedAt)
                 .map { [$0] } ?? []
+        case "trae-hook":
+            // Trae CN 的 hooks 是 Claude 兼容实现 → 同一个解码器，只换 source
+            events = ClaudeHookDecoder.decode(
+                payload: raw.payload, receivedAt: raw.receivedAt, source: .trae)
+                .map { [$0] } ?? []
         case "codex-hook":
             events = CodexHookDecoder.decode(payload: raw.payload, receivedAt: raw.receivedAt)
                 .map { [$0] } ?? []

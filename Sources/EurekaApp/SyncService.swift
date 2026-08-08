@@ -236,6 +236,7 @@ final class SyncService: ObservableObject {
                 (root: URL(fileURLWithPath: folder.path, isDirectory: true),
                  category: folder.remoteCategory)
             }
+        roots.traeRoots = Self.traeRoots()
         // 项目级 skill 纳入备份（复用 Skills 页的项目发现；分类 <source>/skills/project/<项目名>）
         roots.projectSkills = SkillMemoryIndexer
             .projectSkillRoots(repoRoots: ProjectScopeDiscovery.repoRoots(resolver: ProjectResolver()))
@@ -323,6 +324,27 @@ final class SyncService: ObservableObject {
             cursorSkills: CursorPaths.skillsRoot(),
             cursorAgents: CursorPaths.agentsRoot(),
             antigravitySkills: AntigravityPaths.userSkillsRoot())
+    }
+
+    /// Trae 可备份的白名单根（技能 / 用户规则 ×已装渠道，加 CN 独有的记忆库）。
+    ///
+    /// ⚠️ 只列这几个具体目录。`~/.trae-cn` 本身有 `trae-jwt-token`（JWT）与 `mcp.json`
+    /// （可能含 API key），`Application Support/Trae CN` 有 Cookies 与 SQLCipher 加密的
+    /// 会话库 —— 任何一个都不能纳入。内置技能（`builtin_skills`、`builtin/global/skills`）
+    /// 随客户端分发、只读，也没有备份价值。
+    static func traeRoots() -> [(root: URL, category: String)] {
+        var result: [(root: URL, category: String)] = []
+        for channel in TraePaths.installedChannels() {
+            let suffix = channel == .cn ? "" : "-intl"
+            result.append((TraePaths.skillsRoot(channel), "trae/skills\(suffix)"))
+            result.append((TraePaths.userRulesDir(channel), "trae/rules\(suffix)"))
+            // 旧版单文件形态，与上面的目录形态并存 → 单点加入（它的父目录有 trae-jwt-token）
+            result.append((TraePaths.userRulesFile(channel), "trae/rules\(suffix)"))
+        }
+        // 记忆库只有 CN 版有（user_profile.md / projects/**/project_memory.md / topics.md）。
+        // markdownOnly 过滤会自动跳过 session_memory_*.jsonl 那些逐回合流水。
+        result.append((TraePaths.memoryRoot(), "trae/memory"))
+        return result
     }
 
     /// 物化 Codex / opencode / Grok / Kimi 计划到暂存目录（Claude 计划本就是 .md，无需物化）。

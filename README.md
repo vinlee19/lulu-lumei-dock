@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor · Trae**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -52,14 +52,16 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with twelve agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, Qoder, and Cursor** — and needs **no network** for its core features: everything is
+It works with thirteen agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
+Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, Qoder, Cursor, and Trae** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session / database files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
 
 It also works **without installing any hooks** — transcript/rollout watchers are the fallback, so
-sessions opened before hooks were installed are still visible.
+sessions opened before hooks were installed are still visible. The one exception is **Trae**, whose
+session database is encrypted and which writes no transcript: hooks are its only live channel (and
+Trae itself gates hooks per account — see the Trae footnote under [Supported agents](#supported-agents)).
 
 ## Features
 
@@ -167,6 +169,7 @@ many concurrent sessions, or late‑night runs.
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅ (memory) |
 | **Qoder** | ✅ | —³ | — | ✅ | ✅ (memory/plans) |
 | **Cursor** | ✅⁴ | ✅ (no cost)⁴ | — | ✅ | ✅ |
+| **Trae** | hooks only⁵ | —⁵ | — | ✅ (from memory)⁵ | ✅ (skills/memory/rules/plans) |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
@@ -225,6 +228,42 @@ out (conventions taken from Cursor's own built-in `create-skill` / `create-rule`
   `update_plan` calls. Full-text search and session deletion are skipped for the
 same reason as opencode/Hermes: every session shares one database file. That database also
 holds `cursorAuth/*` tokens, so it is **never** included in backup — only `~/.cursor/skills` is.
+
+⁵ Trae is an IDE too, and it ships as **two independent installs** that Eureka merges into one
+source: Trae CN (`~/.trae-cn` + `~/Library/Application Support/Trae CN`) and international Trae
+(`~/.trae` + `.../Trae`). They are not symmetric — only CN has hooks and a memory library.
+
+Its session database (`ModularData/ai-agent/database.db`) is **SQLCipher-encrypted** (16-byte
+random salt header; `sqlite3` refuses it), and Trae writes no plaintext transcript anywhere. So:
+**no message bodies, no token accounting, no cost, no rate limits** — those columns are blank on
+purpose, not pending. Two consequences worth knowing before you enable it:
+
+- **Live cards need hooks, and Trae gates hooks per account.** Trae CN implements a
+  Claude-Code-compatible hook runtime (same `hook_event_name` / `session_id` / `cwd` /
+  `tool_input` stdin payload, same `hookSpecificOutput` / `permissionDecision` output contract),
+  so Eureka installs `eureka-relay trae-hook` into `~/.trae-cn/hooks.json` from
+  Settings → Integrations — opt-in, marker-scoped, and backed up first like every other hook
+  edit. **But whether hooks run at all is a server-side flag**
+  (`dynamicConfig.iCubeApp.hooks.enable`, or a ByteDance-scope account): with it off, Trae never
+  even reads the config file, so the integration is inert. If Trae's own Settings shows a
+  **Hooks** page, the feature is open for your account; if it doesn't, installing this does
+  nothing. Without working hooks Trae still shows up in the knowledge surfaces and the session
+  browser, but **never on the island** — it is the one agent with no transcript fallback. Trae
+  has no permission-request hook event either, so "waiting for permission" is never reported
+  for it.
+- **Sessions come from the memory library.** `memory/projects/<encoded>/<YYYYMMDD>/topics.md`
+  carries a per-session narrative summary with its session id and timestamp, which is where the
+  session list's titles and times come from. That summary is generated **asynchronously**, so it
+  lags, and it is empty entirely if you turned Trae's memory feature off.
+
+Knowledge surfaces: skills at `<dataFolder>/{skills,builtin_skills,builtin/global/skills}` and
+`<repo>/.trae/skills` (standard `SKILL.md` frontmatter); memory at `~/.trae-cn/memory/`
+(`user_profile.md`, per-project `project_memory.md`, per-day `topics.md`); user-written rules —
+`user_rules.md`, `user_rules/*.md` and `<repo>/.trae/rules/*.md` — indexed as **instructions**,
+never mixed into the memory count; plans at `<repo>/.trae/documents/plan_*.md`, indexed in place
+like Hermes rather than materialized. Backup is a strict whitelist of exactly those three kinds of
+markdown: `~/.trae-cn` itself is never walked, because `trae-jwt-token` is a JWT and `mcp.json`
+can hold API keys. Slash commands (`<dataFolder>/commands`) are not indexed — no agent's are.
 
 ## Quick start
 

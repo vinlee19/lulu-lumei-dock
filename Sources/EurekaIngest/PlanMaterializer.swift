@@ -619,13 +619,23 @@ public enum PlanMaterializer {
     /// hermesPlansDirs：Hermes 的计划由 `plan` 技能用 write_file 直接写成 .md
     /// （项目内 `<repo>/.hermes/plans/`，profile 级 `~/.hermes/plans/` 可选），
     /// 本就是真文件 → 同 Claude 一样直接索引，**不需要物化**。
+    ///
+    /// traePlansDirs：Trae 的计划是 `<repo>/.trae/documents/plan_<yyyyMMdd>_<HHmmss>.md`，
+    /// 本就是真 markdown → 同 Hermes 一样**直接索引、不物化**（往暂存区抄一份等于把用户
+    /// 仓库里的文件复制进 app 数据目录，没有收益）。同目录还混着别的文档（Trae 的
+    /// `.trae/documents` 不只放计划），所以按 `plan_` 前缀收窄。
     public static func index(
-        claudePlansDir: URL, stagingRoot: URL, hermesPlansDirs: [URL] = []
+        claudePlansDir: URL, stagingRoot: URL, hermesPlansDirs: [URL] = [],
+        traePlansDirs: [URL] = []
     ) -> [PlanEntry] {
         var result: [PlanEntry] = []
         collect(dir: claudePlansDir, source: .claude, into: &result)
         for dir in hermesPlansDirs {
             collect(dir: dir, source: .hermes, into: &result)
+        }
+        for dir in traePlansDirs {
+            collect(dir: dir, source: .trae, into: &result,
+                    nameFilter: { $0.lowercased().hasPrefix("plan_") })
         }
         // 物化暂存源：各自读 sessions.json 边车补 sessionId（kimi/gemini/qwen/qoder 没有边车文件，
         // sessionMap(dir:) 读不到就返回空表，传了也无害）。
@@ -783,12 +793,16 @@ public enum PlanMaterializer {
 
     private static func collect(
         dir: URL, source: AgentSource, into result: inout [PlanEntry],
-        sessionMap: [String: String] = [:]
+        sessionMap: [String: String] = [:],
+        /// 只收文件名满足该判定的 .md。默认全收；Trae 的 `.trae/documents` 里混着别的文档，
+        /// 靠它把范围收到 `plan_*.md`。
+        nameFilter: ((String) -> Bool)? = nil
     ) {
         let fm = FileManager.default
         let items = (try? fm.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? []
-        for url in items where url.pathExtension.lowercased() == "md" {
+        for url in items where url.pathExtension.lowercased() == "md"
+            && (nameFilter?(url.lastPathComponent) ?? true) {
             let values = try? url.resourceValues(
                 forKeys: [.contentModificationDateKey, .fileSizeKey])
             let body = readBody(url) ?? ""

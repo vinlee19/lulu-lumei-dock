@@ -86,6 +86,11 @@ final class SkillMemoryService: ObservableObject {
             // cursor 内置技能 ~/.cursor/skills-cursor（官方分发、随客户端更新，
             // 它自己的 create-skill 技能明写「绝不要往这里写」→ 只读，走 bundled）
             bundledRoots.append((CursorPaths.bundledSkillsRoot(), .cursor))
+            // trae 内置技能有**两处**且内容不同：`builtin_skills`（TRAE-code-review…）与
+            // `builtin/global/skills`（TRAE-computer-use…）。只扫一处会漏一半。
+            for root in TraePaths.bundledSkillsRoots() {
+                bundledRoots.append((root, .trae))
+            }
             let skills = SkillMemoryIndexer.indexSkills(
                 claudeSkillsRoot: SkillMemoryIndexer.claudeSkillsRoot(),
                 codexSkillsRoot: SkillMemoryIndexer.codexSkillsRoot(),
@@ -107,6 +112,8 @@ final class SkillMemoryService: ObservableObject {
                 cursorSkillsRoot: CursorPaths.skillsRoot(),
                 codeBuddySkillsRoot: CodeBuddyPaths.skillsRoot(),
                 qoderSkillsRoot: QoderPaths.skillsRoot(),
+                // CN 与国际版可能同时装着 → 已装渠道各一个可写根
+                traeSkillsRoots: TraePaths.userSkillsRoots(),
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
             let memories = SkillMemoryIndexer.indexMemory(
@@ -121,6 +128,9 @@ final class SkillMemoryService: ObservableObject {
                 hermesHome: HermesPaths.configHome(),
                 codeBuddyMemoryRoot: CodeBuddyPaths.memoryRoot(),
                 qoderMemoriesRoot: QoderPaths.memoriesRoot(),
+                // 记忆库只有 CN 版有；用户手写规则两个渠道都有
+                traeMemoryRoot: TraePaths.memoryRoot(),
+                traeRulesHomes: TraePaths.installedChannels().map { TraePaths.configHome($0) },
                 projectRoots: repoRoots,
                 codexInstructionScopes: codexInstructionScopes)
             let libraries = MemoryLibrary.group(memories)
@@ -341,6 +351,10 @@ final class SkillMemoryService: ObservableObject {
             case .cursor: root = CursorPaths.skillsRoot()
             case .codebuddy: root = CodeBuddyPaths.skillsRoot()
             case .qoder: root = QoderPaths.skillsRoot()
+            case .trae:
+                // 两个渠道都可能装：优先写已装的第一个（CN 在前）；都没装就按 CN 建。
+                // `builtin_skills` / `builtin/global/skills` 随客户端分发，只读，不能往里建。
+                root = TraePaths.userSkillsRoots().first ?? TraePaths.skillsRoot(.cn)
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -463,6 +477,33 @@ final class SkillMemoryService: ObservableObject {
                         at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                     if !FileManager.default.fileExists(atPath: file.path) {
                         try "# GEMINI.md\n\n".write(to: file, atomically: true, encoding: .utf8)
+                    }
+                    ok = true
+                } catch {
+                    self?.report(error)
+                }
+                DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
+                return
+            case .trae:
+                // trae 有两份固定名字的全局文件，靠 name 选（同 codex/kimi/gemini 的做法：
+                // 菜单传一个固定名字进来，不是用户输入的标题）：
+                //   `user_rules` → `<dataFolder>/user_rules.md`（用户手写规则 → 指令页）
+                //   其它        → `~/.trae-cn/memory/user_profile.md`（Trae 自写画像 → 记忆页）
+                // 项目记忆 `memory/projects/<encoded>/project_memory.md` 归属某个仓库，
+                // 不该由这个「新建全局」入口凭空造。
+                // 一律建**空文件**（同 Hermes 的规矩）：两份都是分节扁平文档，塞一个假标题
+                // 进去会污染 Trae 自己的分节解析。记忆库只有 CN 版有，所以画像固定落 CN；
+                // 规则落已装渠道的第一个。
+                let file = Self.slugify(name) == "user-rules" || name == "user_rules"
+                    ? (TraePaths.installedChannels().first.map { TraePaths.userRulesFile($0) }
+                        ?? TraePaths.userRulesFile(.cn))
+                    : TraePaths.userProfileFile()
+                var ok = false
+                do {
+                    try FileManager.default.createDirectory(
+                        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if !FileManager.default.fileExists(atPath: file.path) {
+                        try Data().write(to: file, options: .atomic)
                     }
                     ok = true
                 } catch {

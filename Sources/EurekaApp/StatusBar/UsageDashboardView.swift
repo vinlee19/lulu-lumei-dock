@@ -439,8 +439,11 @@ struct UsageDashboardView: View {
             //   qoder 的 CN 后端 token 全零无用量，故均不入用量；kimi 有真实 token 账 → 自动包含）
             FlowLayout(spacing: 8, lineSpacing: 6) {
                 sourceChip(nil, label: "全部")
+                // 没有 token 记账的源不给 chip（否则永远是空列表）：
+                // grok/antigravity 无本地 token；qoder 的 CN 后端报零；
+                // trae 的会话库经 SQLCipher 加密，本地一个 token 都读不到。
                 ForEach(AgentSource.allCases.filter {
-                    $0 != .grok && $0 != .antigravity && $0 != .qoder
+                    $0 != .grok && $0 != .antigravity && $0 != .qoder && $0 != .trae
                 }, id: \.self) { source in
                     sourceChip(source, label: source.displayName)
                 }
