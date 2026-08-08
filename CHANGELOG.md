@@ -4,6 +4,73 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.23.0] - 2026-08-08
+
+### Added
+
+- **Trae is the thirteenth supported agent.** Both installs are covered as one source: Trae CN
+  (`~/.trae-cn` + `~/Library/Application Support/Trae CN`) and international Trae (`~/.trae` +
+  `.../Trae`). Skills (user, both `builtin_skills` and `builtin/global/skills`, and
+  `<repo>/.trae/skills`), memory, instructions, plans, sessions, project-scoped discovery, the
+  audit trail, cloud backup and the About page's CLI card all cover it, with its own brand mark
+  in TRAE mint (`#32F08C`).
+- **Trae hooks integration** (Settings → Integrations, opt-in, off by default). Trae CN ships a
+  Claude-Code-compatible hook runtime — same `hook_event_name` / `session_id` / `cwd` /
+  `tool_input` stdin payload and the same `hookSpecificOutput` / `permissionDecision` /
+  `additionalContext` / `stopReason` output contract — so `eureka-relay` gained a `trae-hook`
+  subcommand that is byte-for-byte the `claude-hook` path, and `ClaudeHookDecoder` /
+  `ClaudeAuditDecoder` are now parameterised by source instead of duplicated. Managed events:
+  `UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, `PreCompact` and `PostCompact` (the
+  last is Trae-only; it maps to a tool-less heartbeat so the island's "compacting" state clears).
+  The installer follows the same rules as the Claude and Codex ones: only entries carrying the
+  `eureka-relay` marker are added or removed, a shape we cannot parse aborts the write instead of
+  overwriting it, and the original file is backed up to `*.bak.eureka.*` first.
+- **Trae sessions are reconstructed from its plaintext memory library.** Titles and timestamps
+  come from `memory/projects/<encoded>/<YYYYMMDD>/topics.md`, whose blocks are delimited by the
+  next block header rather than by newlines (the real file is a single line with no trailing
+  newline, and consecutive blocks can be adjacent). A session spanning several day directories is
+  merged into one entry, and the summary from the latest `topic_summary_time` wins — not the
+  first directory the filesystem happens to return.
+- `--hooks-status` now also reports Codex hooks and Trae hooks (Codex hooks were missing from
+  this output before), and prints the Trae config path.
+
+### Notes
+
+- **Trae has no token accounting, cost, rate limits or message bodies, by construction.** Its
+  session database (`ModularData/ai-agent/database.db`) is SQLCipher-encrypted — a 16-byte random
+  salt header that `sqlite3` refuses — and Trae writes no plaintext transcript anywhere. It is
+  therefore excluded from the usage chips (like Grok / Antigravity / Qoder) and the session detail
+  page says so rather than showing a blank body. It is also **the only source with no
+  transcript fallback**: without hooks installed, Trae appears in the knowledge surfaces and the
+  session browser but never on the island. Trae has no permission-request hook event either, so
+  "waiting for permission" is never reported for it.
+- **Trae gates hooks per account, so the integration can be inert through no fault of ours.**
+  Whether Trae runs hooks at all is decided by a server-side flag —
+  `dynamicConfig.iCubeApp.hooks.enable === true`, or a ByteDance-scope account — which is the same
+  condition that makes Trae's own **Hooks** settings page visible. With it off, Trae never reads
+  `~/.trae-cn/hooks.json`: the log shows `resolve_hooks_config is_ok=true` followed directly by
+  `UserPromptSubmit hook completed`, with no `Triggering hook: id=` and no
+  `[parse_hooks_config] skipping config file` — our path never appears at all. This was measured on
+  the development machine (scope `marscode`, no `hooks` key in the fetched config) across two real
+  turns, so **the hook path has not been verified end to end**. The two config *paths* are taken
+  from Trae's own code and are certain; the *schema inside the file* is a reasoned guess (Trae's
+  payload and output contract are Claude's, and it can `import_claude_folders`), and the binary also
+  carries `id` / `if_expr` / `exec_env` / `version` / `matcher` field names that Claude has no
+  equivalent for. Getting it wrong is harmless — Trae simply ignores the file — and the settings row
+  says up front that Trae must have hooks open for your account. To verify once the flag flips:
+  install the integration, run one turn, then
+  `grep -E "Triggering hook: id=|Hook execution finished: id=|parse_hooks_config" <ai-agent stdout log>`.
+- **Trae backup is a strict whitelist.** Only skills, `user_rules`(`.md`) and the memory library
+  are enumerated. `~/.trae-cn` itself is never walked, because `trae-jwt-token` is a JWT and
+  `mcp.json` can hold API keys; the Application Support directory is never walked either
+  (Cookies plus that encrypted database). Same rule, same reason as Cursor's `state.vscdb`.
+- The two Trae installs are **not symmetric**: only CN has hooks and a memory library. The
+  international build's `libai_agent.dylib` contains no hooks module at all.
+- Trae's memory directory names carry a `--p<N>-<hash>` suffix on top of Claude's lossy path
+  encoding. The suffix is stripped and the remainder matched by encoding known repo roots
+  *forward*, never by splitting on `-` — adding Trae also caught a real leak in the process, where
+  `ProjectRoots.recentCwds` read the real `~/.trae-cn` during tests.
+
 ## [0.22.0] - 2026-08-06
 
 ### Added
@@ -1171,6 +1238,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.23.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.23.0
 [0.22.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.22.0
 [0.21.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.1
 [0.21.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.0
