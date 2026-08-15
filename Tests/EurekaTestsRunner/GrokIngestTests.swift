@@ -240,7 +240,10 @@ func grokSessionIndexerTests(_ t: TestRunner) {
             to: session.events.deletingLastPathComponent()
                 .appendingPathComponent("chat_history.jsonl"))
 
-        let sessions = GrokSessionIndexer.index(sessionsRoot: session.root)
+        // 窗口必须显式放大：fixture 的 last_active_at 是固定日期（2026-07-09），
+        // 用默认 30 天窗口会随墙钟时间推移把 fixture 滤掉（时间炸弹）
+        let sessions = GrokSessionIndexer.index(
+            sessionsRoot: session.root, window: .greatestFiniteMagnitude)
         try expectEqual(sessions.count, 1)
         try expectEqual(sessions[0].source, .grok)
         try expectEqual(sessions[0].id, "grok-sess-1")
