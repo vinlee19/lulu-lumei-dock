@@ -167,6 +167,9 @@ struct PopoverRootView: View {
         SidebarView(
             selected: navigation.tab,
             limitsBadge: limitsBadge,
+            // 历史徽标 = 当前窗口（近 14 天）条数；0 不显示
+            historyBadge: usageService.recentHistory.isEmpty
+                ? nil : "\(usageService.recentHistory.count)",
             appVersion: appVersion,
             onSelect: { tab in
                 // 用户手动导航即视为放弃未消费的跨页 reveal，收敛残留窗口到一次 reveal 生命周期
@@ -192,7 +195,13 @@ struct PopoverRootView: View {
         case .history:
             HistoryView(
                 tasks: usageService.recentHistory,
-                terminals: sessionBrowser.terminals, settings: settings)
+                dailyOutcomes: usageService.historyDailyOutcomes,
+                tokens: usageService.historyTokens,
+                runningTasks: usageService.runningTasks,
+                terminals: sessionBrowser.terminals,
+                onExport: { usageService.exportHistoryCSV() },
+                exportMessage: usageService.exportMessage,
+                settings: settings)
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings,
                          skillMemory: skillMemoryService, plans: plansService)

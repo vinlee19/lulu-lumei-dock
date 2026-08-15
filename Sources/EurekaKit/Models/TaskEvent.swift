@@ -1,10 +1,19 @@
 import Foundation
 
-/// 任务结束方式
-public enum TaskOutcome: String, Codable, Sendable {
+/// 任务结束方式（CaseIterable：历史页图表图例全量遍历用，顺序即声明顺序）
+public enum TaskOutcome: String, Codable, Sendable, CaseIterable {
     case success
     case error
     case interrupted
+
+    /// 界面文案（历史行结局标签 / 图表图例 / 导出 CSV 共用）
+    public var label: String {
+        switch self {
+        case .success: return "成功"
+        case .error: return "失败"
+        case .interrupted: return "中断"
+        }
+    }
 }
 
 /// 等待原因（Claude Notification 分类）

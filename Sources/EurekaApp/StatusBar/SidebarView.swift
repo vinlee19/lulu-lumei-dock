@@ -13,6 +13,8 @@ struct SidebarView: View {
     let selected: PopoverRootView.Tab
     /// 限额徽标（无数据时 nil）
     let limitsBadge: (text: String, color: Color)?
+    /// 历史条数徽标（0 时 nil；参照限额徽标接法）
+    var historyBadge: String? = nil
     let appVersion: String
     let onSelect: (PopoverRootView.Tab) -> Void
     /// 点击底部品牌区（跳「设置 → 关于」）；渲染器可不传
@@ -48,7 +50,8 @@ struct SidebarView: View {
                         ForEach(group.tabs, id: \.self) { tab in
                             SidebarNavButton(
                                 title: tab.rawValue, icon: tab.icon, tileColor: tab.tileColor,
-                                badge: tab == .limits ? limitsBadge?.text : nil,
+                                badge: tab == .limits ? limitsBadge?.text
+                                    : (tab == .history ? historyBadge : nil),
                                 badgeColor: (tab == .limits ? limitsBadge?.color : nil)
                                     ?? .secondary,
                                 isSelected: selected == tab

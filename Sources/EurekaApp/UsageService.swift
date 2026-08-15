@@ -10,6 +10,12 @@ import Foundation
 final class UsageService: ObservableObject {
     @Published private(set) var summary: UsageSummary?
     @Published private(set) var recentHistory: [FinishedTask] = []
+    /// 近 14 天按 (天, 结局) 的任务计数（历史页堆叠图；无任务的日期不出现，UI 补 0）
+    @Published private(set) var historyDailyOutcomes: [(day: Date, outcome: TaskOutcome, count: Int)] = []
+    /// 历史任务的会话 token 总量（sessionId → totalTokens；行内 Tokens 列用）
+    @Published private(set) var historyTokens: [String: Int] = [:]
+    /// 运行中任务（AppDelegate 状态机推送；历史页置顶「运行中」分组用）
+    @Published private(set) var runningTasks: [AgentTask] = []
     @Published private(set) var lastError: String?
     @Published private(set) var exportMessage: String?
     /// 请求日志当前页（倒序）与总条数（仪表盘分页用）
@@ -593,9 +599,102 @@ final class UsageService: ObservableObject {
         }
     }
 
+    /// 历史页窗口：近 14 天、上限 200 条（替代旧的固定 50 条）
+    private static let historyWindow: TimeInterval = 14 * 86400
+    private static let historyLimit = 200
+
     private func publishHistory(store: EurekaStore) {
-        let history = (try? store.history.recent(limit: 50)) ?? []
-        publish { $0.recentHistory = history }
+        let since = Date().addingTimeInterval(-Self.historyWindow)
+        let history = (try? store.history.tasks(since: since, limit: Self.historyLimit)) ?? []
+        let dailyRows = (try? store.history.dailyOutcomeCounts(since: since)) ?? []
+        // 按会话关联 token 总量（session_id → 四段 token 求和）
+        var tokensBySession: [String: Int] = [:]
+        if let totals = try? store.usage.totalsForSessions(history.map(\.sessionId)) {
+            for (sessionId, rows) in totals {
+                tokensBySession[sessionId] = rows.reduce(0) {
+                    $0 + $1.inputTokens + $1.outputTokens
+                        + $1.cacheReadTokens + $1.cacheCreationTokens
+                }
+            }
+        }
+        let dayFormatter = Self.historyDayFormatter
+        let daily = dailyRows.compactMap { row -> (day: Date, outcome: TaskOutcome, count: Int)? in
+            guard let day = dayFormatter.date(from: row.day),
+                  let outcome = TaskOutcome(rawValue: row.outcome)
+            else { return nil }
+            return (day, outcome, row.count)
+        }
+        publish {
+            $0.recentHistory = history
+            $0.historyDailyOutcomes = daily
+            $0.historyTokens = tokensBySession
+        }
+    }
+
+    /// 历史页按天聚合用的日期解析（dailyOutcomeCounts 的 '%Y-%m-%d' 本地时区串）
+    private static let historyDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    /// 运行中任务推送（AppDelegate 在 .activeTasksChanged 时同步调用，主线程）
+    func publishRunningTasks(_ tasks: [AgentTask]) {
+        runningTasks = tasks
+    }
+
+    /// 导出历史页当前窗口（近 14 天）为 CSV 到 ~/Downloads 并在 Finder 显示。
+    /// 列：结局/标题/来源/项目/开始时间/结束时间/耗时/Tokens（范式同 AuditService.exportCSV）。
+    func exportHistoryCSV() {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            do {
+                let since = Date().addingTimeInterval(-Self.historyWindow)
+                let tasks = try store.history.tasks(since: since, limit: Self.historyLimit)
+                let totals = (try? store.usage.totalsForSessions(
+                    tasks.map(\.sessionId))) ?? [:]
+                let isoFormatter = ISO8601DateFormatter()
+                var csv = "结局,标题,来源,项目,开始时间,结束时间,耗时秒,Tokens\n"
+                for task in tasks {
+                    let tokens = totals[task.sessionId]?.reduce(0) {
+                        $0 + $1.inputTokens + $1.outputTokens
+                            + $1.cacheReadTokens + $1.cacheCreationTokens
+                    }
+                    csv += [
+                        task.outcome.label,
+                        Self.csvField(task.title ?? ""),
+                        task.source.displayName,
+                        Self.csvField(task.projectName ?? ""),
+                        (task.sessionStartedAt ?? task.startedAt)
+                            .map { isoFormatter.string(from: $0) } ?? "",
+                        isoFormatter.string(from: task.finishedAt),
+                        task.duration.map { String(format: "%.0f", $0) } ?? "",
+                        tokens.map(String.init) ?? "",
+                    ].joined(separator: ",") + "\n"
+                }
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyyMMdd-HHmmss"
+                let url = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(
+                        "Downloads/eureka-history-\(formatter.string(from: Date())).csv")
+                try Data(csv.utf8).write(to: url)
+                self.publish {
+                    $0.exportMessage = "已导出 \(url.lastPathComponent)（\(tasks.count) 条）"
+                }
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            } catch {
+                self.publish { $0.exportMessage = "导出失败: \(error)" }
+            }
+        }
+    }
+
+    /// CSV 字段转义（含逗号/引号/换行时加引号）
+    private static func csvField(_ raw: String) -> String {
+        guard raw.contains(",") || raw.contains("\"") || raw.contains("\n") else { return raw }
+        return "\"" + raw.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
     private func publish(_ apply: @escaping (UsageService) -> Void) {

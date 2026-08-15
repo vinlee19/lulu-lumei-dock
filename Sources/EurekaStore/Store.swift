@@ -87,18 +87,52 @@ public final class TaskHistoryRepo {
                finished_at, outcome, detail
         FROM task_history ORDER BY finished_at DESC LIMIT ?
         """, [.int(Int64(limit))]) { row in
-            FinishedTask(
-                source: AgentSource(rawValue: row.text(0) ?? "") ?? .claude,
-                sessionId: row.text(1) ?? "",
-                title: row.text(2),
-                cwd: row.text(3),
-                startedAt: row.date(4),
-                sessionStartedAt: row.date(5),
-                finishedAt: row.date(6) ?? Date(),
-                outcome: TaskOutcome(rawValue: row.text(7) ?? "") ?? .success,
-                detail: row.text(8)
-            )
+            Self.rowToTask(row)
         }
+    }
+
+    /// 区间内任务列表（finished_at >= since，倒序；历史页 14 天窗口用）。
+    /// `recent(limit:)` 保留：周报表等调用方口径不变。
+    public func tasks(since: Date, limit: Int) throws -> [FinishedTask] {
+        try db.query("""
+        SELECT source, session_id, title, cwd, started_at, session_started_at,
+               finished_at, outcome, detail
+        FROM task_history WHERE finished_at >= ?
+        ORDER BY finished_at DESC LIMIT ?
+        """, [.date(since), .int(Int64(limit))]) { row in
+            Self.rowToTask(row)
+        }
+    }
+
+    /// 按天×结局聚合计数（本地时区界；历史页「近 14 天任务量」堆叠图用）。
+    /// SQL 范式同 UsageRepo.dailyRows；无任务的日期不出现，补 0 由 UI 层处理。
+    public func dailyOutcomeCounts(
+        since: Date
+    ) throws -> [(day: String, outcome: String, count: Int)] {
+        try db.query("""
+        SELECT strftime('%Y-%m-%d', finished_at, 'unixepoch', 'localtime') AS day,
+               outcome, COUNT(*)
+        FROM task_history
+        WHERE finished_at >= ?
+        GROUP BY day, outcome
+        ORDER BY day
+        """, [.date(since)]) { row in
+            (row.text(0) ?? "", row.text(1) ?? "", Int(row.int(2)))
+        }
+    }
+
+    private static func rowToTask(_ row: SQLiteRow) -> FinishedTask {
+        FinishedTask(
+            source: AgentSource(rawValue: row.text(0) ?? "") ?? .claude,
+            sessionId: row.text(1) ?? "",
+            title: row.text(2),
+            cwd: row.text(3),
+            startedAt: row.date(4),
+            sessionStartedAt: row.date(5),
+            finishedAt: row.date(6) ?? Date(),
+            outcome: TaskOutcome(rawValue: row.text(7) ?? "") ?? .success,
+            detail: row.text(8)
+        )
     }
 }
 

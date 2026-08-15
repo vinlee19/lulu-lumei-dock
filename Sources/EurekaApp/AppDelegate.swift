@@ -481,7 +481,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     notificationService.postEvent(note)
                 }
             case .activeTasksChanged:
-                break
+                // 历史页「运行中」分组：与 IslandViewModel 同路径同步推一份给 UsageService
+                usageService.publishRunningTasks(store.sortedActiveTasks)
             }
         }
         island.viewModel.updateActiveTasks(
