@@ -228,6 +228,46 @@ public enum AgentDefinitionIndexer {
         }
     }
 
+    /// ZCode 子代理 profile：内置在 CLI 二进制里、磁盘无定义文件，但每次派生子代理都会把
+    /// `profileSnapshot`（name/description/tools/color）写进运行记录
+    /// `~/.zcode/cli/agents/<sess>/agent_*/metadata.json` → 聚合真实观测到的快照展示
+    /// （只列跑过的 profile，不猜静态清单）。同 profileId 取最近一次快照。
+    public static func indexZcodeObservedAgents(agentsRoot: URL) -> [AgentDefinition] {
+        let fm = FileManager.default
+        let sessionDirs = (try? fm.contentsOfDirectory(
+            at: agentsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        // profileId → (快照定义, 观测时间)，同 id 保留最近一次
+        var latest: [String: (definition: AgentDefinition, observedAt: Date)] = [:]
+        for sessionDir in sessionDirs {
+            let agentDirs = (try? fm.contentsOfDirectory(
+                at: sessionDir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            for dir in agentDirs where dir.lastPathComponent.hasPrefix("agent_") {
+                let metaURL = dir.appendingPathComponent("metadata.json")
+                guard let data = try? Data(contentsOf: metaURL),
+                      let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      let profile = root["profileSnapshot"] as? [String: Any]
+                else { continue }
+                let name = (profile["name"] as? String)
+                    ?? (root["profileId"] as? String) ?? "subagent"
+                let key = (root["profileId"] as? String) ?? name
+                let observedAt = ZcodeRolloutDecoder.parseISO(root["createdAt"] as? String)
+                    ?? .distantPast
+                if let existing = latest[key], existing.observedAt >= observedAt { continue }
+                latest[key] = (AgentDefinition(
+                    source: .zcode,
+                    name: name,
+                    description: (profile["description"] as? String)
+                        .flatMap { $0.isEmpty ? nil : $0 },
+                    tools: (profile["tools"] as? [String]) ?? [],
+                    color: (profile["color"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                    builtin: true, path: "", enabled: true,
+                    sizeBytes: 0, modifiedAt: observedAt), observedAt)
+            }
+        }
+        return latest.values.map(\.definition)
+            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
     /// Kimi Code 内置 subagent profile 静态清单：编译内嵌于 CLI 二进制（profile/default/*.yaml），
     /// 磁盘上无用户自定义 agent 约定 → 只读展示，随 Kimi Code 版本可能变化。
     public static func builtinKimiAgents() -> [AgentDefinition] {

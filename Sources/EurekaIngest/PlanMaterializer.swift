@@ -624,9 +624,12 @@ public enum PlanMaterializer {
     /// 本就是真 markdown → 同 Hermes 一样**直接索引、不物化**（往暂存区抄一份等于把用户
     /// 仓库里的文件复制进 app 数据目录，没有收益）。同目录还混着别的文档（Trae 的
     /// `.trae/documents` 不只放计划），所以按 `plan_` 前缀收窄。
+    ///
+    /// zcodePlansDirs：ZCode 的计划是 `<repo>/.zcode/plans/plan-sess_<会话id>.md`，
+    /// 同 Hermes 直接索引；会话 id 内嵌在文件名里，无需边车即可关联。
     public static func index(
         claudePlansDir: URL, stagingRoot: URL, hermesPlansDirs: [URL] = [],
-        traePlansDirs: [URL] = []
+        traePlansDirs: [URL] = [], zcodePlansDirs: [URL] = []
     ) -> [PlanEntry] {
         var result: [PlanEntry] = []
         collect(dir: claudePlansDir, source: .claude, into: &result)
@@ -636,6 +639,14 @@ public enum PlanMaterializer {
         for dir in traePlansDirs {
             collect(dir: dir, source: .trae, into: &result,
                     nameFilter: { $0.lowercased().hasPrefix("plan_") })
+        }
+        for dir in zcodePlansDirs {
+            collect(dir: dir, source: .zcode, into: &result,
+                    nameFilter: { $0.lowercased().hasPrefix("plan-") },
+                    sessionIdFromName: { name in
+                        let stem = String(name.dropFirst("plan-".count).dropLast(".md".count))
+                        return stem.hasPrefix("sess_") ? stem : nil
+                    })
         }
         // 物化暂存源：各自读 sessions.json 边车补 sessionId（kimi/gemini/qwen/qoder 没有边车文件，
         // sessionMap(dir:) 读不到就返回空表，传了也无害）。
@@ -796,7 +807,10 @@ public enum PlanMaterializer {
         sessionMap: [String: String] = [:],
         /// 只收文件名满足该判定的 .md。默认全收；Trae 的 `.trae/documents` 里混着别的文档，
         /// 靠它把范围收到 `plan_*.md`。
-        nameFilter: ((String) -> Bool)? = nil
+        nameFilter: ((String) -> Bool)? = nil,
+        /// 由文件名直接推导会话 id（zcode 的 `plan-sess_<id>.md` 内嵌会话 id，无需边车）；
+        /// sessionMap 命中时优先。
+        sessionIdFromName: ((String) -> String?)? = nil
     ) {
         let fm = FileManager.default
         let items = (try? fm.contentsOfDirectory(
@@ -818,7 +832,8 @@ public enum PlanMaterializer {
                 stepsDone: check.done, stepsTotal: check.total,
                 status: deriveStatus(done: check.done, total: check.total),
                 summary: PlanParsing.summary(body),
-                sessionId: sessionMap[url.lastPathComponent]))
+                sessionId: sessionMap[url.lastPathComponent]
+                    ?? sessionIdFromName?(url.lastPathComponent)))
         }
     }
 

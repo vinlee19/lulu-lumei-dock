@@ -165,7 +165,7 @@ struct AgentsView: View {
         return map
     }
 
-    /// 全部子代理（Claude 用户/项目/插件/内置 + OpenCode + Grok + Kimi 内置 + Codex profile）
+    /// 全部子代理（Claude 用户/项目/插件/内置 + OpenCode + Grok + Kimi 内置 + ZCode 快照 + Codex profile）
     private var allItems: [AgentItem] {
         let calls = callsByKey
         func item(_ agent: AgentDefinition) -> AgentItem {
@@ -189,6 +189,7 @@ struct AgentsView: View {
         items += service.grokAgents.map(item)
         items += service.cursorAgents.map(item)
         items += service.kimiBuiltinAgents.map(item)
+        items += service.zcodeAgents.map(item)
         items += service.codexProfiles.map { profile in
             AgentItem(
                 id: "codex:\(profile.name)", source: .codex, name: profile.name, description: nil,

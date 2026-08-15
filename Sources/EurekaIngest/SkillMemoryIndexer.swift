@@ -235,6 +235,10 @@ public enum SkillMemoryIndexer {
             roots.append(ProjectScopedRoot(
                 root: TraePaths.projectSkillsRoot(repoRoot: root),
                 source: .trae, projectName: name))
+            for skillsRoot in ZcodePaths.projectSkillsRoots(repoRoot: root) {
+                roots.append(ProjectScopedRoot(
+                    root: skillsRoot, source: .zcode, projectName: name))
+            }
         }
         return roots
     }

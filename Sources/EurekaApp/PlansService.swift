@@ -66,9 +66,12 @@ final class PlansService: ObservableObject {
             hermesPlansDirs += repoRoots.map { HermesPaths.projectPlansDir(repoRoot: $0.root) }
             // Trae 计划：<repo>/.trae/documents/plan_*.md，同样是真 .md，无需物化
             let traePlansDirs = repoRoots.map { TraePaths.projectDocumentsRoot(repoRoot: $0.root) }
+            // ZCode 计划：<repo>/.zcode/plans/plan-sess_*.md，真 .md，会话 id 内嵌在文件名
+            let zcodePlansDirs = repoRoots.map { ZcodePaths.projectPlansDir(repoRoot: $0.root) }
             var entries = PlanMaterializer.index(
                 claudePlansDir: PlanMaterializer.defaultClaudePlansDir(), stagingRoot: staging,
-                hermesPlansDirs: hermesPlansDirs, traePlansDirs: traePlansDirs)
+                hermesPlansDirs: hermesPlansDirs, traePlansDirs: traePlansDirs,
+                zcodePlansDirs: zcodePlansDirs)
             entries += PlanMaterializer.indexProjectPlans(roots: repoRoots)
             DispatchQueue.main.async {
                 self.all = entries

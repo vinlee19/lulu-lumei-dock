@@ -19,6 +19,8 @@ final class AgentConfigService: ObservableObject {
     @Published private(set) var builtinAgents: [AgentDefinition] = []
     /// Kimi Code 内置 subagent profile（编译内嵌，只读；磁盘无用户自定义约定）
     @Published private(set) var kimiBuiltinAgents: [AgentDefinition] = []
+    /// ZCode 子代理 profile（运行记录 profileSnapshot 聚合，只读；磁盘无定义文件）
+    @Published private(set) var zcodeAgents: [AgentDefinition] = []
     @Published private(set) var codexProfiles: [CodexProfile] = []
     @Published private(set) var scanning = false
     /// 扫描中的阶段文案；扫完置 nil（列表已有数据时搜索框的小 spinner 太不显眼）
@@ -39,6 +41,7 @@ final class AgentConfigService: ObservableObject {
     private var allPluginAgents: [AgentDefinition] = []
     private var allBuiltinAgents: [AgentDefinition] = []
     private var allKimiBuiltinAgents: [AgentDefinition] = []
+    private var allZcodeAgents: [AgentDefinition] = []
     private var allProfiles: [CodexProfile] = []
 
     private var codexConfigURL: URL { EurekaCLI.codexConfigURL }
@@ -90,6 +93,8 @@ final class AgentConfigService: ObservableObject {
                 pluginsRoot: AgentDefinitionIndexer.claudePluginsRoot())
             let builtinAgents = AgentDefinitionIndexer.builtinClaudeAgents()
             let kimiBuiltins = AgentDefinitionIndexer.builtinKimiAgents()
+            let zcodeAgents = AgentDefinitionIndexer.indexZcodeObservedAgents(
+                agentsRoot: ZcodePaths.agentsRoot())
             let profiles = CodexProfileEditor.read(from: ConfigFile.read(self.codexConfigURL))
             DispatchQueue.main.async {
                 self.allAgents = agents
@@ -99,6 +104,7 @@ final class AgentConfigService: ObservableObject {
                 self.allPluginAgents = pluginAgents
                 self.allBuiltinAgents = builtinAgents
                 self.allKimiBuiltinAgents = kimiBuiltins
+                self.allZcodeAgents = zcodeAgents
                 self.allProfiles = profiles
                 self.scanning = false
                 self.scanPhase = nil
@@ -118,6 +124,7 @@ final class AgentConfigService: ObservableObject {
             pluginAgents = allPluginAgents
             builtinAgents = allBuiltinAgents
             kimiBuiltinAgents = allKimiBuiltinAgents
+            zcodeAgents = allZcodeAgents
             codexProfiles = allProfiles
             return
         }
@@ -133,6 +140,7 @@ final class AgentConfigService: ObservableObject {
         pluginAgents = allPluginAgents.filter(matchAgent)
         builtinAgents = allBuiltinAgents.filter(matchAgent)
         kimiBuiltinAgents = allKimiBuiltinAgents.filter(matchAgent)
+        zcodeAgents = allZcodeAgents.filter(matchAgent)
         codexProfiles = allProfiles.filter {
             [$0.name, $0.model, $0.personality, $0.reasoningEffort]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)

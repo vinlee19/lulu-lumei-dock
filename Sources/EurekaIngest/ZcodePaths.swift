@@ -76,6 +76,18 @@ public enum ZcodePaths {
         return home().appendingPathComponent(".agents/skills", isDirectory: true)
     }
 
+    /// 项目级计划目录 `<repo>/.zcode/plans`：plan mode 写 `plan-sess_<会话id>.md`，
+    /// 真 markdown → 同 Hermes 一样直接索引、不物化（无全局 plans 目录）。
+    public static func projectPlansDir(repoRoot: URL) -> URL {
+        repoRoot.appendingPathComponent(".zcode/plans", isDirectory: true)
+    }
+
+    /// 项目级技能根：ZCode 官方约定 `<repo>/.zcode/skills` 与共享的 `<repo>/.agents/skills` 都认
+    public static func projectSkillsRoots(repoRoot: URL) -> [URL] {
+        [repoRoot.appendingPathComponent(".zcode/skills", isDirectory: true),
+         repoRoot.appendingPathComponent(".agents/skills", isDirectory: true)]
+    }
+
     /// 模型目录 `~/.zcode/v2/config.json`（env `EUREKA_ZCODE_MODEL_CONFIG`）。
     /// 每个 provider 的 models.<型号>.limit.context 是 ctx% 分母的权威来源
     /// （GLM-5.3/5.2 = 1M、GLM-5-Turbo = 200K，随版本更新由 ZCode 自己维护）。
