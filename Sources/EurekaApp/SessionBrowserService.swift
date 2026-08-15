@@ -90,6 +90,8 @@ final class SessionBrowserService: ObservableObject {
     @Published private(set) var transcript: [TranscriptMessage] = []
     @Published private(set) var transcriptTruncated = false
     @Published private(set) var transcriptLoading = false
+    /// 当前会话的上下文用量分类拆解（transcript 加载完成后异步估算；trae/antigravity 恒 nil）
+    @Published private(set) var contextBreakdown: ContextBreakdown?
     @Published var sortMode: SortMode = .time {
         didSet { rebuild() }
     }
@@ -373,6 +375,11 @@ final class SessionBrowserService: ObservableObject {
 
     // MARK: - 选中与对话记录
 
+    /// 会话×模型聚合一行的 token 合计（选窗口模型用，口径同 costs）
+    private static func totalTokens(_ row: UsageTotals) -> Int {
+        row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheCreationTokens
+    }
+
     /// 跨页签跳转：按 id 选中会话（索引未就绪时记下，refresh 完成后自动选中）
     func reveal(sessionId: String) {
         if let hit = sessionsById[sessionId] {
@@ -388,15 +395,32 @@ final class SessionBrowserService: ObservableObject {
         selected = session
         transcript = []
         transcriptTruncated = false
+        contextBreakdown = nil  // 切会话即清空，估算完成后按 id 校验回填
         guard let session else { return }
         transcriptLoading = true
         queue.async { [weak self] in
             let result = TranscriptReader.load(session: session)
+            // 上下文用量估算：trae/antigravity 正文不可得，直接 nil
+            var breakdown: ContextBreakdown?
+            if session.source != .trae && session.source != .antigravity {
+                self?.loadStoreIfNeeded()
+                // 窗口大小按该会话 token 最多的模型取；无记录则 nil → 默认窗口
+                let rows = (try? self?.store?.usage.totalsForSessions([session.id]))?[session.id] ?? []
+                let model = rows.max(by: { Self.totalTokens($0) < Self.totalTokens($1) })?.model
+                breakdown = ContextBreakdownEstimator.estimate(
+                    source: session.source,
+                    cwd: session.cwd,
+                    messages: result.messages,
+                    model: model,
+                    lastTurnTotalTokens: LastTurnUsageReader.lastContextTokens(
+                        source: session.source, transcriptPath: session.transcriptPath))
+            }
             DispatchQueue.main.async {
                 guard let self, self.selected?.id == session.id else { return }
                 self.transcript = result.messages
                 self.transcriptTruncated = result.truncated
                 self.transcriptLoading = false
+                self.contextBreakdown = breakdown
             }
         }
     }

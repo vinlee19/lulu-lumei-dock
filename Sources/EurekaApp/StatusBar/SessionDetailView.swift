@@ -36,6 +36,12 @@ struct SessionDetailView: View {
                 VStack(spacing: 0) {
                     header(session)
                     overviewCard(session)
+                    // 上下文用量卡片：nil（trae/antigravity/未算完）时不渲染；
+                    // .id 让切会话时折叠态归零（同 artifactsExpanded 的防护思路）
+                    if let breakdown = service.contextBreakdown {
+                        ContextUsageCard(breakdown: breakdown)
+                            .id(session.id)
+                    }
                     searchBar
                     Divider()
                     HStack(spacing: 0) {

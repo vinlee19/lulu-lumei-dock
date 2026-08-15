@@ -458,6 +458,29 @@ enum Theme {
         }
     }
 
+    // MARK: - 上下文用量类目色（会话详情页「上下文用量」卡片：堆叠条段 + 图例点共用）
+
+    /// 五类目配色：classic / 配色主题 = 参考图青绿/黄/紫/浅蓝/蓝紫（深浅各一组）；
+    /// brutal = 平色荧光系 cyan/黄/紫/蓝/绿（深浅同值，平色不渐变）。
+    static func contextCategoryColor(_ category: ContextBreakdown.Category) -> Color {
+        if ThemeStyle.current.isHardEdged {
+            switch category {
+            case .systemPrompt: return Color(hex: "27CCF3")  // cyan
+            case .tools: return Color(hex: "F5C518")         // 黄
+            case .messages: return Color(hex: "B98CFF")      // 紫
+            case .mcp: return Color(hex: "6C9EF8")           // 蓝
+            case .skills: return Color(hex: "A9D877")        // 绿
+            }
+        }
+        switch category {
+        case .systemPrompt: return dynamic(light: hexRGB("2FA98C"), dark: hexRGB("5CCBAD"))
+        case .tools: return dynamic(light: hexRGB("D9A62E"), dark: hexRGB("E8C25C"))
+        case .messages: return dynamic(light: hexRGB("7C5CFC"), dark: hexRGB("9D8AFA"))
+        case .mcp: return dynamic(light: hexRGB("5BA8D9"), dark: hexRGB("7FC2E8"))
+        case .skills: return dynamic(light: hexRGB("6B6BD6"), dark: hexRGB("8F8FE8"))
+        }
+    }
+
     // MARK: - 角色 / 计划状态语义色（紫金稿）
 
     /// 子代理角色标识色（palette「角色 · Agents」；实现=品牌紫，其余取 palette 固定值）

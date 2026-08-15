@@ -101,5 +101,7 @@ syncCompositionTests(t)
 codexHooksTests(t)
 projectRootsTests(t)
 knowledgeLinkTests(t)
+contextBreakdownTests(t)
+historyPageTests(t)
 
 t.finish()
