@@ -4,6 +4,18 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.26.2] - 2026-08-15
+
+### Fixed
+
+- **Large blank gaps inside the history day groups.** A running session's merged
+  history row shares its identity (`source:sessionId`) with the pinned running row,
+  and duplicate identities inside one `LazyVStack` make SwiftUI render the later
+  occurrence as an invisible placeholder — a big stretch of empty space in the
+  middle of the group. Day groups now exclude sessions that are currently running
+  (they are already pinned on top); their history rows return once the session
+  stops.
+
 ## [0.26.1] - 2026-08-15
 
 ### Fixed
@@ -1360,6 +1372,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.26.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.2
 [0.26.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.1
 [0.26.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.0
 [0.25.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.1
