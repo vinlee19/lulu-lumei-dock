@@ -10,9 +10,26 @@ public enum ContextWindows {
     static let builtin: [String: Int] = [
         // 用户主力模型为 1M 窗口
         "claude-fable": 1_000_000,
+        // 企业版账号服务端解锁 Opus 1M（本地无痕：settings/transcript 均无标记），
+        // 按用户实况收录在用的 opus-5 / opus-4-8；旧 opus（4-1 等 200K 标准档）不落表
+        "claude-opus-5": 1_000_000,
+        "claude-opus-4-8": 1_000_000,
         // Gemini 2.5/3 全系官方 1M 窗口（前缀匹配，gemini-3-pro 等也能命中）
         "gemini-2.5": 1_000_000,
         "gemini-3": 1_000_000,
+        // Kimi K3 官方最高 1M（平台配置值 1048576）；k3-256k 是 256K 档位变体，
+        // 靠最长前缀优先命中，-256k 条目必须与短前缀同时存在。
+        // 注意：实际可用窗口随 Kimi Code 订阅档位降档（部分档位仅 256K），
+        // 此处记模型上限，档位差异由用户用 context-windows.json 覆盖。
+        "kimi-code/k3-256k": 262_144,
+        "kimi-k3-256k": 262_144,
+        "k3-256k": 262_144,
+        "kimi-code/k3": 1_048_576,
+        "kimi-k3": 1_048_576,
+        "k3": 1_048_576,
+        // Kimi K2 系（k2.5/k2.6/k2.7-code/k2-thinking 等）官方均为 256K（262144）
+        "kimi-code/k2": 262_144,
+        "kimi-k2": 262_144,
         // glm/qwen 等暂无官方确数，刻意不收录——落到 defaultWindow，待官方数据再补
     ]
 

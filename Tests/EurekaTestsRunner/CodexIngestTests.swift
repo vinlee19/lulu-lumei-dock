@@ -372,12 +372,15 @@ func contextEstimatorTests(_ t: TestRunner) {
 
     t.test("ContextWindows：前缀匹配 + 覆盖优先 + 默认 200k") {
         try expectEqual(ContextWindows.window(forModel: "claude-fable-5"), 1_000_000)
-        try expectEqual(ContextWindows.window(forModel: "claude-haiku-4-5"), 200_000)
-        try expectEqual(ContextWindows.window(forModel: nil), 200_000)
-        ContextWindows.overrides = ["claude-opus-4-8": 1_000_000]
-        defer { ContextWindows.overrides = [:] }
+        // 企业版 1M 实况收录：opus-5 / opus-4-8 → 1M；旧 opus 仍走默认
+        try expectEqual(ContextWindows.window(forModel: "claude-opus-5"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "claude-opus-4-8"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "claude-opus-4-1"), 200_000)
+        try expectEqual(ContextWindows.window(forModel: "claude-haiku-4-5"), 200_000)
+        try expectEqual(ContextWindows.window(forModel: nil), 200_000)
+        ContextWindows.overrides = ["claude-haiku-4-5": 500_000]
+        defer { ContextWindows.overrides = [:] }
+        try expectEqual(ContextWindows.window(forModel: "claude-haiku-4-5"), 500_000)
     }
 
     t.test("ContextWindows：gemini-2.5/3 → 1M；glm/qwen 刻意落默认 200k") {
@@ -397,6 +400,26 @@ func contextEstimatorTests(_ t: TestRunner) {
         // percent 口径：used ÷ 命中窗口
         try expectEqual(ContextWindows.percent(used: 250_000, model: "gemini-2.5-pro"), 25.0)
         try expectEqual(ContextWindows.percent(used: 250_000, model: "glm-5.2"), 125.0)
+    }
+
+    t.test("ContextWindows：kimi k3 → 1M，k3-256k / k2 系 → 256K（最长前缀优先）") {
+        // 线上真实模型 ID（usage_records 实测）：kimi-code/k3、kimi-k3、k3 → 1M
+        try expectEqual(ContextWindows.window(forModel: "kimi-code/k3"), 1_048_576)
+        try expectEqual(ContextWindows.window(forModel: "kimi-k3"), 1_048_576)
+        try expectEqual(ContextWindows.window(forModel: "k3"), 1_048_576)
+        // 256K 档位变体必须压过短前缀
+        try expectEqual(ContextWindows.window(forModel: "kimi-code/k3-256k"), 262_144)
+        try expectEqual(ContextWindows.window(forModel: "kimi-k3-256k"), 262_144)
+        try expectEqual(ContextWindows.window(forModel: "k3-256k"), 262_144)
+        // K2 系（含 k2.7-code）官方 256K
+        try expectEqual(ContextWindows.window(forModel: "kimi-k2.7-code"), 262_144)
+        try expectEqual(ContextWindows.window(forModel: "kimi-k2-thinking"), 262_144)
+        // 订阅档位降档由用户覆盖接管（覆盖优先于内建）
+        ContextWindows.overrides = ["kimi-code/k3": 262_144]
+        defer { ContextWindows.overrides = [:] }
+        try expectEqual(ContextWindows.window(forModel: "kimi-code/k3"), 262_144)
+        let pct = ContextWindows.percent(used: 500_000, model: "kimi-k3")
+        try expect(abs(pct - 47.68) < 0.01, "got \(pct)")
     }
 
     t.test("synthetic 错误行（usage 全零）不参与估算") {
