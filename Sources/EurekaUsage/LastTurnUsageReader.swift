@@ -41,22 +41,60 @@ public enum LastTurnUsageReader {
     /// zcode：rollout（`model-io-sess_<id>.jsonl`）末条 `response.usage` 的
     /// inputTokens + outputTokens（OpenAI 口径：inputTokens 已含缓存读，两者之和
     /// = 文件自带 totalTokens = 官方「上下文容量」分子）。模型名一并带回
-    /// （response.modelId 回退 model.modelId，小写化），供 v2/config.json 查窗口分母。
+    /// （model.modelId 与 response.modelId 值等价、统一小写），供 v2/config.json
+    /// 查窗口分母——不依赖账本行，账本 60s tick 未到时分母也能查对。
+    ///
+    /// ⚠️ 不能走 readTail/逐行 JSON：zcode 每行内嵌完整 `request.body.messages`
+    /// （实测单行 25 万~47 万字节，64KB 尾窗连一根完整行都盖不住）。改为从尾部
+    /// 按块回退（256KB 起、×4 递增、上限 16MB），字节级找最后一个结构性
+    /// `"usage":{"inputTokens":` 片段——JSON 字符串里的引号必被转义，裸片段
+    /// 只可能是真实结构，不会误中对话正文。
     public static func lastZcodeContext(rolloutPath: String) -> (model: String?, tokens: Int)? {
-        guard let tail = readTail(path: rolloutPath) else { return nil }
-        for line in tail.reversed() {
-            guard let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
-                  root["type"] as? String == "model_io",
-                  let response = root["response"] as? [String: Any],
-                  let usage = response["usage"] as? [String: Any],
-                  let input = usage["inputTokens"] as? Int, input > 0
+        guard let handle = FileHandle(forReadingAtPath: rolloutPath) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd(), size > 0 else { return nil }
+        var window: UInt64 = 256 * 1024
+        let maxWindow: UInt64 = 16 * 1024 * 1024
+        while true {
+            let length = min(window, size)
+            guard (try? handle.seek(toOffset: size - length)) != nil,
+                  let data = try? handle.read(upToCount: Int(length))
+            else { return nil }
+            if let hit = lastZcodeUsageSnippet(in: data) { return hit }
+            if length == size || window >= maxWindow { return nil }
+            window *= 4
+        }
+    }
+
+    /// 字节块里从后往前找 usage 片段并解析（平铺对象，到第一个 `}` 截断）
+    static func lastZcodeUsageSnippet(in data: Data) -> (model: String?, tokens: Int)? {
+        let marker = Data("\"usage\":{\"inputTokens\":".utf8)
+        var searchUpper = data.endIndex
+        while searchUpper > data.startIndex,
+              let range = data.range(
+                of: marker, options: .backwards, in: data.startIndex..<searchUpper) {
+            searchUpper = range.lowerBound
+            let objectStart = range.lowerBound + "\"usage\":".utf8.count  // 落在 `{`
+            guard let close = data[objectStart...].firstIndex(of: UInt8(ascii: "}")),
+                  let dict = (try? JSONSerialization.jsonObject(
+                    with: data[objectStart...close])) as? [String: Any],
+                  let input = dict["inputTokens"] as? Int, input > 0
             else { continue }
-            let output = usage["outputTokens"] as? Int ?? 0
-            let model = (response["modelId"] as? String)
-                ?? (root["model"] as? [String: Any])?["modelId"] as? String
-            return (model?.lowercased(), input + output)
+            let output = dict["outputTokens"] as? Int ?? 0
+            return (lastZcodeModelId(in: data), input + output)
         }
         return nil
+    }
+
+    /// 块内最后一个 `"modelId":"…"`（model.modelId 大写 / response.modelId 小写，
+    /// 值等价，取哪个都一样；进行中的新行无 usage 但有 model，同会话同模型，无害）
+    private static func lastZcodeModelId(in data: Data) -> String? {
+        let marker = Data("\"modelId\":\"".utf8)
+        guard let range = data.range(of: marker, options: .backwards),
+              let quote = data[range.upperBound...].firstIndex(of: UInt8(ascii: "\"")),
+              quote > range.upperBound
+        else { return nil }
+        return String(decoding: data[range.upperBound..<quote], as: UTF8.self).lowercased()
     }
 
     /// 读取该会话模型上下文窗口的**真实值**（会话数据里自带的参数）。

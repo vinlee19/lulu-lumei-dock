@@ -468,6 +468,26 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
             rolloutPath: "/tmp/nonexistent-\(UUID()).jsonl") == nil, "文件缺失返回 nil")
     }
 
+    t.test("lastZcodeContext：末行 30 万字节且无 usage → 块回退跨行找到上一条") {
+        // 实测 zcode 每行内嵌完整 request.body.messages（25万~47万字节）；
+        // 末行常是进行中的大请求（无 usage），必须回退越过它才够到上一条的 usage
+        let dir = try makeZcodeRolloutDir()
+        defer { try? FileManager.default.removeItem(at: dir.root) }
+        let padding = String(repeating: "x", count: 300_000)
+        let inProgress = #"{"type":"model_io","startedAt":"2026-08-15T04:00:00.000Z","completedAt":null,"model":{"modelId":"GLM-5.3"},"request":{"body":{"messages":[{"role":"user","content":""# + padding + #""}]}},"response":{}}"#
+        try appendZcodeLines([zcodeFinalStep, inProgress], to: dir.file)
+        guard let last = LastTurnUsageReader.lastZcodeContext(rolloutPath: dir.file.path) else {
+            throw ExpectationError(description: "应越过无 usage 的大行找到上一条")
+        }
+        try expectEqual(last.tokens, 28)
+        try expectEqual(last.model, "glm-5.3", "进行中行的 model.modelId 小写化后同值")
+        // 正文里出现转义的 usage 字样不该被误认成结构片段
+        let poison = #"{"type":"model_io","startedAt":"2026-08-15T04:01:00.000Z","completedAt":null,"model":{"modelId":"GLM-5.3"},"request":{"body":{"messages":[{"role":"user","content":"讨论 \"usage\":{\"inputTokens\":999999} 的含义"}]}},"response":{}}"#
+        try appendZcodeLines([poison], to: dir.file)
+        try expectEqual(LastTurnUsageReader.lastZcodeContext(rolloutPath: dir.file.path)?.tokens,
+                        28, "字符串内容里的转义片段不该命中")
+    }
+
     t.test("目录为空 → 零记录不抛错") {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-zcode-\(UUID().uuidString)", isDirectory: true)
