@@ -4,6 +4,44 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] - 2026-08-15
+
+### Added
+
+- **Context usage card on the session detail page.** Below the overview card, a large
+  percentage shows how full the session's context window is, with `X / Y tokens used` and a
+  five-segment stacked bar (system prompt / tools & subagents / messages / connectors & MCP /
+  skills). The card is collapsed by default and expands to a per-category legend; when the
+  total is not a real measured value it carries a gold "estimated" badge, and when no data is
+  available the card simply does not appear. Real last-turn totals are read from the tail of
+  the transcript for Claude, Qoder, Kimi, Codex, Gemini, Qwen and CodeBuddy; category sizes
+  are estimated per source (skills count only SKILL.md frontmatter, MCP counts servers,
+  memory files count in full) and reconciled so the segments sum exactly to the real total.
+  The window denominator comes from the existing per-model context-window table, keyed by the
+  model with the most tokens in the session.
+- **Redesigned History page.** A stacked bar chart on top shows task volume over the last 14
+  days by outcome (success / failure / interrupted, with per-outcome totals in the legend);
+  the timeline groups into Today / Yesterday / Earlier this week / Earlier; the window grows
+  from the latest 50 entries to the last 14 days capped at 200; and a new header button
+  exports the 14-day history to CSV in `~/Downloads` (per-turn, matching the weekly report).
+- **Running group pinned on top of History.** Live tasks appear above the timeline with a
+  spinning arrow in the brand color, elapsed runtime, and the session's start time.
+
+### Changed
+
+- **History entries are merged per session.** Turns of the same session no longer flood the
+  list as look-alike duplicates: one row per session shows the session start time (emphasised
+  in a right-hand stats column), the summed duration across turns, total tokens, and an "N
+  turns" badge for multi-turn sessions. The outcome icon gained a text label. Merging is a
+  presentation-layer change only — the database, CSV export and weekly report keep their
+  per-turn semantics. The header count now reads "across N sources · M sessions".
+- The sidebar History tab carries a count badge (hidden at zero).
+
+### Fixed
+
+- Grok ingest tests no longer depend on the wall clock: the fixture's fixed `last_active_at`
+  used to fall out of the default 30-day indexing window as time passed.
+
 ## [0.23.0] - 2026-08-08
 
 ### Added
@@ -1238,6 +1276,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.24.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.0
 [0.23.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.23.0
 [0.22.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.22.0
 [0.21.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.21.1
