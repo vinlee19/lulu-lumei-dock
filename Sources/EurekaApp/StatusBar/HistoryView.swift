@@ -61,10 +61,15 @@ struct HistoryView: View {
         sortMode == .active ? task.finishedAt : startKey(task)
     }
 
-    /// 四档分组：今天 / 昨天 / 本周更早 / 更早（sortedTasks 已倒序，组内保持该顺序）
+    /// 四档分组：今天 / 昨天 / 本周更早 / 更早（sortedTasks 已倒序，组内保持该顺序）。
+    /// 运行中的会话已在置顶分组呈现，这里必须剔除：AgentTask.id 与 MergedSessionTask.id
+    /// 同为 `source:sessionId`，同一 id 在同一个 LazyVStack 的两个 ForEach 里重复出现时，
+    /// SwiftUI 会把后者渲染成只占位不显示的空洞——历史列表里表现为组内一大段空白
+    /// （成因同 AgentDefinitionIndexer 的重复 path 网格空洞）。
     private var dayGroups: [(group: HistoryDayGroup, tasks: [MergedSessionTask])] {
+        let runningKeys = Set(runningTasks.map(\.id))
         var buckets: [HistoryDayGroup: [MergedSessionTask]] = [:]
-        for task in sortedTasks {
+        for task in sortedTasks where !runningKeys.contains(task.id) {
             buckets[HistoryGrouping.group(of: groupKey(task), now: Date()), default: []]
                 .append(task)
         }
