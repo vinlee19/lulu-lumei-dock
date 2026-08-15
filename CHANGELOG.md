@@ -4,6 +4,22 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.25.0] - 2026-08-15
+
+### Added
+
+- **ZCode support as the 14th agent source.** Live island cards, token accounting and
+  session browsing for Z.ai's coding agent, whose CLI keeps everything under `~/.zcode/cli`:
+  the shared session database (`db/db.sqlite`, read-only) drives the session browser, and the
+  per-session append-only model-IO stream (`rollout/model-io-sess_<id>.jsonl`) is tailed for
+  live lifecycle events and per-request usage (subagent streams included; `glm-` models are
+  token-counted at $0 like other plan-based sources). Subagent snapshots come from
+  `agents/<sess>/agent_*/metadata.json`. Skills live in the shared `~/.agents/skills`.
+  Cloud backup adds a strict whitelist of `cli/rollout`, `cli/agents` and `~/.agents/skills`
+  — `~/.zcode/v2` (credentials) and the session database itself are never included. The
+  CLI-tools page reports the version from `/Applications/ZCode.app`. Branding ships the
+  official Z.ai mark in light/dark variants.
+
 ## [0.24.1] - 2026-08-15
 
 ### Fixed
@@ -1290,6 +1306,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.25.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.0
 [0.24.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.1
 [0.24.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.0
 [0.23.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.23.0

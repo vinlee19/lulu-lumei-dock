@@ -112,6 +112,8 @@ final class SkillMemoryService: ObservableObject {
                 cursorSkillsRoot: CursorPaths.skillsRoot(),
                 codeBuddySkillsRoot: CodeBuddyPaths.skillsRoot(),
                 qoderSkillsRoot: QoderPaths.skillsRoot(),
+                // zcode 技能装在共享的 ~/.agents/skills（与桌面版共用）
+                zcodeSkillsRoot: ZcodePaths.skillsRoot(),
                 // CN 与国际版可能同时装着 → 已装渠道各一个可写根
                 traeSkillsRoots: TraePaths.userSkillsRoots(),
                 projectSkillRoots: projectRoots,
@@ -355,6 +357,8 @@ final class SkillMemoryService: ObservableObject {
                 // 两个渠道都可能装：优先写已装的第一个（CN 在前）；都没装就按 CN 建。
                 // `builtin_skills` / `builtin/global/skills` 随客户端分发，只读，不能往里建。
                 root = TraePaths.userSkillsRoots().first ?? TraePaths.skillsRoot(.cn)
+            case .zcode:
+                root = ZcodePaths.skillsRoot()
             }
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
@@ -510,6 +514,11 @@ final class SkillMemoryService: ObservableObject {
                     self?.report(error)
                 }
                 DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
+                return
+            case .zcode:
+                // zcode 未观测到全局记忆文件布局（~/.zcode 无 AGENTS.md 类文件）——
+                // 不提供入口（同 antigravity 的规矩：宁可不建，也不造一个 CLI 不认的文件）
+                DispatchQueue.main.async { completion?(false) }
                 return
             }
             let file = dir.appendingPathComponent(Self.slugify(name) + ".md")

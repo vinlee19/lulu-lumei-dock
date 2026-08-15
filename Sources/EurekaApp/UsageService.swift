@@ -140,6 +140,7 @@ final class UsageService: ObservableObject {
     private var hermesScanner: HermesUsageScanner?
     private var codeBuddyScanner: CodeBuddyUsageScanner?
     private var cursorScanner: CursorUsageScanner?
+    private var zcodeScanner: ZcodeUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
     private var pricing = PricingTable(models: [])
 
@@ -153,6 +154,7 @@ final class UsageService: ObservableObject {
     private static let hermesHealthName = "用量扫描 Hermes"
     private static let codeBuddyHealthName = "用量扫描 CodeBuddy"
     private static let cursorHealthName = "用量扫描 Cursor"
+    private static let zcodeHealthName = "用量扫描 ZCode"
 
     func start() {
         HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
@@ -165,6 +167,7 @@ final class UsageService: ObservableObject {
         HealthRegistry.shared.register(Self.hermesHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.cursorHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.zcodeHealthName, expectedInterval: 60)
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -205,6 +208,11 @@ final class UsageService: ObservableObject {
                             maxSessions: 2000, now: now)
                             .map { ($0.id, $0.cwd, $0.lastActiveAt) }
                     })
+                // zcode：token 在 cli/rollout 的 model_io 行（含子代理流水）
+                self.zcodeScanner = ZcodeUsageScanner(
+                    rolloutRoot: ZcodePaths.rolloutRoot(),
+                    dbPath: ZcodePaths.db(), store: store)
+                try? self.zcodeScanner?.recordPromptCounts()
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
                 self.pricing = PricingTable.load(
                     bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
@@ -582,6 +590,10 @@ final class UsageService: ObservableObject {
             let cursorNew = try cursorScanner?.scanOnce() ?? 0
             HealthRegistry.shared.beat(Self.cursorHealthName)
             if cursorNew > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }
+            let zcodeNew = try zcodeScanner?.scanOnce() ?? 0
+            HealthRegistry.shared.beat(Self.zcodeHealthName)
+            if zcodeNew > 0 { HealthRegistry.shared.event(Self.zcodeHealthName) }
+            try? zcodeScanner?.recordPromptCounts()
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             // 全文索引**不跟用量同节奏**：见 indexInterval。

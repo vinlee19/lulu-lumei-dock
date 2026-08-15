@@ -73,6 +73,17 @@ public struct AgentContextProfile: Equatable, Sendable {
                 baselineSystemPromptTokens: 3_000,
                 baselineBuiltinToolTokens: 8_000,
                 perMCPServerTokens: defaultPerMCPServerTokens)
+        case .zcode:
+            // zcode 技能在共享 ~/.agents/skills；记忆按 AGENTS.md 惯例（未见全局记忆文件）
+            return AgentContextProfile(
+                skillDirs: [home.appendingPathComponent(".agents/skills").path]
+                    + at(cwd, ".agents/skills"),
+                mcpConfigFiles: [home.appendingPathComponent(".zcode/cli/config.json").path],
+                memoryFiles: at(cwd, "AGENTS.md"),
+                agentDirs: [],
+                baselineSystemPromptTokens: 3_000,
+                baselineBuiltinToolTokens: 8_000,
+                perMCPServerTokens: defaultPerMCPServerTokens)
         case .codex:
             return AgentContextProfile(
                 skillDirs: [home.appendingPathComponent(".codex/skills").path],

@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor · Trae**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor · Trae · ZCode**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -53,7 +53,7 @@ agents and turns them into a live **Dynamic Island** overlay near the notch, plu
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
 It works with thirteen agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, Qoder, Cursor, and Trae** — and needs **no network** for its core features: everything is
+Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, Qoder, Cursor, Trae, and ZCode** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session / database files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
@@ -170,6 +170,7 @@ many concurrent sessions, or late‑night runs.
 | **Qoder** | ✅ | —³ | — | ✅ | ✅ (memory/plans) |
 | **Cursor** | ✅⁴ | ✅ (no cost)⁴ | — | ✅ | ✅ |
 | **Trae** | hooks only⁵ | —⁵ | — | ✅ (from memory)⁵ | ✅ (skills/memory/rules/plans) |
+| **ZCode** | ✅⁶ | ✅ (no cost)⁶ | — | ✅⁶ | ✅ (skills)⁶ |
 
 ¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
 per‑request token accounting locally — only activity (invocations / sessions) is available.
@@ -264,6 +265,17 @@ never mixed into the memory count; plans at `<repo>/.trae/documents/plan_*.md`, 
 like Hermes rather than materialized. Backup is a strict whitelist of exactly those three kinds of
 markdown: `~/.trae-cn` itself is never walked, because `trae-jwt-token` is a JWT and `mcp.json`
 can hold API keys. Slash commands (`<dataFolder>/commands`) are not indexed — no agent's are.
+
+⁶ ZCode (Z.ai's coding agent) ships as a desktop app whose CLI keeps everything under
+`~/.zcode/cli`: sessions and messages in one SQLite database (`db/db.sqlite`, same schema family
+as opencode, read-only), and a per-session append-only model-IO stream
+(`rollout/model-io-sess_<id>.jsonl`) that carries per-request usage — that stream is tailed for
+live cards and token accounting, subagent streams included. Tokens are counted but every `glm/*`
+model is marked `unknown` in the price table (plan-based subscription), so **cost is always $0**.
+Sessions live in the shared database, so per-session deletion and full-text search are skipped
+like opencode. Skills live in the shared `~/.agents/skills` (SKILL.md, same layout as Claude).
+Backup is a strict whitelist of `cli/rollout`, `cli/agents` and `~/.agents/skills`:
+`~/.zcode/v2` (credentials) and the session database itself are **never** included.
 
 ## Quick start
 

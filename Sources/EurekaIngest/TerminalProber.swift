@@ -32,6 +32,7 @@ public enum TerminalProber {
         .gemini: ["gemini", "gemini.exe"],
         .qwen: ["qwen", "qwen.exe"],
         .hermes: ["hermes", "hermes.exe"],
+        .zcode: ["zcode", "zcode.exe", "zai", "zai.exe"],
     ]
 
     /// 父链最多上溯几层（终端 → shell → 可能的 wrapper → CLI，正常 3~5 层）

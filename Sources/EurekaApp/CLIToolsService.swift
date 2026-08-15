@@ -87,6 +87,13 @@ final class CLIToolsService: ObservableObject {
              npmPackage: "",
              installCommand: "从 https://trae.cn（国内）或 https://trae.ai 下载安装 Trae",
              updateCommand: ""),
+        // ZCode CLI 随 /Applications/ZCode.app 分发（PATH 上通常没有 zcode 命令）。
+        // 版本检测读 App Bundle 的 Info.plist（见 detectLocal 的 zcode 分支）；
+        // 应用自身走客户端更新 → updateCommand 留空。
+        Tool(id: "zcode", name: "ZCode", source: .zcode,
+             command: "zcode", npmPackage: "",
+             installCommand: "从 https://z.ai 下载安装 ZCode（CLI 随桌面版分发）",
+             updateCommand: ""),
     ]
     @Published private(set) var detected = false
 
@@ -102,7 +109,13 @@ final class CLIToolsService: ObservableObject {
         let snapshot = tools
         queue.async { [weak self] in
             for tool in snapshot {
-                let version = Self.localVersion(command: tool.command)
+                let version: String?
+                if tool.id == "zcode" {
+                    // ZCode CLI 随 App 分发，PATH 上没有命令 → 读 ZCode.app 的版本号
+                    version = Self.zcodeBundleVersion()
+                } else {
+                    version = Self.localVersion(command: tool.command)
+                }
                 DispatchQueue.main.async {
                     guard let self,
                           let index = self.tools.firstIndex(where: { $0.id == tool.id })
@@ -112,6 +125,16 @@ final class CLIToolsService: ObservableObject {
                 }
             }
         }
+    }
+
+    /// /Applications/ZCode.app 的 CFBundleShortVersionString（未安装返回 nil）
+    private static func zcodeBundleVersion() -> String? {
+        let url = URL(fileURLWithPath: "/Applications/ZCode.app/Contents/Info.plist")
+        guard let dict = NSDictionary(contentsOf: url) as? [String: Any],
+              let version = dict["CFBundleShortVersionString"] as? String,
+              !version.isEmpty
+        else { return nil }
+        return version
     }
 
     /// 手动「检查更新」：逐个查 npm registry（唯一的联网点，用户主动触发）。

@@ -199,6 +199,7 @@ struct SkillMemoryView: View {
                 Button("CodeBuddy 技能") { startCreate(.codebuddy, isSkill: true, "CodeBuddy 技能") }
                 Button("Qoder 技能") { startCreate(.qoder, isSkill: true, "Qoder 技能") }
                 Button("Trae 技能") { startCreate(.trae, isSkill: true, "Trae 技能") }
+                Button("ZCode 技能") { startCreate(.zcode, isSkill: true, "ZCode 技能") }
             } else if mode == .memory {
                 Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
                 Button("OpenCode 记忆") { startCreate(.opencode, isSkill: false, "OpenCode 记忆") }

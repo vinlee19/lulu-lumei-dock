@@ -83,6 +83,15 @@ public struct SyncRoots {
     ///     （SQLCipher 加密的全部会话）含鉴权与会话正文。
     /// 与 `cursorSkills` 上那条注释同性质：会话库跟凭据同处一地，一律不纳入。
     public var traeRoots: [(root: URL, category: String)] = []
+    /// ZCode 可备份的根。⚠️ **白名单，且只能是白名单**：
+    ///   - `~/.zcode/v2` 含 credentials.json（鉴权）—— 绝不纳入；
+    ///   - `~/.zcode/cli/db` 是会话库本体（WAL 活跃，且与本备份的 rollout/agents 冗余）—— 不纳入；
+    ///   - `~/.zcode/cli/rollout`（model-io-*.jsonl 用量流水）与
+    ///     `~/.zcode/cli/agents`（子代理 metadata/transcript）只收文本工件；
+    ///   - `~/.agents/skills`（共享技能根，与桌面版共用）。
+    public var zcodeRollout: URL?
+    public var zcodeAgents: URL?
+    public var zcodeSkills: URL?
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
     public var customDirs: [(root: URL, category: String)] = []
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
@@ -103,6 +112,7 @@ public struct SyncRoots {
         qoderProjects: URL? = nil, qoderMemories: URL? = nil,
         cursorSkills: URL? = nil,
         cursorAgents: URL? = nil,
+        zcodeRollout: URL? = nil, zcodeAgents: URL? = nil, zcodeSkills: URL? = nil,
         antigravitySkills: URL? = nil
     ) {
         self.claudeHome = claudeHome
@@ -137,6 +147,9 @@ public struct SyncRoots {
         self.cursorSkills = cursorSkills
         self.cursorAgents = cursorAgents
         self.antigravitySkills = antigravitySkills
+        self.zcodeRollout = zcodeRollout
+        self.zcodeAgents = zcodeAgents
+        self.zcodeSkills = zcodeSkills
     }
 }
 
@@ -332,6 +345,26 @@ public enum SyncSourceCatalog {
         if let antigravitySkills = roots.antigravitySkills {
             walk(root: antigravitySkills, category: "antigravity/skills", priority: 0,
                  include: markdownOnly)
+        }
+
+        // zcode：用量流水 jsonl + 子代理 metadata/transcript 文本 + 共享技能根。
+        // ⚠️ ~/.zcode/v2（credentials.json）与 cli/db（会话库本体）绝不纳入，见 SyncRoots 注释。
+        if let zcodeRollout = roots.zcodeRollout {
+            walk(root: zcodeRollout, category: "zcode/rollout", priority: 1,
+                 include: jsonlOnly)
+        }
+        if let zcodeAgents = roots.zcodeAgents {
+            walk(root: zcodeAgents, category: "zcode/agents", priority: 1) { rel in
+                rel.lowercased().hasSuffix(".jsonl")
+                    || rel.lowercased().hasSuffix(".json")
+                    || rel.lowercased().hasSuffix(".md")
+                    || rel.lowercased().hasSuffix(".txt")
+            }
+        }
+        if let zcodeSkills = roots.zcodeSkills {
+            walk(root: zcodeSkills, category: "zcode/skills", priority: 0, include: always)
+            walk(root: disabledSibling(of: zcodeSkills),
+                 category: "zcode/skills.eureka-disabled", priority: 0, include: always)
         }
 
         // trae：只有技能 / 记忆 / 用户规则三类明文 markdown 可备份，且都是显式白名单根。

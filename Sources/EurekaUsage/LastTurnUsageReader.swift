@@ -29,7 +29,10 @@ public enum LastTurnUsageReader {
         case .codebuddy:
             return lastCodeBuddyUsage(path: transcriptPath)
         case .grok:
-            // grok transcript 无 per-request token（订阅制不记账）→ 无真实总量
+            // grok transcript 无 per-request token（订阅制不记账）-> 无真实总量
+            return nil
+        case .zcode:
+            // zcode 会话在共享 sqlite 库里，无单会话 transcript 路径 -> nil
             return nil
         }
     }

@@ -234,6 +234,9 @@ enum EurekaCLI {
                         maxSessions: 2000, now: now)
                         .map { ($0.id, $0.cwd, $0.lastActiveAt) }
                 })
+            let zcode = ZcodeUsageScanner(
+                rolloutRoot: ZcodePaths.rolloutRoot(),
+                dbPath: ZcodePaths.db(), store: store)
             let newClaude = try claude.scanOnce()
             let newCodex = try codex.scanOnce()
             let newOpencode = try opencode.scanOnce()
@@ -244,11 +247,13 @@ enum EurekaCLI {
             let newHermes = try hermes.scanOnce()
             let newCodeBuddy = try codebuddy.scanOnce()  // qoder 无 token（CN 后端全零），不扫描
             let newCursor = try cursor.scanOnce()  // cursor 有 token 无价（成本恒 0）
+            let newZcode = try zcode.scanOnce()
+            try? zcode.recordPromptCounts()
             FileHandle.standardError.write(Data(
                 ("扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，"
                     + "grok 工具 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
                     + "qwen +\(newQwen) 条，hermes +\(newHermes) 条，codebuddy +\(newCodeBuddy) 条，"
-                    + "cursor +\(newCursor) 条\n").utf8))
+                    + "cursor +\(newCursor) 条，zcode +\(newZcode) 条\n").utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(

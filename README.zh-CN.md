@@ -48,8 +48,8 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 `lulu-lumei-dock` 是一个原生 macOS 菜单栏应用:它监视本地 AI 编码助手的日志,把任务活动实时装进刘海
 旁的一座「灵动岛」,并提供一个完整面板——用量分析、订阅限额,以及会话 / 技能 / agent / 记忆的管理。
 
-开箱支持十三种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
-Qwen Code、Hermes Agent、CodeBuddy、Qoder、Cursor、Trae**,核心功能**零网络**:
+开箱支持十四种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
+Qwen Code、Hermes Agent、CodeBuddy、Qoder、Cursor、Trae、ZCode**,核心功能**零网络**:
 一切都靠读取本地 transcript / rollout / session / 数据库文件推导。唯一的联网功能是 Claude 订阅限额(非官方
 接口,默认关闭,可在设置里 opt‑in)。此外，更新器默认会访问本仓库的 GitHub Releases feed 检查新版，
 可在「设置 → 关于」关闭。
@@ -121,6 +121,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 | **Qoder** | ✅ | —² | — | ✅ | ✅(记忆/计划) |
 | **Cursor** | ✅³ | ✅(不计费)³ | — | ✅ | ✅ |
 | **Trae** | 仅 hooks⁴ | —⁴ | — | ✅(来自记忆库)⁴ | ✅(技能/记忆/规则/计划) |
+| **ZCode** | ✅⁵ | ✅(不计费)⁵ | — | ✅⁵ | ✅(技能)⁵ |
 
 ¹ Grok 是订阅制、Antigravity 会话是 protobuf,两者本地都不暴露 per‑request token 账,只能给活动量
 (调用 / 会话)。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
@@ -178,6 +179,15 @@ salt,`sqlite3` 直接拒绝),而且全机没有任何明文转录。所以**没�
 计划在 `<repo>/.trae/documents/plan_*.md`,同 Hermes 一样就地索引而不物化。备份是严格白名单,
 只收上面这三类 markdown:`~/.trae-cn` 本身绝不遍历,因为 `trae-jwt-token` 是 JWT、
 `mcp.json` 可能带 API key。斜杠命令(`<dataFolder>/commands`)不索引——任何来源的都不索引。
+
+⁵ ZCode(Z.ai 的编码助手)以桌面应用分发,CLI 数据都在 `~/.zcode/cli`:会话与消息在单个
+SQLite 库里(`db/db.sqlite`,与 opencode 同源的表结构,只读打开),每个会话另有一条
+append-only 的模型 IO 流水(`rollout/model-io-sess_<id>.jsonl`),逐请求带 token 用量——
+实时卡片与用量账都尾随这条流水(含子代理流)。token 正常计数,但 `glm-` 前缀模型在价格表里
+标 `unknown`(套餐订阅制):**只统计 token,金额恒为 0**。会话在共享库里,与 opencode 同例
+跳过单条删除与全文搜索;技能在共享的 `~/.agents/skills`(SKILL.md,与 Claude 同构)。
+备份是严格白名单,只收 `cli/rollout`、`cli/agents` 与 `~/.agents/skills`:
+`~/.zcode/v2`(凭证)与会话库本体**绝不**纳入。
 
 ## 快速上手
 

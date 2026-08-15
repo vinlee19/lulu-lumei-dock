@@ -323,6 +323,9 @@ final class SyncService: ObservableObject {
             qoderMemories: QoderPaths.memoriesRoot(),
             cursorSkills: CursorPaths.skillsRoot(),
             cursorAgents: CursorPaths.agentsRoot(),
+            zcodeRollout: ZcodePaths.rolloutRoot(),
+            zcodeAgents: ZcodePaths.agentsRoot(),
+            zcodeSkills: ZcodePaths.skillsRoot(),
             antigravitySkills: AntigravityPaths.userSkillsRoot())
     }
 

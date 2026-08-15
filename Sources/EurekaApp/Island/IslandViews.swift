@@ -202,6 +202,13 @@ extension AgentSource {
         // TRAE 官方标是薄荷绿方括号。与 Qoder 的 #2ADB5C 同为绿系但更偏青，
         // 排在一起要能分开 —— 改这里之后务必 `--render-badges` 看图核对。
         case .trae: return Color(red: 0.196, green: 0.941, blue: 0.549)      // TRAE 绿 #32F08C
+        // ZCode（Z.ai）官方标是单色 currentColor 的 Z 标 → 同 OpenCode/Cursor 走动态墨色，
+        // 配 logo-zcode{,-dark}.svg 双版本资产
+        case .zcode: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(srgbRed: 0.894, green: 0.894, blue: 0.909, alpha: 1)
+                : NSColor(srgbRed: 0.102, green: 0.102, blue: 0.118, alpha: 1)
+        }))
         }
     }
 }
@@ -425,6 +432,8 @@ enum SourceLogo {
         case .cursor: name = dark ? "logo-cursor-dark" : "logo-cursor"
         // TRAE 官方标本身是薄荷绿（#32F08C），浅底深底都看得见 → 不需要 -dark 变体
         case .trae: name = "logo-trae"
+        // ZCode（Z.ai）官方标是单色 currentColor → 双版本：浅色用深墨、深色用浅灰
+        case .zcode: name = dark ? "logo-zcode-dark" : "logo-zcode"
         case .opencode: return nil  // 无资产：由 SourceBadge 走代码绘制分支
         }
         lock.lock()
@@ -504,9 +513,40 @@ struct SourceBadge: View {
             // 兜底方块（官方标是方括号取景框，同 CursorMarkShape 的规矩走实心而非描边，
             // 仅 logo-trae.svg 缺失时才会走到这里）
             RoundedRectangle(cornerRadius: size * 0.18).fill(source.brandColor)
+        case .zcode:
+            // 兜底 Z 字剪影（官方标的 Z 由三段人字带构成，9pt 下走实心剪影）
+            ZcodeMarkShape().fill(source.brandColor)
         case .opencode:
             EmptyView()
         }
+    }
+}
+
+/// ZCode 兜底标记：粗 Z 剪影（仅 logo-zcode{,-dark}.svg 缺失时使用）。
+/// 官方 Z.ai 标由三条人字带拼成 Z，这里用两横杠 + 一斜杠近似；实心而非描边。
+struct ZcodeMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let bar = side * 0.22
+        let inset = side * 0.1
+        var path = Path()
+        // 上横杠 / 下横杠（直角矩形，9pt 下圆角无意义）
+        path.addRect(CGRect(
+            x: rect.minX + inset, y: rect.minY + inset,
+            width: side - inset * 2, height: bar))
+        path.addRect(CGRect(
+            x: rect.minX + inset, y: rect.maxY - inset - bar,
+            width: side - inset * 2, height: bar))
+        // 斜杠（平行四边形，连接右上到左下）
+        let skew = side * 0.14
+        var diagonal = Path()
+        diagonal.move(to: CGPoint(x: rect.maxX - inset - skew, y: rect.minY + inset + bar))
+        diagonal.addLine(to: CGPoint(x: rect.maxX - inset, y: rect.minY + inset + bar * 0.4))
+        diagonal.addLine(to: CGPoint(x: rect.minX + inset, y: rect.maxY - inset - bar * 0.4))
+        diagonal.addLine(to: CGPoint(x: rect.minX + inset + skew, y: rect.maxY - inset - bar))
+        diagonal.closeSubpath()
+        path.addPath(diagonal)
+        return path
     }
 }
 

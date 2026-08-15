@@ -6,7 +6,7 @@ import Foundation
 /// 而全文索引与逐轮指标索引原本各自调一遍同样的 8 个 indexer —— 每分钟白付两次。
 /// 现在由调用方（`UsageService`）发现一次、两个消费者共用。
 ///
-/// 不含共享库的源（opencode / hermes / cursor / trae）与 antigravity：
+/// 不含共享库的源（opencode / hermes / cursor / trae / zcode）与 antigravity：
 /// 前者以 `transcriptPath` 为主键会互相整片覆盖，后者是 protobuf 解不出内容。
 /// trae 还多一层：会话库是 SQLCipher 加密的，压根没有可索引的正文（见 `TraeSessionIndexer`）。
 public enum AgentSessionDiscovery {

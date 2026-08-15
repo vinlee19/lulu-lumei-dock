@@ -26,6 +26,7 @@ public final class EventPipeline {
     private var qoderTailer: QoderChatTailer?
     private var cursorTailer: CursorStateTailer?
     private var cursorTranscriptTailer: CursorTranscriptTailer?
+    private var zcodeTailer: ZcodeRolloutTailer?
 
     /// 最近一次 Codex 限额快照（M6 面板消费）
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -50,6 +51,8 @@ public final class EventPipeline {
         cursorStateDB: URL = CursorPaths.globalStateDB(),
         cursorWorkspaceStorageRoot: URL = CursorPaths.workspaceStorageRoot(),
         cursorCLIHome: URL = CursorPaths.cliHome(),
+        zcodeRolloutRoot: URL = ZcodePaths.rolloutRoot(),
+        zcodeDbPath: URL = ZcodePaths.db(),
         auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -153,6 +156,12 @@ public final class EventPipeline {
         ) { [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // zcode 无 hook/notify，尾随 cli/rollout/model-io-sess_*.jsonl 做实时
+        zcodeTailer = ZcodeRolloutTailer(
+            rolloutRoot: zcodeRolloutRoot, dbPath: zcodeDbPath) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -169,6 +178,7 @@ public final class EventPipeline {
         qoderTailer?.start(pollInterval: 2)
         cursorTailer?.start(pollInterval: 2)
         cursorTranscriptTailer?.start(pollInterval: 2)
+        zcodeTailer?.start(pollInterval: 2)
         // Claude transcript 常驻监视（含启动首扫现场重建）：
         // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
@@ -193,6 +203,7 @@ public final class EventPipeline {
         qoderTailer?.stop()
         cursorTailer?.stop()
         cursorTranscriptTailer?.stop()
+        zcodeTailer?.stop()
         claudeWatcher?.stop()
     }
 

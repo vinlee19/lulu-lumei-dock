@@ -172,6 +172,9 @@ final class SessionBrowserService: ObservableObject {
                 projectsRoot: CodeBuddyPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             indexed += QoderSessionIndexer.index(
                 projectsRoot: QoderPaths.projectsRoot(), window: window, maxSessions: maxSessions)
+            // zcode：会话全在 cli/db/db.sqlite（共享库，无 transcript 文件）
+            indexed += ZcodeSessionIndexer.index(
+                dbPath: ZcodePaths.db(), window: window, maxSessions: maxSessions)
             // cursor：会话全在 state.vscdb（IDE 无 transcript 文件）
             indexed += CursorSessionIndexer.index(window: window, maxSessions: maxSessions)
             // trae：会话库是 SQLCipher 加密的，标题/时间只能从明文记忆库反推（延迟、可能为空）
@@ -475,6 +478,9 @@ final class SessionBrowserService: ObservableObject {
             // Trae 同 Cursor：IDE，无按会话恢复的命令行入口，只能打开工作区。
             // 会话来自 CN 版的记忆库（国际版没有记忆目录），所以固定用 `trae-cn`。
             return session.cwd.map { "trae-cn '\($0)'" } ?? "trae-cn"
+        case .zcode:
+            // ZCode 无已知的按会话恢复命令行参数，只能打开工作区目录
+            return session.cwd.map { "open '\($0)'" } ?? "open ."
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume

@@ -86,6 +86,12 @@ public enum TranscriptReader {
                 maxMessages: maxMessages)
         case .trae:
             return loadTrae()
+        case .zcode:
+            // zcode 的 message/part 表与 opencode 同构（同 schema 的 sqlite 库），
+            // transcriptPath 传的是 db 路径
+            return loadOpencode(
+                dbPath: session.transcriptPath, sessionId: session.id,
+                maxMessages: maxMessages)
         }
     }
 

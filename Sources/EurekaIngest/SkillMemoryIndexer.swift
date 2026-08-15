@@ -326,6 +326,8 @@ public enum SkillMemoryIndexer {
         cursorSkillsRoot: URL? = nil,
         codeBuddySkillsRoot: URL? = nil,
         qoderSkillsRoot: URL? = nil,
+        /// zcode：技能装在共享的 `~/.agents/skills`（SKILL.md 与 Claude 同构）
+        zcodeSkillsRoot: URL? = nil,
         /// trae 的**可写**技能根，两个渠道各一个（`~/.trae-cn/skills`、`~/.trae/skills`）。
         /// 只读的 `builtin_skills` / `builtin/global/skills` 走 `bundledRoots`。
         traeSkillsRoots: [URL] = [],
@@ -410,6 +412,13 @@ public enum SkillMemoryIndexer {
                 qoderSkillsRoot, source: .qoder, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: qoderSkillsRoot), source: .qoder, enabled: false, scope: .system)
+        }
+        // zcode：~/.agents/skills（共享技能根，ZCode CLI 桌面版装技能的默认位置）
+        if let zcodeSkillsRoot {
+            result += scanSkillRoot(
+                zcodeSkillsRoot, source: .zcode, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: zcodeSkillsRoot), source: .zcode, enabled: false, scope: .system)
         }
         // trae：`<dataFolder>/skills`（SKILL.md 与 Claude 同构：frontmatter 的 name/description）。
         // 两个渠道（CN / 国际版）可能同时装着，各扫一遍；同名技能在两边是两条，
