@@ -4,6 +4,33 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.26.0] - 2026-08-15
+
+### Added
+
+- **ZCode plans and subagent profiles now show up in the knowledge panels.** Plan-mode
+  documents (`<repo>/.zcode/plans/plan-sess_<id>.md`) are indexed in place like Hermes
+  plans — no materialization — with the owning session linked straight from the filename.
+  The Agents tab lists the subagent profiles actually observed in ZCode's run records
+  (`~/.zcode/cli/agents/<sess>/agent_*/metadata.json` `profileSnapshot`, deduplicated by
+  profile id, latest snapshot wins) since the built-in profiles never hit disk as files.
+  Project-level skill roots `<repo>/.zcode/skills` and `<repo>/.agents/skills` are now
+  scanned alongside the shared user-level skills.
+
+### Fixed
+
+- **ZCode token accounting and context usage misread the usage semantics, roughly
+  doubling both.** ZCode's rollout reports OpenAI-style usage — `inputTokens` already
+  includes cache reads (`cacheReadTokens ⊆ inputTokens`, `totalTokens = input + output`)
+  — but was booked Claude-style. The usage ledger now subtracts cache reads before
+  insert (verified 7.15M real vs 14.14M previously booked locally; schema v22 forces a
+  full rescan on upgrade so historic rows self-correct). Live island ctx% uses
+  `input + output` as the numerator instead of summing all four counters, and the
+  session detail card reads the real last-turn total from the per-session rollout
+  instead of falling back to a character-count estimate (23.4% actual vs 2.5%
+  estimated on a live 1M-window session), resolving the model for the window
+  denominator from the rollout when the ledger row hasn't landed yet.
+
 ## [0.25.1] - 2026-08-15
 
 ### Fixed
@@ -1318,6 +1345,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.26.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.0
 [0.25.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.1
 [0.25.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.0
 [0.24.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.1
