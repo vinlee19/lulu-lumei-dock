@@ -4,6 +4,20 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.24.1] - 2026-08-15
+
+### Fixed
+
+- **Context-window percentages now use the session's own window where the data carries it.**
+  Codex sessions read `model_context_window` from the last `token_count` rollout event, and
+  Kimi sessions read the per-model `max_context_size` from `~/.kimi-code/config.toml` — the
+  user-configured value that already follows the subscription tier. Sources without a
+  session-side window keep falling back to the builtin table.
+- **The builtin context-window table learns the models that were silently mis-measured.**
+  Kimi K3 (1M, plus its 256K `k3-256k` tier variant), the Kimi K2 family (256K), and the
+  enterprise-unlocked 1M Opus models (`claude-opus-5`, `claude-opus-4-8`) previously fell
+  through to the 200K default, overstating ctx% by up to 5x.
+
 ## [0.24.0] - 2026-08-15
 
 ### Added
@@ -1276,6 +1290,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.24.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.1
 [0.24.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.0
 [0.23.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.23.0
 [0.22.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.22.0
