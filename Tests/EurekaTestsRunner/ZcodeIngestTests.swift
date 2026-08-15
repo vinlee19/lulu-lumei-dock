@@ -56,15 +56,16 @@ func zcodeRolloutDecoderTests(_ t: TestRunner) {
     }
 
     t.test("usageRecord：response.usage 四段 token + 模型小写化；空对象返回 nil") {
+        // OpenAI 口径：inputTokens 100 已含 cacheRead 10；totalTokens = input + output
         let root = try JSONDict(#"""
-        {"type":"model_io","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","modelId":"glm-5.3","usage":{"inputTokens":100,"outputTokens":50,"totalTokens":160,"cacheReadTokens":10,"cacheWriteTokens":0}}}
+        {"type":"model_io","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","modelId":"glm-5.3","usage":{"inputTokens":100,"outputTokens":50,"totalTokens":150,"cacheReadTokens":10,"cacheWriteTokens":0}}}
         """#)
         let record = ZcodeRolloutDecoder.usageRecord(root)
         try expectEqual(record?.model, "glm-5.3")
         try expectEqual(record?.usage.input, 100)
         try expectEqual(record?.usage.output, 50)
         try expectEqual(record?.usage.cacheRead, 10)
-        try expectEqual(record?.usage.total, 160)
+        try expectEqual(record?.usage.total, 150, "total = input + output（cacheRead 是 input 子集，不叠加）")
 
         let empty = try JSONDict(
             #"{"type":"model_io","response":{"usage":{}}}"#)
@@ -262,8 +263,9 @@ func zcodeTailerTests(_ t: TestRunner) {
         tailer.scanOnce()  // 初见
         events.removeAll()
 
-        // 大用量行（97,000 token ÷ config 的 1M 窗口 = 9.7%，超过抑制阈值 0.5%）
-        let bigUsage = #"{"type":"model_io","querySource":"main_turn","startedAt":"2026-08-15T03:59:05.000Z","completedAt":"2026-08-15T03:59:10.000Z","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","usage":{"inputTokens":64000,"outputTokens":1000,"cacheReadTokens":32000,"cacheWriteTokens":0}}}"#
+        // 大用量行（input 96k[含 cacheRead 32k] + output 1k = 97,000 ÷ config 的 1M 窗口
+        // = 9.7%，超过抑制阈值 0.5%；cacheRead 是 input 子集，不参与相加）
+        let bigUsage = #"{"type":"model_io","querySource":"main_turn","startedAt":"2026-08-15T03:59:05.000Z","completedAt":"2026-08-15T03:59:10.000Z","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","usage":{"inputTokens":96000,"outputTokens":1000,"cacheReadTokens":32000,"cacheWriteTokens":0}}}"#
         try appendZcodeLines([bigUsage], to: dir.file)
         tailer.scanOnce()
         let kinds = events.map(\.0.kind)
@@ -447,9 +449,23 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
         let zcodeRows = totals.filter { $0.source == .zcode }
         try expectEqual(zcodeRows.count, 1)
         try expectEqual(zcodeRows[0].model, "glm-5.3")
-        try expectEqual(zcodeRows[0].inputTokens, 30)
+        // inputTokens 含缓存读（OpenAI 口径）→ 入库前减掉：10 + (20-2) = 28
+        try expectEqual(zcodeRows[0].inputTokens, 28)
         try expectEqual(zcodeRows[0].outputTokens, 13)
         try expectEqual(zcodeRows[0].cacheReadTokens, 2)
+    }
+
+    t.test("lastZcodeContext：rollout 末条 usage 的 input+output + 模型名") {
+        let dir = try makeZcodeRolloutDir()
+        defer { try? FileManager.default.removeItem(at: dir.root) }
+        try appendZcodeLines([zcodeMidStep, zcodeFinalStep], to: dir.file)
+        guard let last = LastTurnUsageReader.lastZcodeContext(rolloutPath: dir.file.path) else {
+            throw ExpectationError(description: "末条 usage 应可读出")
+        }
+        try expectEqual(last.tokens, 28, "input 20（已含 cacheRead 2）+ output 8")
+        try expectEqual(last.model, "glm-5.3")
+        try expect(LastTurnUsageReader.lastZcodeContext(
+            rolloutPath: "/tmp/nonexistent-\(UUID()).jsonl") == nil, "文件缺失返回 nil")
     }
 
     t.test("目录为空 → 零记录不抛错") {
@@ -461,5 +477,110 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
         let scanner = ZcodeUsageScanner(
             rolloutRoot: dir, dbPath: dir.appendingPathComponent("nope.db"), store: store)
         try expectEqual(try scanner.scanOnce(), 0)
+    }
+}
+
+// MARK: - 计划索引
+
+func zcodePlanIndexTests(_ t: TestRunner) {
+    t.suite("ZcodePlanIndex")
+
+    t.test("<repo>/.zcode/plans：plan- 前缀收窄 + 文件名推导会话 id") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-zcode-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let plansDir = root.appendingPathComponent(".zcode/plans", isDirectory: true)
+        try FileManager.default.createDirectory(at: plansDir, withIntermediateDirectories: true)
+        try "# 适配 ZCode\n\n- [x] 步骤一\n- [ ] 步骤二\n".write(
+            to: plansDir.appendingPathComponent("plan-sess_abc.md"),
+            atomically: true, encoding: .utf8)
+        // 无 sess_ 段的 plan- 文件：仍收，但不关联会话
+        try "# 附录\n".write(
+            to: plansDir.appendingPathComponent("plan-notes.md"),
+            atomically: true, encoding: .utf8)
+        // 非 plan- 前缀：不收
+        try "# 杂记\n".write(
+            to: plansDir.appendingPathComponent("readme.md"),
+            atomically: true, encoding: .utf8)
+
+        let entries = PlanMaterializer.index(
+            claudePlansDir: root.appendingPathComponent("no-claude"),
+            stagingRoot: root.appendingPathComponent("no-staging"),
+            zcodePlansDirs: [plansDir])
+        try expectEqual(entries.count, 2, "只收 plan-*.md: \(entries.map(\.path))")
+        try expect(entries.allSatisfy { $0.source == .zcode })
+        guard let plan = entries.first(where: { $0.sessionId != nil }) else {
+            throw ExpectationError(description: "应有一条带会话 id")
+        }
+        try expectEqual(plan.sessionId, "sess_abc")
+        try expectEqual(plan.title, "适配 ZCode")
+        try expectEqual(plan.stepsDone, 1)
+        try expectEqual(plan.stepsTotal, 2)
+        guard let notes = entries.first(where: { $0.sessionId == nil }) else {
+            throw ExpectationError(description: "plan-notes.md 应被收录且无会话 id")
+        }
+        try expect(notes.path.hasSuffix("plan-notes.md"))
+    }
+
+    t.test("目录不存在 → 空结果不抛错") {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-zcode-missing-\(UUID().uuidString)")
+        let entries = PlanMaterializer.index(
+            claudePlansDir: missing.appendingPathComponent("claude"),
+            stagingRoot: missing.appendingPathComponent("staging"),
+            zcodePlansDirs: [missing.appendingPathComponent("plans")])
+        try expect(entries.isEmpty)
+    }
+}
+
+// MARK: - 子代理 profile 聚合（Agents 标签用）
+
+func zcodeAgentDefinitionTests(_ t: TestRunner) {
+    t.suite("ZcodeAgentDefinitions")
+
+    t.test("聚合运行记录 profileSnapshot：按 profileId 去重、取最近快照") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-zcode-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func writeMeta(
+            session: String, agent: String, profileId: String,
+            description: String, createdAt: String, tools: [String] = []
+        ) throws {
+            let dir = root.appendingPathComponent("\(session)/\(agent)", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let toolsJSON = tools.map { "\"\($0)\"" }.joined(separator: ",")
+            let meta = """
+            {"agentId":"\(agent)","createdAt":"\(createdAt)","description":"任务描述（不该被采用）",
+             "profileId":"\(profileId)",
+             "profileSnapshot":{"name":"\(profileId)","description":"\(description)",
+                                "color":"cyan","tools":[\(toolsJSON)]},
+             "status":"completed"}
+            """
+            try Data(meta.utf8).write(to: dir.appendingPathComponent("metadata.json"))
+        }
+        try writeMeta(session: "sess_a", agent: "agent_1", profileId: "Explore",
+                      description: "旧快照", createdAt: "2026-08-15T01:00:00.000Z")
+        try writeMeta(session: "sess_b", agent: "agent_2", profileId: "Explore",
+                      description: "新快照", createdAt: "2026-08-15T02:00:00.000Z",
+                      tools: ["Bash", "Read"])
+        try writeMeta(session: "sess_b", agent: "agent_3", profileId: "Coder",
+                      description: "写码", createdAt: "2026-08-15T02:00:00.000Z")
+
+        let agents = AgentDefinitionIndexer.indexZcodeObservedAgents(agentsRoot: root)
+        try expectEqual(agents.count, 2, "同 profileId 应去重: \(agents.map(\.name))")
+        try expectEqual(agents.map(\.name), ["Coder", "Explore"], "按名字排序")
+        let explore = agents[1]
+        try expectEqual(explore.source, .zcode)
+        try expectEqual(explore.description, "新快照", "同 id 取最近一次快照")
+        try expectEqual(explore.tools, ["Bash", "Read"])
+        try expectEqual(explore.color, "cyan")
+        try expect(explore.builtin, "无磁盘定义文件 → 只读展示")
+        try expect(explore.path.isEmpty)
+    }
+
+    t.test("根不存在 → 空结果不抛错") {
+        let agents = AgentDefinitionIndexer.indexZcodeObservedAgents(
+            agentsRoot: URL(fileURLWithPath: "/tmp/nonexistent-zcode-agents-\(UUID())"))
+        try expect(agents.isEmpty)
     }
 }
