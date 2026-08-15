@@ -185,7 +185,8 @@ SQLite 库里(`db/db.sqlite`,与 opencode 同源的表结构,只读打开),每�
 append-only 的模型 IO 流水(`rollout/model-io-sess_<id>.jsonl`),逐请求带 token 用量——
 实时卡片与用量账都尾随这条流水(含子代理流)。token 正常计数,但 `glm-` 前缀模型在价格表里
 标 `unknown`(套餐订阅制):**只统计 token,金额恒为 0**。会话在共享库里,与 opencode 同例
-跳过单条删除与全文搜索;技能在共享的 `~/.agents/skills`(SKILL.md,与 Claude 同构)。
+跳过单条删除与全文搜索;ctx% 分母取 `~/.zcode/v2/config.json` 里 per-model 的 `limit.context`(ZCode 自己维护的
+模型目录);技能在共享的 `~/.agents/skills`(SKILL.md,与 Claude 同构)。
 备份是严格白名单,只收 `cli/rollout`、`cli/agents` 与 `~/.agents/skills`:
 `~/.zcode/v2`(凭证)与会话库本体**绝不**纳入。
 

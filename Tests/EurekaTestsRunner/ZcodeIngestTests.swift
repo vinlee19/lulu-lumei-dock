@@ -124,12 +124,51 @@ private func JSONDict(_ json: String) throws -> [String: Any] {
     return dict
 }
 
+// MARK: - 模型目录（v2/config.json 的 per-model limit.context）
+
+func zcodeConfigWindowsTests(_ t: TestRunner) {
+    t.suite("ZcodeConfigWindows")
+
+    func makeConfig(_ json: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-zcode-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("config.json")
+        try Data(json.utf8).write(to: url)
+        return url
+    }
+
+    t.test("解析 provider→models→limit.context；多 provider 同名取最大；键小写") {
+        let url = try makeConfig(#"""
+        { "provider": {
+            "builtin:zai": { "models": {
+                "GLM-5.3": { "limit": { "context": 1000000, "output": 128000 } },
+                "GLM-5-Turbo": { "limit": { "context": 200000, "output": 128000 } } } },
+            "custom-x": { "models": {
+                "GLM-5.3": { "limit": { "context": 512000 } },
+                "NoLimit": { "modalities": {} } } } } }
+        """#)
+        let map = ZcodeConfigWindows.parse(configURL: url)
+        try expectEqual(map["glm-5.3"], 1_000_000, "同名模型多 provider 应取最大")
+        try expectEqual(map["glm-5-turbo"], 200_000)
+        try expect(map["nolimit"] == nil, "无 limit 的模型不入表")
+        try expectEqual(
+            ZcodeConfigWindows.window(forModel: "GLM-5.3", configURL: url), 1_000_000,
+            "模型名大小写不敏感")
+        try expect(ZcodeConfigWindows.window(forModel: nil, configURL: url) == nil)
+        try expect(ZcodeConfigWindows.window(
+            forModel: "glm-5.3",
+            configURL: URL(fileURLWithPath: "/tmp/nope-\(UUID()).json")) == nil,
+            "文件缺失返回 nil 不抛错")
+    }
+}
+
 // MARK: - tailer
 
 /// 建 rollout 目录 + 一个主会话 db（session 表只含 directory 列查询所需的行）
 private func makeZcodeRolloutDir(
     sessionId: String = "sess_abc", cwd: String? = "/Users/me/work/demo"
-) throws -> (root: URL, dbPath: URL, file: URL) {
+) throws -> (root: URL, dbPath: URL, file: URL, configURL: URL) {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("eureka-zcode-\(UUID().uuidString)", isDirectory: true)
     let rollout = root.appendingPathComponent("rollout", isDirectory: true)
@@ -149,7 +188,12 @@ private func makeZcodeRolloutDir(
         """)
         try db.run("INSERT INTO session (id, directory) VALUES ('\(sessionId)', '\(cwd)')")
     }
-    return (root, dbPath, rollout.appendingPathComponent("model-io-\(sessionId).jsonl"))
+    let configURL = root.appendingPathComponent("v2-config.json")
+    try Data(#"""
+    { "provider": { "builtin:zai": { "models": {
+        "GLM-5.3": { "limit": { "context": 1000000 } } } } } }
+    """#.utf8).write(to: configURL)
+    return (root, dbPath, rollout.appendingPathComponent("model-io-\(sessionId).jsonl"), configURL)
 }
 
 private func appendZcodeLines(_ lines: [String], to url: URL) throws {
@@ -176,7 +220,7 @@ func zcodeTailerTests(_ t: TestRunner) {
         try appendZcodeLines([zcodeMidStep], to: dir.file)
 
         var events: [(TaskEvent, Bool)] = []
-        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath) {
+        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
             events.append(($0, $1))
         }
         tailer.scanOnce()
@@ -194,7 +238,7 @@ func zcodeTailerTests(_ t: TestRunner) {
         try appendZcodeLines([zcodeMidStep, zcodeFinalStep], to: dir.file)
 
         var events: [(TaskEvent, Bool)] = []
-        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath) {
+        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
             events.append(($0, $1))
         }
         tailer.scanOnce()
@@ -212,23 +256,42 @@ func zcodeTailerTests(_ t: TestRunner) {
             to: dir.root.appendingPathComponent("rollout/model-io-sess_subagent_agent_x.jsonl"))
 
         var events: [(TaskEvent, Bool)] = []
-        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath) {
+        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
             events.append(($0, $1))
         }
         tailer.scanOnce()  // 初见
         events.removeAll()
 
-        // 大用量行（context 占比超过抑制阈值 0.5%，确保 contextUpdate 可见）
+        // 大用量行（97,000 token ÷ config 的 1M 窗口 = 9.7%，超过抑制阈值 0.5%）
         let bigUsage = #"{"type":"model_io","querySource":"main_turn","startedAt":"2026-08-15T03:59:05.000Z","completedAt":"2026-08-15T03:59:10.000Z","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","usage":{"inputTokens":64000,"outputTokens":1000,"cacheReadTokens":32000,"cacheWriteTokens":0}}}"#
         try appendZcodeLines([bigUsage], to: dir.file)
         tailer.scanOnce()
         let kinds = events.map(\.0.kind)
         try expect(kinds.contains { if case .taskFinished(outcome: .success, _, _) = $0 { return true } else { return false } },
                    "终轮应产出 success: \(kinds)")
-        try expect(kinds.contains { if case .contextUpdate = $0 { return true } else { return false } },
-                   "usage 应产出 contextUpdate: \(kinds)")
+        guard kinds.contains(where: { kind in
+            if case .contextUpdate(let percent) = kind { return abs(percent - 9.7) < 0.1 }
+            return false
+        }) else {
+            throw ExpectationError(description: "97k/1M 应发 contextUpdate≈9.7%: \(kinds)")
+        }
         try expect(!events.contains { $0.0.sessionId.contains("subagent") },
                    "子代理流水不该进事件流")
+    }
+
+    t.test("config 缺该模型的窗口 → 不发 contextUpdate（不猜分母）") {
+        let dir = try makeZcodeRolloutDir()
+        defer { try? FileManager.default.removeItem(at: dir.root) }
+        // 空 provider 表：任何模型都查不到窗口
+        try Data(#"{"provider":{}}"#.utf8).write(to: dir.configURL)
+        try appendZcodeLines([zcodeMidStep], to: dir.file)
+        var events: [(TaskEvent, Bool)] = []
+        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
+            events.append(($0, $1))
+        }
+        tailer.scanOnce()
+        try expect(!events.contains { if case .contextUpdate = $0.0.kind { return true } else { return false } },
+                   "无窗口配置不该发 contextUpdate: \(events.map(\.0.kind))")
     }
 
     t.test("半行不消费，补全后产出") {
@@ -236,7 +299,7 @@ func zcodeTailerTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: dir.root) }
         try appendZcodeLines([zcodeMidStep], to: dir.file)
         var events: [(TaskEvent, Bool)] = []
-        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath) {
+        let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
             events.append(($0, $1))
         }
         tailer.scanOnce()  // 初见定基线

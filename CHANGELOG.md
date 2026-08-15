@@ -4,6 +4,18 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.25.1] - 2026-08-15
+
+### Fixed
+
+- **ZCode context-window percentages now use the app's own model catalog.** The ctx%
+  denominator reads the per-model `limit.context` from `~/.zcode/v2/config.json`
+  (e.g. GLM-5.3/5.2 = 1M, GLM-5-Turbo = 200K) — the value ZCode itself maintains —
+  instead of the conservative 128K placeholder shipped in 0.25.0, which understated
+  ctx% by up to 8x. Applies to both live island context updates and the session
+  detail card; if a model has no configured limit, no percentage is shown rather
+  than guessing a denominator.
+
 ## [0.25.0] - 2026-08-15
 
 ### Added
@@ -1306,6 +1318,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.25.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.1
 [0.25.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.0
 [0.24.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.1
 [0.24.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.24.0

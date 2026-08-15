@@ -13,6 +13,7 @@ public final class ZcodeRolloutTailer {
 
     private let rolloutRoot: URL
     private let dbPath: URL
+    private let modelConfigURL: URL
     private let staleThreshold: TimeInterval
     private let recentWindow: TimeInterval
     private let handler: Handler
@@ -28,19 +29,22 @@ public final class ZcodeRolloutTailer {
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
-    private var contextWindow: Int? = 128_000  // GLM 未知确切窗口前保守取值（仅估算 %）
+    /// v2/config.json 的 per-model limit.context（懒加载；ctx% 分母的权威来源）
+    private var contextWindows: [String: Int]?
 
     static let healthName = "zcode 事件监视"
 
     public init(
         rolloutRoot: URL = ZcodePaths.rolloutRoot(),
         dbPath: URL = ZcodePaths.db(),
+        modelConfigURL: URL = ZcodePaths.modelConfig(),
         staleThreshold: TimeInterval = 300,
         recentWindow: TimeInterval = 2 * 86400,
         handler: @escaping Handler
     ) {
         self.rolloutRoot = rolloutRoot
         self.dbPath = dbPath
+        self.modelConfigURL = modelConfigURL
         self.staleThreshold = staleThreshold
         self.recentWindow = recentWindow
         self.handler = handler
@@ -121,7 +125,7 @@ public final class ZcodeRolloutTailer {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
         let complete = data[data.startIndex...lastNewline]
         let ctx = context(for: url)
-        var lastUsage: ZcodeRolloutDecoder.Usage?
+        var lastUsage: (model: String?, usage: ZcodeRolloutDecoder.Usage)?
         var lastPrompt: String?
         var cursor = complete.startIndex
         while cursor < complete.endIndex {
@@ -132,7 +136,9 @@ public final class ZcodeRolloutTailer {
                   let object = try? JSONSerialization.jsonObject(with: Data(line)),
                   let root = object as? [String: Any]
             else { continue }
-            if let record = ZcodeRolloutDecoder.usageRecord(root) { lastUsage = record.usage }
+            if let record = ZcodeRolloutDecoder.usageRecord(root) {
+                lastUsage = (record.model, record.usage)
+            }
             if let prompt = ZcodeRolloutDecoder.userPromptText(root) { lastPrompt = prompt }
             for event in ZcodeRolloutDecoder.decode(root: root, sessionId: ctx.sessionId, cwd: ctx.cwd) {
                 deliver(event)
@@ -184,13 +190,15 @@ public final class ZcodeRolloutTailer {
 
         var lastEvent: TaskEvent?
         var finished: TaskEvent?
-        var lastUsage: ZcodeRolloutDecoder.Usage?
+        var lastUsage: (model: String?, usage: ZcodeRolloutDecoder.Usage)?
         var lastPrompt: String?
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
                   let root = object as? [String: Any]
             else { continue }
-            if let record = ZcodeRolloutDecoder.usageRecord(root) { lastUsage = record.usage }
+            if let record = ZcodeRolloutDecoder.usageRecord(root) {
+                lastUsage = (record.model, record.usage)
+            }
             if let prompt = ZcodeRolloutDecoder.userPromptText(root) { lastPrompt = prompt }
             for event in ZcodeRolloutDecoder.decode(root: root, sessionId: ctx.sessionId, cwd: ctx.cwd) {
                 lastEvent = event
@@ -226,13 +234,19 @@ public final class ZcodeRolloutTailer {
         }
     }
 
-    // MARK: - 上下文占用（usage.total ÷ 保守窗口）
+    // MARK: - 上下文占用（usage.total ÷ config.json 的 per-model limit.context）
 
     private func emitContext(
-        for url: URL, context ctx: FileContext, usage: ZcodeRolloutDecoder.Usage
+        for url: URL, context ctx: FileContext,
+        usage: (model: String?, usage: ZcodeRolloutDecoder.Usage)
     ) {
-        guard let window = contextWindow, window > 0 else { return }
-        let percent = min(100, Double(usage.total) / Double(window) * 100)
+        if contextWindows == nil {
+            contextWindows = ZcodeConfigWindows.parse(configURL: modelConfigURL)
+        }
+        // 窗口取该次请求模型在 config 里的值；查不到（自定义 provider 未配 limit）不发
+        guard let window = usage.model.flatMap({ contextWindows?[$0] }), window > 0
+        else { return }
+        let percent = min(100, Double(usage.usage.total) / Double(window) * 100)
         // 只在变化时补发，避免刷屏
         if let last = lastContextPercent[url.path], abs(last - percent) < 0.5 { return }
         lastContextPercent[url.path] = percent

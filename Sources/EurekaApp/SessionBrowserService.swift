@@ -411,12 +411,15 @@ final class SessionBrowserService: ObservableObject {
                 let rows = (try? self?.store?.usage.totalsForSessions([session.id]))?[session.id] ?? []
                 let model = rows.max(by: { Self.totalTokens($0) < Self.totalTokens($1) })?.model
                 // 窗口分母优先用会话数据自带的真实值：codex 的 token_count 事件带
-                // model_context_window；kimi 用 config.toml 的 per-model max_context_size
-                // （用户实际配置，随订阅档位而变）；其余源回退 ContextWindows 内建表
+                // model_context_window；kimi 用 config.toml 的 per-model max_context_size，
+                // zcode 用 v2/config.json 的 per-model limit.context（都是应用自己维护的
+                // 真实配置）；其余源回退 ContextWindows 内建表
                 let realWindow = LastTurnUsageReader.lastContextWindow(
                     source: session.source, transcriptPath: session.transcriptPath)
                     ?? (session.source == .kimi
                         ? KimiConfigWindows.window(forModel: model) : nil)
+                    ?? (session.source == .zcode
+                        ? ZcodeConfigWindows.window(forModel: model) : nil)
                 breakdown = ContextBreakdownEstimator.estimate(
                     source: session.source,
                     cwd: session.cwd,

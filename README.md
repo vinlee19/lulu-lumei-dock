@@ -273,7 +273,9 @@ as opencode, read-only), and a per-session append-only model-IO stream
 live cards and token accounting, subagent streams included. Tokens are counted but every `glm/*`
 model is marked `unknown` in the price table (plan-based subscription), so **cost is always $0**.
 Sessions live in the shared database, so per-session deletion and full-text search are skipped
-like opencode. Skills live in the shared `~/.agents/skills` (SKILL.md, same layout as Claude).
+like opencode. Context-window percentages use the per-model `limit.context` from `~/.zcode/v2/config.json`
+(ZCode's own model catalog). Skills live in the shared `~/.agents/skills` (SKILL.md, same
+layout as Claude).
 Backup is a strict whitelist of `cli/rollout`, `cli/agents` and `~/.agents/skills`:
 `~/.zcode/v2` (credentials) and the session database itself are **never** included.
 

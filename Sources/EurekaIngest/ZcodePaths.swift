@@ -75,4 +75,17 @@ public enum ZcodePaths {
         }
         return home().appendingPathComponent(".agents/skills", isDirectory: true)
     }
+
+    /// 模型目录 `~/.zcode/v2/config.json`（env `EUREKA_ZCODE_MODEL_CONFIG`）。
+    /// 每个 provider 的 models.<型号>.limit.context 是 ctx% 分母的权威来源
+    /// （GLM-5.3/5.2 = 1M、GLM-5-Turbo = 200K，随版本更新由 ZCode 自己维护）。
+    /// ⚠️ v2 目录整体含凭证、绝不进同步白名单——这里只**读**这一个具名文件。
+    public static func modelConfig(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        if let custom = environment["EUREKA_ZCODE_MODEL_CONFIG"], !custom.isEmpty {
+            return URL(fileURLWithPath: custom)
+        }
+        return root(environment: environment).appendingPathComponent("v2/config.json")
+    }
 }

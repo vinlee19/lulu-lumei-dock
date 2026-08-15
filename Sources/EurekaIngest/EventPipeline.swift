@@ -158,7 +158,8 @@ public final class EventPipeline {
         }
         // zcode 无 hook/notify，尾随 cli/rollout/model-io-sess_*.jsonl 做实时
         zcodeTailer = ZcodeRolloutTailer(
-            rolloutRoot: zcodeRolloutRoot, dbPath: zcodeDbPath) {
+            rolloutRoot: zcodeRolloutRoot, dbPath: zcodeDbPath,
+            modelConfigURL: ZcodePaths.modelConfig()) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
