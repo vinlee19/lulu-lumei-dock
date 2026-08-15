@@ -8,18 +8,21 @@ import EurekaKit
 /// - `model.modelId`：如 "glm-5.3"（response.modelId 是小写版）
 /// - `response.finishReason`：tool-calls=中间步、stop=终轮
 /// - `response.usage`：{inputTokens,outputTokens,totalTokens,cacheReadTokens,cacheWriteTokens}
-///   （error 行可能是空对象 {}）
+///   （error 行可能是空对象 {}）。**OpenAI 口径**（实测全部 55 条 usage 行验证）：
+///   `cacheReadTokens ⊆ inputTokens`（inputTokens 是完整输入侧、已含缓存读），
+///   `totalTokens = inputTokens + outputTokens`，cacheWriteTokens 恒 0。
 /// - `error` 非空 = 该请求出错（如 "v4 session stopped"）
 /// 会话 id 从文件名解出（`model-io-sess_<id>.jsonl` -> `sess_<id>`）；
 /// cwd 由调用方从 db 的 session 表带入。未知形状一律忽略不抛错。
 public enum ZcodeRolloutDecoder {
     /// 归一化用量（response.usage 的真实字段）
     public struct Usage: Equatable {
-        public var input: Int          // inputTokens（非缓存输入）
+        public var input: Int          // inputTokens（完整输入侧，已含 cacheRead——OpenAI 口径）
         public var output: Int         // outputTokens
-        public var cacheRead: Int      // cacheReadTokens
-        public var cacheWrite: Int     // cacheWriteTokens
-        public var total: Int { input + output + cacheRead + cacheWrite }
+        public var cacheRead: Int      // cacheReadTokens（input 的子集，不能与 input 相加）
+        public var cacheWrite: Int     // cacheWriteTokens（实测恒 0）
+        /// = 文件自带 totalTokens；ctx% 的分子（官方「上下文容量」同口径）
+        public var total: Int { input + output }
 
         public init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int) {
             self.input = input

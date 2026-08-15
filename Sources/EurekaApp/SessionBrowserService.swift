@@ -414,19 +414,28 @@ final class SessionBrowserService: ObservableObject {
                 // model_context_window；kimi 用 config.toml 的 per-model max_context_size，
                 // zcode 用 v2/config.json 的 per-model limit.context（都是应用自己维护的
                 // 真实配置）；其余源回退 ContextWindows 内建表
+                // zcode 的 transcriptPath 是共享 sqlite 库，真实 usage 在逐会话 rollout；
+                // 末条 usage 顺带带回模型名——账本行可能尚未写入（60s tick），
+                // 没有它窗口分母会漏查 config 而落到内建默认值
+                let zcodeLast = session.source == .zcode
+                    ? LastTurnUsageReader.lastZcodeContext(
+                        rolloutPath: ZcodePaths.rolloutRoot()
+                            .appendingPathComponent("model-io-\(session.id).jsonl").path)
+                    : nil
                 let realWindow = LastTurnUsageReader.lastContextWindow(
                     source: session.source, transcriptPath: session.transcriptPath)
                     ?? (session.source == .kimi
                         ? KimiConfigWindows.window(forModel: model) : nil)
                     ?? (session.source == .zcode
-                        ? ZcodeConfigWindows.window(forModel: model) : nil)
+                        ? ZcodeConfigWindows.window(forModel: model ?? zcodeLast?.model) : nil)
                 breakdown = ContextBreakdownEstimator.estimate(
                     source: session.source,
                     cwd: session.cwd,
                     messages: result.messages,
                     model: model,
-                    lastTurnTotalTokens: LastTurnUsageReader.lastContextTokens(
-                        source: session.source, transcriptPath: session.transcriptPath),
+                    lastTurnTotalTokens: zcodeLast?.tokens
+                        ?? LastTurnUsageReader.lastContextTokens(
+                            source: session.source, transcriptPath: session.transcriptPath),
                     windowOverride: realWindow)
             }
             DispatchQueue.main.async {

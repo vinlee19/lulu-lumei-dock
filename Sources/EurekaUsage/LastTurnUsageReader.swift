@@ -32,9 +32,31 @@ public enum LastTurnUsageReader {
             // grok transcript 无 per-request token（订阅制不记账）-> 无真实总量
             return nil
         case .zcode:
-            // zcode 会话在共享 sqlite 库里，无单会话 transcript 路径 -> nil
+            // zcode 的 transcriptPath 是共享 sqlite 库；真实 usage 在逐会话 rollout 文件里，
+            // 调用方改用 lastZcodeContext(rolloutPath:)（顺带带回模型名给窗口分母查询）
             return nil
         }
+    }
+
+    /// zcode：rollout（`model-io-sess_<id>.jsonl`）末条 `response.usage` 的
+    /// inputTokens + outputTokens（OpenAI 口径：inputTokens 已含缓存读，两者之和
+    /// = 文件自带 totalTokens = 官方「上下文容量」分子）。模型名一并带回
+    /// （response.modelId 回退 model.modelId，小写化），供 v2/config.json 查窗口分母。
+    public static func lastZcodeContext(rolloutPath: String) -> (model: String?, tokens: Int)? {
+        guard let tail = readTail(path: rolloutPath) else { return nil }
+        for line in tail.reversed() {
+            guard let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+                  root["type"] as? String == "model_io",
+                  let response = root["response"] as? [String: Any],
+                  let usage = response["usage"] as? [String: Any],
+                  let input = usage["inputTokens"] as? Int, input > 0
+            else { continue }
+            let output = usage["outputTokens"] as? Int ?? 0
+            let model = (response["modelId"] as? String)
+                ?? (root["model"] as? [String: Any])?["modelId"] as? String
+            return (model?.lowercased(), input + output)
+        }
+        return nil
     }
 
     /// 读取该会话模型上下文窗口的**真实值**（会话数据里自带的参数）。

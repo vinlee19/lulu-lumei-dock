@@ -5,6 +5,8 @@ import EurekaStore
 /// 扫描 ~/.zcode/cli/rollout/model-io-sess_<id>.jsonl（模型 IO 流水）。
 /// schema 已对真实会话核验（2026-08）：每行一次模型请求 `type:"model_io"`，
 /// `response.usage` 为四段 token（inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens），
+/// **OpenAI 口径**：inputTokens 含缓存读（实测 cacheReadTokens ⊆ inputTokens）→ 入库前减掉，
+/// 与账本约定（inputTokens = 非缓存输入）对齐，否则 token/费用双重计数（与 CodeBuddy 同例）。
 /// `response.modelId` 如 "glm-5.3"，`startedAt` ISO8601。
 /// 子代理文件（sess_subagent_*）的 token 是真实开销，一并收（归属该子会话 id）。
 /// `response.toolCalls[].name` → tool_calls。
@@ -94,10 +96,12 @@ public final class ZcodeUsageScanner {
 
             // 用量：response.usage（全零/空对象 = error 行或进行中行，跳过）
             if let dict = response["usage"] as? [String: Any] {
-                let input = dict["inputTokens"] as? Int ?? 0
+                let rawInput = dict["inputTokens"] as? Int ?? 0
                 let output = dict["outputTokens"] as? Int ?? 0
                 let cacheRead = dict["cacheReadTokens"] as? Int ?? 0
                 let cacheWrite = dict["cacheWriteTokens"] as? Int ?? 0
+                // inputTokens 含缓存读（OpenAI 口径）→ 减掉，账本里两者分列
+                let input = max(0, rawInput - cacheRead)
                 if input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0 {
                     let model = ((response["modelId"] as? String)
                         ?? (root["model"] as? [String: Any])?["modelId"] as? String

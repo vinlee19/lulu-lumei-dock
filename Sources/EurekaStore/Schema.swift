@@ -1,6 +1,9 @@
 import Foundation
 
 enum Schema {
+    /// v22：ZCode usage 口径修正 —— rollout 的 inputTokens 是 OpenAI 口径（已含 cacheRead），
+    ///      旧版把两者分别入账导致 token/费用近乎双计（实测本机 14.14M vs 真值 7.15M）。
+    ///      扫描已改为入库前减掉缓存读；旧行是错的，派生表升级重建全量重扫修正。
     /// v21：Claude 工具调用计数算法修正 —— 改为按 tool_use id 逐调用持久去重（`tc:<id>`），
     ///      不再按 assistant 消息键末次覆盖、也不再依附"用量首次入库"分支；子代理转录的调用
     ///      归属父会话。旧行是错的（实测技能调用 68 / 真值 78），派生表升级重建全量回填。
@@ -24,7 +27,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 21
+    static let version: Int64 = 22
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
