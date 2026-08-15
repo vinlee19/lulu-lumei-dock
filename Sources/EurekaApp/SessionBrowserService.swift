@@ -407,13 +407,21 @@ final class SessionBrowserService: ObservableObject {
                 // 窗口大小按该会话 token 最多的模型取；无记录则 nil → 默认窗口
                 let rows = (try? self?.store?.usage.totalsForSessions([session.id]))?[session.id] ?? []
                 let model = rows.max(by: { Self.totalTokens($0) < Self.totalTokens($1) })?.model
+                // 窗口分母优先用会话数据自带的真实值：codex 的 token_count 事件带
+                // model_context_window；kimi 用 config.toml 的 per-model max_context_size
+                // （用户实际配置，随订阅档位而变）；其余源回退 ContextWindows 内建表
+                let realWindow = LastTurnUsageReader.lastContextWindow(
+                    source: session.source, transcriptPath: session.transcriptPath)
+                    ?? (session.source == .kimi
+                        ? KimiConfigWindows.window(forModel: model) : nil)
                 breakdown = ContextBreakdownEstimator.estimate(
                     source: session.source,
                     cwd: session.cwd,
                     messages: result.messages,
                     model: model,
                     lastTurnTotalTokens: LastTurnUsageReader.lastContextTokens(
-                        source: session.source, transcriptPath: session.transcriptPath))
+                        source: session.source, transcriptPath: session.transcriptPath),
+                    windowOverride: realWindow)
             }
             DispatchQueue.main.async {
                 guard let self, self.selected?.id == session.id else { return }

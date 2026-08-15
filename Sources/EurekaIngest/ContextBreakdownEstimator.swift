@@ -119,12 +119,15 @@ public enum ContextBreakdownEstimator {
     /// 入口：按源估五类，再与最后一轮真实总量对账。
     /// - model：该会话 token 最多的模型（决定窗口大小）；nil → 默认窗口。
     /// - lastTurnTotalTokens：LastTurnUsageReader 的结果；nil → 总量为纯估算。
+    /// - windowOverride：会话数据里带的真实窗口（codex 的 model_context_window /
+    ///   kimi config.toml 的 max_context_size）；优先于 ContextWindows 内建表。
     public static func estimate(
         source: AgentSource,
         cwd: String?,
         messages: [TranscriptMessage],
         model: String?,
         lastTurnTotalTokens: Int?,
+        windowOverride: Int? = nil,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> ContextBreakdown {
         let profile = AgentContextProfile.profile(for: source, cwd: cwd, home: home)
@@ -146,7 +149,7 @@ public enum ContextBreakdownEstimator {
         }
         return reconcile(
             estimates: estimates,
-            windowTokens: ContextWindows.window(forModel: model),
+            windowTokens: windowOverride ?? ContextWindows.window(forModel: model),
             lastTurnTotalTokens: lastTurnTotalTokens)
     }
 

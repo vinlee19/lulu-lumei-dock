@@ -34,6 +34,22 @@ public enum LastTurnUsageReader {
         }
     }
 
+    /// 读取该会话模型上下文窗口的**真实值**（会话数据里自带的参数）。
+    /// 目前只有 codex 的 token_count 事件带 `model_context_window`；其余源一律 nil，
+    /// 调用方应回退到 Kimi config.toml（kimi）或 ContextWindows 内建表。
+    public static func lastContextWindow(source: AgentSource, transcriptPath: String) -> Int? {
+        guard source == .codex else { return nil }
+        return lastMatch(path: transcriptPath) { root in
+            guard root["type"] as? String == "event_msg",
+                  let payload = root["payload"] as? [String: Any],
+                  payload["type"] as? String == "token_count",
+                  let info = payload["info"] as? [String: Any],
+                  let window = info["model_context_window"] as? Int, window > 0
+            else { return nil }
+            return window
+        }
+    }
+
     // MARK: - 各源解析（复用对应 UsageScanner 的行格式口径，只取输入侧）
 
     /// Claude：assistant 行 message.usage 的 input + cache_read + cache_creation

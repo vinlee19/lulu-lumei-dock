@@ -1,5 +1,6 @@
 import EurekaIngest
 import EurekaKit
+import EurekaUsage
 import Foundation
 
 // 上下文用量估算：TokenEstimator 启发式、reconcile 对账数学、AgentContextProfile 配置表。
@@ -146,5 +147,84 @@ func contextBreakdownTests(_ t: TestRunner) {
         try expectEqual(breakdown.windowTokens, ContextWindows.defaultWindow)
         let sum = breakdown.entries.reduce(0) { $0 + $1.tokens }
         try expectEqual(sum, 1_000)
+    }
+
+    // MARK: - 窗口分母：会话数据自带的真实值优先
+
+    t.test("windowOverride 优先于内建表；nil 回退按模型查表") {
+        let messages = [
+            TranscriptMessage(id: 0, role: .user, text: String(repeating: "a", count: 400)),
+        ]
+        // codex 会话自带 model_context_window=258400 → 不用内建表/默认值
+        let real = ContextBreakdownEstimator.estimate(
+            source: .codex, cwd: nil, messages: messages, model: "gpt-5.4",
+            lastTurnTotalTokens: 1_000, windowOverride: 258_400,
+            home: URL(fileURLWithPath: "/tmp/nonexistent-home"))
+        try expectEqual(real.windowTokens, 258_400)
+        // 无 override → 回退内建表（kimi-k3 → 1M）
+        let builtin = ContextBreakdownEstimator.estimate(
+            source: .kimi, cwd: nil, messages: messages, model: "kimi-code/k3",
+            lastTurnTotalTokens: 1_000,
+            home: URL(fileURLWithPath: "/tmp/nonexistent-home"))
+        try expectEqual(builtin.windowTokens, 1_048_576)
+    }
+
+    t.test("LastTurnUsageReader.lastContextWindow：codex 取最后一条 token_count 的窗口") {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-ctxwin-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("rollout.jsonl")
+        let lines = [
+            #"{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":258400,"last_token_usage":{"input_tokens":1000}}}}"#,
+            #"{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":272000,"last_token_usage":{"input_tokens":2000}}}}"#,
+            #"{"type":"response_item","payload":{}}"#,
+        ]
+        try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
+        try expectEqual(
+            LastTurnUsageReader.lastContextWindow(
+                source: .codex, transcriptPath: file.path),
+            272_000)
+        // 非 codex 源一律 nil
+        try expect(
+            LastTurnUsageReader.lastContextWindow(
+                source: .kimi, transcriptPath: file.path) == nil)
+        // 无窗口字段的文件 → nil
+        let empty = dir.appendingPathComponent("empty.jsonl")
+        try #"{"type":"response_item","payload":{}}"#
+            .write(to: empty, atomically: true, encoding: .utf8)
+        try expect(
+            LastTurnUsageReader.lastContextWindow(
+                source: .codex, transcriptPath: empty.path) == nil)
+    }
+
+    t.test("KimiConfigWindows：per-model max_context_size + 默认 256K 兜底") {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-kimicfg-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = dir.appendingPathComponent("config.toml")
+        try """
+        default_model = "kimi-code/k3"
+
+        [models."kimi-code/k3"]
+        max_context_size = 1048576
+
+        [models."kimi-code/k3-256k"]
+        max_context_size = 262144
+        """.write(to: config, atomically: true, encoding: .utf8)
+        try expectEqual(
+            KimiConfigWindows.window(forModel: "kimi-code/k3", configURL: config), 1_048_576)
+        try expectEqual(
+            KimiConfigWindows.window(forModel: "kimi-code/k3-256k", configURL: config), 262_144)
+        // 未收录模型 → Kimi Code 默认窗口 256K
+        try expectEqual(
+            KimiConfigWindows.window(forModel: "kimi-code/k2.7", configURL: config), 262_144)
+        // 文件缺失 → 兜底默认值而非 nil
+        try expectEqual(
+            KimiConfigWindows.window(
+                forModel: "kimi-code/k3",
+                configURL: dir.appendingPathComponent("nope.toml")),
+            262_144)
     }
 }

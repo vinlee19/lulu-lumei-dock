@@ -38,7 +38,8 @@ public struct ContextBreakdown: Equatable, Sendable {
     public var entries: [Entry]
     /// 上下文占用总量：totalIsReal 时为最后一轮真实值，否则为估算合计
     public var totalTokens: Int
-    /// 上下文窗口大小（百分比分母；无模型信息时回退 ContextWindows 默认值）
+    /// 上下文窗口大小（百分比分母）：优先会话数据自带的真实值（codex model_context_window /
+    /// kimi config.toml max_context_size），否则按模型查 ContextWindows 表，最终回退默认值
     public var windowTokens: Int
     /// 总量是否为最后一轮真实值（false = 纯估算，UI 标注「估算」徽章）
     public var totalIsReal: Bool

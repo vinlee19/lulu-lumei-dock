@@ -303,33 +303,9 @@ public final class KimiWireTailer {
         return contextWindows?[modelAlias] ?? contextWindows?["*default*"]
     }
 
-    /// config.toml → { "kimi-code/k3": max_context_size }（懒加载一次；朴素行扫描，不解全量 TOML）。
-    /// 段头形如 `[models."kimi-code/k3"]`，段内 `max_context_size = 1048576`。
+    /// config.toml → { "kimi-code/k3": max_context_size }（解析逻辑已抽至 KimiConfigWindows）
     private func loadContextWindows() -> [String: Int] {
-        var map: [String: Int] = ["*default*": 262144]
-        guard let text = try? String(contentsOf: configTomlURL, encoding: .utf8) else {
-            return map
-        }
-        var currentModel: String?
-        for rawLine in text.components(separatedBy: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") {
-                if line.hasPrefix("[models.\""), let end = line.range(of: "\"]") {
-                    currentModel = String(
-                        line[line.index(line.startIndex, offsetBy: "[models.\"".count)..<end.lowerBound])
-                } else {
-                    currentModel = nil
-                }
-                continue
-            }
-            guard let model = currentModel, line.hasPrefix("max_context_size") else { continue }
-            let parts = line.components(separatedBy: "=")
-            if parts.count == 2,
-               let value = Int(parts[1].trimmingCharacters(in: .whitespaces)) {
-                map[model] = value
-            }
-        }
-        return map
+        KimiConfigWindows.parse(configURL: configTomlURL)
     }
 
     // MARK: - 会话上下文（上级 state.json，mtime 变了重读 → 标题事件）
