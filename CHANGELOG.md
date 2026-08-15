@@ -4,6 +4,21 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.26.1] - 2026-08-15
+
+### Fixed
+
+- **ZCode session detail card still showed the character estimate after 0.26.0.**
+  The last-turn reader assumed rollout lines fit in a 64KB tail window, but every
+  zcode line embeds the full request conversation (250–470KB measured locally), so
+  no complete line ever surfaced and the card silently fell back to estimation with
+  the built-in window denominator. The reader now walks back from the end of file in
+  growing chunks (256KB → 16MB cap) and locates the last structural
+  `"usage":{"inputTokens":…}` snippet byte-wise — quotes inside JSON strings are
+  always escaped, so the bare pattern can only be real structure, never conversation
+  text. The model id rides along for the window lookup, so the card shows the real
+  23.4% · 1.00M immediately, even before the usage ledger row lands.
+
 ## [0.26.0] - 2026-08-15
 
 ### Added
@@ -1345,6 +1360,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.26.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.1
 [0.26.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.0
 [0.25.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.1
 [0.25.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.25.0
