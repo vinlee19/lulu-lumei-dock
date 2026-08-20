@@ -4,6 +4,19 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.27.1] - 2026-08-20
+
+### Fixed
+
+- **Sessions silently disappeared from the session manager.** The per-source
+  index kept only the 300 most recently modified sessions (2,000 in the
+  all-time range), so long-running conversations got pushed off the tail of
+  the list by newer sessions — a 300+ turn session could vanish even though
+  its `.jsonl` was still on disk. The caps are gone: the 30-day view now
+  lists every session in the window and the all-time view lists everything
+  (session cost/prompt lookups were already chunked and the list renders
+  lazily, so large lists stay smooth).
+
 ## [0.27.0] - 2026-08-20
 
 ### Added
@@ -1411,6 +1424,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.27.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.1
 [0.27.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.0
 [0.26.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.2
 [0.26.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.1
