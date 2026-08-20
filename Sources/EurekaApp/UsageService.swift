@@ -30,6 +30,13 @@ final class UsageService: ObservableObject {
     @Published private(set) var toolCallTotals: [ToolCallsRepo.ToolCallTotal] = []
     /// 技能全时累计统计（Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）
     @Published private(set) var skillStats: [ToolCallsRepo.SkillUsageStat] = []
+    /// MCP server 调用统计（键 = server 名小写，跨源聚合；MCP 页闲置检测用）
+    @Published private(set) var mcpServerStats: [String: MCPServerCallStat] = [:]
+
+    struct MCPServerCallStat: Equatable {
+        var calls: Int
+        var lastTs: Double
+    }
     /// Top 技能排行（Skills 页分析卡，按所选时间档过滤）
     @Published private(set) var skillRanking: [ToolCallsRepo.SkillUsageStat] = []
     /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，Claude/Kimi 有数据）
@@ -405,6 +412,34 @@ final class UsageService: ObservableObject {
             let stats = (try? store.toolCalls.skillStats(source: source)) ?? []
             self.publish { $0.skillStats = stats }
         }
+    }
+
+    /// MCP 调用按 server 聚合（MCP 页"N 次调用/最近使用/闲置提示"）。
+    /// 原始名形态：codex/kimi `server.tool`（取首个 . 前缀），Claude `mcp__server__tool`。
+    func loadMCPStats() {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let totals = (try? store.toolCalls.mcpNameTotals()) ?? []
+            var stats: [String: MCPServerCallStat] = [:]
+            for total in totals {
+                let key = Self.mcpServerKey(total.name)
+                guard !key.isEmpty else { continue }
+                var stat = stats[key] ?? MCPServerCallStat(calls: 0, lastTs: 0)
+                stat.calls += total.count
+                stat.lastTs = max(stat.lastTs, total.lastTs)
+                stats[key] = stat
+            }
+            self.publish { $0.mcpServerStats = stats }
+        }
+    }
+
+    /// `server.tool` / `mcp__server__tool` → server 名（小写）
+    static func mcpServerKey(_ raw: String) -> String {
+        if raw.hasPrefix("mcp__") {
+            let rest = raw.dropFirst("mcp__".count)
+            return rest.components(separatedBy: "__").first?.lowercased() ?? ""
+        }
+        return raw.split(separator: ".").first.map { String($0).lowercased() } ?? ""
     }
 
     /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，累计次数降序）

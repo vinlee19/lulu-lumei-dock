@@ -968,6 +968,26 @@ public final class ToolCallsRepo {
         public var id: String { "\(source.rawValue):\(name)" }
     }
 
+    /// MCP 调用按原始名全时聚合（名的形态因源而异：codex/kimi 是 `server.tool`，
+    /// Claude 是 `mcp__server__tool`——server 前缀提取在 app 层做，SQL 只管聚合）
+    public struct MCPCallTotal: Equatable, Sendable {
+        public var name: String
+        public var count: Int
+        public var lastTs: Double
+    }
+
+    public func mcpNameTotals() throws -> [MCPCallTotal] {
+        try db.query("""
+        SELECT name, SUM(count), MAX(last_ts) FROM tool_calls
+        WHERE kind = 'mcp' GROUP BY name
+        """) { row in
+            MCPCallTotal(
+                name: row.text(0) ?? "",
+                count: Int(row.int(1)),
+                lastTs: row.real(2))
+        }
+    }
+
     /// 累加计数（同 日/来源/kind/name/session 合并）；last_ts 取较大值、tokens 累加。
     /// session：触发会话 id（仅 Claude 扫描器传真实值，其余默认空 —— 与逐技能数据仅 Claude 的现状一致）。
     public func bump(

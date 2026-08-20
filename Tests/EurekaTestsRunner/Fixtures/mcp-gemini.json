@@ -1,0 +1,8 @@
+{
+  "theme": "Default",
+  "mcpServers": {
+    "figma": {
+      "httpUrl": "https://mcp.figma.com/mcp#fragment-token"
+    }
+  }
+}

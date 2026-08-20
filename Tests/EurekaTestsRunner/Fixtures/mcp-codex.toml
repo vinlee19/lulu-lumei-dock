@@ -1,0 +1,26 @@
+model = "gpt-5"
+notify = ["eureka-relay", "codex-notify"]
+
+[profiles.fast]
+model = "gpt-5-mini"
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp"]
+env = { PLAYWRIGHT_TOKEN = "SECRET-INLINE-VALUE" }
+
+[mcp_servers.playwright.tools.screenshot]
+enabled = false
+
+[mcp_servers.internal-docs]
+url = "https://docs.internal.example/mcp?key=SECRET-QUERY"
+
+[mcp_servers.internal-docs.env]
+DOCS_API_KEY = "SECRET-SUBSECTION-VALUE"
+DOCS_REGION = "cn"
+
+[mcp.kimi-style]
+command = "uvx"
+
+[history]
+persistence = "save-all"

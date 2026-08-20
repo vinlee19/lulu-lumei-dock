@@ -15,18 +15,46 @@ import SwiftUI
 /// 否则就会报「你没配 Gemini 的指令文件」这类纯噪声。判据与阈值见 `ConsistencyChecker`（有单测）。
 struct ConsistencyCard: View {
     @ObservedObject var service: SkillMemoryService
+    /// MCP 同名异义（同一 server 名在多源定义冲突；AuditView 传入，默认空）
+    var mcpDrifts: [ConsistencyChecker.MCPDrift] = []
 
     @State private var expanded = false
+    /// 待确认的"补齐"目标（点了某条技能缺口的补齐按钮）
+    @State private var fixGap: ConsistencyReportAlias.SkillSourceGap?
+    /// 补齐结果反馈（短暂显示；重扫后缺口条目自然消失）
+    @State private var fixNote: String?
 
     var body: some View {
         let report = service.consistencyReport
+        let clean = report.isClean && mcpDrifts.isEmpty
+        let issueCount = report.issueCount + mcpDrifts.count
         // 还没扫完就不占版面（此时全是空的，报"一切正常"是假的）
         if service.lastScanAt != nil {
             VStack(alignment: .leading, spacing: expanded ? 10 : 0) {
-                header(report)
-                if expanded, !report.isClean {
+                header(report, clean: clean, issueCount: issueCount)
+                if let note = fixNote {
+                    Text(note)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, expanded ? 0 : 6)
+                }
+                if expanded, !clean {
                     Divider().opacity(0.5)
                     details(report)
+                }
+            }
+            .confirmationDialog(
+                "把 \(fixGap?.missing.count ?? 0) 个技能安装到 \(fixGap?.source.displayName ?? "")？",
+                isPresented: Binding(
+                    get: { fixGap != nil },
+                    set: { if !$0 { fixGap = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("复制这些技能过去") { runFix() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                if let gap = fixGap {
+                    Text(gap.missing.joined(separator: "、"))
                 }
             }
             .padding(12)
@@ -37,28 +65,30 @@ struct ConsistencyCard: View {
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.card, style: .continuous)
                     .strokeBorder(
-                        report.isClean ? Theme.cardBorder : Theme.gold.opacity(0.35),
-                        lineWidth: report.isClean ? 0.5 : 0.8))
+                        clean ? Theme.cardBorder : Theme.gold.opacity(0.35),
+                        lineWidth: clean ? 0.5 : 0.8))
             .shadow(color: .black.opacity(0.05), radius: 3, y: 1.5)
         }
     }
 
-    private func header(_ report: ConsistencyReportAlias) -> some View {
+    private func header(
+        _ report: ConsistencyReportAlias, clean: Bool, issueCount: Int
+    ) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: report.isClean
+            Image(systemName: clean
                 ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                 .font(.system(size: 13))
-                .foregroundStyle(report.isClean ? Theme.enabledGreen : Theme.gold)
+                .foregroundStyle(clean ? Theme.enabledGreen : Theme.gold)
             VStack(alignment: .leading, spacing: 1) {
                 Text("配置一致性").font(.system(size: 12.5, weight: .semibold))
-                Text(summary(report))
+                Text(summary(report, clean: clean))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 8)
-            if !report.isClean {
-                Button(expanded ? "收起" : "查看 \(report.issueCount) 项") {
+            if !clean {
+                Button(expanded ? "收起" : "查看 \(issueCount) 项") {
                     withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
                 }
                 .buttonStyle(.borderless)
@@ -67,8 +97,8 @@ struct ConsistencyCard: View {
         }
     }
 
-    private func summary(_ report: ConsistencyReportAlias) -> String {
-        guard !report.isClean else { return "指令文件、技能分布与记忆库索引都对得上" }
+    private func summary(_ report: ConsistencyReportAlias, clean: Bool) -> String {
+        guard !clean else { return "指令文件、技能分布、记忆库索引与 MCP 定义都对得上" }
         var parts: [String] = []
         if !report.instructionGaps.isEmpty {
             parts.append("\(report.instructionGaps.count) 个仓库的指令文件不完整")
@@ -81,6 +111,9 @@ struct ConsistencyCard: View {
         if !report.libraryDrifts.isEmpty {
             let total = report.libraryDrifts.reduce(0) { $0 + $1.unindexed }
             parts.append("\(total) 条记忆未被索引收录")
+        }
+        if !mcpDrifts.isEmpty {
+            parts.append("\(mcpDrifts.count) 个 MCP server 同名异义")
         }
         return parts.joined(separator: " · ")
     }
@@ -116,6 +149,28 @@ struct ConsistencyCard: View {
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
                             }
+                            Spacer(minLength: 8)
+                            Button("补齐 \(gap.missing.count) 个") { fixGap = gap }
+                                .buttonStyle(.borderless)
+                                .font(.system(size: 10.5))
+                                .help("把这些技能从已配置的源复制到 \(gap.source.displayName)")
+                        }
+                    }
+                }
+            }
+            if !mcpDrifts.isEmpty {
+                section("MCP 同名异义", hint: "同一 server 名在多源定义冲突（详情见 MCP 页）") {
+                    ForEach(mcpDrifts) { drift in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(drift.name)
+                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                            ForEach(drift.variants, id: \.self) { variant in
+                                Text(variant)
+                                    .font(.system(size: 9.5).monospaced())
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
                         }
                     }
                 }
@@ -138,6 +193,23 @@ struct ConsistencyCard: View {
                     }
                 }
             }
+        }
+    }
+
+    /// 执行"补齐"（confirmationDialog 确认后）：批量复制 + 单次重扫；结果短暂显示在卡内
+    private func runFix() {
+        guard let gap = fixGap else { return }
+        fixGap = nil
+        let targetName = gap.source.displayName
+        fixNote = "正在把 \(gap.missing.count) 个技能安装到 \(targetName)…"
+        service.propagateAll(names: gap.missing, to: gap.source) { succeeded, failures in
+            if failures.isEmpty {
+                fixNote = "已把 \(succeeded) 个技能安装到 \(targetName)"
+            } else {
+                fixNote = "安装到 \(targetName)：成功 \(succeeded) 个、失败 \(failures.count) 个"
+                    + (failures.first.map { "（\($0)）" } ?? "")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { fixNote = nil }
         }
     }
 

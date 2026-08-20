@@ -1,0 +1,24 @@
+{
+  "numStartups": 42,
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {
+        "CONTEXT7_API_KEY": "SECRET-ENV-VALUE"
+      }
+    },
+    "linear": {
+      "type": "sse",
+      "url": "https://mcp.linear.app/sse?token=SECRET-QUERY-TOKEN",
+      "headers": {
+        "Authorization": "Bearer SECRET-HEADER-VALUE"
+      }
+    }
+  },
+  "projects": {
+    "/tmp/some-repo": {
+      "mcpServers": { "project-only": { "command": "true" } }
+    }
+  }
+}

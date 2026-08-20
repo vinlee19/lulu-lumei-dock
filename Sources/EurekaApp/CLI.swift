@@ -63,9 +63,22 @@ enum EurekaCLI {
                 PreviewRenderer.renderMascot(to: dir)
             }
         case "--render-knowledge":
-            let dir = args.count > 1 ? args[1] : "/tmp/eureka-knowledge"
+            // 与 --render-shell 同款参数解析：--style 的值不是位置参数
+            var positional = [String]()
+            var styleRaw = "classic"
+            var index = 1
+            while index < args.count {
+                if args[index] == "--style", args.indices.contains(index + 1) {
+                    styleRaw = args[index + 1]
+                    index += 2
+                    continue
+                }
+                if !args[index].hasPrefix("--") { positional.append(args[index]) }
+                index += 1
+            }
+            let dir = positional.first ?? "/tmp/eureka-knowledge"
             MainActor.assumeIsolated {
-                PreviewRenderer.renderKnowledge(to: dir)
+                PreviewRenderer.renderKnowledge(to: dir, style: ThemeStyle.resolve(styleRaw))
             }
         case "--render-shell":
             // 参数解析：--style 的值不是位置参数；其余非 flag 参数第一个是输出目录
@@ -89,6 +102,13 @@ enum EurekaCLI {
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-lineage"
             MainActor.assumeIsolated {
                 PreviewRenderer.renderLineage(to: dir)
+            }
+        case "--mcp-inspect":
+            // 走真实探测路径（remote 握手 / stdio 深探），结果落真缓存——
+            // 显式执行本命令等同于在 UI 点「重新检测」（同一次性、同披露）。
+            let name = args.count > 1 ? args[1] : ""
+            MainActor.assumeIsolated {
+                mcpInspect(name: name)
             }
         case "--prep-mascot-assets":
             let src = args.count > 1 ? args[1] : "Sources/EurekaApp/Resources/mascots/lulu"
@@ -374,11 +394,71 @@ enum EurekaCLI {
           --uninstall-codex-notify  卸载 Codex notify
           --hooks-status            查看安装状态
           --audit-snapshot          扫描并输出 agent 操作审计流水（--risk-only 仅风险 / --limit N）
+          --mcp-inspect <名字>       检测某个 MCP server（remote 握手 / stdio 深探），结果落缓存
           --render-previews [目录]   离屏渲染灵动岛各形态 PNG
           --render-mascot [目录]     离屏渲染全部吉祥物变体与分镜 PNG
           --pack-mascot-v3 <目录> <文件>  将 12 张 2×2 分镜打包为 v3 图集
           --render-shell [目录]      离屏渲染侧栏（含品牌区）与审计页，明/暗两版
           --render-lineage [目录]    离屏渲染轮次血缘图（golden 基准 + 真实数据）
         """)
+    }
+
+    /// --mcp-inspect：走 MCPService 的真实探测路径（与 UI「重新检测」同一条代码路径、
+    /// 同一份缓存），供无头验证与调试。
+    @MainActor
+    private static func mcpInspect(name: String) {
+        guard !name.isEmpty else {
+            print("用法：eureka --mcp-inspect <server名>")
+            return
+        }
+        let service = MCPService()
+        service.refresh()
+        var deadline = Date().addingTimeInterval(30)
+        while service.scanning, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        let entries = service.entries(named: name)
+        guard !entries.isEmpty else {
+            let known = Set(service.allEntries().map(\.name)).sorted()
+            print("未找到 server「\(name)」。已知：\(known.joined(separator: ", "))")
+            return
+        }
+        print("检测「\(name)」的 \(entries.count) 处配置…")
+        service.probe(entries)
+        deadline = Date().addingTimeInterval(90)
+        while Date() < deadline {
+            let allDone = entries.allSatisfy { entry in
+                if case .done = service.probeResults[entry.id] { return true }
+                return false
+            }
+            if allDone { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))  // 等 toolCache 回主线程
+        for entry in entries {
+            guard let snapshot = service.probeSnapshots[entry.id] else {
+                print("[\(entry.source.displayName)] 超时未出结果")
+                continue
+            }
+            var line = "[\(entry.source.displayName)] \(snapshot.label)"
+            if let detail = snapshot.detail { line += " · \(detail)" }
+            if let scheme = snapshot.authScheme { line += " · 鉴权=\(scheme)" }
+            print(line)
+            if let hint = snapshot.hint { print("  ↳ \(hint)") }
+        }
+        guard let cache = MCPToolCache.load()[name.lowercased()] else { return }
+        print("工具 \(cache.toolCount) 个 · 每轮 ~\(cache.schemaTokens) tokens"
+            + " · 协议 \(cache.protocolVersion ?? "-")")
+        for tool in cache.tools ?? [] {
+            let params = (tool.params?.isEmpty == false)
+                ? "(\(tool.params!.joined(separator: ", ")))" : ""
+            print("  - \(tool.name)\(params)  \(tool.description ?? "")")
+        }
+        if let prompts = cache.prompts, !prompts.isEmpty {
+            print("提示词 \(prompts.count)：\(prompts.map(\.name).joined(separator: ", "))")
+        }
+        if let resources = cache.resources, !resources.isEmpty {
+            print("资源 \(resources.count)：\(resources.map(\.name).joined(separator: ", "))")
+        }
     }
 }

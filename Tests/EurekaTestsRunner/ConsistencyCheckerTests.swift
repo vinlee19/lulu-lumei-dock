@@ -120,3 +120,42 @@ func consistencyCheckerTests(_ t: TestRunner) {
         try expectEqual(report.issueCount, 0)
     }
 }
+
+func mcpDriftTests(_ t: TestRunner) {
+    t.suite("ConsistencyChecker.mcpDrifts（MCP 同名异义）")
+
+    func entry(
+        _ source: AgentSource, _ name: String,
+        command: String? = nil, url: String? = nil
+    ) -> MCPServerEntry {
+        MCPServerEntry(
+            source: source, name: name,
+            transport: url == nil ? "stdio" : "http",
+            commandSummary: command, urlSummary: url,
+            envKeys: [], projectName: nil, configPath: "/tmp/\(source.rawValue)")
+    }
+
+    t.test("同名不同定义 → 漂移；同名同定义 / 单源 → 不报") {
+        let servers = [
+            // notion：codex 远程 vs grok 本地（实勘案例）→ 漂移
+            entry(.codex, "notion", url: "https://mcp.notion.com/mcp"),
+            entry(.grok, "notion", command: "npx -y @notionhq/notion-mcp-server"),
+            // xhawk：两源同一定义 → 不报
+            entry(.cursor, "xhawk", url: "https://app.xhawk.ai/api/mcp"),
+            entry(.gemini, "xhawk", url: "https://app.xhawk.ai/api/mcp"),
+            // 单源 → 不报
+            entry(.claude, "solo", command: "npx solo"),
+        ]
+        let drifts = ConsistencyChecker.mcpDrifts(servers)
+        try expectEqual(drifts.map(\.name), ["notion"])
+        try expectEqual(drifts.first?.variants.count, 2)
+    }
+
+    t.test("大小写归一：Notion 与 notion 算同名") {
+        let drifts = ConsistencyChecker.mcpDrifts([
+            entry(.codex, "Notion", url: "https://a/mcp"),
+            entry(.grok, "notion", command: "npx b"),
+        ])
+        try expectEqual(drifts.count, 1)
+    }
+}

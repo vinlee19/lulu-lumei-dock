@@ -1,3 +1,4 @@
+import EurekaIngest
 import EurekaInstall
 import EurekaKit
 import EurekaStore
@@ -23,6 +24,8 @@ struct AuditView: View {
     @ObservedObject var notificationService: NotificationService
     /// 跨源配置一致性卡的数据源（技能 / 指令 / 记忆库都在它手上）
     @ObservedObject var skillMemory: SkillMemoryService
+    /// MCP 条目快照（同名异义漂移检查用；构造方每次渲染传最新值，默认空不影响离屏渲染）
+    var mcpServers: [MCPServerEntry] = []
 
     @State private var sourceFilter: AgentSource?
     @State private var kindFilter: ToolKind?
@@ -42,6 +45,7 @@ struct AuditView: View {
     init(
         service: AuditService, installer: InstallerService, settings: AppSettings,
         notificationService: NotificationService, skillMemory: SkillMemoryService,
+        mcpServers: [MCPServerEntry] = [],
         initialRiskOnly: Bool = false, initialKeyword: String = ""
     ) {
         self._service = ObservedObject(wrappedValue: service)
@@ -49,6 +53,7 @@ struct AuditView: View {
         self._settings = ObservedObject(wrappedValue: settings)
         self._notificationService = ObservedObject(wrappedValue: notificationService)
         self._skillMemory = ObservedObject(wrappedValue: skillMemory)
+        self.mcpServers = mcpServers
         self._riskOnly = State(initialValue: initialRiskOnly)
         self._keyword = State(initialValue: initialKeyword)
     }
@@ -205,7 +210,7 @@ struct AuditView: View {
                 statsCard
                 // 配置一致性：与审计流水同页，因为两者回答的是同一类问题
                 // 「我这一堆 CLI 的配置到底是什么状态」。它不需要审计开关，也不受筛选影响。
-                ConsistencyCard(service: skillMemory)
+                ConsistencyCard(service: skillMemory, mcpDrifts: ConsistencyChecker.mcpDrifts(mcpServers))
                 sourceBar
                 kindBar
                 if !settings.auditEnabled {

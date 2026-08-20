@@ -1,0 +1,17 @@
+[cli]
+theme = "dark"
+
+[mcp_servers.notion]
+command = "npx"
+args = ["-y", "@notionhq/notion-mcp-server"]
+enabled = true
+
+[mcp_servers.notion.env]
+NOTION_TOKEN = "SECRET-NOTION"
+
+[mcp_servers.paused]
+command = "uvx"
+enabled = false
+
+[plugins]
+autoload = true

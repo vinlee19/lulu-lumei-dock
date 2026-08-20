@@ -50,6 +50,36 @@ public enum ConsistencyChecker {
         }
     }
 
+    /// MCP 同名异义：同一个 server 名在多个源里配置，但定义互相冲突
+    /// （实勘案例：notion 在 codex 是远程 mcp.notion.com、在 grok 是本地 npx——
+    /// 矩阵里都亮"已配置"，实则是两个实现）。只报**定义确实不同**的，纯展示不误伤。
+    public struct MCPDrift: Equatable, Identifiable {
+        public var id: String { name }
+        public var name: String
+        /// 各处定义的归一化摘要（去重排序，如 ["npx …", "https://…"]）
+        public var variants: [String]
+    }
+
+    /// 与 report 解耦的独立检查（MCP 条目在 MCPService 手里，调用点不同）
+    public static func mcpDrifts(_ servers: [MCPServerEntry]) -> [MCPDrift] {
+        var byName: [String: [MCPServerEntry]] = [:]
+        for entry in servers {
+            byName[entry.name.lowercased(), default: []].append(entry)
+        }
+        var drifts: [MCPDrift] = []
+        for (_, entries) in byName where entries.count >= 2 {
+            let variants = Set(entries.compactMap { entry -> String? in
+                let summary = entry.commandSummary ?? entry.urlSummary
+                guard let summary, !summary.isEmpty else { return nil }
+                return summary
+            })
+            guard variants.count >= 2 else { continue }
+            drifts.append(MCPDrift(
+                name: entries[0].name, variants: variants.sorted()))
+        }
+        return drifts.sorted { $0.name < $1.name }
+    }
+
     /// `repoNames` = 本轮发现的全部仓库名（用来找出「完全没配指令」的那些）
     public static func report(
         skills: [SkillEntry], memories: [MemoryEntry],

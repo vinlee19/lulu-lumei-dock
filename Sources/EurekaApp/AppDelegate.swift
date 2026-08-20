@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let skillMemory = SkillMemoryService()
     private let plans = PlansService()
     private let agentConfig = AgentConfigService()
+    private let mcpService = MCPService()
     private let syncService = SyncService()
     private let cliTools = CLIToolsService()
     private let auditService = AuditService()
@@ -60,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: settings, installer: installer,
             sessionBrowser: sessionBrowser, skillMemoryService: skillMemory,
             plansService: plans,
-            agentConfigService: agentConfig, syncService: syncService,
+            agentConfigService: agentConfig, mcpService: mcpService, syncService: syncService,
             cliToolsService: cliTools, auditService: auditService,
             notificationService: notificationService, updateService: updateService,
             navigation: navigation, palette: palette)
@@ -289,6 +290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             (0.8, "agents", { [weak self] in
                 guard let self else { return }
                 self.agentConfig.refresh()
+                // MCP 索引与 agents 同批（同为轻量配置文件扫描，毫秒级）
+                self.mcpService.refresh()
                 self.usageService.loadAgentStats()
             }),
             (1.5, "skills+memory", { [weak self] in

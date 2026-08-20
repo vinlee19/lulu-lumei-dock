@@ -168,9 +168,11 @@ enum PreviewRenderer {
     /// 离屏渲染知识库页（Plans/Skills/Memory/Agents × 卡片/列表）做视觉走查。
     /// 真实服务扫本机数据，等扫描完成后截图；宽度对齐主窗口内容区。
     @MainActor
-    static func renderKnowledge(to directory: String) {
+    static func renderKnowledge(to directory: String, style: ThemeStyle = .classic) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        ThemeStyle.current = style
+        defer { ThemeStyle.current = .classic }
 
         let plans = PlansService()
         let skillMemory = SkillMemoryService()
@@ -272,6 +274,34 @@ enum PreviewRenderer {
              AgentsView(service: agents, usageService: usage, initialLayout: .cards))
         snap("knowledge-plans-list-dark",
              PlansView(service: plans, initialLayout: .list), dark: true)
+
+        // MCP 页：列表 / 图标 / 详情（跨源矩阵 + 各处配置）。扫描是毫秒级，短等即可。
+        let mcp = MCPService()
+        mcp.refresh()
+        let mcpDeadline = Date().addingTimeInterval(30)
+        while mcp.scanning, Date() < mcpDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        print("MCP 扫描结束：servers=\(mcp.servers.count)")
+        snap("knowledge-mcp-list", MCPView(service: mcp, usageService: usage, initialLayout: .list))
+        snap("knowledge-mcp-cards", MCPView(service: mcp, usageService: usage, initialLayout: .cards))
+        if let first = mcp.servers.first {
+            snap("knowledge-mcp-detail",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: first.name))
+            snap("knowledge-mcp-form-edit",
+                 MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(
+                    id: "edit", mode: .form, editing: first)))
+        }
+        // 再出一张 remote server 的详情：鉴权路由（OAuth/请求头密钥）只有 remote 才展现
+        if let remote = mcp.servers.first(where: { $0.transport != "stdio" }) {
+            snap("knowledge-mcp-detail-remote",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: remote.name))
+        }
+        snap("knowledge-mcp-form-new",
+             MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(id: "new", mode: .quick)))
+        snap("knowledge-mcp-form-manual",
+             MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(id: "new", mode: .form)))
+        snap("knowledge-mcp-list-dark", MCPView(service: mcp, usageService: usage, initialLayout: .list), dark: true)
     }
 
     /// 离屏渲染「外壳」：侧栏（含品牌区）与审计页，明/暗两版。

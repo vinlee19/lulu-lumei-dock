@@ -10,8 +10,9 @@ public enum KeychainStore {
     public static let secretIdAccount = "secret-id"
     public static let secretKeyAccount = "secret-key"
 
-    /// 读：find-generic-password -w（密钥经 stdout 返回，不进 argv）
-    public static func read(account: String) -> String? {
+    /// 读：find-generic-password -w（密钥经 stdout 返回，不进 argv）。
+    /// service 可指定（默认 COS；MCP OAuth 用 "com.vinlee.eureka.mcp"）
+    public static func read(account: String, service: String = KeychainStore.service) -> String? {
         let output = run(arguments: [
             "find-generic-password", "-s", service, "-a", account, "-w",
         ])
@@ -22,22 +23,26 @@ public enum KeychainStore {
     /// 写：security -i 交互模式，命令连同密钥经 stdin 喂入（不进 argv，防 ps 窥见）。
     /// -U 更新已有项；部分系统 -U 更新失败 → 先 delete 再 add 兜底。
     @discardableResult
-    public static func write(account: String, secret: String) -> Bool {
-        if writeViaStdin(account: account, secret: secret) {
+    public static func write(
+        account: String, secret: String, service: String = KeychainStore.service
+    ) -> Bool {
+        if writeViaStdin(account: account, secret: secret, service: service) {
             return true
         }
-        delete(account: account)
-        return writeViaStdin(account: account, secret: secret)
+        delete(account: account, service: service)
+        return writeViaStdin(account: account, secret: secret, service: service)
     }
 
     @discardableResult
-    public static func delete(account: String) -> Bool {
+    public static func delete(account: String, service: String = KeychainStore.service) -> Bool {
         run(arguments: ["delete-generic-password", "-s", service, "-a", account]) != nil
     }
 
     // MARK: - 内部
 
-    private static func writeViaStdin(account: String, secret: String) -> Bool {
+    private static func writeViaStdin(
+        account: String, secret: String, service: String = KeychainStore.service
+    ) -> Bool {
         // security 交互解析器支持双引号 + 反斜杠转义
         let escaped = secret
             .replacingOccurrences(of: "\\", with: "\\\\")

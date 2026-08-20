@@ -20,6 +20,7 @@ struct PopoverRootView: View {
     @ObservedObject var skillMemoryService: SkillMemoryService
     @ObservedObject var plansService: PlansService
     @ObservedObject var agentConfigService: AgentConfigService
+    @ObservedObject var mcpService: MCPService
     @ObservedObject var syncService: SyncService
     @ObservedObject var cliToolsService: CLIToolsService
     @ObservedObject var auditService: AuditService
@@ -41,6 +42,8 @@ struct PopoverRootView: View {
         case instructions = "指令"
         case plans = "Plans"
         case agents = "Agents"
+        /// MCP server 配置矩阵（只读）：同名 server 折叠一行、按源亮徽章
+        case mcp = "MCP"
         case usage = "用量"
         case limits = "限额"
         case audit = "审计"
@@ -56,6 +59,7 @@ struct PopoverRootView: View {
             case .instructions: return "doc.plaintext.fill"
             case .plans: return "list.bullet.clipboard.fill"
             case .agents: return "person.crop.rectangle.stack.fill"
+            case .mcp: return "powerplug.fill"
             case .usage: return "chart.bar.fill"
             case .limits: return "gauge.with.dots.needle.67percent"
             case .audit: return "checkmark.shield"
@@ -71,7 +75,7 @@ struct PopoverRootView: View {
         /// 却没有任何分隔，读起来是个走失的孤项。现在归入「系统」，底部只留品牌脚注。
         static let sidebarGroups: [(label: String, tabs: [Tab])] = [
             ("活动", [.history, .sessions]),
-            ("知识库", [.skills, .memory, .instructions, .plans, .agents]),
+            ("知识库", [.skills, .memory, .instructions, .plans, .agents, .mcp]),
             ("安全", [.audit]),
             ("用量", [.usage, .limits]),
             ("系统", [.settings]),
@@ -221,6 +225,8 @@ struct PopoverRootView: View {
             PlansView(service: plansService)
         case .agents:
             AgentsView(service: agentConfigService, usageService: usageService)
+        case .mcp:
+            MCPView(service: mcpService, usageService: usageService)
         case .usage:
             UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
         case .limits:
@@ -228,7 +234,8 @@ struct PopoverRootView: View {
         case .audit:
             AuditView(
                 service: auditService, installer: installer, settings: settings,
-                notificationService: notificationService, skillMemory: skillMemoryService)
+                notificationService: notificationService, skillMemory: skillMemoryService,
+                mcpServers: mcpService.allEntries())
         case .settings:
             SettingsView(
                 section: $navigation.settingsSection,

@@ -146,7 +146,7 @@ public enum ContextBreakdownEstimator {
             .messages: messages.reduce(0) { $0 + TokenEstimator.estimate($1.text) },
             .systemPrompt: profile.baselineSystemPromptTokens,
             .tools: profile.baselineBuiltinToolTokens,
-            .mcp: mcpServerCount(profile: profile) * profile.perMCPServerTokens,
+            .mcp: mcpTokens(profile: profile),
             .skills: 0,
         ]
         estimates[.systemPrompt, default: 0] += profile.memoryFiles.reduce(0) {
@@ -252,10 +252,13 @@ public enum ContextBreakdownEstimator {
         return TokenEstimator.estimate(text)
     }
 
-    /// MCP server 个数：JSON 配置数 mcpServers 键；TOML 数 [mcp_servers.xxx] 段。
-    /// server 的工具 schema 拿不到（需实际连接），只能按个数 × 常驻常量估算。
-    private static func mcpServerCount(profile: AgentContextProfile) -> Int {
-        var count = 0
+    /// MCP 上下文开销：优先用探测缓存里的**真实 schema token**（MCPToolCache——
+    /// MCP 页「检测连接」时经 tools/list 实测落盘），没测过的 server 退回常量估算。
+    /// server 名解析：JSON 取 mcpServers 键；TOML 取 [mcp_servers.<name>] 段名首段
+    /// （`.env` / `.tools.*` 子段归属同名 server，不再按行前缀重复计数——旧实现会多算）。
+    private static func mcpTokens(profile: AgentContextProfile) -> Int {
+        let cache = MCPToolCache.load()
+        var names: Set<String> = []
         for path in profile.mcpConfigFiles {
             guard let data = FileManager.default.contents(atPath: path),
                   let text = String(data: data, encoding: .utf8)
@@ -263,19 +266,25 @@ public enum ContextBreakdownEstimator {
             if path.hasSuffix(".json") {
                 if let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                    let servers = root["mcpServers"] as? [String: Any] {
-                    count += servers.count
+                    names.formUnion(servers.keys.map { $0.lowercased() })
                 }
             } else {
-                // TOML 无解析器依赖，按段头计数（codex [mcp_servers.xxx] / kimi [mcp.xxx]）
+                // TOML 无解析器依赖，按段头取名（codex [mcp_servers.xxx] / kimi [mcp.xxx]）
                 for line in text.split(separator: "\n") {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if trimmed.hasPrefix("[mcp_servers.") || trimmed.hasPrefix("[mcp.") {
-                        count += 1
-                    }
+                    guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else { continue }
+                    let parts = trimmed.dropFirst().dropLast().split(separator: ".")
+                    guard parts.count >= 2,
+                          parts[0] == "mcp_servers" || parts[0] == "mcp" else { continue }
+                    let name = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    names.insert(name.lowercased())
                 }
             }
         }
-        return count
+        return names.reduce(0) { total, name in
+            total + (cache[name]?.schemaTokens ?? profile.perMCPServerTokens)
+        }
     }
 
     /// 文件头部（frontmatter 都在开头，读 8KB 足够）
