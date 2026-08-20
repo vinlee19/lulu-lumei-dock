@@ -142,10 +142,13 @@ final class SessionBrowserService: ObservableObject {
         queue.async { [weak self] in
             guard let self else { return }
             self.loadStoreIfNeeded()
-            // 时间范围：默认近 30 天；「全部时间」放大窗口与上限（head 解析在后台队列，
-            // 2000 上限是 IO 保险丝，正常用户远低于此）
+            // 时间范围：默认近 30 天；「全部时间」不设窗口。
+            // 不截断条数——旧上限（300/2000 按 mtime 截尾）会把更早的会话
+            // 静默挤出列表（实勘：300+ 轮的长会话因此"消失"）。head 解析
+            // 每文件只读 64KB 且在后台队列，万级文件也就秒级；下游批量查询
+            // （费用/对话数）已按 500 分块，列表渲染走 LazyVStack。
             let window: TimeInterval = self.rangeAll ? .greatestFiniteMagnitude : 30 * 86400
-            let maxSessions = self.rangeAll ? 2000 : 300
+            let maxSessions = Int.max
             var indexed = ClaudeSessionIndexer.index(
                 projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
                 window: window, maxSessions: maxSessions)
