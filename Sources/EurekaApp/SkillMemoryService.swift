@@ -337,29 +337,35 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
+    /// 各源的**可写**技能根（新建与跨源安装共用同一口径）。
+    /// Hermes 走顶层无分类深度（实勘存在，扫描器也认）；Trae 优先已装渠道（CN 在前）；
+    /// zcode 是共享的 ~/.agents/skills —— 装进去其它兼容 CLI 也会读到。
+    static func writableSkillRoot(for source: AgentSource) -> URL {
+        switch source {
+        case .claude: return SkillMemoryIndexer.claudeSkillsRoot()
+        case .codex: return SkillMemoryIndexer.codexSkillsRoot()
+        case .opencode: return OpencodePaths.skillsRoot()
+        case .grok: return GrokPaths.skillsRoot()
+        case .antigravity: return AntigravityPaths.userSkillsRoot()
+        case .kimi: return KimiPaths.skillsRoot()
+        case .gemini: return GeminiPaths.skillsRoot()
+        case .qwen: return QwenPaths.skillsRoot()
+        case .hermes: return HermesPaths.skillsRoot()
+        case .cursor: return CursorPaths.skillsRoot()
+        case .codebuddy: return CodeBuddyPaths.skillsRoot()
+        case .qoder: return QoderPaths.skillsRoot()
+        case .trae:
+            // 两个渠道都可能装：优先写已装的第一个（CN 在前）；都没装就按 CN 建。
+            // `builtin_skills` / `builtin/global/skills` 随客户端分发，只读，不能往里建。
+            return TraePaths.userSkillsRoots().first ?? TraePaths.skillsRoot(.cn)
+        case .zcode:
+            return ZcodePaths.skillsRoot()
+        }
+    }
+
     func createSkill(source: AgentSource, name: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
-            let root: URL
-            switch source {
-            case .claude: root = SkillMemoryIndexer.claudeSkillsRoot()
-            case .codex: root = SkillMemoryIndexer.codexSkillsRoot()
-            case .opencode: root = OpencodePaths.skillsRoot()
-            case .grok: root = GrokPaths.skillsRoot()
-            case .antigravity: root = AntigravityPaths.userSkillsRoot()
-            case .kimi: root = KimiPaths.skillsRoot()
-            case .gemini: root = GeminiPaths.skillsRoot()
-            case .qwen: root = QwenPaths.skillsRoot()
-            case .hermes: root = HermesPaths.skillsRoot()
-            case .cursor: root = CursorPaths.skillsRoot()
-            case .codebuddy: root = CodeBuddyPaths.skillsRoot()
-            case .qoder: root = QoderPaths.skillsRoot()
-            case .trae:
-                // 两个渠道都可能装：优先写已装的第一个（CN 在前）；都没装就按 CN 建。
-                // `builtin_skills` / `builtin/global/skills` 随客户端分发，只读，不能往里建。
-                root = TraePaths.userSkillsRoots().first ?? TraePaths.skillsRoot(.cn)
-            case .zcode:
-                root = ZcodePaths.skillsRoot()
-            }
+            let root = Self.writableSkillRoot(for: source)
             let slug = Self.slugify(name)
             let dir = root.appendingPathComponent(slug, isDirectory: true)
             let file = dir.appendingPathComponent("SKILL.md")
@@ -376,6 +382,85 @@ final class SkillMemoryService: ObservableObject {
             }
             DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
+    }
+
+    /// 跨源安装：把一个已有技能复制到其它 agent 的技能根（详情矩阵"安装"与一致性卡"补齐"共用）。
+    /// 只写各源技能根（用户目录），不碰任何配置文件；同名已存在按失败报告，不覆盖。
+    /// 回调给出每个目标的失败原因（nil = 成功），全部完成后强制重扫。
+    func propagate(
+        _ skill: SkillEntry, to targets: [AgentSource],
+        completion: (([AgentSource: String?]) -> Void)? = nil
+    ) {
+        queue.async { [weak self] in
+            var results: [AgentSource: String?] = [:]
+            let sourceDir = URL(fileURLWithPath: skill.directory)
+            let slug = URL(fileURLWithPath: skill.directory).lastPathComponent
+            for target in targets {
+                do {
+                    try SkillPropagator.install(
+                        skillDirectory: sourceDir,
+                        into: Self.writableSkillRoot(for: target),
+                        slug: slug)
+                    results.updateValue(nil, forKey: target)
+                } catch {
+                    results[target] = error.localizedDescription
+                }
+            }
+            DispatchQueue.main.async {
+                completion?(results)
+                self?.refresh(force: true)
+            }
+        }
+    }
+
+    /// 一致性卡"补齐"：把一组技能（归一化名）安装到某个源。
+    /// 名单在主线程先解析成实际条目（allSkills 只在主线程读写），复制在队列上串行做，
+    /// 全部完成后**只重扫一次**（逐个 propagate 会触发 N 次全量重扫）。
+    func propagateAll(
+        names: [String], to target: AgentSource,
+        completion: ((_ succeeded: Int, _ failures: [String]) -> Void)? = nil
+    ) {
+        var entries: [SkillEntry] = []
+        var failures: [String] = []
+        for name in names {
+            if let entry = skillEntry(named: name) {
+                entries.append(entry)
+            } else {
+                failures.append("\(name)：找不到可作为来源的技能目录")
+            }
+        }
+        queue.async { [weak self] in
+            var succeeded = 0
+            let root = Self.writableSkillRoot(for: target)
+            for entry in entries {
+                do {
+                    try SkillPropagator.install(
+                        skillDirectory: URL(fileURLWithPath: entry.directory),
+                        into: root,
+                        slug: URL(fileURLWithPath: entry.directory).lastPathComponent)
+                    succeeded += 1
+                } catch {
+                    failures.append("\(entry.name)：\(error.localizedDescription)")
+                }
+            }
+            DispatchQueue.main.async {
+                completion?(succeeded, failures)
+                self?.refresh(force: true)
+            }
+        }
+    }
+
+    /// 按归一化名找一份可作为传播来源的技能：用户自建、启用中，系统级优先。
+    /// 一致性卡的缺口名单只有归一化名，靠这个反查出实际目录。
+    func skillEntry(named name: String) -> SkillEntry? {
+        let key = Self.normalizeSkillName(name)
+        let candidates = allSkills.filter {
+            $0.origin == .user && $0.enabled
+                && (Self.normalizeSkillName($0.name) == key
+                    || Self.normalizeSkillName(
+                        URL(fileURLWithPath: $0.directory).lastPathComponent) == key)
+        }
+        return candidates.first { !$0.scope.isProject } ?? candidates.first
     }
 
     func createMemory(source: AgentSource, name: String, completion: ((Bool) -> Void)? = nil) {

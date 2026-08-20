@@ -36,6 +36,10 @@ struct SkillDetailView: View {
 
     /// 本周排名（金块；nil = 本周无调用）
     @State private var weeklyRank: Int?
+    /// 待确认的跨源安装目标（矩阵里点了某个未配置的源）
+    @State private var installTarget: AgentSource?
+    /// 安装结果反馈（矩阵下方短暂显示）
+    @State private var installNote: String?
     /// 最近调用过该技能的会话（详情页「最近调用会话」卡）
     @State private var recentSessions: [(sessionId: String, lastTs: Date, count: Int)] = []
     /// sessionBrowser 是普通 optional 存储属性（非 @ObservedObject），索引刷新后视图不会自动重渲；
@@ -226,19 +230,32 @@ struct SkillDetailView: View {
                 Text("\(AgentSource.allCases.count) 个工具中 \(configured) 个可用")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
+                if entry != nil, configured < AgentSource.allCases.count {
+                    Text("· 点未配置的源可一键安装")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
             }
             HStack(alignment: .top, spacing: 8) {
                 ForEach(AgentSource.allCases, id: \.self) { source in
                     let origin = configs[source]
+                    // 有实体条目（非纯统计行）时，未配置的源可点击安装（复制技能目录过去）
+                    let installable = origin == nil && entry != nil
                     VStack(spacing: 4) {
                         SourceBadge(source: source, size: 22)
                             .opacity(origin == nil ? 0.28 : 1)
                         Text(source.displayName)
                             .font(.system(size: 9))
                             .foregroundStyle(origin == nil ? .tertiary : .secondary)
-                        Text(originLabel(origin))
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundStyle(originColor(origin))
+                        if installable {
+                            Text("安装")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(Theme.brandFg)
+                        } else {
+                            Text(originLabel(origin))
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(originColor(origin))
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -251,8 +268,53 @@ struct SkillDetailView: View {
                             .strokeBorder(
                                 origin != nil ? Theme.brand.opacity(0.5) : Theme.cardBorder,
                                 lineWidth: origin != nil ? 1 : 0.5))
+                    .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
+                    .onTapGesture {
+                        guard installable else { return }
+                        installTarget = source
+                    }
+                    .help(installable
+                        ? "把该技能复制到 \(source.displayName)"
+                        : source.displayName)
                 }
             }
+            if let note = installNote {
+                Text(note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .confirmationDialog(
+            "安装到 \(installTarget?.displayName ?? "")？",
+            isPresented: Binding(
+                get: { installTarget != nil },
+                set: { if !$0 { installTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("复制技能目录过去") { runInstall() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let target = installTarget {
+                Text("将把整个技能目录复制到\n\(SkillMemoryService.writableSkillRoot(for: target).path)")
+            }
+        }
+    }
+
+    /// 执行跨源安装（confirmationDialog 确认后）；结果在矩阵下方短暂提示
+    private func runInstall() {
+        guard let installTo = installTarget, let entry else { return }
+        installTarget = nil
+        let targetName = installTo.displayName
+        installNote = "正在安装到 \(targetName)…"
+        service.propagate(entry, to: [installTo]) { results in
+            if let failure = results[installTo] ?? nil {
+                installNote = "安装到 \(targetName) 失败：\(failure)"
+            } else if installTo == .zcode {
+                installNote = "已安装到 \(targetName)（~/.agents/skills 为共享目录，其他兼容 CLI 也会读到）"
+            } else {
+                installNote = "已安装到 \(targetName)"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
         }
     }
 
