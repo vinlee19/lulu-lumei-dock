@@ -94,6 +94,9 @@ public struct SyncRoots {
     public var zcodeSkills: URL?
     /// 用户自定义同步目录：(本地根, 远端类目如 "custom/notes")。默认空 → 既有构造点不受影响
     public var customDirs: [(root: URL, category: String)] = []
+    /// eureka 自身的分析快照（EurekaDBSnapshot 产出的三事实表 SQLite）。
+    /// 默认 nil → 既有构造点不受影响；由 app 侧在每轮同步前物化后注入。
+    public var eurekaSnapshot: URL?
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
     /// 默认空；由 app 侧从 ProjectScopeDiscovery 注入，与全局 skill 并列备份。
     public var projectSkills: [(root: URL, category: String)] = []
@@ -383,6 +386,13 @@ public enum SyncSourceCatalog {
             } else {
                 walk(root: root, category: category, priority: 0, include: markdownOnly)
             }
+        }
+
+        // eureka 分析快照（三张事实表的独立 SQLite，EurekaDBSnapshot 产出）：单文件加入。
+        // 指纹侧车 *.fingerprint 在同目录，但这里只加快照本体，不 walk 目录。
+        if let snapshot = roots.eurekaSnapshot {
+            add(snapshot, category: "eureka/db",
+                relativePath: snapshot.lastPathComponent, priority: 1)
         }
 
         // 用户自定义目录：远端类目由用户指定（custom/<名>），全部常规文件（隐藏文件仍跳过）

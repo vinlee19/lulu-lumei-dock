@@ -225,6 +225,12 @@ final class SyncService: ObservableObject {
 
         Self.materializePlans()  // 物化 Codex/opencode/Grok/Kimi 计划到暂存，纳入本轮增量上传
 
+        // eureka 分析快照：三张事实表指纹变了才重建（详见 EurekaDBSnapshot 头注释——
+        // 整库上传会被 sync_state 记账自我触发成每轮必传）。服务器侧分析脚本见 Scripts/analytics/。
+        let snapshotURL = Self.eurekaSnapshotURL()
+        EurekaDBSnapshot.materializeIfChanged(
+            dbPath: EurekaStore.defaultURL(), snapshotPath: snapshotURL)
+
         // 重试参数与自定义目录来自配置快照
         var effectiveLimits = limits
         effectiveLimits.maxRetries = config.retryAttempts
@@ -237,6 +243,9 @@ final class SyncService: ObservableObject {
                  category: folder.remoteCategory)
             }
         roots.traeRoots = Self.traeRoots()
+        if FileManager.default.fileExists(atPath: snapshotURL.path) {
+            roots.eurekaSnapshot = snapshotURL
+        }
         // 项目级 skill 纳入备份（复用 Skills 页的项目发现；分类 <source>/skills/project/<项目名>）
         roots.projectSkills = SkillMemoryIndexer
             .projectSkillRoots(repoRoots: ProjectScopeDiscovery.repoRoots(resolver: ProjectResolver()))
@@ -327,6 +336,12 @@ final class SyncService: ObservableObject {
             zcodeAgents: ZcodePaths.agentsRoot(),
             zcodeSkills: ZcodePaths.skillsRoot(),
             antigravitySkills: AntigravityPaths.userSkillsRoot())
+    }
+
+    /// eureka 分析快照的固定落点（eureka.sqlite 同级的 export/ 子目录）
+    static func eurekaSnapshotURL() -> URL {
+        EurekaStore.defaultURL().deletingLastPathComponent()
+            .appendingPathComponent("export/eureka-snapshot.sqlite")
     }
 
     /// Trae 可备份的白名单根（技能 / 用户规则 ×已装渠道，加 CN 独有的记忆库）。
