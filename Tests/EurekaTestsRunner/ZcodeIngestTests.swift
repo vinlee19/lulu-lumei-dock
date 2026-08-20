@@ -209,8 +209,20 @@ private func appendZcodeLines(_ lines: [String], to url: URL) throws {
     }
 }
 
-private let zcodeMidStep = #"{"type":"model_io","querySource":"main_turn","startedAt":"2026-08-15T03:59:00.000Z","completedAt":"2026-08-15T03:59:05.000Z","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"tool-calls","toolCalls":[{"name":"Bash"}],"usage":{"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0}}}"#
-private let zcodeFinalStep = #"{"type":"model_io","querySource":"main_turn","startedAt":"2026-08-15T03:59:05.000Z","completedAt":"2026-08-15T03:59:10.000Z","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","modelId":"glm-5.3","usage":{"inputTokens":20,"outputTokens":8,"cacheReadTokens":2,"cacheWriteTokens":0}}}"#
+/// fixture 时间戳相对当前时间生成：写死日历日会随时间滑出 usage 断言的
+/// 「最近 24h」查询窗口，几天后必然变红（2026-08-20 实际发生）。
+private func zcodeFixtureISO(_ secondsAgo: TimeInterval) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: Date().addingTimeInterval(-secondsAgo))
+}
+
+private var zcodeMidStep: String {
+    #"{"type":"model_io","querySource":"main_turn","startedAt":"\#(zcodeFixtureISO(15))","completedAt":"\#(zcodeFixtureISO(10))","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"tool-calls","toolCalls":[{"name":"Bash"}],"usage":{"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0}}}"#
+}
+private var zcodeFinalStep: String {
+    #"{"type":"model_io","querySource":"main_turn","startedAt":"\#(zcodeFixtureISO(10))","completedAt":"\#(zcodeFixtureISO(5))","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","modelId":"glm-5.3","usage":{"inputTokens":20,"outputTokens":8,"cacheReadTokens":2,"cacheWriteTokens":0}}}"#
+}
 
 func zcodeTailerTests(_ t: TestRunner) {
     t.suite("ZcodeRolloutTailer")
