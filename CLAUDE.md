@@ -27,6 +27,7 @@ Scripts/check-usage-against-ccusage.sh   # diff usage totals against ccusage (ex
 swift run eureka --hooks-status            # Claude hooks + Codex notify install state
 swift run eureka --usage-snapshot          # full scan → today's usage JSON (used by ccusage diff)
 swift run eureka --limits-snapshot --claude # rate-limit snapshot (--claude also hits unofficial API)
+swift run eureka --mcp-inspect <name>      # probe one MCP server (remote handshake / stdio deep-inspect), writes the real tool cache
 swift run eureka --render-previews [dir]   # offscreen-render every island state to PNG
 swift run eureka --render-shell [dir] [--style brutal]  # offscreen-render the sidebar + audit page (light/dark, both styles)
 swift run eureka --render-lineage [dir]    # offscreen-render the turn lineage graph (golden + live)

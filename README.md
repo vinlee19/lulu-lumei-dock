@@ -321,8 +321,17 @@ All data lives in `~/Library/Application Support/Eureka/`:
 | `context-windows.json` (optional) | override per‑model context window size, e.g. `{"claude-opus": 1000000}` |
 
 **Privacy:** automatic update checks contact this repository's GitHub Releases feed and can be disabled.
-The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. Core activity,
-session and usage data stays local unless you explicitly configure cloud backup.
+The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. The MCP tab's
+"检测连接" probe fires only when you click it and only contacts the server URL configured for that entry
+(with its own configured headers); it speaks MCP 2025-11-25 (sending the negotiated `MCP-Protocol-Version`
+header and following `tools/list` pagination), and for servers that advertise them it fetches only the
+*names and descriptions* of tools/prompts/resources — never their bodies. For stdio servers the probe
+briefly launches the configured command (the same one your CLIs run every session) to read those lists
+over stdin/stdout, then terminates it — also click-only, never automatic. The MCP tab's browser OAuth flow is also click-only:
+it contacts the authorization server that the MCP server itself advertises (OAuth AS metadata or OIDC
+discovery), and the resulting token is stored only in the macOS Keychain (used solely for Eureka's own
+probing — it never logs in any CLI). Core activity, session and usage data stays local unless you
+explicitly configure cloud backup.
 
 ## CLI
 

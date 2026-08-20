@@ -4,6 +4,45 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.27.0] - 2026-08-20
+
+### Added
+
+- **MCP tab: every CLI's MCP servers in one place.** A new knowledge tab indexes
+  the MCP configuration of all supported agents side by side — one row per
+  definition; the same server name across sources folds into a detail page with a
+  cross-source install matrix. Create servers via quick-install (paste a command,
+  a URL, or a whole `mcpServers` JSON blob), edit definitions in place, toggle or
+  remove them per source, and copy a server to other agents in one click. Every
+  write keeps a `.bak.eureka` backup; the UI shows only key *names* — secret
+  values never leave the local config files.
+- **Click-only capability probing and authorization.** "重新检测" speaks MCP
+  2025-11-25 (remote handshake or a brief stdio launch that exits after reading
+  the lists) and persists the tools / prompts / resources inventory with its
+  per-round schema-token cost; servers that are never called for 30 days get an
+  uninstall hint. The auth router tells you whether a server needs browser OAuth
+  (with dynamic client registration and a pre-registered `client_id` fallback),
+  a static header key, or environment variables — tokens live in a dedicated
+  macOS Keychain service used only by the app's own probing. Same-name servers
+  with conflicting definitions surface as drift in the audit page's consistency
+  card.
+- **One-click skill propagation across agents.** The skill detail matrix and the
+  consistency card's gap rows can now copy a skill to other agents' skill roots —
+  user directories only, no config files touched, existing skills are never
+  overwritten.
+- **Analytics snapshot rides along with cloud backup.** Each sync materializes a
+  compact SQLite snapshot of the three fact tables (`usage_records` /
+  `task_history` / `tool_calls`) and uploads it under `eureka/db/`, rebuilt only
+  when the tables actually change. Example DuckDB queries ship in
+  `Scripts/analytics/`.
+
+### Changed
+
+- The context breakdown's MCP share now uses the schema tokens measured by the
+  probe instead of a flat per-server constant (unprobed servers fall back to the
+  constant), and TOML config parsing no longer double-counts `.env` /
+  `.tools.*` sub-sections as extra servers.
+
 ## [0.26.2] - 2026-08-15
 
 ### Fixed
@@ -1372,6 +1411,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.27.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.0
 [0.26.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.2
 [0.26.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.1
 [0.26.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.0
