@@ -164,7 +164,8 @@ public enum MCPConfigIndexer {
 
     /// 行级解析，不引 TOML 依赖（与 CodexProfileEditor 的 `[profiles.*]` 手法同源）。
     /// `[mcp_servers.<name>.env]` 之类的子段归属同一 server，且段内**只收键名不读值**；
-    /// 多行数组/多行表不跨行拼接（best-effort，宁可漏摘要也不误读密钥）。
+    /// `args = [` 换行书写的多行数组跨行拼接（grok 实勘的真实形态），遇段头或 EOF
+    /// 未闭合则放弃该数组；多行表仍不拼接（best-effort，宁可漏摘要也不误读密钥）。
     public static func parseTOMLServers(
         _ text: String, source: AgentSource, configPath: String
     ) -> [MCPServerEntry] {
@@ -177,9 +178,29 @@ public enum MCPConfigIndexer {
         var current: String?
         var inSecretSubsection = false
         var inIgnoredSubsection = false
+        /// 多行数组收集态：`args = [` 未闭合时持续吃行直到引号外出现 `]`
+        var pendingArray: (name: String, buffer: String)?
 
         for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
+            // 多行数组收集中：整行注释跳过（数组内允许注释）；段头 = 上个数组畸形
+            // 未闭合，放弃收集防吞段，该行落回正常段头处理
+            if var pending = pendingArray {
+                if line.hasPrefix("#") { continue }
+                if line.hasPrefix("[") {
+                    pendingArray = nil
+                } else {
+                    let merged = pending.buffer.isEmpty
+                        ? line : pending.buffer + " " + line
+                    if tomlArrayClosed(merged) {
+                        args[pending.name] = inlineArrayStrings(merged)
+                        pendingArray = nil
+                    } else {
+                        pendingArray = (pending.name, merged)
+                    }
+                    continue
+                }
+            }
             if line.hasPrefix("[") {
                 current = nil
                 inSecretSubsection = false
@@ -216,7 +237,13 @@ public enum MCPConfigIndexer {
             switch key {
             case "command": command[name] = unquote(value)
             case "url": url[name] = unquote(value)
-            case "args": args[name] = inlineArrayStrings(value)
+            case "args":
+                if tomlArrayClosed(value) {
+                    args[name] = inlineArrayStrings(value)
+                } else {
+                    // 多行数组开头（`args = [` 后换行）：进收集态吃后续行
+                    pendingArray = (name, value)
+                }
             case "enabled": enabled[name] = value.lowercased().hasPrefix("t")  // true/false 字面量
             case "env", "headers":
                 envKeys[name, default: []].formUnion(inlineTableKeys(value))
@@ -283,7 +310,7 @@ public enum MCPConfigIndexer {
         }
     }
 
-    /// 单行数组 `["-y", "pkg"]` → 字符串元素（多行数组不拼接，直接放弃）
+    /// 单行数组 `["-y", "pkg"]` → 字符串元素（多行形态由调用方拼接后再进来）
     private static func inlineArrayStrings(_ value: String) -> [String] {
         var inner = value.trimmingCharacters(in: .whitespaces)
         guard inner.hasPrefix("[") else { return [] }
@@ -292,5 +319,22 @@ public enum MCPConfigIndexer {
         return inner.split(separator: ",").map {
             unquote(String($0).trimmingCharacters(in: .whitespaces))
         }.filter { !$0.isEmpty }
+    }
+
+    /// 数组字面量是否已闭合：引号外的 `]` 才算（引号内的 `]` 是元素内容）；
+    /// 引号内的 `\"` 转义不翻转引号态。best-effort 扫描，够覆盖 args 的字符串数组形态。
+    private static func tomlArrayClosed(_ value: String) -> Bool {
+        var inString = false
+        var escaped = false
+        for character in value {
+            if escaped { escaped = false; continue }
+            switch character {
+            case "\\" where inString: escaped = true
+            case "\"": inString.toggle()
+            case "]" where !inString: return true
+            default: break
+            }
+        }
+        return false
     }
 }

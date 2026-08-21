@@ -3,7 +3,10 @@ theme = "dark"
 
 [mcp_servers.notion]
 command = "npx"
-args = ["-y", "@notionhq/notion-mcp-server"]
+args = [
+    "-y",
+    "@notionhq/notion-mcp-server",
+]
 enabled = true
 
 [mcp_servers.notion.env]

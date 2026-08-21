@@ -109,9 +109,68 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
             text, source: .grok, configPath: "/tmp/grok-config.toml")
         try expectEqual(entries.map(\.name), ["notion", "paused"])
         try expectEqual(entries[0].enabled, true)
+        try expectEqual(
+            entries[0].commandSummary, "npx -y @notionhq/notion-mcp-server",
+            "多行数组（grok 实勘形态）必须跨行拼接进摘要")
         try expectEqual(entries[0].envKeys, ["NOTION_TOKEN"])
         try expectEqual(entries[1].enabled, false)
         try expect(!flatten(entries).contains("SECRET"), "密钥值泄漏进了模型字段")
+    }
+
+    t.test("TOML 多行数组：注释行跳过、未闭合 EOF 放弃、段头终止不吞段") {
+        // 数组内整行注释 + 正常闭合
+        let commented = """
+        [mcp_servers.a]
+        command = "npx"
+        args = [
+            # 里外两层
+            "-y", "pkg-a",
+        ]
+        [mcp_servers.b]
+        command = "uvx"
+        """
+        var entries = MCPConfigIndexer.parseTOMLServers(
+            commented, source: .grok, configPath: "/tmp/t.toml")
+        try expectEqual(entries.map(\.name), ["a", "b"], "注释行不该截断收集")
+        try expectEqual(entries[0].commandSummary, "npx -y pkg-a")
+
+        // 未闭合到 EOF：放弃该数组，server 仍在（command 还在）
+        let unclosed = """
+        [mcp_servers.a]
+        command = "npx"
+        args = ["-y",
+            "never-closed"
+        """
+        entries = MCPConfigIndexer.parseTOMLServers(
+            unclosed, source: .grok, configPath: "/tmp/t.toml")
+        try expectEqual(entries.map(\.name), ["a"])
+        try expectEqual(entries[0].commandSummary, "npx")
+
+        // 收集态遇段头：放弃数组，后续段照常解析
+        let hijacked = """
+        [mcp_servers.a]
+        command = "npx"
+        args = ["-y",
+        [mcp_servers.b]
+        command = "uvx"
+        """
+        entries = MCPConfigIndexer.parseTOMLServers(
+            hijacked, source: .grok, configPath: "/tmp/t.toml")
+        try expectEqual(entries.map(\.name), ["a", "b"], "畸形数组不该吞掉下一段")
+        try expectEqual(entries[1].commandSummary, "uvx")
+
+        // 引号内的 `]` 不算闭合
+        let quoted = """
+        [mcp_servers.a]
+        command = "sh"
+        args = ["-c", "echo [not-close]",
+        ]
+        """
+        entries = MCPConfigIndexer.parseTOMLServers(
+            quoted, source: .grok, configPath: "/tmp/t.toml")
+        try expectEqual(
+            entries[0].commandSummary, "sh -c echo [not-close]",
+            "引号内的 ] 不能提前闭合数组")
     }
 
     t.test("index：新读源全覆盖（cursor/kimi mcp.json、qwen settings、grok toml、opencode）") {
