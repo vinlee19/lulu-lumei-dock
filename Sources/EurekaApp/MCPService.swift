@@ -165,10 +165,12 @@ final class MCPService: ObservableObject {
         }
     }
 
-    /// 该定义能否装到目标（远程 server → TOML 目标的形态未实勘，拒绝）；nil = 可以
+    /// 该定义能否装到目标。codex 的远程形态已实勘（url + 可选 bearer_token，本机
+    /// config.toml 验证）；grok 无远程证据 → 继续拒绝。细粒度边界（非 Authorization
+    /// 请求头拒写 http_headers）由 MCPServerEditor 在写入时把关。nil = 可以
     static func installBlockReason(transport: String, to source: AgentSource) -> String? {
         if let reason = writeBlockReason(for: source) { return reason }
-        if transport != "stdio", source == .codex || source == .grok {
+        if transport != "stdio", source == .grok {
             return "远程 server 在该目标的格式未验证"
         }
         return nil

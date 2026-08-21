@@ -148,7 +148,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expect(out.hasSuffix("\n"), "保持尾换行")
     }
 
-    t.test("upsertTOML：同名拒绝；remote 拒绝（格式未实勘）；换行值拒绝") {
+    t.test("upsertTOML：同名拒绝；remote 带非 Authorization 头拒绝；换行值拒绝") {
         let existing = "[mcp_servers.context7]\ncommand = \"old\"\n"
         do {
             _ = try MCPServerEditor.upsertTOML(into: existing, definition: stdioDef)
@@ -159,9 +159,11 @@ func mcpServerEditorTests(_ t: TestRunner) {
                 return
             }
         }
+        var extraHeader = remoteDef
+        extraHeader.headers["X-Custom"] = "val"
         do {
-            _ = try MCPServerEditor.upsertTOML(into: "", definition: remoteDef)
-            try expect(false, "remote → TOML 应抛 unsupportedTarget")
+            _ = try MCPServerEditor.upsertTOML(into: "", definition: extraHeader)
+            try expect(false, "非 Authorization 头 → TOML 应抛 unsupportedTarget（http_headers 未实勘）")
         } catch let error as MCPEditError {
             guard case .unsupportedTarget = error else {
                 try expect(false, "错误类型不对：\(error)")
@@ -179,6 +181,76 @@ func mcpServerEditorTests(_ t: TestRunner) {
                 return
             }
         }
+    }
+
+    t.test("upsertTOML remote：url + Authorization→bearer_token；无鉴权只写 url") {
+        let toml = try MCPServerEditor.upsertTOML(into: "", definition: remoteDef)
+        try expect(toml.contains("[mcp_servers.linear]"))
+        try expect(toml.contains("url = \"https://mcp.linear.app/sse\""))
+        try expect(toml.contains("bearer_token = \"fake\""),
+            "Authorization 头值剥掉 Bearer 前缀后写 bearer_token（运行时自带方案）")
+        try expect(!toml.contains("command ="), "远程段不写 command")
+
+        var open = remoteDef
+        open.headers = [:]
+        let bare = try MCPServerEditor.upsertTOML(into: "", definition: open)
+        try expect(bare.contains("url = "), "无鉴权远程只写 url")
+        try expect(!bare.contains("bearer_token"))
+    }
+
+    t.test("upsertTOML remote：裸 token（无 Bearer 前缀）也归一进 bearer_token") {
+        var raw = remoteDef
+        raw.headers["Authorization"] = "sk-raw-token"
+        let toml = try MCPServerEditor.upsertTOML(into: "", definition: raw)
+        try expect(toml.contains("bearer_token = \"sk-raw-token\""))
+    }
+
+    t.test("updateTOML remote：改 url、bearer_token 随 Authorization 增删") {
+        let toml = """
+        [mcp_servers.linear]
+        url = "https://old.example/mcp"
+        bearer_token = "stale"
+        enabled = true
+        """
+        var def = remoteDef
+        def.url = "https://new.example/mcp"
+        let out = try MCPServerEditor.updateTOML(in: toml, definition: def)
+        try expect(out.contains("url = \"https://new.example/mcp\""))
+        try expect(out.contains("bearer_token = \"fake\""), "鉴权头变更要原位改写")
+        try expect(out.contains("enabled = true"), "未建模键原样保留")
+
+        def.headers = [:]
+        let cleared = try MCPServerEditor.updateTOML(in: toml, definition: def)
+        try expect(!cleared.contains("bearer_token"), "鉴权置空要删行")
+    }
+
+    t.test("round-trip：remote JSON 读定义 → TOML 写 → 读回 Authorization 稳定") {
+        let json = try MCPServerEditor.upsertJSON(
+            into: "", definition: remoteDef, container: "mcpServers", style: .typed)
+        let fromJSON = try MCPServerEditor.readDefinitionJSON(
+            json, name: "linear", container: "mcpServers")
+        let toml = try MCPServerEditor.upsertTOML(into: "", definition: fromJSON)
+        let fromTOML = try MCPServerEditor.readDefinitionTOML(toml, name: "linear")
+        try expectEqual(fromTOML.transport, .remote)
+        try expectEqual(fromTOML.url, remoteDef.url)
+        try expectEqual(
+            fromTOML.headers["Authorization"], "Bearer fake",
+            "bearer_token 读回要补全 Bearer 方案（探测按 HTTP 语义直接用）")
+    }
+
+    t.test("readDefinitionTOML：多行数组 args 跨行读回（grok 实勘形态）") {
+        let toml = """
+        [mcp_servers.notion]
+        command = "npx"
+        args = [
+            "-y",
+            "@notionhq/notion-mcp-server",
+        ]
+        enabled = true
+        """
+        let def = try MCPServerEditor.readDefinitionTOML(toml, name: "notion")
+        try expectEqual(def.args, ["-y", "@notionhq/notion-mcp-server"],
+            "编辑预填与探测都要拿到完整 args")
     }
 
     t.test("removeTOML：连带清除 .env / .tools.* 子段，邻段无损") {

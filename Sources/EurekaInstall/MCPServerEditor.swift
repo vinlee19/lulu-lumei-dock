@@ -318,17 +318,17 @@ public enum MCPServerEditor {
 
     // MARK: - TOML（codex / grok 的 [mcp_servers.<name>]）
 
-    /// 追加 `[mcp_servers.<name>]` 段（+ 可选 `.env` 子段）。
-    /// v1 只接受 stdio：远程 server 在 codex/grok 的字段形态未实勘，拒写防造废配置。
+    /// 追加 `[mcp_servers.<name>]` 段（+ 可选 `.env` 子段 / 远程鉴权键）。
+    /// 远程形态已实勘（本机 codex config.toml）：`url` 键即启用远程 server；
+    /// `Authorization` 请求头 → `bearer_token`（官方字段，运行时以 Bearer 方案发送）。
+    /// 其它请求头需要 `http_headers`，形态未实勘 → 拒写防造废配置（grok 无远程证据，由
+    /// MCPService.installBlockReason 在矩阵层继续拒绝）。
     public static func upsertTOML(
         into toml: String, definition: MCPServerDefinition
     ) throws -> String {
         try validate(definition)
-        guard definition.transport == .stdio else {
-            throw MCPEditError.unsupportedTarget(
-                "该目标的远程 server 格式未验证，暂不支持写入（仅支持 stdio）")
-        }
-        guard let command = definition.command else {
+        try guardRemoteHeadersForTOML(definition)
+        if definition.transport == .stdio, definition.command == nil {
             throw MCPEditError.invalidDefinition("stdio server 缺少 command")
         }
         let existing = sectionRanges(in: toml.components(separatedBy: "\n"))
@@ -336,8 +336,8 @@ public enum MCPServerEditor {
             throw MCPEditError.alreadyExists(definition.name)
         }
         // 值不能带换行/控制字符：行级 TOML 写不了多行字符串，宁可拒绝也不写坏文件
-        for value in [command] + definition.args
-            + definition.env.keys + definition.env.values {
+        for value in [definition.command ?? "", definition.url ?? ""] + definition.args
+            + definition.env.keys + definition.env.values + definition.headers.values {
             if value.contains("\n") || value.contains("\r") {
                 throw MCPEditError.invalidDefinition("值包含换行，无法安全写入 TOML")
             }
@@ -350,16 +350,23 @@ public enum MCPServerEditor {
         }
         if !lines.isEmpty { lines.append("") }
         lines.append(headerLine(name: definition.name))
-        lines.append("command = \"\(escape(command))\"")
-        if !definition.args.isEmpty {
-            let items = definition.args.map { "\"\(escape($0))\"" }.joined(separator: ", ")
-            lines.append("args = [\(items)]")
-        }
-        if !definition.env.isEmpty {
-            lines.append("")
-            lines.append(headerLine(name: definition.name, subsection: "env"))
-            for key in definition.env.keys.sorted() {
-                lines.append("\(key) = \"\(escape(definition.env[key] ?? ""))\"")
+        if definition.transport == .remote {
+            lines.append("url = \"\(escape(definition.url ?? ""))\"")
+            if let token = authorizationBearerToken(of: definition) {
+                lines.append("bearer_token = \"\(escape(token))\"")
+            }
+        } else {
+            lines.append("command = \"\(escape(definition.command ?? ""))\"")
+            if !definition.args.isEmpty {
+                let items = definition.args.map { "\"\(escape($0))\"" }.joined(separator: ", ")
+                lines.append("args = [\(items)]")
+            }
+            if !definition.env.isEmpty {
+                lines.append("")
+                lines.append(headerLine(name: definition.name, subsection: "env"))
+                for key in definition.env.keys.sorted() {
+                    lines.append("\(key) = \"\(escape(definition.env[key] ?? ""))\"")
+                }
             }
         }
         var result = lines.joined(separator: "\n")
@@ -367,15 +374,40 @@ public enum MCPServerEditor {
         return result
     }
 
-    /// 编辑既有 TOML server（**原位改写**，段落位置不动）：主段内重写 command/args/url
-    /// （未识别键如 `enabled`、注释原样保留——照 CodexProfileEditor.upsert 的段内手法）；
-    /// env 三形态：已有 `.env` 子段 → 整体重写子段体（置空则删子段）；只有内联 `env = {…}`
-    /// → 重写该行；两者皆无且 env 非空 → 主段末补内联行。`.tools.*` 等其它子段原样不动。
-    /// 与 upsert 不同：已是 remote 的条目允许改 url（stdio-only 限制只针对新建）。
+    /// 远程定义装进 TOML 目标的鉴权边界：只认 `Authorization`（→ bearer_token）；
+    /// 其它请求头需要 `http_headers`，形态未实勘 → 拒绝（新建与编辑共用）。
+    private static func guardRemoteHeadersForTOML(
+        _ definition: MCPServerDefinition
+    ) throws {
+        guard definition.transport == .remote else { return }
+        if let extra = definition.headers.keys
+            .first(where: { $0.lowercased() != "authorization" }) {
+            throw MCPEditError.unsupportedTarget(
+                "该目标对自定义请求头（\(extra)）的写法未验证，暂只支持 Authorization（bearer_token）")
+        }
+    }
+
+    /// `Authorization` 头值 → bearer_token 值：JSON 侧常带 "Bearer " 前缀，
+    /// codex 的 bearer_token 运行时自带 Bearer 方案，去前缀防双重拼接
+    private static func authorizationBearerToken(
+        of definition: MCPServerDefinition
+    ) -> String? {
+        guard let value = definition.headers
+            .first(where: { $0.key.lowercased() == "authorization" })?.value else { return nil }
+        if value.lowercased().hasPrefix("bearer ") { return String(value.dropFirst(7)) }
+        return value
+    }
+
+    /// 编辑既有 TOML server（**原位改写**，段落位置不动）：主段内重写 command/args/url/
+    /// bearer_token（未识别键如 `enabled`、注释原样保留——照 CodexProfileEditor.upsert 的
+    /// 段内手法）；env 三形态：已有 `.env` 子段 → 整体重写子段体（置空则删子段）；只有内联
+    /// `env = {…}` → 重写该行；两者皆无且 env 非空 → 主段末补内联行。`.tools.*` 等其它子段
+    /// 原样不动。与 upsert 不同：已是 remote 的条目允许改 url（stdio-only 限制只针对新建）。
     public static func updateTOML(
         in toml: String, definition: MCPServerDefinition
     ) throws -> String {
         try validate(definition)
+        try guardRemoteHeadersForTOML(definition)
         for value in [definition.command ?? "", definition.url ?? ""] + definition.args
             + definition.env.keys + definition.env.values {
             if value.contains("\n") || value.contains("\r") {
@@ -420,6 +452,10 @@ public enum MCPServerEditor {
             case "url":
                 guard definition.transport == .remote else { return nil }
                 return definition.url.map { "url = \"\(escape($0))\"" }
+            case "bearer_token":
+                guard definition.transport == .remote else { return nil }
+                return authorizationBearerToken(of: definition)
+                    .map { "bearer_token = \"\(escape($0))\"" }
             case "env":
                 // 子段是权威时不写内联；env 置空也不写
                 guard !hasEnvSubsection, !definition.env.isEmpty else { return nil }
@@ -431,7 +467,7 @@ public enum MCPServerEditor {
                 return nil
             }
         }
-        let managedKeys = ["command", "args", "url", "env"]
+        let managedKeys = ["command", "args", "url", "bearer_token", "env"]
         var newBody: [String] = []
         var written = Set<String>()
         for line in lines[(main.lowerBound + 1)..<main.upperBound] {
@@ -490,12 +526,30 @@ public enum MCPServerEditor {
         var args: [String] = []
         var url: String?
         var env: [String: String] = [:]
+        var headers: [String: String] = [:]
         var found = false
         var inMain = false
         var inEnvSub = false
+        /// 多行数组收集态（与 MCPConfigIndexer 同手法）：`args = [` 未闭合时吃行到 `]`
+        var pendingArgs: String?
 
         for rawLine in toml.components(separatedBy: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if let buffer = pendingArgs {
+                if line.hasPrefix("#") { continue }
+                if line.hasPrefix("[") {
+                    pendingArgs = nil  // 畸形未闭合：放弃，落回段头处理
+                } else {
+                    let merged = buffer.isEmpty ? line : buffer + " " + line
+                    if arrayLiteralClosed(merged) {
+                        args = inlineArrayStrings(merged)
+                        pendingArgs = nil
+                    } else {
+                        pendingArgs = merged
+                    }
+                    continue
+                }
+            }
             if line.hasPrefix("[") {
                 inMain = false
                 inEnvSub = false
@@ -521,7 +575,16 @@ public enum MCPServerEditor {
             switch key {
             case "command": command = unquote(value)
             case "url": url = unquote(value)
-            case "args": args = inlineArrayStrings(value)
+            case "args":
+                if arrayLiteralClosed(value) {
+                    args = inlineArrayStrings(value)
+                } else {
+                    pendingArgs = value
+                }
+            case "bearer_token":
+                // 运行时以 Bearer 方案发送 → 读回时补全 Authorization 头值，
+                // 探测与编辑表单即可按 HTTP 语义直接使用（round-trip 稳定）
+                headers["Authorization"] = "Bearer \(unquote(value))"
             case "env":
                 for (envKey, envValue) in inlineTablePairs(value) { env[envKey] = envValue }
             default: break
@@ -531,7 +594,7 @@ public enum MCPServerEditor {
         return MCPServerDefinition(
             name: name,
             transport: url == nil ? .stdio : .remote,
-            command: command, args: args, env: env, url: url)
+            command: command, args: args, env: env, url: url, headers: headers)
     }
 
     // MARK: - JSON 私有（parse/serialize 契约照 ClaudeHooksInstaller）
@@ -707,7 +770,7 @@ public enum MCPServerEditor {
         return value
     }
 
-    /// 单行数组 `["-y", "pkg"]` → 元素（多行数组放弃，与索引器同限制）
+    /// 单行数组 `["-y", "pkg"]` → 元素（多行形态由调用方拼接后再进来）
     private static func inlineArrayStrings(_ value: String) -> [String] {
         var inner = value.trimmingCharacters(in: .whitespaces)
         guard inner.hasPrefix("[") else { return [] }
@@ -716,6 +779,23 @@ public enum MCPServerEditor {
         return inner.split(separator: ",").map {
             unquote(String($0).trimmingCharacters(in: .whitespaces))
         }.filter { !$0.isEmpty }
+    }
+
+    /// 数组字面量是否已闭合：引号外的 `]` 才算（引号内是元素内容）；
+    /// 引号内 `\"` 转义不翻转引号态。与 MCPConfigIndexer 的同款手法（模块不互相依赖）
+    private static func arrayLiteralClosed(_ value: String) -> Bool {
+        var inString = false
+        var escaped = false
+        for character in value {
+            if escaped { escaped = false; continue }
+            switch character {
+            case "\\" where inString: escaped = true
+            case "\"": inString.toggle()
+            case "]" where !inString: return true
+            default: break
+            }
+        }
+        return false
     }
 
     /// 单行内联表 `{ A = "x", B = "y" }` → 键值对（这里**要**值：传播需要完整定义）
