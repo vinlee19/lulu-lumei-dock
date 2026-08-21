@@ -202,6 +202,7 @@ struct MCPView: View {
                     totalCount: totalCount,
                     sources: availableSources,
                     count: { count(for: $0) })
+                probeBar
                 if filteredEntries.isEmpty {
                     emptyState.padding(.top, 40)
                 } else if layout == .cards {
@@ -247,6 +248,35 @@ struct MCPView: View {
 
     private func open(_ entry: MCPServerEntry) {
         withAnimation(.easeOut(duration: 0.15)) { detailName = entry.name }
+    }
+
+    /// 批量检测操作行：串行逐处、可取消；stdio 深探只在此类显式动作下发生
+    @ViewBuilder
+    private var probeBar: some View {
+        HStack(spacing: 8) {
+            if let progress = service.probeProgress {
+                ProgressView().controlSize(.small).scaleEffect(0.7)
+                Text("检测中 \(progress.done)/\(progress.total)")
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.secondary)
+                Button("取消") { service.cancelProbe() }
+                    .font(Theme.font.themed(10))
+            } else {
+                Button {
+                    service.probe(filteredEntries)
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 9))
+                        Text(selectedSource == nil ? "检测全部" : "检测当前源")
+                            .font(Theme.font.themed(10))
+                    }
+                }
+                .disabled(filteredEntries.isEmpty)
+                .help("逐处发起连接检测（\(filteredEntries.count) 处）：remote 走 MCP 握手；stdio 会短暂启动配置的命令，读完即退出")
+            }
+            Spacer()
+        }
     }
 
     private func toolInfo(for entry: MCPServerEntry) -> MCPToolCacheEntry? {
@@ -309,6 +339,13 @@ private func mcpPickProjectRoot() -> String? {
     panel.canCreateDirectories = false
     panel.message = "选择要写入 .mcp.json 的项目根目录"
     return panel.runModal() == .OK ? panel.url?.path : nil
+}
+
+/// 快照过期阈值：超过 7 天视为过期（列表灰点 + 详情提示，建议重新检测）
+private let mcpProbeStaleThreshold: TimeInterval = 7 * 86_400
+
+private func mcpSnapshotStale(_ snapshot: MCPProbeSnapshot) -> Bool {
+    Date().timeIntervalSince(snapshot.checkedAt) > mcpProbeStaleThreshold
 }
 
 /// 总览行/卡的能力计数摘要："30 工具 · 5 提示词 · 2 资源"（实测过才有；0 略去不占位）
@@ -583,12 +620,18 @@ private struct MCPRow: View {
                 SourceLogoTile(source: entry.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        // 上次检测的健康点（持久快照；无快照不显示）——扫一眼列表即知全局状态
+                        // 上次检测的健康点（持久快照；无快照不显示）——扫一眼列表即知全局状态；
+                        // 超过 7 天转灰点（过期，结果未必仍成立）
                         if let snapshot = service.probeSnapshots[entry.id] {
+                            let stale = mcpSnapshotStale(snapshot)
                             Circle()
-                                .fill(mcpToneColor(snapshot.tone))
+                                .fill(stale
+                                    ? Color.secondary.opacity(0.45)
+                                    : mcpToneColor(snapshot.tone))
                                 .frame(width: 6, height: 6)
-                                .help("上次检测：\(snapshot.label)")
+                                .help(stale
+                                    ? "上次检测：\(snapshot.label)（已超过 7 天，建议重新检测）"
+                                    : "上次检测：\(snapshot.label)")
                         }
                         Text(entry.name)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
@@ -931,7 +974,8 @@ private struct MCPDetailView: View {
                                 .truncationMode(.middle)
                         }
                         Text(relativeFormatter.localizedString(
-                            for: snapshot.checkedAt, relativeTo: Date()))
+                            for: snapshot.checkedAt, relativeTo: Date())
+                            + (mcpSnapshotStale(snapshot) ? " · 已过期" : ""))
                             .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
                     }
@@ -1649,14 +1693,16 @@ private struct MCPDetailView: View {
         .help("点击编辑该处定义")
     }
 
-    /// 状态 chip：检测中 → spinner；否则显示**持久化快照**（重启不丢，v2.6 直显）
+    /// 状态 chip：检测中 → spinner；否则显示**持久化快照**（重启不丢，v2.6 直显）；
+    /// 超过 7 天附「已过期」提示（相对时间本就带"几天前"）
     @ViewBuilder
     private func probeChip(for entry: MCPServerEntry) -> some View {
         if service.probeResults[entry.id] == .checking {
             ProgressView().controlSize(.small).scaleEffect(0.6)
         } else if let snapshot = service.probeSnapshots[entry.id] {
             TagChip(snapshot.label, tint: mcpToneColor(snapshot.tone))
-            Text(relativeFormatter.localizedString(for: snapshot.checkedAt, relativeTo: Date()))
+            Text(relativeFormatter.localizedString(for: snapshot.checkedAt, relativeTo: Date())
+                + (mcpSnapshotStale(snapshot) ? " · 已过期" : ""))
                 .font(Theme.font.themed(9))
                 .foregroundStyle(.tertiary)
         }

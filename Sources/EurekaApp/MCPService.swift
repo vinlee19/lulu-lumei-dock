@@ -550,28 +550,70 @@ final class MCPService: ObservableObject {
 
     // MARK: - 连接检测（只在用户点击时发起，绝不自动探测）
 
+    /// 取消票据：新批次发放新票据，旧批次发现被取消即停（线程安全，main 发放/queue 查询）
+    private final class ProbeTicket {
+        private let lock = NSLock()
+        private var cancelled = false
+        var isCancelled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled
+        }
+        func cancel() {
+            lock.lock(); defer { lock.unlock() }
+            cancelled = true
+        }
+    }
+    private var probeTicket: ProbeTicket?
+    /// 批量检测进度（nil = 不在批量检测中）
+    @Published private(set) var probeProgress: (done: Int, total: Int)?
+
     /// 检测一组配置处：remote 发 MCP initialize 探测（headers 只发往该 server 自己的
     /// URL——这是这些凭证的既定用途；响应体不读不存不记日志）；stdio 查命令可达（纯
     /// syscall，不 spawn 进程）。结果进 probeResults，UI 以 chip 呈现。
+    /// 串行逐处执行，每处完成即发布进度；再次调用或 cancelProbe() 取消未完成的旧批次。
     func probe(_ entries: [MCPServerEntry]) {
+        let ticket = ProbeTicket()
+        probeTicket = ticket
         for entry in entries {
             probeResults[entry.id] = .checking
         }
+        probeProgress = (0, entries.count)
         queue.async { [weak self] in
+            var done = 0
             for entry in entries {
+                guard !ticket.isCancelled else {
+                    DispatchQueue.main.async { self?.probeProgress = nil }
+                    return
+                }
                 let (status, authScheme) = Self.probeOne(entry)
                 // 快照落盘（含鉴权方式折算）：下次打开页面（含重启后）直显，不让用户猜
                 let snapshot = MCPProbeSnapshot(
                     status: status, authScheme: authScheme, checkedAt: Date())
                 MCPProbeCache.upsert(key: entry.id, snapshot: snapshot)
+                done += 1
                 DispatchQueue.main.async {
+                    guard !ticket.isCancelled else { return }
                     self?.probeResults[entry.id] = .done(status)
                     self?.probeSnapshots[entry.id] = snapshot
+                    self?.probeProgress = (done, entries.count)
                 }
             }
             // tools/list 可能刚落盘 → 刷新工具缓存（工具数 chip / ctx 开销随之更新）
             let cache = MCPToolCache.load()
-            DispatchQueue.main.async { self?.toolCache = cache }
+            DispatchQueue.main.async {
+                guard !ticket.isCancelled else { return }
+                self?.toolCache = cache
+                self?.probeProgress = nil
+            }
+        }
+    }
+
+    /// 取消进行中的批量检测（单处「重新检测」也走同一条取消路径，无副作用）
+    func cancelProbe() {
+        probeTicket?.cancel()
+        probeProgress = nil
+        for (id, state) in probeResults where state == .checking {
+            probeResults.removeValue(forKey: id)
         }
     }
 
