@@ -8,10 +8,12 @@ import Foundation
 /// 的端点。所以"已连接"必须以**握手成功**为准 —— 只看 HTTP 200 会把任意网站误判为
 /// MCP server（v1 的毛病），现在 2xx 还要能解析出 `result.protocolVersion` 才算。
 public enum MCPProbe {
-    /// 我们实现所对齐的最新**定稿**协议版本（2026-07-28 尚为 release candidate，不追）。
-    /// initialize 报此版本，server 协商回落什么就记录什么；后续请求按规范带
-    /// `MCP-Protocol-Version: <协商版本>` 头。
-    public static let latestProtocolVersion = "2025-11-25"
+    /// 我们实现所对齐的最新**定稿**协议版本（2026-07-28 已正式发布：stateless core、
+    /// 多轮请求、header 版本协商）。initialize 报此版本，server 协商回落什么就记录什么
+    /// （旧 server 回旧版本照样连通）；后续请求按规范带
+    /// `MCP-Protocol-Version: <协商版本>` 头。经典握手序列对新规范保持兼容；
+    /// stateless core 的单请求能力发现属后续跟进项，不影响探测正确性。
+    public static let latestProtocolVersion = "2026-07-28"
 
     /// initialize 握手取回的 server 自述（协议定义里的 serverInfo + capabilities）
     public struct HandshakeInfo: Equatable, Sendable {

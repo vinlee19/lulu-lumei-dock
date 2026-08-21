@@ -25,6 +25,25 @@ func mcpProbeTests(_ t: TestRunner) {
         try expect(info.summary.contains("协议 2025-03-26"))
     }
 
+    t.test("版本协商：initialize 报最新定稿版本，server 回落旧版照常连通") {
+        // 我们声明 2026-07-28（已定稿）；只支持旧版的 server 应回它自己的版本
+        try expectEqual(MCPProbe.latestProtocolVersion, "2026-07-28")
+        let body = MCPProbe.initializeRequestBody()
+        let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let params = object?["params"] as? [String: Any]
+        try expectEqual(
+            params?["protocolVersion"] as? String, "2026-07-28",
+            "initialize 必须声明我们支持的最高版本")
+        // server 回 2025-03-26 → 协商回落照记，仍算已连接（后续请求按回落版本带头）
+        let status = MCPProbe.classify(
+            statusCode: 200, body: Data(validInit.utf8), contentType: "application/json")
+        guard case .connected(let info) = status else {
+            try expect(false, "旧版 server 应照常连通，得到 \(status)")
+            return
+        }
+        try expectEqual(info.protocolVersion, "2025-03-26")
+    }
+
     t.test("误报修复：200 但响应不是 MCP → notMCP（旧实现会误判已连接）") {
         let html = Data("<html><body>hello</body></html>".utf8)
         try expectEqual(
@@ -207,14 +226,13 @@ func mcpProbeTests(_ t: TestRunner) {
         try expect(MCPProbe.resolveCommand("", pathVariable: "/bin") == nil)
     }
 
-    t.test("请求体：initialize 报 2025-11-25 / 通知无 id / list 带分页 cursor") {
+    t.test("请求体：initialize 报最新定稿版本 / 通知无 id / list 带分页 cursor") {
         let initBody = try JSONSerialization.jsonObject(
             with: MCPProbe.initializeRequestBody()) as? [String: Any]
         try expectEqual(initBody?["method"] as? String, "initialize")
         try expectEqual(
             (initBody?["params"] as? [String: Any])?["protocolVersion"] as? String,
-            "2025-11-25", "必须报最新定稿版本（server 自己会协商回落）")
-        try expectEqual(MCPProbe.latestProtocolVersion, "2025-11-25")
+            MCPProbe.latestProtocolVersion, "必须报最新定稿版本（server 自己会协商回落）")
         let notify = try JSONSerialization.jsonObject(
             with: MCPProbe.initializedNotificationBody()) as? [String: Any]
         try expectEqual(notify?["method"] as? String, "notifications/initialized")
