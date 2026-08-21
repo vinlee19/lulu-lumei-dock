@@ -4,6 +4,50 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.28.0] - 2026-08-21
+
+### Added
+
+- **Remote MCP servers can now be installed into Codex.** The remote TOML shape
+  is verified on a real machine (a bare `url` key enables the server), so the
+  install matrix no longer blocks remote definitions for Codex: the
+  `Authorization` header maps to the official `bearer_token` field (reads back
+  as a complete header so probing keeps HTTP semantics). Other headers still
+  refuse — their TOML shape is unverified — and grok stays blocked pending
+  evidence.
+- **Project-level `.mcp.json` installs.** Project-scoped configs were read-only;
+  the new-server form now has a project chip (repo picker fed by the same
+  discovery roots the scanner uses, plus a browse fallback) and the detail-page
+  matrix has a project tile. Claude's `.mcp.json` and Cursor's
+  `.cursor/mcp.json` are both supported; both are dedicated small files and are
+  created when missing, with parent directories as needed.
+- **Batch probing with progress.** The MCP list gains a "检测全部 / 检测当前源"
+  bar that walks the filtered entries serially with live progress and a cancel
+  button; issuing a new probe cancels the old batch. Probe snapshots older than
+  7 days now read as stale — gray health dot in the list, explicit marker in
+  detail views.
+- **Per-server call drill-down and idle cleanup.** The MCP detail page has a new
+  activity card: a 30-day mini bar chart, the recent/total call counts, and the
+  top tools by invocation. The 30-day idle hint now has a matching "从所有源移除"
+  action that removes the server from every configured place (backup first,
+  per-place results).
+
+### Fixed
+
+- **Multi-line TOML `args` arrays are parsed.** Grok writes `args` across
+  multiple lines, which the line-level parser silently dropped — the list showed
+  the bare command without arguments and drift checks skewed. The indexer and
+  the edit-form reader now accumulate lines until the array closes (quote-aware
+  bracket matching, whole-line comments skipped, malformed values abandoned on
+  EOF or a section header).
+
+### Changed
+
+- The connection probe now declares MCP `2026-07-28` (the finalized
+  specification) instead of `2025-11-25`; servers answering with an older
+  version still connect and the negotiated version is used for subsequent
+  requests, as before.
+
 ## [0.27.1] - 2026-08-20
 
 ### Fixed
@@ -1424,6 +1468,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.28.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.28.0
 [0.27.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.1
 [0.27.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.0
 [0.26.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.26.2
