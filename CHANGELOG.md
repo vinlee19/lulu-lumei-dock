@@ -4,7 +4,7 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
-## [0.28.0] - 2026-08-21
+## [0.28.0] - 2026-08-22
 
 ### Added
 
@@ -40,6 +40,17 @@ this project uses [Semantic Versioning](https://semver.org/).
   the edit-form reader now accumulate lines until the array closes (quote-aware
   bracket matching, whole-line comments skipped, malformed values abandoned on
   EOF or a section header).
+- **The session TOC is resizable and reads naturally.** The conversation
+  directory pane had a hard-coded 190pt width in a plain HStack — it now lives
+  in an HSplitView (160–360pt) matching the list-pane interaction, wraps entries
+  up to three lines with tail truncation, and rows gain hover feedback plus a
+  count in the header.
+- **Session refreshes are no longer dropped mid-scan.** A refresh request
+  arriving while the 14-source index scan was running was silently discarded, so
+  switching to "全部时间" during a scan left the tab showing the 30-day window
+  with no way to re-trigger. Refreshes now coalesce and re-run when the scan
+  finishes; the header shows a live indexing indicator so re-scans are visible
+  even with data on screen.
 
 ### Changed
 
