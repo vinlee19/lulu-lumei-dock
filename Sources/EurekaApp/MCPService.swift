@@ -373,23 +373,55 @@ final class MCPService: ObservableObject {
         queue.async { [weak self] in
             var ok = false
             do {
-                let url = URL(fileURLWithPath: entry.configPath)
-                let original = ConfigFile.read(url)
-                let updated: String
-                switch Self.readDialect(for: entry) {
-                case .toml:
-                    updated = try MCPServerEditor.removeTOML(from: original, name: entry.name)
-                case .json(let container, _):
-                    updated = try MCPServerEditor.removeJSON(
-                        from: original, name: entry.name, container: container)
-                }
-                try ConfigFile.backupThenWrite(path: url, newContent: updated)
+                try Self.removeOne(entry)
                 ok = true
             } catch {
                 self?.report(error)
             }
             DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
         }
+    }
+
+    /// 从**所有**配置处移除该名字的 server（闲置清理闭环）：逐处走既有删除逻辑，
+    /// 逐处汇报（键 = "源 · 路径"，nil = 成功）；读不到定义的源自动跳过。
+    func removeEverywhere(
+        named name: String, completion: (([String: String?]) -> Void)? = nil
+    ) {
+        queue.async { [weak self] in
+            let key = name.lowercased()
+            let targets = self?.allServers.filter { $0.name.lowercased() == key } ?? []
+            var results: [String: String?] = [:]
+            for entry in targets {
+                let label = "\(entry.source.displayName) · \(entry.configPath)"
+                do {
+                    try Self.removeOne(entry)
+                    results[label] = nil
+                } catch let error as LocalizedError {
+                    results[label] = error.errorDescription ?? "\(error)"
+                } catch {
+                    results[label] = "\(error)"
+                }
+            }
+            DispatchQueue.main.async {
+                completion?(results)
+                self?.refresh(force: true)
+            }
+        }
+    }
+
+    /// 单处删除内核（remove 与 removeEverywhere 共用）
+    private static func removeOne(_ entry: MCPServerEntry) throws {
+        let url = URL(fileURLWithPath: entry.configPath)
+        let original = ConfigFile.read(url)
+        let updated: String
+        switch readDialect(for: entry) {
+        case .toml:
+            updated = try MCPServerEditor.removeTOML(from: original, name: entry.name)
+        case .json(let container, _):
+            updated = try MCPServerEditor.removeJSON(
+                from: original, name: entry.name, container: container)
+        }
+        try ConfigFile.backupThenWrite(path: url, newContent: updated)
     }
 
     /// 启停：codex/grok 走 TOML 原位改写，opencode 走 JSON 合并；写前备份。

@@ -442,6 +442,61 @@ final class UsageService: ObservableObject {
         return raw.split(separator: ".").first.map { String($0).lowercased() } ?? ""
     }
 
+    /// 某 MCP server 的调用活跃（详情页「调用活跃」卡）：近 N 天逐日序列 + top 工具
+    struct MCPServerActivity {
+        /// 连续 N 天（旧→新，缺调用补 0），day 为当天零点
+        var series: [(day: Date, count: Int)]
+        /// 全时 top 工具（次数降序；工具名 = 原始名去掉 server 前缀）
+        var topTools: [(name: String, count: Int)]
+    }
+
+    /// 工具名：原始名去掉 server 前缀（`mcp__s__t` → t；`s.t` → t；无前缀原样）
+    static func mcpToolLabel(_ raw: String) -> String {
+        if raw.hasPrefix("mcp__") {
+            let parts = raw.components(separatedBy: "__")
+            return parts.count >= 3 ? parts[2...] .joined(separator: "__") : raw
+        }
+        if let dot = raw.firstIndex(of: "."), dot != raw.startIndex {
+            return String(raw[raw.index(after: dot)...])
+        }
+        return raw
+    }
+
+    func loadMCPServerActivity(
+        server: String, days: Int = 30,
+        completion: @escaping (MCPServerActivity?) -> Void
+    ) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let rows = (try? store.toolCalls.mcpDailyTotals()) ?? []
+            let key = server.lowercased()
+            var byDay: [String: Int] = [:]
+            var byTool: [String: Int] = [:]
+            for row in rows {
+                guard Self.mcpServerKey(row.name) == key else { continue }
+                byDay[row.day, default: 0] += row.count
+                byTool[Self.mcpToolLabel(row.name), default: 0] += row.count
+            }
+            // 连续 N 天补零序列（旧 → 新）：与扫描器写库同款的本地 yyyy-MM-dd
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            var series: [(day: Date, count: Int)] = []
+            for offset in stride(from: days - 1, through: 0, by: -1) {
+                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+                series.append((day, byDay[formatter.string(from: day)] ?? 0))
+            }
+            let topTools = byTool.sorted { $0.value > $1.value }.prefix(5)
+                .map { (name: $0.key, count: $0.value) }
+            let activity = MCPServerActivity(series: series, topTools: topTools)
+            DispatchQueue.main.async { completion(activity) }
+        }
+    }
+
     /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，累计次数降序）
     func loadAgentStats(source: AgentSource? = nil) {
         queue.async { [weak self] in

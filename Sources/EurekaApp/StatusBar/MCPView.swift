@@ -784,6 +784,11 @@ private struct MCPDetailView: View {
     @State private var capabilityTab = "tools"
     @State private var capabilitySearch = ""
     @State private var expandedTools: Set<String> = []
+    /// 调用活跃（近 30 天逐日 + top 工具；onAppear 异步加载）
+    @State private var activity: UsageService.MCPServerActivity?
+    /// 闲置清理（从所有源移除）确认与反馈
+    @State private var removeAllConfirm = false
+    @State private var removeAllNote: String?
 
     /// 实时条目：删除/安装后 service 重扫，这里跟着刷新
     private var entries: [MCPServerEntry] { service.entries(named: serverName) }
@@ -804,14 +809,20 @@ private struct MCPDetailView: View {
                         definitionSection
                         connectionSection
                         runtimeSection
+                        activitySection
                         matrixSection
                         occurrencesSection
                     }
                     .padding(Theme.spacing.page)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .onAppear { loadActivity() }
             }
         }
+    }
+
+    private func loadActivity() {
+        usage.loadMCPServerActivity(server: serverName) { activity = $0 }
     }
 
     private var toolbar: some View {
@@ -1287,9 +1298,30 @@ private struct MCPDetailView: View {
         }
         capabilityList(cache: cache)
         if let hint = idleHint(cache: cache, stat: stat) {
-            Text(hint)
-                .font(Theme.font.themed(10))
-                .foregroundStyle(Theme.goldFg)
+            HStack(spacing: 10) {
+                Text(hint)
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(Theme.goldFg)
+                Button("从所有源移除…") { removeAllConfirm = true }
+                    .font(Theme.font.themed(10, .semibold))
+                    .foregroundStyle(Theme.failureRed)
+                    .buttonStyle(.borderless)
+                if let note = removeAllNote {
+                    Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
+                }
+            }
+            .confirmationDialog(
+                "从所有配置移除「\(serverName)」？",
+                isPresented: $removeAllConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("移除（\(entries.count) 处，写前各留备份）", role: .destructive) {
+                    runRemoveEverywhere()
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将从以下位置移除：\n\(entries.map(\.configPath).joined(separator: "\n"))")
+            }
         }
         Text("检测于 \(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))")
             .font(Theme.font.themed(9))
@@ -1409,6 +1441,77 @@ private struct MCPDetailView: View {
         let idle = (stat?.calls ?? 0) == 0 || (stat?.lastTs ?? 0) < thirtyDaysAgo
         guard idle else { return nil }
         return "30 天内没有调用记录，却每轮消耗 ~\(formatTokens(cache.schemaTokens)) tokens —— 建议停用或移除"
+    }
+
+    private func runRemoveEverywhere() {
+        removeAllNote = "正在移除…"
+        service.removeEverywhere(named: serverName) { results in
+            let failures = results.sorted(by: { $0.key < $1.key })
+                .compactMap { label, error in error.map { "\(label)：\($0)" } }
+            removeAllNote = failures.isEmpty
+                ? "已从 \(results.count) 处移除"
+                : "部分失败 —— " + failures.joined(separator: "；")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { removeAllNote = nil }
+        }
+    }
+
+    // MARK: 调用活跃（用量下钻：近 30 天逐日 + top 工具）
+
+    /// 近 30 天窗口合计（series 已补零，直接求和）
+    private var recentCalls: Int {
+        activity?.series.reduce(0) { $0 + $1.count } ?? 0
+    }
+
+    @ViewBuilder
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                sectionTitle("调用活跃")
+                if let stat = usage.mcpServerStats[serverName.lowercased()], stat.calls > 0 {
+                    Text("近 30 天 \(recentCalls) 次 · 累计 \(stat.calls) 次 · 最近 \(relativeFormatter.localizedString(for: Date(timeIntervalSince1970: stat.lastTs), relativeTo: Date()))")
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("暂无调用记录（5 个源的扫描器计入 kind='mcp'）")
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            if let activity, activity.series.contains(where: { $0.count > 0 }) {
+                activityBars(activity)
+                if !activity.topTools.isEmpty {
+                    FlowLayout(spacing: 5, lineSpacing: 5) {
+                        ForEach(activity.topTools, id: \.name) { tool in
+                            Text("\(tool.name) · \(tool.count)")
+                                .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.surfaceSecondary))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 30 根迷你柱（缺 0 画基线灰；有调用按峰值缩放）
+    private func activityBars(_ activity: UsageService.MCPServerActivity) -> some View {
+        let peak = max(activity.series.map(\.count).max() ?? 1, 1)
+        return HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(activity.series.enumerated()), id: \.offset) { _, point in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(point.count > 0
+                        ? Theme.brand.opacity(0.45 + 0.55 * Double(point.count) / Double(peak))
+                        : Color.secondary.opacity(0.15))
+                    .frame(height: point.count > 0
+                        ? max(4, 30.0 * Double(point.count) / Double(peak))
+                        : 2)
+            }
+        }
+        .frame(height: 30, alignment: .bottom)
+        .help("近 30 天逐日调用（最高 \(peak) 次/天）")
     }
 
     // MARK: 跨源矩阵（照 SkillDetailView.matrixSection 模板）

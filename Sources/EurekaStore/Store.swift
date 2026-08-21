@@ -988,6 +988,26 @@ public final class ToolCallsRepo {
         }
     }
 
+    /// MCP 调用按 (天, 原始名) 全时聚合（详情页 per-server 趋势与 top 工具；
+    /// server 前缀提取照旧在 app 层做，SQL 只管聚合）
+    public struct MCPDailyTotal: Equatable, Sendable {
+        public var day: String
+        public var name: String
+        public var count: Int
+    }
+
+    public func mcpDailyTotals() throws -> [MCPDailyTotal] {
+        try db.query("""
+        SELECT day, name, SUM(count) FROM tool_calls
+        WHERE kind = 'mcp' GROUP BY day, name
+        """) { row in
+            MCPDailyTotal(
+                day: row.text(0) ?? "",
+                name: row.text(1) ?? "",
+                count: Int(row.int(2)))
+        }
+    }
+
     /// 累加计数（同 日/来源/kind/name/session 合并）；last_ts 取较大值、tokens 累加。
     /// session：触发会话 id（仅 Claude 扫描器传真实值，其余默认空 —— 与逐技能数据仅 Claude 的现状一致）。
     public func bump(
