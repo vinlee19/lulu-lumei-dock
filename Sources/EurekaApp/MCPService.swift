@@ -29,6 +29,8 @@ final class MCPService: ObservableObject {
     @Published private(set) var oauthTokenNames: Set<String> = []
     /// 持久化的上次探测快照（键 = entry.id）：打开页面即见，重启不丢（v2.6 直显）
     @Published private(set) var probeSnapshots: [String: MCPProbeSnapshot] = [:]
+    /// 项目根候选（repo 选择器用）：扫描时与索引共用同一次 ProjectScopeDiscovery 结果
+    @Published private(set) var repoRoots: [(root: URL, name: String)] = []
     /// 预注册 client_id（键 = server 名小写；client_id 非密钥，存 UserDefaults）——
     /// AS 不支持动态注册时的规范出口（注册优先级第一位：预注册凭据）
     @Published private(set) var preRegisteredClientIDs: [String: String] = [:]
@@ -66,6 +68,7 @@ final class MCPService: ObservableObject {
                 as? [String: String]) ?? [:]
             DispatchQueue.main.async {
                 self.allServers = servers
+                self.repoRoots = roots
                 self.toolCache = cache
                 self.probeSnapshots = snapshots
                 self.oauthTokenNames = tokenNames
@@ -165,6 +168,34 @@ final class MCPService: ObservableObject {
         }
     }
 
+    // MARK: - 项目级写目标（专用小文件，缺失可建）
+
+    /// 有项目级配置约定的源：claude `<repo>/.mcp.json`（MCP 官方的项目共享标准）
+    /// 与 cursor `<repo>/.cursor/mcp.json`（与用户级同构）
+    static let projectLevelSources: [AgentSource] = [.claude, .cursor]
+
+    /// 项目级写目标；返回 nil = 该源没有项目级约定
+    static func projectTarget(
+        for source: AgentSource, projectRoot: URL
+    ) -> WritableTarget? {
+        switch source {
+        case .claude:
+            return WritableTarget(
+                source: source,
+                configURL: projectRoot.appendingPathComponent(".mcp.json"),
+                dialect: .json(container: "mcpServers", style: .plain),
+                canCreateFile: true)
+        case .cursor:
+            return WritableTarget(
+                source: source,
+                configURL: projectRoot.appendingPathComponent(".cursor/mcp.json"),
+                dialect: .json(container: "mcpServers", style: .plain),
+                canCreateFile: true)
+        default:
+            return nil
+        }
+    }
+
     /// 该定义能否装到目标。codex 的远程形态已实勘（url + 可选 bearer_token，本机
     /// config.toml 验证）；grok 无远程证据 → 继续拒绝。细粒度边界（非 Authorization
     /// 请求头拒写 http_headers）由 MCPServerEditor 在写入时把关。nil = 可以
@@ -246,6 +277,63 @@ final class MCPService: ObservableObject {
             let result = try? Self.readDefinition(of: entry)
             DispatchQueue.main.async { completion(result) }
         }
+    }
+
+    /// 安装到项目级配置（专用小文件，缺失可建）：逐源汇报失败，全部完成只重扫一次
+    func installToProject(
+        definitions: [MCPServerDefinition],
+        sources: [AgentSource], projectRoot: URL,
+        completion: (([AgentSource: String?]) -> Void)? = nil
+    ) {
+        queue.async { [weak self] in
+            let results = Self.writeToProjectTargets(
+                definitions: definitions, sources: sources, projectRoot: projectRoot)
+            DispatchQueue.main.async {
+                completion?(results)
+                self?.refresh(force: true)
+            }
+        }
+    }
+
+    /// 跨源安装到项目级（详情页矩阵）：读出完整定义（含 env 值，仅内存中转）后写入
+    func propagateToProject(
+        _ entry: MCPServerEntry, sources: [AgentSource], projectRoot: URL,
+        completion: (([AgentSource: String?]) -> Void)? = nil
+    ) {
+        queue.async { [weak self] in
+            var results: [AgentSource: String?]
+            if let definition = try? Self.readDefinition(of: entry) {
+                results = Self.writeToProjectTargets(
+                    definitions: [definition], sources: sources, projectRoot: projectRoot)
+            } else {
+                results = [:]
+                for source in sources { results[source] = "读取来源定义失败" }
+            }
+            DispatchQueue.main.async {
+                completion?(results)
+                self?.refresh(force: true)
+            }
+        }
+    }
+
+    private static func writeToProjectTargets(
+        definitions: [MCPServerDefinition], sources: [AgentSource], projectRoot: URL
+    ) -> [AgentSource: String?] {
+        var results: [AgentSource: String?] = [:]
+        for source in sources {
+            guard let target = projectTarget(for: source, projectRoot: projectRoot) else {
+                results[source] = "该源没有项目级配置约定"
+                continue
+            }
+            var failure: String?
+            for definition in definitions {
+                if let error = write(definition, to: target) {
+                    failure = failure ?? error
+                }
+            }
+            results[source] = failure
+        }
+        return results
     }
 
     /// 跨源安装：从 entry 所在配置读出**完整定义**（含 env 值，仅内存中转），投影写入目标
@@ -739,11 +827,26 @@ final class MCPService: ObservableObject {
         guard let target = writableTarget(for: source) else {
             return writeBlockReason(for: source) ?? "该目标不支持写入"
         }
-        let exists = FileManager.default.fileExists(atPath: target.configURL.path)
+        return write(definition, to: target)
+    }
+
+    /// 单个定义 → 任意写目标（全局或项目级）。返回失败原因；nil = 成功。
+    /// 专用小文件（cursor/kimi 全局、项目级两种）缺失时先建父目录再新建文件；
+    /// 宿主大配置缺失依旧拒绝凭空创建。
+    private static func write(
+        _ definition: MCPServerDefinition, to target: WritableTarget
+    ) -> String? {
+        let fm = FileManager.default
+        let exists = fm.fileExists(atPath: target.configURL.path)
         guard exists || target.canCreateFile else {
             return "未检测到该 agent 的配置文件（\(target.configURL.path)），不凭空创建"
         }
         do {
+            if !exists, target.canCreateFile {
+                try fm.createDirectory(
+                    at: target.configURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+            }
             let original = ConfigFile.read(target.configURL)
             let updated: String
             switch target.dialect {

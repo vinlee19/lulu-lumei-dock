@@ -301,6 +301,16 @@ func mcpToneColor(_ tone: String) -> Color {
     }
 }
 
+/// NSOpenPanel 选项目根（项目级 .mcp.json 安装的 repo 选择兜底；表单与详情矩阵共用）
+private func mcpPickProjectRoot() -> String? {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.canCreateDirectories = false
+    panel.message = "选择要写入 .mcp.json 的项目根目录"
+    return panel.runModal() == .OK ? panel.url?.path : nil
+}
+
 /// 总览行/卡的能力计数摘要："30 工具 · 5 提示词 · 2 资源"（实测过才有；0 略去不占位）
 func mcpCapabilitySummary(_ info: MCPToolCacheEntry?) -> String? {
     guard let info else { return nil }
@@ -716,6 +726,10 @@ private struct MCPDetailView: View {
 
     /// 待确认的跨源安装目标
     @State private var installTarget: AgentSource?
+    /// 项目级安装 sheet（repo 选择）
+    @State private var projectSheet = false
+    @State private var projectRootPath = ""
+    @State private var projectCursorToo = false
     /// 安装结果反馈（矩阵下方短暂显示）
     @State private var installNote: String?
     /// 复制为 JSON 的反馈
@@ -1371,11 +1385,13 @@ private struct MCPDetailView: View {
                 ForEach(AgentSource.allCases, id: \.self) { source in
                     matrixTile(source, configured: configuredSources.contains(source))
                 }
+                projectMatrixTile
             }
             if let note = installNote {
                 Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
             }
         }
+        .sheet(isPresented: $projectSheet) { projectInstallSheet }
         .confirmationDialog(
             "安装到 \(installTarget?.displayName ?? "")？",
             isPresented: Binding(
@@ -1450,6 +1466,120 @@ private struct MCPDetailView: View {
             } else {
                 installNote = "已安装到 \(targetName)（写前留有备份）"
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
+        }
+    }
+
+    /// 项目级瓦片：不属于任何单一 agent（claude 的 .mcp.json 是 MCP 官方项目标准，
+    /// cursor 有同构约定）；已配置过也允许再装到别的 repo，所以始终可点
+    private var projectMatrixTile: some View {
+        let projectConfigured = entries.contains { $0.projectName != nil }
+        return VStack(spacing: 4) {
+            Image(systemName: projectConfigured ? "folder.fill.badge.checkmark" : "folder.badge.plus")
+                .font(.system(size: 12))
+                .foregroundStyle(projectConfigured ? .secondary : Theme.brandFg.opacity(0.8))
+            Text("项目级")
+                .font(Theme.font.themed(9))
+                .foregroundStyle(.secondary)
+            Text(projectConfigured ? "已配置" : "安装")
+                .font(Theme.font.themed(8, projectConfigured ? .medium : .semibold))
+                .foregroundStyle(projectConfigured ? .green : Theme.brandFg)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.container)
+                .fill(projectConfigured ? Theme.brandFill(0.08) : Theme.surface))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radius.container)
+                .strokeBorder(
+                    projectConfigured ? Theme.brand.opacity(0.5) : Theme.cardBorder,
+                    lineWidth: projectConfigured ? 1 : 0.5))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
+        .onTapGesture { projectSheet = true }
+        .help(projectConfigured
+            ? "已装到某些 repo；点开可再装到其它项目"
+            : "把该 server 写入所选 repo 的 .mcp.json（随项目共享）")
+    }
+
+    /// repo 选择 sheet：最近项目（扫描实勘的根）+ 浏览兜底
+    private var projectInstallSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("安装「\(serverName)」到项目")
+                .font(Theme.font.themed(13, .semibold))
+            HStack(spacing: 6) {
+                Menu {
+                    ForEach(service.repoRoots, id: \.root) { candidate in
+                        Button(candidate.name.isEmpty
+                            ? candidate.root.lastPathComponent
+                            : "\(candidate.name)（\(candidate.root.lastPathComponent)）") {
+                            projectRootPath = candidate.root.path
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder").font(.system(size: 9))
+                        Text(projectRootPath.isEmpty
+                            ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""))
+                            .lineLimit(1)
+                    }
+                    .font(Theme.font.themed(11))
+                    .frame(maxWidth: 200)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                Button("浏览…") {
+                    if let picked = mcpPickProjectRoot() { projectRootPath = picked }
+                }
+                .font(Theme.font.themed(11))
+                Spacer()
+            }
+            if !projectRootPath.isEmpty {
+                Text("\(projectRootPath)/.mcp.json")
+                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .foregroundStyle(.tertiary)
+            }
+            Toggle(isOn: $projectCursorToo) {
+                Text("同时写 cursor 的项目配置（.cursor/mcp.json）")
+                    .font(Theme.font.themed(11))
+            }
+            .toggleStyle(.checkbox)
+            HStack {
+                Button("取消") { projectSheet = false }
+                    .font(Theme.font.themed(11))
+                Spacer()
+                Button {
+                    runProjectInstall()
+                } label: {
+                    Text("写入 .mcp.json")
+                        .font(Theme.font.themed(11, .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(projectRootPath.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 400)
+    }
+
+    private func runProjectInstall() {
+        guard let primary else { return }
+        projectSheet = false
+        var sources: [AgentSource] = [.claude]
+        if projectCursorToo { sources.append(.cursor) }
+        let root = URL(fileURLWithPath:
+            projectRootPath.trimmingCharacters(in: .whitespaces))
+        installNote = "正在安装到项目级…"
+        service.propagateToProject(primary, sources: sources, projectRoot: root) { results in
+            let failures = results.sorted(by: { $0.key.rawValue < $1.key.rawValue })
+                .compactMap { source, error in
+                    error.map { "项目级 \(source.displayName)：\($0)" }
+                }
+            installNote = failures.isEmpty
+                ? "已安装到项目（写前留有备份）"
+                : "安装失败 —— " + failures.joined(separator: "；")
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
         }
     }
@@ -1585,6 +1715,10 @@ private struct MCPServerFormView: View {
 
     // 共用
     @State private var selectedTargets: Set<AgentSource> = []
+    // 项目级安装（新建模式）：选 repo + 约定（claude .mcp.json 必选、cursor 可选）
+    @State private var projectInstall = false
+    @State private var projectRootPath = ""
+    @State private var projectCursorToo = false
     @State private var resultNote: String?
     @State private var submitting = false
 
@@ -2013,7 +2147,9 @@ private struct MCPServerFormView: View {
                     ForEach(availableTargets, id: \.self) { source in
                         targetChip(source)
                     }
+                    projectChip
                 }
+                if projectInstall { projectPicker }
                 if !selectedTargets.isEmpty {
                     Text(selectedTargets
                         .compactMap { MCPService.writableTarget(for: $0)?.configURL.path }
@@ -2024,6 +2160,82 @@ private struct MCPServerFormView: View {
                 }
             }
         }
+    }
+
+    /// 项目级安装开关（随 repo 共享的 .mcp.json，MCP 官方项目标准）
+    private var projectChip: some View {
+        Button { projectInstall.toggle() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 10))
+                Text("项目级（.mcp.json）")
+                    .font(Theme.font.themed(11, projectInstall ? .semibold : .regular))
+                if projectInstall {
+                    Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Theme.brandFg)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(projectInstall ? Theme.brandFill(0.14) : Theme.surface))
+            .overlay(Capsule().strokeBorder(
+                projectInstall ? Theme.brand.opacity(0.5) : Theme.cardBorder,
+                lineWidth: projectInstall ? 1 : 0.5))
+        }
+        .buttonStyle(.plain)
+        .help("写入仓库根的 .mcp.json，随项目共享（claude 约定）；可一并写 cursor 的项目配置")
+    }
+
+    /// repo 选择：最近项目（扫描实勘的根）+ 浏览兜底；cursor 项目配置可选
+    private var projectPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Menu {
+                    ForEach(service.repoRoots, id: \.root) { candidate in
+                        Button(candidate.name.isEmpty
+                            ? candidate.root.lastPathComponent
+                            : "\(candidate.name)（\(candidate.root.lastPathComponent)）") {
+                            projectRootPath = candidate.root.path
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder").font(.system(size: 9))
+                        Text(projectRootPath.isEmpty
+                            ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""))
+                            .lineLimit(1)
+                    }
+                    .font(Theme.font.themed(11))
+                    .frame(maxWidth: 180)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                Button("浏览…") { browseProjectRoot() }
+                    .font(Theme.font.themed(11))
+                Spacer()
+            }
+            if !projectRootPath.isEmpty {
+                Text("""
+                \(projectRootPath)/.mcp.json\(projectCursorToo
+                    ? "\n\(projectRootPath)/.cursor/mcp.json" : "")
+                """)
+                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .foregroundStyle(.tertiary)
+            }
+            Toggle(isOn: $projectCursorToo) {
+                Text("同时写 cursor 的项目配置（.cursor/mcp.json）")
+                    .font(Theme.font.themed(11))
+            }
+            .toggleStyle(.checkbox)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.container).fill(Theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius.container)
+            .strokeBorder(Theme.cardBorder, lineWidth: 0.5))
+    }
+
+    private func browseProjectRoot() {
+        if let picked = mcpPickProjectRoot() { projectRootPath = picked }
     }
 
     private func targetChip(_ source: AgentSource) -> some View {
@@ -2060,25 +2272,38 @@ private struct MCPServerFormView: View {
         if let entry = target.editing {
             return "原位改写 \(entry.configPath)"
         }
+        let globalCount = selectedTargets.count
+        if validProjectInstall {
+            return globalCount == 0
+                ? "写入项目级 .mcp.json（写前留备份）"
+                : "写入 \(globalCount) 个 agent 的全局配置 + 项目级 .mcp.json（写前各留备份）"
+        }
         if selectedTargets.isEmpty { return "选择至少一个目标 agent" }
-        return "写入 \(selectedTargets.count) 个 agent 的全局配置（写前各留备份）"
+        return "写入 \(globalCount) 个 agent 的全局配置（写前各留备份）"
+    }
+
+    /// 项目级安装有效 = 开关开 + repo 根路径非空
+    private var validProjectInstall: Bool {
+        projectInstall && !projectRootPath.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private var canSubmit: Bool {
         if mode == .quick {
-            return !parsedQuick.isEmpty && !selectedTargets.isEmpty
+            return !parsedQuick.isEmpty && hasAnyTarget
         }
         if mode == .paste {
             guard !parsedDefinitions.isEmpty else { return false }
-            return isEditing || !selectedTargets.isEmpty
+            return isEditing || hasAnyTarget
         }
         let hasName = !name.trimmingCharacters(in: .whitespaces).isEmpty
         let hasBody = isRemote
             ? !urlText.trimmingCharacters(in: .whitespaces).isEmpty
             : !command.trimmingCharacters(in: .whitespaces).isEmpty
         if isEditing { return hasName && hasBody }
-        return hasName && hasBody && !selectedTargets.isEmpty
+        return hasName && hasBody && hasAnyTarget
     }
+
+    private var hasAnyTarget: Bool { !selectedTargets.isEmpty || validProjectInstall }
 
     private var parsedDefinitions: [MCPServerDefinition] {
         MCPServerEditor.parsePasted(pasteText)
@@ -2135,18 +2360,42 @@ private struct MCPServerFormView: View {
             submitting = false
             return
         }
-        service.addAll(
-            definitions: definitions, to: Array(selectedTargets)
-        ) { results in
-            submitting = false
-            let failures = results.compactMap { source, error -> String? in
-                error.map { "\(source.displayName)：\($0)" }
+        // 全局目标 + 项目级目标并行推进，结果统一聚合（项目级单列前缀防同名源混淆）
+        var projectSources: [AgentSource] = [.claude]
+        if projectCursorToo { projectSources.append(.cursor) }
+        let useProject = validProjectInstall
+        let projectRoot = URL(fileURLWithPath:
+            projectRootPath.trimmingCharacters(in: .whitespaces))
+        service.addAll(definitions: definitions, to: Array(selectedTargets)) { global in
+            guard useProject else {
+                reportInstallResults(global: global, project: nil)
+                return
             }
-            if failures.isEmpty {
-                onBack()
-            } else {
-                resultNote = "部分失败 —— " + failures.joined(separator: "；")
+            service.installToProject(
+                definitions: definitions, sources: projectSources, projectRoot: projectRoot
+            ) { project in
+                reportInstallResults(global: global, project: project)
             }
+        }
+    }
+
+    private func reportInstallResults(
+        global: [AgentSource: String?], project: [AgentSource: String?]?
+    ) {
+        submitting = false
+        var failures: [String] = []
+        for (source, error) in global.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            if let error { failures.append("\(source.displayName)：\(error)") }
+        }
+        if let project {
+            for (source, error) in project.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+                if let error { failures.append("项目级 \(source.displayName)：\(error)") }
+            }
+        }
+        if failures.isEmpty {
+            onBack()
+        } else {
+            resultNote = "部分失败 —— " + failures.joined(separator: "；")
         }
     }
 }
