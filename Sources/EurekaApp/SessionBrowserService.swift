@@ -119,6 +119,10 @@ final class SessionBrowserService: ObservableObject {
     private var sessions: [AgentSessionInfo] = []
     /// 待跳转的会话 id（索引未就绪时记下，refresh 完成后消费）
     private var pendingRevealId: String?
+    /// 扫描进行中又收到刷新请求（典型：切「全部时间」）→ 扫完后自动补一轮。
+    /// 不能静默丢弃——档位状态已变，丢弃后再次点击同一档不会触发 didSet，
+    /// 界面就停在「全部时间」却只有 30 天数据，像永远拉取不到。
+    private var refreshPending = false
     /// 全文搜索防抖
     private var searchWorkItem: DispatchWorkItem?
     // 以下仅 queue 上访问
@@ -137,8 +141,13 @@ final class SessionBrowserService: ObservableObject {
     }
 
     func refresh() {
-        guard !scanning else { return }
+        if scanning {
+            refreshPending = true
+            return
+        }
         scanning = true
+        // rangeAll 是主线程写的 @Published，派发前先捕获，闭包里不再跨线程读
+        let rangeAll = self.rangeAll
         queue.async { [weak self] in
             guard let self else { return }
             self.loadStoreIfNeeded()
@@ -147,7 +156,7 @@ final class SessionBrowserService: ObservableObject {
             // 静默挤出列表（实勘：300+ 轮的长会话因此"消失"）。head 解析
             // 每文件只读 64KB 且在后台队列，万级文件也就秒级；下游批量查询
             // （费用/对话数）已按 500 分块，列表渲染走 LazyVStack。
-            let window: TimeInterval = self.rangeAll ? .greatestFiniteMagnitude : 30 * 86400
+            let window: TimeInterval = rangeAll ? .greatestFiniteMagnitude : 30 * 86400
             let maxSessions = Int.max
             var indexed = ClaudeSessionIndexer.index(
                 projectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
@@ -226,6 +235,12 @@ final class SessionBrowserService: ObservableObject {
                     if let hit = self.sessionsById[pending] {
                         self.select(hit)
                     }
+                }
+                // 扫描期间收到过刷新请求（如切了时间范围）→ 自动补扫，
+                // 用最新状态重跑而不是让用户点了没反应
+                if self.refreshPending {
+                    self.refreshPending = false
+                    self.refresh()
                 }
             }
         }

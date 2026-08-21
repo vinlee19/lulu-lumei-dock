@@ -44,12 +44,14 @@ struct SessionDetailView: View {
                     }
                     searchBar
                     Divider()
-                    HStack(spacing: 0) {
+                    // 目录栏用 HSplitView：分隔线可拖拽调宽（与左栏会话列表同款交互），
+                    // minWidth 保证拖到最窄也不挤坏时间戳，maxWidth 防止吞掉对话区
+                    HSplitView {
                         transcriptPane(session)
+                            .frame(maxWidth: .infinity)
                         if showTOC && !userMessages.isEmpty {
-                            Divider()
                             tocPane
-                                .frame(width: 190)
+                                .frame(minWidth: 160, idealWidth: 210, maxWidth: 360)
                         }
                     }
                 }
@@ -559,50 +561,76 @@ struct SessionDetailView: View {
                     .foregroundStyle(.secondary)
                 Text("对话目录")
                     .font(.system(size: 11, weight: .semibold))
-                Spacer()
+                Spacer(minLength: 4)
+                Text("\(userMessages.count) 条")
+                    .font(.system(size: 9.5).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             Divider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(userMessages.enumerated()), id: \.element.id) { index, message in
-                        Button {
-                            NotificationCenter.default.post(
-                                name: .eurekaJumpToMessage, object: message.id)
-                        } label: {
-                            HStack(alignment: .top, spacing: 6) {
-                                Text("\(index + 1)")
-                                    .font(.system(size: 9, weight: .semibold).monospacedDigit())
-                                    .foregroundStyle(Theme.brandFg)
-                                    .frame(width: 16, height: 16)
-                                    .background(Circle().fill(Theme.brand.opacity(0.1)))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    if let ts = message.timestamp {
-                                        Text(ts, format: .dateTime.month(.twoDigits).day(.twoDigits)
-                                            .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-                                            .font(.system(size: 8.5).monospacedDigit())
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    Text(message.text)
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.leading)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                        TOCRow(index: index, message: message)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 5)
             }
         }
-        .background(Color.primary.opacity(0.02))
+        .background(Theme.surfaceSecondary)
+    }
+}
+
+/// 目录行：序号圆徽 + 时间 + 提问摘录。宽度由外层 HSplitView 拖拽决定，
+/// 文字随宽自适应换行（最多 3 行，尾部省略），hover 有轻高亮。
+private struct TOCRow: View {
+    let index: Int
+    let message: TranscriptMessage
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            NotificationCenter.default.post(
+                name: .eurekaJumpToMessage, object: message.id)
+        } label: {
+            HStack(alignment: .top, spacing: 6) {
+                Text("\(index + 1)")
+                    .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(hovering ? Theme.onBrand : Theme.brandFg)
+                    .frame(width: 16, height: 16)
+                    .background(
+                        Circle().fill(hovering ? Theme.brand : Theme.brand.opacity(0.1)))
+                VStack(alignment: .leading, spacing: 1.5) {
+                    if let ts = message.timestamp {
+                        Text(ts, format: .dateTime.month(.twoDigits).day(.twoDigits)
+                            .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                            .font(.system(size: 8.5).monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(message.text)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(hovering ? .primary : .secondary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(hovering ? Color.primary.opacity(0.05) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 

@@ -128,7 +128,7 @@ struct SessionsView: View {
 
     private var listPane: some View {
         VStack(spacing: 0) {
-            // 账本总览
+            // 账本总览（右端常驻索引状态：扫描中可见，重扫不再"无反应"）
             HStack(spacing: 6) {
                 Text("共 \(service.summary.sessionCount) 个会话")
                     .font(.system(size: 11, weight: .medium))
@@ -148,10 +148,23 @@ struct SessionsView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
+                if service.scanning {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.55)
+                        Text("索引中")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize()
+                    }
+                    .transition(.opacity)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 2)
+            .padding(.bottom, 3)
+            .animation(.easeOut(duration: 0.15), value: service.scanning)
 
             // 搜索面板（来源筛选内嵌右端；聚焦时紫金渐变描边）+ 圆形工具按钮
             HStack(spacing: 6) {
@@ -170,7 +183,7 @@ struct SessionsView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
 
             // 时间范围（近 30 天 / 全部时间）；胶囊页签，与下方排序档同风格，选中紫底白字
             CapsuleTabTray {
@@ -192,7 +205,7 @@ struct SessionsView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
+            .padding(.bottom, 4)
             .accessibilityLabel("会话时间范围")
 
             // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签，选中紫底白字
@@ -210,7 +223,7 @@ struct SessionsView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
+            .padding(.bottom, 4)
 
             Divider()
 
@@ -219,15 +232,23 @@ struct SessionsView: View {
                 VStack(spacing: 8) {
                     if service.scanning {
                         ProgressView("正在索引会话…")
+                        Text("14 个来源逐个扫描，稍等片刻")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
                     } else {
-                        Image(systemName: "tray")
-                            .font(.system(size: 28))
-                            .foregroundStyle(Theme.brandFg.opacity(0.45))
+                        Image(systemName: "archivebox")
+                            .font(.system(size: 26))
+                            .foregroundStyle(Theme.brandFg.opacity(0.4))
                         Text(service.isSearching
                             ? "没有匹配的会话"
                             : (settings.sessionRangeAll ? "没有会话" : "近 30 天没有会话"))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
+                        if !service.isSearching && !settings.sessionRangeAll {
+                            Text("更早的记录在「全部时间」里")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -580,6 +601,7 @@ private struct SessionRow: View {
     let onToggleCheck: () -> Void
 
     @State private var copied = false
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -649,9 +671,13 @@ private struct SessionRow: View {
                         .fill(Theme.brand)
                         .frame(width: 3)
                         .padding(.vertical, 4)
+                } else if hovering {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04))
                 }
             })
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
         .onTapGesture {
             if multiSelect {
                 if session.source.supportsSessionDeletion { onToggleCheck() }
