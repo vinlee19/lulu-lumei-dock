@@ -4,6 +4,23 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.29.0] - 2026-08-22
+
+### Changed
+
+- **Session chat records now read as a natural transcript.** User messages
+  previously sat in right-aligned iMessage-style bubbles with a tail corner
+  and a visible border around every message, while assistant replies floated
+  borderless - the contrast made the conversation feel like a chat widget
+  rather than a document. Both roles now flow left-aligned in a single
+  column, each introduced by a compact role header (icon + label + timestamp
+  that is always visible + a copy button that fades in on hover). User
+  messages get a very subtle brand-tinted background with no border in
+  normal state; assistant messages remain as flowing text. All corner radii
+  now use the theme system (`Theme.radius.container`), so the neo-brutalism
+  style renders with its hard 5pt edges and the classic style with 10pt
+  rounded corners. The floating timestamp capsule overlay is gone.
+
 ## [0.28.0] - 2026-08-22
 
 ### Added
@@ -1479,6 +1496,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.29.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.29.0
 [0.28.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.28.0
 [0.27.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.1
 [0.27.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.0

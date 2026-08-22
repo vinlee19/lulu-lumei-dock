@@ -524,7 +524,7 @@ struct SessionDetailView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        // 聊天式排版：消息间距拉开；左右两侧本就有列表/目录夹着，不再限宽居中
+                        // 文档式排列：统一左对齐，角色标签区分消息来源
                         LazyVStack(alignment: .leading, spacing: 18) {
                             ForEach(displayMessages) { message in
                                 MessageRowView(
@@ -641,8 +641,9 @@ extension Notification.Name {
 
 // MARK: - 消息行
 
-/// 聊天式消息行：用户提问 = 右对齐、紧贴内容宽的品牌色气泡；助手回复 = 靠左无边框正文直排；
-/// 时间戳 + 复制按钮不常驻，hover 时浮出在消息块右上角（overlay 不占布局）。
+/// 对话流式消息行：用户与助手统一左对齐、文档式排列，
+/// 通过角色标签 + 微妙底色区分（不再用聊天气泡框）。
+/// 时间戳常驻角色标签行、复制按钮 hover 浮现，不遮挡正文。
 private struct MessageRowView: View {
     let message: TranscriptMessage
     var isMatch = false
@@ -667,69 +668,75 @@ private struct MessageRowView: View {
         case .thinking:
             ThinkingRowView(message: message, isMatch: isMatch, expanded: $expandedTrails)
         case .user:
-            HStack(spacing: 0) {
-                // 左侧至少留 ~15% 空，气泡宽度由内容决定、靠右
-                Spacer(minLength: 56)
-                // 用户气泡：紫浅底，圆角 14、右下小角（自然聊天形态）
-                MarkdownRichText(text: message.text, fillWidth: false)
-                    .padding(12)
+            VStack(alignment: .leading, spacing: 4) {
+                roleHeader(label: "用户", icon: "person.fill", color: Theme.brandFg)
+                MarkdownRichText(text: message.text)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
                     .background(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 14, bottomLeadingRadius: 14,
-                            bottomTrailingRadius: 4, topTrailingRadius: 14)
-                            .fill(Theme.brandFill(0.10)))
+                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                            .fill(Theme.brandFill(0.05)))
                     .overlay(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 14, bottomLeadingRadius: 14,
-                            bottomTrailingRadius: 4, topTrailingRadius: 14)
+                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
                             .strokeBorder(
-                                isMatch ? Theme.gold.opacity(0.85) : Theme.hairline,
-                                lineWidth: isMatch ? 1.5 : 0.5))
+                                isMatch ? Theme.gold.opacity(0.6) : .clear,
+                                lineWidth: 1.5))
             }
-            .overlay(alignment: .topTrailing) { hoverMeta }
             .onHover { hovering = $0 }
         case .assistant:
-            MarkdownRichText(text: message.text)
-                .padding(.horizontal, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isMatch ? Theme.gold.opacity(0.12) : .clear)
-                        .padding(-6))
-                .overlay(alignment: .topTrailing) { hoverMeta }
-                .onHover { hovering = $0 }
-        case .error:
-            HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.red.opacity(0.8))
-                    .frame(width: 3)
-                Text(message.text)
-                    .font(.system(size: 12.5))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                roleHeader(label: "助手", icon: "sparkles", color: .secondary)
+                MarkdownRichText(text: message.text)
+                    .padding(.horizontal, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                            .fill(isMatch ? Theme.gold.opacity(0.10) : .clear)
+                            .padding(-4))
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.06)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isMatch ? Theme.gold.opacity(0.85) : .clear, lineWidth: 1.5))
-            .overlay(alignment: .topTrailing) { hoverMeta }
+            .onHover { hovering = $0 }
+        case .error:
+            VStack(alignment: .leading, spacing: 4) {
+                roleHeader(label: "错误", icon: "exclamationmark.triangle.fill", color: .red)
+                HStack(alignment: .top, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.red.opacity(0.8))
+                        .frame(width: 3)
+                    Text(message.text)
+                        .font(.system(size: 12.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(Color.red.opacity(0.06)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                        .strokeBorder(isMatch ? Theme.gold.opacity(0.6) : .clear, lineWidth: 1.5))
+            }
             .onHover { hovering = $0 }
         }
     }
 
-    /// hover 浮出的时间戳 + 复制胶囊：悬在消息块右上角外侧，不参与布局
+    /// 角色标签行：图标 + 角色名 + 时间戳（常驻、细弱）+ 复制按钮（hover 浮现）
     @ViewBuilder
-    private var hoverMeta: some View {
-        if hovering || copied {
-            HStack(spacing: 5) {
-                if let timestamp = message.timestamp {
-                    Text(timestamp, format: .dateTime.month(.twoDigits).day(.twoDigits)
-                        .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
-                        .font(.system(size: 9).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+    private func roleHeader(label: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(color)
+            Text(label)
+                .font(Theme.font.themed(10, .medium))
+                .foregroundStyle(color)
+            if let timestamp = message.timestamp {
+                Text(timestamp, format: .dateTime.month(.twoDigits).day(.twoDigits)
+                    .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                    .font(Theme.font.themedMono(9))
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 4)
+            if hovering || copied {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(message.text, forType: .string)
@@ -742,15 +749,11 @@ private struct MessageRowView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("复制消息原文")
+                .transition(.opacity)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                Capsule().fill(Theme.surface)
-                    .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.10), radius: 3, y: 1))
-            .offset(y: -11)
         }
+        .padding(.horizontal, 2)
+        .animation(.easeInOut(duration: 0.15), value: hovering)
     }
 }
 
