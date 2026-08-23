@@ -104,9 +104,11 @@ final class CommandPaletteService: ObservableObject {
                 kind: .plan, key: plan.path, title: plan.title,
                 subtitle: plan.project, snippet: nil, sessionId: nil, messageIdx: nil))
         }
+        // prompt 元数据只匹配标题（与 skills 按名字、memory 按标题同一口径）——
+        // 全文 contains 在主线程对上万条提问逐条小写化会卡输入；
+        // 正文命中交给下方 FTS 通道（后台队列，kind = "prompt" 已映射）
         for prompt in prompts.knowledgeSnapshot()
-        where prompt.title.lowercased().contains(lowered)
-            || prompt.text.lowercased().contains(lowered) {
+        where prompt.title.lowercased().contains(lowered) {
             metadata.append(Hit(
                 kind: .prompt, key: prompt.id, title: prompt.title,
                 subtitle: prompt.source.displayName, snippet: nil, sessionId: nil, messageIdx: nil))

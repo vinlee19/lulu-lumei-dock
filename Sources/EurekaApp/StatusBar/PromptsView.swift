@@ -106,7 +106,9 @@ struct PromptsView: View {
                     emptyState.padding(.top, 40)
                 } else {
                     KnowledgeListContainer {
-                        VStack(spacing: 0) {
+                        // 懒加载：prompt 库是首个数据量可上万的条目面，
+                        // 普通 VStack 会一次性物化全部行（Plans 条数少无所谓，这里会卡）
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
                                 PromptRow(
                                     entry: entry, service: service,
