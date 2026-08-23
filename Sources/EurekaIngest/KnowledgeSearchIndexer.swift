@@ -90,4 +90,34 @@ public final class KnowledgeSearchIndexer {
             }
         }
     }
+
+    /// Prompt 库索引：正文在内存（SQLite prompts 表）而非磁盘文件，与文件型知识面
+    /// 分开通道；指纹用 (text 字节数, timestamp) 近似——提取 upsert 后 timestamp/
+    /// 字节数未变即视为未变。独立 prune（kind 维度），不与文件型 docs 互删。
+    public func indexPrompts(_ prompts: [PromptEntry]) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            if self.store == nil {
+                self.store = try? EurekaStore(path: EurekaStore.defaultURL())
+            }
+            guard let store = self.store else { return }
+            let fingerprints = (try? store.knowledge.fileFingerprints()) ?? [:]
+            let ids = Set(prompts.map(\.id))
+            for prompt in prompts {
+                let size = Int64(prompt.text.utf8.count)
+                let mtime = prompt.timestamp?.timeIntervalSince1970
+                    ?? prompt.firstSeen.timeIntervalSince1970
+                if let old = fingerprints[prompt.id],
+                   old.size == size, old.mtime == mtime { continue }
+                let body = prompt.text.utf8.count > Self.bodyCap
+                    ? String(decoding: prompt.text.utf8.prefix(Self.bodyCap), as: UTF8.self)
+                    : prompt.text
+                try? store.knowledge.replaceDoc(
+                    path: prompt.id, kind: "prompt", source: prompt.source.rawValue,
+                    title: prompt.title, project: prompt.projectName,
+                    size: size, mtime: mtime, body: body)
+            }
+            try? store.knowledge.prunePrompts(keeping: ids)
+        }
+    }
 }

@@ -19,6 +19,7 @@ struct PopoverRootView: View {
     @ObservedObject var sessionBrowser: SessionBrowserService
     @ObservedObject var skillMemoryService: SkillMemoryService
     @ObservedObject var plansService: PlansService
+    @ObservedObject var promptsService: PromptsService
     @ObservedObject var agentConfigService: AgentConfigService
     @ObservedObject var mcpService: MCPService
     @ObservedObject var syncService: SyncService
@@ -44,6 +45,8 @@ struct PopoverRootView: View {
         case agents = "Agents"
         /// MCP server 配置矩阵（只读）：同名 server 折叠一行、按源亮徽章
         case mcp = "MCP"
+        /// Prompt 库：从会话 transcript 提取的用户提问，统一浏览/搜索/复用
+        case prompts = "Prompts"
         case usage = "用量"
         case limits = "限额"
         case audit = "审计"
@@ -60,6 +63,7 @@ struct PopoverRootView: View {
             case .plans: return "list.bullet.clipboard.fill"
             case .agents: return "person.crop.rectangle.stack.fill"
             case .mcp: return "powerplug.fill"
+            case .prompts: return "text.quote"
             case .usage: return "chart.bar.fill"
             case .limits: return "gauge.with.dots.needle.67percent"
             case .audit: return "checkmark.shield"
@@ -75,7 +79,7 @@ struct PopoverRootView: View {
         /// 却没有任何分隔，读起来是个走失的孤项。现在归入「系统」，底部只留品牌脚注。
         static let sidebarGroups: [(label: String, tabs: [Tab])] = [
             ("活动", [.history, .sessions]),
-            ("知识库", [.skills, .memory, .instructions, .plans, .agents, .mcp]),
+            ("知识库", [.skills, .memory, .instructions, .plans, .agents, .mcp, .prompts]),
             ("安全", [.audit]),
             ("用量", [.usage, .limits]),
             ("系统", [.settings]),
@@ -140,6 +144,13 @@ struct PopoverRootView: View {
             guard let path = note.object as? String else { return }
             withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) { navigation.tab = .plans }
             plansService.focusPath = path
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealPrompt)) { note in
+            guard let id = note.object as? String else { return }
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                navigation.tab = .prompts
+            }
+            promptsService.revealPrompt(id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .eurekaToggleCommandPalette)) { note in
             // forceOpen：窗口刚被 ⌘K 唤起时只开不切（残留的 paletteVisible=true 不该反向关闭）
@@ -223,6 +234,8 @@ struct PopoverRootView: View {
                 sessionBrowser: sessionBrowser)
         case .plans:
             PlansView(service: plansService)
+        case .prompts:
+            PromptsView(service: promptsService, sessionBrowser: sessionBrowser)
         case .agents:
             AgentsView(service: agentConfigService, usageService: usageService)
         case .mcp:

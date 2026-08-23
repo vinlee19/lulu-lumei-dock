@@ -1163,6 +1163,8 @@ extension Notification.Name {
     static let eurekaRevealKnowledge = Notification.Name("eurekaRevealKnowledge")
     /// 跨页直达：计划条目（object = 文件路径 String）
     static let eurekaRevealPlan = Notification.Name("eurekaRevealPlan")
+    /// 跨页直达：Prompt 库条目（object = 条目 id String）
+    static let eurekaRevealPrompt = Notification.Name("eurekaRevealPrompt")
     /// ⌘K 全局搜索面板开关（MainMenu 发、PopoverRootView 收）
     static let eurekaToggleCommandPalette = Notification.Name("eurekaToggleCommandPalette")
 }

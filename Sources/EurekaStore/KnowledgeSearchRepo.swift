@@ -61,10 +61,23 @@ public final class KnowledgeSearchRepo {
         }
     }
 
-    /// 清理已消失的文件
+    /// 清理已消失的文件。prompt 条目（kind = "prompt"，path 存 prompt id 而非文件路径）
+    /// 由 prunePrompts 独立管理——本方法动它们会拿 prompt id 当文件路径误删。
     public func prune(keeping existingPaths: Set<String>) throws {
-        let indexed = try db.query("SELECT path FROM knowledge_docs") { $0.text(0) ?? "" }
+        let indexed = try db.query(
+            "SELECT path FROM knowledge_docs WHERE kind != 'prompt'"
+        ) { $0.text(0) ?? "" }
         for path in indexed where !existingPaths.contains(path) {
+            try db.transaction { try deleteDoc(path: path) }
+        }
+    }
+
+    /// prompt 条目专用清理（keeping = 仍存在的 prompt id 集合）
+    public func prunePrompts(keeping existingIds: Set<String>) throws {
+        let indexed = try db.query(
+            "SELECT path FROM knowledge_docs WHERE kind = 'prompt'"
+        ) { $0.text(0) ?? "" }
+        for path in indexed where !existingIds.contains(path) {
             try db.transaction { try deleteDoc(path: path) }
         }
     }

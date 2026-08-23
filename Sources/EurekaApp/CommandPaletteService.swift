@@ -23,6 +23,7 @@ final class CommandPaletteService: ObservableObject {
     private let sessionBrowser: SessionBrowserService
     private let skillMemory: SkillMemoryService
     private let plans: PlansService
+    private let prompts: PromptsService
     private let settings: AppSettings
     private let queue = DispatchQueue(label: "com.vinlee.eureka.palette", qos: .userInitiated)
     private var store: EurekaStore?
@@ -32,11 +33,13 @@ final class CommandPaletteService: ObservableObject {
         sessionBrowser: SessionBrowserService,
         skillMemory: SkillMemoryService,
         plans: PlansService,
+        prompts: PromptsService,
         settings: AppSettings
     ) {
         self.sessionBrowser = sessionBrowser
         self.skillMemory = skillMemory
         self.plans = plans
+        self.prompts = prompts
         self.settings = settings
     }
 
@@ -101,6 +104,13 @@ final class CommandPaletteService: ObservableObject {
                 kind: .plan, key: plan.path, title: plan.title,
                 subtitle: plan.project, snippet: nil, sessionId: nil, messageIdx: nil))
         }
+        for prompt in prompts.knowledgeSnapshot()
+        where prompt.title.lowercased().contains(lowered)
+            || prompt.text.lowercased().contains(lowered) {
+            metadata.append(Hit(
+                kind: .prompt, key: prompt.id, title: prompt.title,
+                subtitle: prompt.source.displayName, snippet: nil, sessionId: nil, messageIdx: nil))
+        }
         // 2) FTS 下队列（正文命中），回主线程合并。transcript FTS 受设置页「跨会话全文搜索索引」
         // 开关约束（会话侧索引惯例）；knowledge FTS 是知识面扫描的伴生索引，不受该开关管。
         // AppSettings 整体 @MainActor；perform 靠调用方保证跑在主线程（同 WellnessMonitor 的
@@ -118,6 +128,7 @@ final class CommandPaletteService: ObservableObject {
                     case "skill": .skill
                     case "instruction": .instruction
                     case "plan": .plan
+                    case "prompt": .prompt
                     default: .memory
                     }
                     content.append(Hit(

@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let sessionBrowser = SessionBrowserService()
     private let skillMemory = SkillMemoryService()
     private let plans = PlansService()
+    // Prompt 库依赖 sessionBrowser 的会话索引，用 lazy 延后构造（同 palette 先例）
+    private lazy var promptsService = PromptsService(sessionBrowser: sessionBrowser)
     private let agentConfig = AgentConfigService()
     private let mcpService = MCPService()
     private let syncService = SyncService()
@@ -26,9 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updateService = UpdateService()
     private let navigation = PopoverNavigation()
     private let knowledgeIndexer = KnowledgeSearchIndexer()
-    // ⌘K 全局搜索：依赖三个已就绪的服务实例，用 lazy 延后到首次访问（此时它们都已构造完毕）
+    // ⌘K 全局搜索：依赖已就绪的服务实例，用 lazy 延后到首次访问（此时它们都已构造完毕）
     private lazy var palette = CommandPaletteService(
-        sessionBrowser: sessionBrowser, skillMemory: skillMemory, plans: plans, settings: settings)
+        sessionBrowser: sessionBrowser, skillMemory: skillMemory, plans: plans,
+        prompts: promptsService, settings: settings)
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
@@ -61,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: settings, installer: installer,
             sessionBrowser: sessionBrowser, skillMemoryService: skillMemory,
             plansService: plans,
+            promptsService: promptsService,
             agentConfigService: agentConfig, mcpService: mcpService, syncService: syncService,
             cliToolsService: cliTools, auditService: auditService,
             notificationService: notificationService, updateService: updateService,
@@ -109,6 +113,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 设置页「清空全文索引」清掉 knowledge 索引后没人会自愈——补一脚重建
         // （此时两个 lastScanAt 必已非 nil：清空只可能发生在启动扫描之后）
         usageService.onSearchIndexCleared = { [weak self] in self?.reindexKnowledge() }
+
+        // Prompt 库：会话索引扫完（scanning → false）即增量提取；
+        // refresh 内部有指纹跳过，重复触发只解析有新消息的会话
+        sessionBrowser.$scanning
+            .dropFirst()
+            .filter { !$0 }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.promptsService.refresh() } }
+            .store(in: &cancellables)
+        promptsService.$lastScanAt.compactMap { $0 }.removeDuplicates()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.reindexPrompts() } }
+            .store(in: &cancellables)
 
         usageService.start()
         limitsService.start()
@@ -303,6 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
             }),
             (3.0, "plans", { [weak self] in self?.plans.refresh() }),
+            // 会话索引喂 Prompt 库（scanning→false 订阅自动接力提取）
+            (4.0, "sessions+prompts", { [weak self] in self?.sessionBrowser.refresh() }),
         ]
         for step in steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + step.delay) { [weak self] in
@@ -324,6 +341,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         knowledgeIndexer.index(
             skills: snapshot.skills, memories: snapshot.memories,
             plans: plans.knowledgeSnapshot())
+    }
+
+    /// Prompt 库全文索引：正文在内存（SQLite prompts 表），与文件型知识面分开通道；
+    /// 独立触发（不等 skills/plans——那条守卫链没含 prompts，混入会互相拖慢首扫）
+    private func reindexPrompts() {
+        knowledgeIndexer.indexPrompts(promptsService.knowledgeSnapshot())
     }
 
     /// 外观主题：system=跟随系统（nil）/ light / dark

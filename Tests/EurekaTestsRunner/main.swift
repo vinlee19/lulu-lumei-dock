@@ -121,5 +121,6 @@ projectRootsTests(t)
 knowledgeLinkTests(t)
 contextBreakdownTests(t)
 historyPageTests(t)
+promptLibraryTests(t)
 
 t.finish()

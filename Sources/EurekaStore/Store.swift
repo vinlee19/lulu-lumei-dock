@@ -16,6 +16,7 @@ public final class EurekaStore {
     public let knowledge: KnowledgeSearchRepo
     public let limitSamples: LimitSamplesRepo
     public let sessionTerminals: SessionTerminalsRepo
+    public let prompts: PromptsRepo
 
     public init(path: URL) throws {
         try FileManager.default.createDirectory(
@@ -34,6 +35,7 @@ public final class EurekaStore {
         knowledge = KnowledgeSearchRepo(db: db)
         limitSamples = LimitSamplesRepo(db: db)
         sessionTerminals = SessionTerminalsRepo(db: db)
+        prompts = PromptsRepo(db: db)
     }
 
     /// 默认 ~/Library/Application Support/Eureka/eureka.sqlite（EUREKA_DB_PATH 覆盖）

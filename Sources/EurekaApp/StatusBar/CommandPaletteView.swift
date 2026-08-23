@@ -119,6 +119,8 @@ struct CommandPaletteView: View {
             }
         case .plan:
             NotificationCenter.default.post(name: .eurekaRevealPlan, object: hit.key)
+        case .prompt:
+            NotificationCenter.default.post(name: .eurekaRevealPrompt, object: hit.key)
         }
         onClose()
     }

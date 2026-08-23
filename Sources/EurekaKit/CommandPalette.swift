@@ -11,7 +11,7 @@ import Foundation
 /// 用 typealias 转发这里的类型（同 `TurnGraph` 的先例）。
 public enum CommandPalette {
     public enum Kind: Int, CaseIterable, Sendable {
-        case session, skill, memory, instruction, plan
+        case session, skill, memory, instruction, plan, prompt
 
         public var label: String {
             switch self {
@@ -20,15 +20,16 @@ public enum CommandPalette {
             case .memory: return "记忆"
             case .instruction: return "指令"
             case .plan: return "计划"
+            case .prompt: return "Prompt"
             }
         }
 
         /// reveal 通知里 userInfo["kind"] 用的字符串（PopoverRootView 路由消费，
         /// CommandPaletteView 发送端复用，避免两端手写字面量拼写漂移）。
-        /// 会话/计划的 reveal 通知不带 kind，故为 nil。
+        /// 会话/计划/Prompt 的 reveal 通知不带 kind，故为 nil。
         public var revealKind: String? {
             switch self {
-            case .session, .plan: return nil
+            case .session, .plan, .prompt: return nil
             case .skill: return "skill"
             case .memory: return "memory"
             case .instruction: return "instruction"

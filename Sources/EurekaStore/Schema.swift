@@ -1,6 +1,10 @@
 import Foundation
 
 enum Schema {
+    /// v23：新增 prompts + prompt_sessions（Prompt 库）。prompts 混合派生与事实：
+    ///      正文/时间戳可由 transcript 重提取，但 favorite/tags/use_count/last_used_at
+    ///      是用户写入 → 与 task_history 同待遇，升级不 DROP；prompt_sessions 是纯
+    ///      派生的提取指纹（走 DROP 块，丢了只会触发一次全量重提取）。
     /// v22：ZCode usage 口径修正 —— rollout 的 inputTokens 是 OpenAI 口径（已含 cacheRead），
     ///      旧版把两者分别入账导致 token/费用近乎双计（实测本机 14.14M vs 真值 7.15M）。
     ///      扫描已改为入库前减掉缓存读；旧行是错的，派生表升级重建全量重扫修正。
@@ -27,7 +31,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 22
+    static let version: Int64 = 23
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -47,6 +51,7 @@ enum Schema {
             DROP TABLE IF EXISTS turn_files;
             DROP TABLE IF EXISTS knowledge_fts;
             DROP TABLE IF EXISTS knowledge_docs;
+            DROP TABLE IF EXISTS prompt_sessions;
             """)
         }
         // v15 建的 session_terminals 主键含可空列，upsert 失效攒了重复行。该表尚未随任何
@@ -247,6 +252,37 @@ enum Schema {
         );
         CREATE INDEX IF NOT EXISTS idx_limit_samples
             ON limit_samples(source, window, ts);
+
+        -- Prompt 库条目：从会话 transcript 提取的用户提问（一行一条）。
+        -- 正文列（text/timestamp/cwd/first_seen）可由 transcript 重提取；用户标注列
+        -- （favorite/tags/use_count/last_used_at）是事实 → 升级不 DROP，重提取只刷新正文列。
+        CREATE TABLE IF NOT EXISTS prompts (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            message_idx INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            timestamp REAL,
+            cwd TEXT,
+            favorite INTEGER NOT NULL DEFAULT 0,
+            tags TEXT NOT NULL DEFAULT '[]',
+            use_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at REAL,
+            first_seen REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_prompts_source ON prompts(source);
+        CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id);
+        CREATE INDEX IF NOT EXISTS idx_prompts_favorite ON prompts(favorite);
+        CREATE INDEX IF NOT EXISTS idx_prompts_first_seen ON prompts(first_seen DESC);
+
+        -- 提取指纹：session → 上次提取时间（lastActiveAt 未变则跳过重解析；
+        -- 纯派生状态，升级随 DROP 块重建，代价只是一次全量重提取）
+        CREATE TABLE IF NOT EXISTS prompt_sessions (
+            session_id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            extracted_at REAL NOT NULL
+        );
         """)
 
         // task_history 不参与 drop/重建（真实历史），旧库补列走幂等 ALTER

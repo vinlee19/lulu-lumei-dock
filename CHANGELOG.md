@@ -4,6 +4,22 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.30.0] - 2026-08-23
+
+### Added
+
+- **Prompt library: every question you've ever asked, in one place.** A new
+  "Prompts" tab in the knowledge section extracts user prompts from session
+  transcripts across all 12 readable sources (Claude, Codex, OpenCode, Grok,
+  Kimi, Gemini, Qwen, Hermes, CodeBuddy, Qoder, Cursor, ZCode) and turns them
+  into a browsable, searchable, reusable library. Extraction is incremental
+  (only sessions with new messages are re-parsed), favorites and tags are
+  user-owned facts that re-extraction never overwrites, and copying a prompt
+  tracks its reuse count. Each entry links back to its originating session at
+  the exact message position. The ⌘K command palette gains a "Prompt"
+  category (metadata + full-text hits), and prompt bodies feed the unified
+  knowledge search index.
+
 ## [0.29.0] - 2026-08-22
 
 ### Changed
@@ -1496,6 +1512,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.30.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.30.0
 [0.29.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.29.0
 [0.28.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.28.0
 [0.27.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.27.1
