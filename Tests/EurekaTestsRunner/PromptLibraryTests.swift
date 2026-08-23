@@ -179,4 +179,48 @@ func promptLibraryTests(_ t: TestRunner) {
         try expectEqual(PromptsRepo.decodeTags(nil), [])
         try expectEqual(PromptsRepo.decodeTags("not-json"), [])
     }
+
+    t.suite("PromptsRepo · 周报统计")
+
+    t.test("窗口内新提问计数（timestamp 优先、缺失退化 first_seen）+ 复用按 last_used_at 落窗") {
+        let (store, dbPath) = try tempStore()
+        defer { try? FileManager.default.removeItem(at: dbPath) }
+
+        let inWindow = Date(timeIntervalSince1970: 1500)
+        let outWindow = Date(timeIntervalSince1970: 2500)
+        // 两条窗口内提问（timestamp 落窗）
+        try store.prompts.upsertExtracted([
+            PromptEntry(
+                id: "claude:s1:0", source: .claude, sessionId: "s1", messageIdx: 0,
+                text: "窗口内提问一", timestamp: inWindow, cwd: nil, firstSeen: outWindow),
+            PromptEntry(
+                id: "codex:s2:0", source: .codex, sessionId: "s2", messageIdx: 0,
+                text: "窗口内提问二", timestamp: inWindow, cwd: nil, firstSeen: outWindow),
+        ])
+        // 一条窗口外提问（timestamp 与 first_seen 都在窗外）
+        try store.prompts.upsertExtracted([
+            PromptEntry(
+                id: "claude:s3:0", source: .claude, sessionId: "s3", messageIdx: 0,
+                text: "窗口外提问", timestamp: outWindow, cwd: nil, firstSeen: outWindow),
+        ])
+        // 一条 timestamp 缺失 → 退化用 first_seen 落窗
+        try store.prompts.upsertExtracted([
+            PromptEntry(
+                id: "claude:s4:0", source: .claude, sessionId: "s4", messageIdx: 0,
+                text: "无时间戳提问", timestamp: nil, cwd: nil, firstSeen: inWindow),
+        ])
+        // 复用：s1 两次都在窗口内；s3 只在窗口外用过
+        try store.prompts.recordUse("claude:s1:0", at: inWindow)
+        try store.prompts.recordUse("claude:s1:0", at: inWindow)
+        try store.prompts.recordUse("claude:s3:0", at: outWindow)
+
+        let stats = try store.prompts.weeklyStats(
+            from: Date(timeIntervalSince1970: 1000), to: Date(timeIntervalSince1970: 2000))
+        try expectEqual(stats.askedCount, 3, "2 条 timestamp 落窗 + 1 条退化 first_seen")
+        try expectEqual(stats.bySource[.claude] ?? 0, 2)
+        try expectEqual(stats.bySource[.codex] ?? 0, 1)
+        try expectEqual(stats.topReused.count, 1, "只有 s1 的 last_used_at 落窗")
+        try expectEqual(stats.topReused[0].id, "claude:s1:0")
+        try expectEqual(stats.topReused[0].useCount, 2)
+    }
 }

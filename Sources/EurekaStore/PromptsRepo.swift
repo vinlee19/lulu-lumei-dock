@@ -106,6 +106,43 @@ public final class PromptsRepo {
         try db.run("DELETE FROM prompts WHERE id = ?", [.text(id)])
     }
 
+    // MARK: - 周报统计
+
+    /// 周报用的提问统计（窗口口径见 weeklyStats）
+    public struct WeeklyPromptStats: Equatable {
+        /// 窗口内新提出的提问数
+        public var askedCount: Int
+        public var bySource: [AgentSource: Int]
+        /// 窗口内复用过的提问（last_used_at 落窗，按累计 use_count 降序）
+        public var topReused: [PromptEntry]
+    }
+
+    /// 周报统计：提问时间取 COALESCE(timestamp, first_seen)（个别源无消息时间戳，
+    /// 退化为提取时间）；复用按 last_used_at 落窗判定（use_count 是全期累计值）。
+    public func weeklyStats(from: Date, to: Date, topLimit: Int = 5) throws -> WeeklyPromptStats {
+        let askedRows = try db.query("""
+        SELECT source, COUNT(*) FROM prompts
+        WHERE COALESCE(timestamp, first_seen) >= ? AND COALESCE(timestamp, first_seen) < ?
+        GROUP BY source
+        """, [.date(from), .date(to)]) { row in
+            (AgentSource(rawValue: row.text(0) ?? "") ?? .claude, Int(row.int(1)))
+        }
+        var bySource: [AgentSource: Int] = [:]
+        var asked = 0
+        for (source, count) in askedRows {
+            bySource[source] = count
+            asked += count
+        }
+        let reused = try db.query("""
+        SELECT id, source, session_id, message_idx, text, timestamp, cwd,
+               favorite, tags, use_count, last_used_at, first_seen
+        FROM prompts
+        WHERE last_used_at >= ? AND last_used_at < ? AND use_count > 0
+        ORDER BY use_count DESC LIMIT ?
+        """, [.date(from), .date(to), .int(Int64(topLimit))]) { Self.mapRow($0) }
+        return WeeklyPromptStats(askedCount: asked, bySource: bySource, topReused: reused)
+    }
+
     // MARK: - 行映射
 
     private static func mapRow(_ row: SQLiteRow) -> PromptEntry {

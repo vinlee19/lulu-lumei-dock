@@ -684,6 +684,9 @@ struct UsageDashboardView: View {
             if total > 0 {
                 weeklyStat("任务", "\(total) 个 · 成功 \(report.successCount)")
             }
+            if let prompts = report.promptSection, prompts.askedCount > 0 {
+                weeklyStat("提问", "\(prompts.askedCount) 个")
+            }
             if report.lateNightDays > 0 {
                 weeklyStat("深夜编码", "\(report.lateNightDays) 天", color: .orange)
             }
@@ -736,6 +739,25 @@ struct UsageDashboardView: View {
                             .lineLimit(1)
                         Spacer(minLength: 6)
                         Text("\(skill.count) 次")
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        if let prompts = report.promptSection, !prompts.topReused.isEmpty {
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Text("提问复用 Top")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(prompts.topReused, id: \.name) { prompt in
+                    HStack {
+                        Text(prompt.name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text("累计 \(prompt.count) 次")
                             .font(.system(size: 10).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }

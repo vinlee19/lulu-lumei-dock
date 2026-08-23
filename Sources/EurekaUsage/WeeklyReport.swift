@@ -19,6 +19,24 @@ public struct WeeklyReport: Equatable {
         public var costUSD: Double?
     }
 
+    /// 提问节（Prompt 库）：窗口内新提的问 + 复用榜。nil = 该周无提问数据。
+    public struct PromptSection: Equatable {
+        public var askedCount: Int
+        /// 窗口内复用过的提问（标题 + 累计次数，按次数降序）
+        public var topReused: [(name: String, count: Int)]
+
+        public init(askedCount: Int, topReused: [(name: String, count: Int)]) {
+            self.askedCount = askedCount
+            self.topReused = topReused
+        }
+
+        public static func == (lhs: PromptSection, rhs: PromptSection) -> Bool {
+            lhs.askedCount == rhs.askedCount
+                && lhs.topReused.map(\.name) == rhs.topReused.map(\.name)
+                && lhs.topReused.map(\.count) == rhs.topReused.map(\.count)
+        }
+    }
+
     public var weekStart: Date
     public var weekEnd: Date
     /// 有请求的（日期, 小时）桶数 ≈ 活跃小时数
@@ -36,13 +54,18 @@ public struct WeeklyReport: Equatable {
     public var errorCount: Int
     public var interruptedCount: Int
     public var topSkills: [(name: String, count: Int)]
+    /// 提问节（Prompt 库数据；默认 nil 兼容旧构造点）
+    public var promptSection: PromptSection? = nil
 
     public static func == (lhs: WeeklyReport, rhs: WeeklyReport) -> Bool {
         lhs.weekStart == rhs.weekStart && lhs.weekEnd == rhs.weekEnd
             && lhs.totalTokens == rhs.totalTokens && lhs.requestCount == rhs.requestCount
     }
 
-    public var isEmpty: Bool { requestCount == 0 && successCount + errorCount + interruptedCount == 0 }
+    public var isEmpty: Bool {
+        requestCount == 0 && successCount + errorCount + interruptedCount == 0
+            && (promptSection?.askedCount ?? 0) == 0
+    }
 }
 
 public enum WeeklyReportBuilder {
@@ -116,6 +139,16 @@ public enum WeeklyReportBuilder {
         let topSkills = skillAgg.sorted { $0.value > $1.value }.prefix(5)
             .map { (name: $0.key, count: $0.value) }
 
+        // 提问节（Prompt 库）：窗口内新提的问 + 复用榜；两者皆空则整节省略
+        let promptStats = try store.prompts.weeklyStats(from: weekStart, to: weekEnd)
+        let promptSection: WeeklyReport.PromptSection? =
+            (promptStats.askedCount > 0 || !promptStats.topReused.isEmpty)
+            ? .init(
+                askedCount: promptStats.askedCount,
+                topReused: promptStats.topReused
+                    .map { (name: $0.title, count: $0.useCount) })
+            : nil
+
         return WeeklyReport(
             weekStart: weekStart, weekEnd: weekEnd,
             activeHours: buckets.count,
@@ -135,7 +168,8 @@ public enum WeeklyReportBuilder {
             successCount: outcomes["success"] ?? 0,
             errorCount: outcomes["error"] ?? 0,
             interruptedCount: outcomes["interrupted"] ?? 0,
-            topSkills: topSkills)
+            topSkills: topSkills,
+            promptSection: promptSection)
     }
 
     /// 导出 Markdown（sessionNames：sessionId → 展示名，UI 层从会话索引补充）
@@ -167,6 +201,15 @@ public enum WeeklyReportBuilder {
         if total > 0 {
             lines.append("- 任务：\(total) 个（成功 \(report.successCount) / "
                 + "出错 \(report.errorCount) / 中断 \(report.interruptedCount)）")
+        }
+        if let prompts = report.promptSection {
+            var line = "- 提问：本周 \(prompts.askedCount) 个"
+            if !prompts.topReused.isEmpty {
+                line += "；复用最多：" + prompts.topReused
+                    .map { "\($0.name)（\($0.count) 次）" }
+                    .joined(separator: "、")
+            }
+            lines.append(line)
         }
         if report.lateNightDays > 0 {
             lines.append("- 深夜编码：\(report.lateNightDays) 天（23 点后仍在跑任务）")

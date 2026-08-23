@@ -98,4 +98,38 @@ func weeklyReportTests(_ t: TestRunner) {
         try expect(md.contains("## 最贵会话"))
         try expect(md.contains("重构管道"), "应使用注入的会话名")
     }
+
+    t.test("提问节：窗口内新提问与复用榜进入周报和 Markdown") {
+        let (store, path) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let midWeek = calendar.date(
+            byAdding: DateComponents(day: 2, hour: 10), to: weekStart)!
+        try store.prompts.upsertExtracted([PromptEntry(
+            id: "claude:s1:0", source: .claude, sessionId: "s1", messageIdx: 0,
+            text: "修一下分页越界\n第二行补充", timestamp: midWeek, cwd: nil,
+            firstSeen: midWeek)])
+        try store.prompts.recordUse("claude:s1:0", at: midWeek)
+
+        let report = try WeeklyReportBuilder.build(
+            store: store, pricing: pricing, weekStart: weekStart, weekEnd: weekEnd)
+        try expectEqual(report.promptSection?.askedCount, 1)
+        // 标题取首行（"修一下分页越界"），复用计数是全期累计值
+        try expectEqual(report.promptSection?.topReused.first?.name, "修一下分页越界")
+        try expectEqual(report.promptSection?.topReused.first?.count, 1)
+        try expect(!report.isEmpty, "只有提问数据的周不算空周")
+
+        let md = WeeklyReportBuilder.markdown(report)
+        try expect(md.contains("- 提问：本周 1 个；复用最多：修一下分页越界（1 次）"))
+    }
+
+    t.test("无提问数据 → promptSection 为 nil、Markdown 不输出提问行") {
+        let (store, path) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: path) }
+        try store.usage.insert([record(0, hour: 10)])
+        let report = try WeeklyReportBuilder.build(
+            store: store, pricing: pricing, weekStart: weekStart, weekEnd: weekEnd)
+        try expect(report.promptSection == nil)
+        let md = WeeklyReportBuilder.markdown(report)
+        try expect(!md.contains("提问："))
+    }
 }
