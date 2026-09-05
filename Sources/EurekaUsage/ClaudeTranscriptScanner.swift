@@ -50,7 +50,9 @@ public final class ClaudeTranscriptScanner {
         )
         while let item = enumerator?.nextObject() as? URL {
             if item.pathExtension == "jsonl" {
-                inserted += try scanFile(item)
+                // 每文件一个池：逐行 JSON 解析的桥接对象是 autorelease 的，
+                // 全量重扫（迁移清空 scan_files 后）不排水会积累出 GB 级峰值
+                inserted += try autoreleasepool { try scanFile(item) }
             }
         }
         return inserted

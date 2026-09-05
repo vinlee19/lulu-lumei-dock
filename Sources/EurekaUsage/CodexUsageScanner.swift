@@ -44,7 +44,8 @@ public final class CodexUsageScanner {
     public func scanOnce() throws -> Int {
         var inserted = 0
         for file in rolloutFiles() {
-            inserted += try scanFile(file)
+            // 每文件一个池：rollout 最大 70MB，全量重扫不排水会积累 GB 级峰值
+            inserted += try autoreleasepool { try scanFile(file) }
         }
         return inserted
     }

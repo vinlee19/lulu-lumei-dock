@@ -650,37 +650,37 @@ final class UsageService: ObservableObject {
     private func scanAndPublish() {
         guard let store else { return }
         do {
-            let claudeNew = try claudeScanner?.scanOnce() ?? 0
+            let claudeNew = try autoreleasepool { try claudeScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.claudeHealthName)
             if claudeNew > 0 { HealthRegistry.shared.event(Self.claudeHealthName) }
-            let codexNew = try codexScanner?.scanOnce() ?? 0
+            let codexNew = try autoreleasepool { try codexScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.codexHealthName)
             if codexNew > 0 { HealthRegistry.shared.event(Self.codexHealthName) }
-            let opencodeNew = try opencodeScanner?.scanOnce() ?? 0
+            let opencodeNew = try autoreleasepool { try opencodeScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.opencodeHealthName)
             if opencodeNew > 0 { HealthRegistry.shared.event(Self.opencodeHealthName) }
-            let grokNew = try grokScanner?.scanOnce() ?? 0
+            let grokNew = try autoreleasepool { try grokScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.grokHealthName)
             if grokNew > 0 { HealthRegistry.shared.event(Self.grokHealthName) }
-            let kimiNew = try kimiScanner?.scanOnce() ?? 0
+            let kimiNew = try autoreleasepool { try kimiScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.kimiHealthName)
             if kimiNew > 0 { HealthRegistry.shared.event(Self.kimiHealthName) }
-            let geminiNew = try geminiScanner?.scanOnce() ?? 0
+            let geminiNew = try autoreleasepool { try geminiScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.geminiHealthName)
             if geminiNew > 0 { HealthRegistry.shared.event(Self.geminiHealthName) }
-            let qwenNew = try qwenScanner?.scanOnce() ?? 0
+            let qwenNew = try autoreleasepool { try qwenScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.qwenHealthName)
             if qwenNew > 0 { HealthRegistry.shared.event(Self.qwenHealthName) }
-            let hermesNew = try hermesScanner?.scanOnce() ?? 0
+            let hermesNew = try autoreleasepool { try hermesScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.hermesHealthName)
             if hermesNew > 0 { HealthRegistry.shared.event(Self.hermesHealthName) }
-            let codeBuddyNew = try codeBuddyScanner?.scanOnce() ?? 0
+            let codeBuddyNew = try autoreleasepool { try codeBuddyScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.codeBuddyHealthName)
             if codeBuddyNew > 0 { HealthRegistry.shared.event(Self.codeBuddyHealthName) }
-            let cursorNew = try cursorScanner?.scanOnce() ?? 0
+            let cursorNew = try autoreleasepool { try cursorScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.cursorHealthName)
             if cursorNew > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }
-            let zcodeNew = try zcodeScanner?.scanOnce() ?? 0
+            let zcodeNew = try autoreleasepool { try zcodeScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.zcodeHealthName)
             if zcodeNew > 0 { HealthRegistry.shared.event(Self.zcodeHealthName) }
             try? zcodeScanner?.recordPromptCounts()

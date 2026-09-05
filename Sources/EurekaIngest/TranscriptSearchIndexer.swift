@@ -36,19 +36,24 @@ public final class TranscriptSearchIndexer {
         var rebuilt = 0
         let fm = FileManager.default
         for session in supported {
-            let path = session.transcriptPath
-            guard let attrs = try? fm.attributesOfItem(atPath: path),
-                  let size = (attrs[.size] as? NSNumber)?.int64Value
-            else { continue }
-            let mtime = ((attrs[.modificationDate] as? Date) ?? .distantPast).timeIntervalSince1970
-            if let known = fingerprints[path], known.size == size, known.mtime == mtime {
-                continue
-            }
-            let docs = Self.docs(for: session)
-            if (try? store.search.replaceDocs(
-                path: path, source: session.source.rawValue, sessionId: session.id,
-                size: size, mtime: mtime, docs: docs)) != nil {
-                rebuilt += 1
+            // 每会话一个池（return = continue）：全量重索引（迁移后 transcript_fts
+            // 重建）会在一个队列块里连续解析全部会话，解析瞬态必须逐会话排水
+            autoreleasepool {
+                let path = session.transcriptPath
+                guard let attrs = try? fm.attributesOfItem(atPath: path),
+                      let size = (attrs[.size] as? NSNumber)?.int64Value
+                else { return }
+                let mtime = ((attrs[.modificationDate] as? Date) ?? .distantPast)
+                    .timeIntervalSince1970
+                if let known = fingerprints[path], known.size == size, known.mtime == mtime {
+                    return
+                }
+                let docs = Self.docs(for: session)
+                if (try? store.search.replaceDocs(
+                    path: path, source: session.source.rawValue, sessionId: session.id,
+                    size: size, mtime: mtime, docs: docs)) != nil {
+                    rebuilt += 1
+                }
             }
         }
         // 空集绝不 prune：一次空的发现结果会把整个全文索引删掉，再付一次全量重索引。

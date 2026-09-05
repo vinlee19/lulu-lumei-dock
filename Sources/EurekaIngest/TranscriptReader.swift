@@ -914,7 +914,13 @@ public enum TranscriptReader {
 
     // MARK: - 工具
 
-    /// 逐行解析 jsonl（坏行/半行容错跳过）；body 返回 false 提前终止
+    /// 逐行解析 jsonl（坏行/半行容错跳过）；body 返回 false 提前终止。
+    ///
+    /// 每行一个 autoreleasepool：JSONSerialization 产出的桥接对象（NSDictionary/
+    /// NSString 树）是 autorelease 的，不排水就要等整个队列块结束才释放 ——
+    /// 全库重扫（迁移后指纹清空）在一个块里连续解析上百个 transcript 时，
+    /// 实测把 app 内存顶到 5.5GB。留在 messages 里的 String 已被数组 retain，
+    /// 不受排水影响。
     private static func forEachJSONLine(
         path: String, _ body: ([String: Any]) -> Bool
     ) {
@@ -924,11 +930,14 @@ public enum TranscriptReader {
             let end = data[start...].firstIndex(of: UInt8(ascii: "\n")) ?? data.endIndex
             let lineData = data[start..<end]
             start = end < data.endIndex ? data.index(after: end) : data.endIndex
-            guard !lineData.isEmpty,
-                  let root = (try? JSONSerialization.jsonObject(
+            guard !lineData.isEmpty else { continue }
+            let proceed = autoreleasepool { () -> Bool in
+                guard let root = (try? JSONSerialization.jsonObject(
                     with: Data(lineData))) as? [String: Any]
-            else { continue }
-            if !body(root) { return }
+                else { return true }
+                return body(root)
+            }
+            if !proceed { return }
         }
     }
 
