@@ -32,7 +32,11 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
 - **事件传输 = spool 目录**：relay 写 `tmp/` 后 rename 原子落入
   `~/Library/Application Support/Eureka/events/`，app 用 DispatchSource 监听。
   app 没起时事件天然排队；重启可重放；`ls`+`cat` 即可调试。
-  **超过 5 分钟的积压事件只入历史/用量，不触发岛动画。**
+  **超过 5 分钟的积压事件只入历史/用量，不触发岛动画** —— 每条实时通道都必须按事件
+  **自身**时间戳算 stale（opencode tailer 曾写死 false）。水位型 tailer（opencode `event.rowid`）
+  查询失败只能跳过本轮、绝不能当成回退归零：2026-09-05 一次失败的 `MAX(rowid)` 把 25,571 条
+  历史事件整表当实时重放，岛上排进上百张完成卡。岛卡队列另设知会型卡待显封顶
+  （`IslandCardQueue.maxPendingPassive`）兜底。
 - **自研 NSPanel 灵动岛**（不用 DynamicNotchKit——它是一次性弹出模型，没有常驻 compact 态）：
   panel 固定 expanded 最大尺寸，展开/收起全靠 SwiftUI spring 动画 + hitTest 让透明区点击穿透。
 - **零第三方依赖**；SQLite 用系统 libsqlite3 + 薄封装，可直接 `sqlite3` 查库调试。
@@ -42,6 +46,24 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
   <50ms、stdin 限读 1MB。
 - **Claude OAuth usage 接口（非官方）默认关闭、opt-in**，任何失败 → 返回 nil → UI 整块隐藏。
 - **Keychain 经 `/usr/bin/security` 子进程读取**（避开 ad-hoc 重签后 ACL 反复弹窗）。
+- **Prompt 库存 SQLite、不物化文件**（spec：`docs/specs/2026-08-23-prompt-library-design.md`）：
+  `prompts` 表混合派生与事实 —— 正文可由 transcript 重提取，收藏/标签/使用计数/**移除
+  （`hidden_at` 软删除）**是用户事实，升级不 DROP、重提取的 upsert 只刷正文列。硬删行不行：
+  会话还活跃时下一次增量提取会把整批 prompt 原样 upsert 回来。评价结果 `prompt_eval`
+  全列可重算 → 纯派生表走 DROP 块。
+- **Prompt 评价零 LLM、看后果不看措辞**（计划：`docs/superpowers/plans/2026-08-24-prompt-evaluation.md`，
+  方法论调研：`docs/research/2026-08-24-prompt-evaluation-methods.md`）：轮内诊断（TurnDiagnostics）
+  + 轮后纠偏/重述（挣扎 vs 探索消歧）+ 静态结构（仅提示）→ 三档 + 证据，不打综合分。
+- **`~/.claude/memories/` 不是 Claude Code 会加载的目录**（官方 `.claude` 目录参考与 memory
+  文档核对于 2026-09-05：加载项只有 CLAUDE.md 系列、`.claude/rules/`、`projects/<project>/memory/`
+  自动记忆）。Prompt「升级为指令」因此追加到 `~/.claude/CLAUDE.md`；记忆页的「新建记忆」仍写
+  `memories/`，属于 Eureka 私有笔记，索引器把它标成"用户自建记忆"是自定口径，待决。
+  另：`~/.claude/rules/**/*.md` 与 `<repo>/.claude/rules/**/*.md` 是官方指令位置，已按官方语义
+  索引进指令页（.md 递归发现、跟随符号链接的共享规则目录、真实路径集合防环；
+  `SkillMemoryIndexer.enumerateRules`）。
+- **「在终端启动新会话」直接执行**（`cd '<cwd>' && claude '<prompt>'`，仅 claude/codex）：
+  spec §5.4 原本只复制 + 开终端让用户手动粘贴，后改为直接启动 —— 用户明确点了"启动"，
+  多一步粘贴只是摩擦；其余源的 CLI 是否接受位置参数 prompt 未实勘，不开放。
 
 ## 模块（SwiftPM targets，依赖单向：app → {Ingest,Usage,Install} → Store → Kit）
 
@@ -211,3 +233,7 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
 M0 骨架 → M1 端到端最小链路（relay→spool→状态栏计数）→ M2 真实 Claude hooks →
 M3 灵动岛 MVP → M4 状态完整+Codex → M5 用量引擎 → M6 限额面板 → M7 产品化打包 → M8 打磨。
 每个里程碑有独立验证方式（详见计划）。
+
+Prompt 库分三批：MVP（提取/浏览/搜索/收藏/⌘K/全文索引，v0.30.0 发版）→ 复用化改造（v0.31.0）
+（排噪分类、三段式列表、高频重复组、终端启动、毕业为技能/记忆）→ 评价体系（`prompt_eval`）。
+后两批的设计变更相对 spec 的差异记在 spec 顶部的「修订记录」。

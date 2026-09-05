@@ -4,6 +4,164 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.31.0] - 2026-09-05
+
+### Added
+
+- **Prompt library is now reuse-first, not a raw log.** Field data (2,395 local
+  prompts) showed ~30% pure noise (`<command-name>` echoes, "继续"-style
+  filler) and zero use of the passive annotations — so the surface was
+  rebuilt around a reuse loop:
+  - *Noise control*: extraction now strips injected blocks
+    (`TurnSlicer.realPrompt`), drops pseudo-user messages and bare slash
+    commands, and truncates >64K pastes; existing noisy rows are never
+    deleted, just classified and hidden (in-memory `PromptClassifier`:
+    noise/trivial/followup/instruction/paste — no schema change).
+  - *Three-section list*: 收藏 (user assets) → 高频重复 (fingerprint clusters
+    with ×N / cross-project badges, expandable — prime skill candidates) →
+    最近, with trivial/paste/noise folded behind a "显示全部" toggle
+    (search always sees everything). Weekly-report asked counts exclude
+    legacy noise via a matching SQL predicate.
+  - *Reuse actions*: launch a new session in Terminal with the prompt
+    (claude/codex, POSIX-safe quoting incl. multi-line via `$'\n'`),
+    and **graduate a prompt** into a skill (full SKILL.md, any of the 14
+    sources) or into a persistent **instruction**: a section appended, with
+    a backup, to the file the agent actually loads every session —
+    `~/.claude/CLAUDE.md` for Claude, `~/.codex/AGENTS.md` for Codex (or
+    `AGENTS.override.md` when that exists, because Codex only loads the first
+    of the two) — landing on the Instructions page where those files are
+    indexed. An earlier cut wrote Claude's into `~/.claude/memories/`, a
+    directory Claude Code never reads (the official `.claude` directory
+    reference lists no such folder). The document bodies (SKILL.md
+    frontmatter escaping, the append) are built by
+    `EurekaInstall.PromptGraduationDocument`, pure text with unit tests.
+- **Weekly report gains a 提问 line.** How many prompts you asked this week
+  (legacy noise rows excluded) and the prompts you reused most (by copy or
+  launch), in both the dashboard card and the exported Markdown.
+- **Claude's `.claude/rules/` directories are indexed as instructions.**
+  Claude Code loads `~/.claude/rules/**/*.md` (user level) and
+  `<repo>/.claude/rules/**/*.md` (project level) every session — path-scoped
+  rules with `paths:` frontmatter on demand — but the Instructions tab only
+  knew about `CLAUDE.md`. Both directories now appear there, following the
+  official semantics: `.md` files discovered recursively, symlinked shared
+  rule directories followed, cycles guarded by real-path tracking, dangling
+  links skipped. Each rule shows as its path inside `rules/` (e.g.
+  `frontend/style`), global or attributed to its repository.
+- **Prompts are now evaluated by their actual consequences.** Every prompt's
+  full aftermath lives in the transcript, so evaluation is behavioral, not
+  textual: (1) the existing per-turn `TurnDiagnostics` engine (7 rules —
+  explore-heavy, reread, rework, retry, file churn, clarification — each with
+  an actionable advice string) grades the turn the prompt triggered; (2) a new
+  post-turn layer detects **corrective follow-ups** (a tightened lexicon:
+  "不对/重来/理解错/revert…") and **reformulations**, disambiguated
+  Hassan-style into struggle (re-asking the same thing in different words —
+  counts against) vs. exploration (expanding the ask — doesn't), using an
+  overlap coefficient over CJK-bigram/word tokens; (3) static structure hints
+  (acceptance criteria / named file paths / deictic openers / sectioning) as
+  advisory-only. No mystery composite score: three severity tiers with
+  evidence and advice. Escalation: corrective or struggle → at least notice;
+  corrective + struggle, or corrective + error ending → bad. Results are
+  computed in the extraction pipeline (single shared transcript parse) and
+  stored in a rebuildable derived table (`prompt_eval`, schema v24), so
+  browsing costs nothing. Per-source capability tiers degrade gracefully:
+  full diagnostics (claude/codex/qoder) → step counts only (toolNote
+  sources) → follow-up signals only (gemini/grok) → excluded
+  (antigravity/trae). Surfaced where reuse decisions happen: severity dots
+  with the primary issue on rows (only when flagged), an "实际效果" evidence
+  card in the detail page, a "最费劲" sort, and "N 次费劲" badges on
+  high-frequency groups. Field-validated on 1,061 local prompts: 15% flagged,
+  file-churn and struggle-reformulation the top signals.
+- **"Load all" for extra-long sessions.** The transcript budget was 2,000
+  entries with tool steps counted in, so a 13k-line session silently stopped
+  at message 1,241 — the TOC listed 430 prompts while the session actually
+  had 663. The default budget is now 20,000 (parsing already reads the whole
+  file; the cap only guards pathological files), and when a session still
+  exceeds it the orange "仅显示前 N 条" badge gains a "加载全部" button that
+  reloads without any cap. Full-text indexing and prompt extraction inherit
+  the raised budget, so their tails are no longer silently missing either.
+- **One-click repair for memory-index drift.** The library detail's drift
+  notice ("索引与目录不一致") gains a repair button: entries missing from
+  `MEMORY.md` are appended as standard `- [title](file.md) — hook` lines and
+  index lines pointing at deleted files are removed. The rewrite reads the
+  full index file (the scanner's 64KB head cap must not truncate a rewrite),
+  is conservative (only list lines whose links are all dangling are dropped),
+  backs up `MEMORY.md` first, and is idempotent.
+- **Skill propagation can now overwrite-update.** The cross-tool matrix on
+  the skill detail page previously refused same-name targets, so versions
+  could never be re-aligned across agents. Tiles whose target has a same-name
+  *user* skill now offer "覆盖更新": the new version is staged in a hidden
+  directory, the old version goes to the Trash (recoverable), and a target
+  living in the disabled area is updated in place without silently
+  re-enabling it. Bundled skills are never touched.
+- **Hermes per-skill usage counts.** Hermes' message stream carries no skill
+  events, so its skills always showed zero hits. Its own
+  `skills/.usage.json` counter file (verified shape, 6-digit-microsecond
+  timestamps) now feeds the all-time skill stats; audit-derived rows still
+  win when both exist.
+
+### Fixed
+
+- **The island can no longer be pinned open by a flood of finished cards.**
+  One failed `MAX(rowid)` read on opencode's event table (a transient I/O or
+  lock hiccup) was interpreted as "the table shrank", the tailer reset its
+  watermark to zero and replayed all 25,571 historical events as live: hundreds
+  of finished cards queued up (the badge read "还有 100+ 条通知"), each held the
+  island open for its full dismiss window, and 22 sessions from July/August
+  were resurrected as running only to be reaped as "interrupted" a minute
+  later. Three layers now stand in the way: a failed watermark query keeps the
+  watermark and retries next tick, a genuine rowid regression re-baselines
+  without replaying, and opencode events are stale-checked against their own
+  timestamps like every other source (historical completions go to history and
+  usage only). Independently, the card queue caps pending finished / notice
+  cards at 5 (oldest dropped, history keeps everything); waiting and alert
+  cards are exempt.
+- **Removing a prompt from the library now sticks.** "移除" deleted the row,
+  and the next incremental extraction of a still-active session re-inserted
+  it, so removed prompts came back as soon as you kept chatting. Removal is
+  now a soft delete (`hidden_at` on the `prompts` row, an idempotent column
+  add with no schema bump and no derived-table rebuild): the row stays to
+  block the re-insert, and every read path — list, favorites count, detail
+  lookup, weekly report — filters it out. Removing also updates the in-memory
+  state right away (group ×N counts, favorite / folded counts, evaluation
+  cache) instead of waiting for the next scan.
+- **TOC ordinals were truncated for long sessions.** The entry number sat in
+  a fixed 16pt circle, so three-digit ordinals rendered as "4…". The badge is
+  now a capsule that grows with the digit count.
+- **Session titles reveal their full text on hover** in both the list rows
+  and the detail header, and the session-list / TOC split dividers gained
+  real travel (list pane up to 620pt, TOC up to 560pt) — the previous ranges
+  were so narrow that dragging felt inert on wide windows.
+
+### Performance
+
+- **Full-corpus rescans no longer balloon memory to gigabytes.** After the
+  v24 migration wiped derived tables, the app re-parsed every transcript in
+  one background block — and every `JSONSerialization` line parse leaves
+  autoreleased bridged objects that only drain when the block ends, which
+  pushed the process to an observed 5.5GB. `autoreleasepool` drains are now
+  in place at every accumulation point: per line in the shared JSONL reader,
+  per session in the prompt extraction/evaluation loop and the full-text
+  indexer, and per file/scanner across all eleven usage scanners. Measured:
+  parsing 162MB of transcripts plus 1,600 turn evaluations now peaks at
+  ~440MB RSS (including runtime overhead) instead of accumulating without
+  bound.
+- **The Prompts tab no longer builds every row eagerly.** The list was a
+  plain `VStack` — with thousands of extracted prompts, opening the tab
+  constructed them all on the main thread. It is now a `LazyVStack`, and the
+  per-render O(N) source-count dictionaries are computed once per body
+  evaluation instead of once per filter chip.
+- **Prompt search is debounced (250ms) and filtered off the main thread**,
+  with a generation guard so stale results are dropped; the full-text
+  lowercased scan grows with the library and was previously run per
+  keystroke on the main thread. Extraction moved from `.userInitiated` to
+  `.utility` so the first full-library scan doesn't compete with the UI
+  during launch warm-up.
+- **In-session search no longer rescans the transcript per visible row.**
+  Match ids were a computed property re-evaluated inside every row closure;
+  they are now state computed once per query change (debounced, off-main)
+  with an O(1) set lookup for row highlighting — noticeable on "load all"
+  sessions with tens of thousands of messages.
+
 ## [0.30.0] - 2026-08-23
 
 ### Added
@@ -1512,6 +1670,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.31.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.0
 [0.30.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.30.0
 [0.29.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.29.0
 [0.28.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.28.0

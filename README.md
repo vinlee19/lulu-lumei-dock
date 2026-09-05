@@ -125,14 +125,39 @@ number made "how much memory is there" meaningless.
   to nothing and origin sessions whose transcript is gone are counted in the legend rather than
   silently dropped. Memory detail pages carry the same graph scoped to one hop.
 
-**Instructions** — the persistent rules *you* wrote for the agents: `CLAUDE.md`, `AGENTS.md` (with
-`AGENTS.override.md` precedence), `GEMINI.md`, `QWEN.md`, `<repo>/.cursor/rules/*.mdc`, and Hermes'
-`SOUL.md`. Same browse/preview/edit workflow as Memory, with its own count and global-vs-project
-breakdown.
+**Instructions** — the persistent rules *you* wrote for the agents: `CLAUDE.md`, Claude's modular
+rules in `~/.claude/rules/**/*.md` and `<repo>/.claude/rules/**/*.md` (discovered recursively,
+symlinked shared rule directories included), `AGENTS.md` (with `AGENTS.override.md` precedence),
+`GEMINI.md`, `QWEN.md`, `<repo>/.cursor/rules/*.mdc`, and Hermes' `SOUL.md`. Same
+browse/preview/edit workflow as Memory, with its own count and global-vs-project breakdown.
 
 **Agent** — manage agent / subagent definitions across tools, mirroring the skills workflow.
 
 **Plans** — browse and manage agent plan documents.
+
+**Prompts** — every question you have asked any agent, extracted from the session transcripts of
+the 12 readable sources (Antigravity's protobuf and Trae's encrypted database are out of reach) into
+one browsable, searchable library. Extraction is incremental; favorites, tags, use counts and
+removals are yours and survive re‑extraction. The tab is built around reuse, not logging:
+- **Three sections**: 收藏 (your curated assets) → 高频重复 (clusters of the same ask, with ×N and
+  cross‑project badges — prime candidates for a skill) → 最近. Noise (`<command-name>` echoes, bare
+  slash commands), one‑word filler and long pastes are folded behind a "显示全部" toggle; search
+  always sees everything.
+- **Actions**: copy; **launch a new session** in Terminal with the prompt (Claude and Codex only —
+  it runs `claude '<prompt>'` in the original working directory, so the agent starts working right
+  away); **graduate** a prompt into a skill (`SKILL.md`, any source) or into a persistent
+  instruction — a section appended, with a backup, to the file the agent loads every session:
+  `~/.claude/CLAUDE.md` for Claude, `~/.codex/AGENTS.md` (or `AGENTS.override.md` when that exists)
+  for Codex; jump back to the exact message in its session.
+- **Evaluation by consequences**: each prompt is graded on what happened afterwards, not on its
+  wording — the tool trajectory of the turn it triggered (explore‑heavy, re‑reads, rework, retries,
+  file churn, clarification questions), whether your *next* prompt was a correction ("不对 / 重来 /
+  revert…") or a struggling reformulation, and whether the turn ended in an API error. No composite
+  score: three tiers with the evidence and a concrete suggestion — a dot on the row only when
+  flagged, an "实际效果" card in the detail page, a "最费劲" sort, and "N 次费劲" badges on
+  repeated asks. Depth degrades per source: full diagnostics for Claude / Codex / Qoder, step
+  counts for the other transcript sources, follow‑up signals only for Gemini / Grok.
+- Prompts also show up in the ⌘K palette and in the weekly report (提问 count, most‑reused prompts).
 
 **Limits** — subscription rate‑limit gauges:
 - **Codex** and **Grok** read a local snapshot (Codex from the newest rollout's `rate_limits`; Grok
@@ -407,8 +432,12 @@ Full design doc: [docs/design.md](docs/design.md).
 - Claude subscription limits rely on an unofficial endpoint and may break with official changes
   (it hides itself when it does).
 - Per‑skill invocation data (count / tokens / trend) is **Claude‑only**: no other agent tags skill
-  invocations in its logs. Hermes does keep its own `skills/.usage.json` counters, but the app does
-  not read them yet, so Hermes skills show no hit count, usage bar or weekly ranking.
+  invocations in its logs. Hermes is the partial exception: its own `skills/.usage.json` counters
+  feed the all‑time hit count, but carry no tokens or per‑day trend.
+- The Prompts tab has nothing for Antigravity (protobuf transcripts) or Trae (encrypted database),
+  and "launch in Terminal" is offered for Claude and Codex only — the other CLIs were not verified
+  to accept a positional prompt. Prompt evaluation needs the turn's tool trajectory, so it is
+  shallower for sources whose transcripts record fewer steps (see the tiers above).
 - `ctx%` for Claude is an estimate (window size from a per‑model table; overridable). Cursor is the
   opposite case: it persists its own `contextUsagePercent`, which is used as-is.
 - Cursor tokens carry no cache split and its per-turn model is often just `default`, so its usage is
