@@ -398,11 +398,13 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 跨源安装：把一个已有技能复制到其它 agent 的技能根（详情矩阵"安装"与一致性卡"补齐"共用）。
-    /// 只写各源技能根（用户目录），不碰任何配置文件；同名已存在按失败报告，不覆盖。
-    /// 回调给出每个目标的失败原因（nil = 成功），全部完成后强制重扫。
+    /// 跨源安装：把一个已有技能复制到其它 agent 的技能根（详情矩阵"安装/更新"与
+    /// 一致性卡"补齐"共用）。只写各源技能根（用户目录），不碰任何配置文件。
+    /// `overwrite = false` 时同名已存在按失败报告；`overwrite = true` 做覆盖更新
+    /// （旧版进废纸篓，详见 SkillPropagator）。回调给出每个目标的失败原因
+    /// （nil = 成功），全部完成后强制重扫。
     func propagate(
-        _ skill: SkillEntry, to targets: [AgentSource],
+        _ skill: SkillEntry, to targets: [AgentSource], overwrite: Bool = false,
         completion: (([AgentSource: String?]) -> Void)? = nil
     ) {
         queue.async { [weak self] in
@@ -414,7 +416,8 @@ final class SkillMemoryService: ObservableObject {
                     try SkillPropagator.install(
                         skillDirectory: sourceDir,
                         into: Self.writableSkillRoot(for: target),
-                        slug: slug)
+                        slug: slug,
+                        overwrite: overwrite)
                     results.updateValue(nil, forKey: target)
                 } catch {
                     results[target] = error.localizedDescription

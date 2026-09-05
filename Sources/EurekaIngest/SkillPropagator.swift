@@ -30,10 +30,16 @@ public enum SkillPropagator {
     ]
 
     /// 把 `skillDirectory` 复制为 `targetRoot/<slug>`（slug 缺省 = 源目录名）。
-    /// 返回目标技能目录。目标已存在（启用区或停用区）则抛错，v1 不做覆盖更新。
+    /// 返回目标技能目录。
+    ///
+    /// `overwrite = false`（默认）：目标已存在（启用区或停用区）则抛错——安装新技能的语义。
+    /// `overwrite = true`：**覆盖更新**——先把新版整树复制进隐藏暂存目录（扫描器
+    /// skipsHiddenFiles 看不到半成品），旧版移入废纸篓（可找回；废纸篓不可用时退回
+    /// 隐藏备份目录），再把暂存换入。目标此前在停用区就更新停用区，不改变启停状态。
     @discardableResult
     public static func install(
-        skillDirectory: URL, into targetRoot: URL, slug: String? = nil
+        skillDirectory: URL, into targetRoot: URL, slug: String? = nil,
+        overwrite: Bool = false
     ) throws -> URL {
         let fm = FileManager.default
         let source = skillDirectory.standardizedFileURL
@@ -44,21 +50,39 @@ public enum SkillPropagator {
         let dest = targetRoot.appendingPathComponent(name, isDirectory: true)
         let disabledTwin = SkillMemoryIndexer.disabledRoot(for: targetRoot)
             .appendingPathComponent(name, isDirectory: true)
-        if fm.fileExists(atPath: dest.path) {
-            throw PropagationError.alreadyExists(dest.path)
+        let existsEnabled = fm.fileExists(atPath: dest.path)
+        let existsDisabled = fm.fileExists(atPath: disabledTwin.path)
+        if !overwrite {
+            if existsEnabled { throw PropagationError.alreadyExists(dest.path) }
+            if existsDisabled { throw PropagationError.alreadyExists(disabledTwin.path) }
         }
-        if fm.fileExists(atPath: disabledTwin.path) {
-            throw PropagationError.alreadyExists(disabledTwin.path)
-        }
-        try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        // 停用区同名且启用区没有 → 就地更新停用区，不悄悄"顺便启用"
+        let finalDest = (!existsEnabled && existsDisabled) ? disabledTwin : dest
+
+        // 先复制进隐藏暂存目录：复制半途失败时旧版一个字节都没动
+        let staging = targetRoot.appendingPathComponent(
+            ".\(name).eureka-staging", isDirectory: true)
+        try? fm.removeItem(at: staging)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         do {
-            try copyTree(from: source, to: dest)
+            try copyTree(from: source, to: staging)
         } catch {
-            // 复制半途失败不留残骸：目标目录是本次新建的，整棵回收
-            try? fm.removeItem(at: dest)
+            try? fm.removeItem(at: staging)
             throw error
         }
-        return dest
+        if fm.fileExists(atPath: finalDest.path) {
+            do {
+                try fm.trashItem(at: finalDest, resultingItemURL: nil)
+            } catch {
+                // 无废纸篓的卷（网络盘/临时目录等）：退回隐藏备份，扫描器同样看不到
+                let backup = targetRoot.appendingPathComponent(
+                    ".\(name).eureka-replaced", isDirectory: true)
+                try? fm.removeItem(at: backup)
+                try fm.moveItem(at: finalDest, to: backup)
+            }
+        }
+        try fm.moveItem(at: staging, to: finalDest)
+        return finalDest
     }
 
     /// 递归复制目录树：跳过隐藏项与剪枝目录；符号链接不跟随（技能不该带链接，防越界复制）

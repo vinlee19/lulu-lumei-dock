@@ -38,6 +38,8 @@ struct SkillDetailView: View {
     @State private var weeklyRank: Int?
     /// 待确认的跨源安装目标（矩阵里点了某个未配置的源）
     @State private var installTarget: AgentSource?
+    /// true = 目标已有同名自建技能，本次是覆盖更新（旧版进废纸篓）而非新装
+    @State private var installOverwrite = false
     /// 安装结果反馈（矩阵下方短暂显示）
     @State private var installNote: String?
     /// 最近调用过该技能的会话（详情页「最近调用会话」卡）
@@ -230,8 +232,8 @@ struct SkillDetailView: View {
                 Text("\(AgentSource.allCases.count) 个工具中 \(configured) 个可用")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                if entry != nil, configured < AgentSource.allCases.count {
-                    Text("· 点未配置的源可一键安装")
+                if entry != nil {
+                    Text("· 未配置可一键安装 · 自建可覆盖更新")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -241,6 +243,9 @@ struct SkillDetailView: View {
                     let origin = configs[source]
                     // 有实体条目（非纯统计行）时，未配置的源可点击安装（复制技能目录过去）
                     let installable = origin == nil && entry != nil
+                    // 目标已有同名**自建**技能 → 可用当前版本覆盖更新（版本对齐）。
+                    // 内置的不碰（bundled 目录按约定只读）；自己所在的源没有更新语义
+                    let updatable = origin == .user && entry != nil && source != entry?.source
                     VStack(spacing: 4) {
                         SourceBadge(source: source, size: 22)
                             .opacity(origin == nil ? 0.28 : 1)
@@ -270,12 +275,15 @@ struct SkillDetailView: View {
                                 lineWidth: origin != nil ? 1 : 0.5))
                     .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
                     .onTapGesture {
-                        guard installable else { return }
+                        guard installable || updatable else { return }
+                        installOverwrite = updatable
                         installTarget = source
                     }
                     .help(installable
                         ? "把该技能复制到 \(source.displayName)"
-                        : source.displayName)
+                        : updatable
+                            ? "用当前版本覆盖更新 \(source.displayName) 的同名技能（旧版移入废纸篓）"
+                            : source.displayName)
                 }
             }
             if let note = installNote {
@@ -285,34 +293,42 @@ struct SkillDetailView: View {
             }
         }
         .confirmationDialog(
-            "安装到 \(installTarget?.displayName ?? "")？",
+            installOverwrite
+                ? "覆盖更新 \(installTarget?.displayName ?? "") 的同名技能？"
+                : "安装到 \(installTarget?.displayName ?? "")？",
             isPresented: Binding(
                 get: { installTarget != nil },
                 set: { if !$0 { installTarget = nil } }),
             titleVisibility: .visible
         ) {
-            Button("复制技能目录过去") { runInstall() }
+            Button(installOverwrite ? "覆盖更新（旧版移入废纸篓）" : "复制技能目录过去") {
+                runInstall()
+            }
             Button("取消", role: .cancel) {}
         } message: {
             if let target = installTarget {
-                Text("将把整个技能目录复制到\n\(SkillMemoryService.writableSkillRoot(for: target).path)")
+                Text(installOverwrite
+                    ? "将用当前版本整体替换\n\(SkillMemoryService.writableSkillRoot(for: target).path) 下的同名技能目录，旧版本移入废纸篓（可恢复）"
+                    : "将把整个技能目录复制到\n\(SkillMemoryService.writableSkillRoot(for: target).path)")
             }
         }
     }
 
-    /// 执行跨源安装（confirmationDialog 确认后）；结果在矩阵下方短暂提示
+    /// 执行跨源安装/覆盖更新（confirmationDialog 确认后）；结果在矩阵下方短暂提示
     private func runInstall() {
         guard let installTo = installTarget, let entry else { return }
         installTarget = nil
+        let overwrite = installOverwrite
+        let verb = overwrite ? "更新" : "安装"
         let targetName = installTo.displayName
-        installNote = "正在安装到 \(targetName)…"
-        service.propagate(entry, to: [installTo]) { results in
+        installNote = "正在\(verb)到 \(targetName)…"
+        service.propagate(entry, to: [installTo], overwrite: overwrite) { results in
             if let failure = results[installTo] ?? nil {
-                installNote = "安装到 \(targetName) 失败：\(failure)"
+                installNote = "\(verb)到 \(targetName) 失败：\(failure)"
             } else if installTo == .zcode {
-                installNote = "已安装到 \(targetName)（~/.agents/skills 为共享目录，其他兼容 CLI 也会读到）"
+                installNote = "已\(verb)到 \(targetName)（~/.agents/skills 为共享目录，其他兼容 CLI 也会读到）"
             } else {
-                installNote = "已安装到 \(targetName)"
+                installNote = "已\(verb)到 \(targetName)"
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
         }

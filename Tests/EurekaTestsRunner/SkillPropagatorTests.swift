@@ -147,4 +147,67 @@ func skillPropagatorTests(_ t: TestRunner) {
         try expect(FileManager.default.fileExists(
             atPath: dest.appendingPathComponent("SKILL.md").path))
     }
+
+    t.test("覆盖更新：同名已存在时整体替换，旧文件不残留") {
+        let base = try tempBase()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let skill = try makeFixtureSkill(in: base)
+        let targetRoot = base.appendingPathComponent("target/skills", isDirectory: true)
+        let existing = targetRoot.appendingPathComponent("commit-helper", isDirectory: true)
+        try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: true)
+        try "旧版".write(
+            to: existing.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        try "旧版独有的文件".write(
+            to: existing.appendingPathComponent("stale.md"), atomically: true, encoding: .utf8)
+
+        let dest = try SkillPropagator.install(
+            skillDirectory: skill, into: targetRoot, overwrite: true)
+
+        let fm = FileManager.default
+        try expectEqual(dest.path, existing.path)
+        let replaced = try String(
+            contentsOf: dest.appendingPathComponent("SKILL.md"), encoding: .utf8)
+        try expect(replaced.contains("commit-helper"), "覆盖后必须是新版内容")
+        try expect(!fm.fileExists(atPath: dest.appendingPathComponent("stale.md").path),
+            "整体替换：旧版独有文件不能残留")
+        try expect(fm.fileExists(atPath: dest.appendingPathComponent("references/rules.md").path))
+        // 暂存目录必须清理干净（隐藏目录留下会在下次覆盖时被误当残骸）
+        try expect(!fm.fileExists(
+            atPath: targetRoot.appendingPathComponent(".commit-helper.eureka-staging").path),
+            "暂存目录不能残留")
+    }
+
+    t.test("覆盖更新：目标在停用区则就地更新停用区（不悄悄启用）") {
+        let base = try tempBase()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let skill = try makeFixtureSkill(in: base)
+        let targetRoot = base.appendingPathComponent("target/skills", isDirectory: true)
+        let disabledTwin = base.appendingPathComponent(
+            "target/skills.eureka-disabled/commit-helper", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: disabledTwin, withIntermediateDirectories: true)
+        try "旧版".write(
+            to: disabledTwin.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+
+        let dest = try SkillPropagator.install(
+            skillDirectory: skill, into: targetRoot, overwrite: true)
+
+        try expectEqual(dest.path, disabledTwin.path, "必须更新停用区那份")
+        try expect(!FileManager.default.fileExists(
+            atPath: targetRoot.appendingPathComponent("commit-helper").path),
+            "启用区不能凭空多出一份")
+    }
+
+    t.test("覆盖更新：目标不存在时等价于新装") {
+        let base = try tempBase()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let skill = try makeFixtureSkill(in: base)
+        let targetRoot = base.appendingPathComponent("target/skills", isDirectory: true)
+
+        let dest = try SkillPropagator.install(
+            skillDirectory: skill, into: targetRoot, overwrite: true)
+
+        try expect(FileManager.default.fileExists(
+            atPath: dest.appendingPathComponent("SKILL.md").path))
+    }
 }
