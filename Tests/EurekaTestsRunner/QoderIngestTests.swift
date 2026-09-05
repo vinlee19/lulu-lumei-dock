@@ -316,8 +316,10 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
             qoderFinalText,
         ], to: session.file)
 
+        // now 钉在 fixture 时间附近：窗口过滤按墙钟，不钉会随时间自然过期
+        let pinnedNow = Date(timeIntervalSince1970: 1_784_958_500)
         // 无 custom-title：ai-title 胜出
-        var sessions = QoderSessionIndexer.index(projectsRoot: session.root)
+        var sessions = QoderSessionIndexer.index(projectsRoot: session.root, now: pinnedNow)
         try expectEqual(sessions.count, 1)
         try expectEqual(sessions[0].source, .qoder)
         try expectEqual(sessions[0].id, "b3ddabc0-0000-4201-82e1-4e0f65e78212")
@@ -334,7 +336,7 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
         try appendQoderLines([
             #"{"type":"custom-title","sessionId":"b3ddabc0-0000-4201-82e1-4e0f65e78212","customTitle":"自定义标题"}"#,
         ], to: session.file)
-        sessions = QoderSessionIndexer.index(projectsRoot: session.root)
+        sessions = QoderSessionIndexer.index(projectsRoot: session.root, now: pinnedNow)
         try expectEqual(sessions.first?.name, "自定义标题")
     }
 
@@ -356,7 +358,10 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
         try FileManager.default.createDirectory(at: subagentsDir, withIntermediateDirectories: true)
         try appendQoderLines([qoderHumanPrompt], to: subagentsDir.appendingPathComponent("agent-1.jsonl"))
 
-        let sessions = QoderSessionIndexer.index(projectsRoot: session.root)
+        // now 钉在 fixture 时间附近（窗口过滤按墙钟，不钉会随时间自然过期）；
+        // 无行级时间戳的文件回退 mtime（相对 pinned now 在"未来"，负差值仍在窗口内）
+        let sessions = QoderSessionIndexer.index(
+            projectsRoot: session.root, now: Date(timeIntervalSince1970: 1_784_958_500))
         try expectEqual(sessions.count, 2, "subagents/ 不应单列: \(sessions.map(\.id))")
         try expectEqual(
             sessions.first { $0.id == "b3ddabc0-0000-4201-82e1-4e0f65e78212" }?.name,
