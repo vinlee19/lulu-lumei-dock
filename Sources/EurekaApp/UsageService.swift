@@ -405,11 +405,25 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 技能全时累计统计（技能卡片"最近活跃"与详情页匹配；kind='skill'，累计次数降序）
+    /// 技能全时累计统计（技能卡片"最近活跃"与详情页匹配；kind='skill'，累计次数降序）。
+    /// Hermes 的消息流没有技能调用事件（审计流水永远覆盖不到它），
+    /// 用它自带的 `skills/.usage.json` 计数补行；同名审计行存在时以审计为准。
     func loadSkillStats(source: AgentSource? = nil) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
-            let stats = (try? store.toolCalls.skillStats(source: source)) ?? []
+            var stats = (try? store.toolCalls.skillStats(source: source)) ?? []
+            if source == nil || source == .hermes {
+                let counted = Set(stats.filter { $0.source == .hermes }.map(\.name))
+                let extras = HermesSkillUsage.read(
+                    url: HermesPaths.skillsRoot().appendingPathComponent(".usage.json"))
+                    .filter { !counted.contains($0.slug) }
+                    .map {
+                        ToolCallsRepo.SkillUsageStat(
+                            source: .hermes, name: $0.slug, count: $0.useCount,
+                            lastTs: $0.lastUsedAt, tokens: 0)
+                    }
+                stats.append(contentsOf: extras)
+            }
             self.publish { $0.skillStats = stats }
         }
     }

@@ -960,7 +960,8 @@ public final class ToolCallsRepo {
         public var count: Int
     }
 
-    /// 全时累计的技能调用统计（供 Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）
+    /// 全时累计的技能调用统计（供 Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）。
+    /// public init：app 层要为审计流水覆盖不到的源补行（hermes 的计数文件）。
     public struct SkillUsageStat: Equatable, Sendable, Identifiable {
         public var source: AgentSource
         public var name: String
@@ -968,6 +969,14 @@ public final class ToolCallsRepo {
         public var lastTs: Date?
         public var tokens: Int
         public var id: String { "\(source.rawValue):\(name)" }
+
+        public init(source: AgentSource, name: String, count: Int, lastTs: Date?, tokens: Int) {
+            self.source = source
+            self.name = name
+            self.count = count
+            self.lastTs = lastTs
+            self.tokens = tokens
+        }
     }
 
     /// MCP 调用按原始名全时聚合（名的形态因源而异：codex/kimi 是 `server.tool`，

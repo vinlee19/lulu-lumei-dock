@@ -440,6 +440,41 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(
             HermesConfigEditor.setSkillDisabled("plan", disabled: false, in: doc), doc)
     }
+
+    t.suite("HermesSkillUsage（skills/.usage.json 技能计数）")
+
+    t.test("读取真实形状：use_count>0 才出、6 位微秒时间戳可解析、坏文件回空") {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-hermes-usage-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(".usage.json")
+        // 实勘 2026-08 的字段与时间戳格式（6 位微秒）
+        try """
+        {
+          "codebase-inspection": {
+            "last_used_at": "2026-07-25T03:00:53.141994+00:00",
+            "use_count": 3, "view_count": 1, "state": "active"
+          },
+          "never-used": { "last_used_at": null, "use_count": 0 }
+        }
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let stats = HermesSkillUsage.read(url: file)
+        try expectEqual(stats.count, 1, "use_count == 0 的不出")
+        try expectEqual(stats.first?.slug, "codebase-inspection")
+        try expectEqual(stats.first?.useCount, 3)
+        let last = try require(stats.first?.lastUsedAt)
+        // 6 位微秒截到毫秒解析：秒级必须准确
+        try expect(abs(last.timeIntervalSince1970 - 1_784_948_453.141) < 1,
+            "时间戳解析偏差过大：\(last.timeIntervalSince1970)")
+
+        try expectEqual(
+            HermesSkillUsage.read(url: dir.appendingPathComponent("missing.json")), [],
+            "文件缺失回空")
+        try "not-json".write(to: file, atomically: true, encoding: .utf8)
+        try expectEqual(HermesSkillUsage.read(url: file), [], "坏 JSON 回空")
+    }
 }
 
 /// 小工具：Optional 解包失败即报错（避免测试里散落 force unwrap）
