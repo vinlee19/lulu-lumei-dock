@@ -2,6 +2,38 @@
 
 > 从会话历史中提取用户提问，构建可浏览、可搜索、可复用的 Prompt 库。
 
+## 0. 修订记录（2026-09-05，对照实现回填）
+
+本文是 MVP（v0.30.0）的设计；之后两批工作有意偏离了其中几条，实现以下面为准：
+
+- **§1.3 / §5.4 「发送到终端」改为直接启动会话**：实现是 `cd '<cwd>' && claude '<prompt>'`
+  （`PromptLaunchCommand`），不再是"复制 + 开终端让用户手动粘贴"。用户明确点了"启动"，
+  多一步粘贴只是摩擦；prompt 走 POSIX 单引号转义，多行用 `$'\n'` 拼接以适配 AppleScript
+  `do script`。只开放 claude / codex（其余 CLI 是否接受位置参数 prompt 未实勘）。
+- **§3.4 步骤 4 的 stale 标记没有做；「删除」改为软删除**：`prompts.hidden_at`（幂等补列，
+  不升 schema 版本）。硬删会被会话下一次增量提取的 upsert 原样复活，所以移除必须像收藏一样
+  是留在行上的用户事实；所有读路径按 `hidden_at IS NULL` 过滤。会话消失的行仍然保留。
+- **阶段三 #14「自动标签」实现为复用价值分类而不是标签**：`PromptClassifier` 内存派生五类
+  （noise / trivial / followup / instruction / paste），阈值来自本机 2,395 条实勘（≤12 字符的
+  418 条全是"继续"类；12.4% 是 `<command-name>` 等伪用户消息；最长一条 1.98MB 日志粘贴）。
+  分类不入库，阈值迭代不需要刷库。噪音在采集端就剥掉（`TurnSlicer.realPrompt`），
+  存量噪音行只隐藏不删。
+- **§3.9 / 阶段二 #13「内容分组」实现为「高频重复」段**：归一化指纹（前 512 字符）聚类、
+  ≥3 次成组，除噪除琐碎后再聚，带 ×N / 跨项目 / N 次费劲徽章。
+- **阶段二 #10 详情页多出两个动作**：「升级为技能」（任意源，写完整 SKILL.md）与「升级为指令」
+  （claude 追加 `~/.claude/CLAUDE.md`、codex 追加 `AGENTS.md` / `AGENTS.override.md`，都落指令页；
+  落点由 `PromptInstructionDestination` 裁定，正文由 `EurekaInstall.PromptGraduationDocument` 生成）。
+  最初 Claude 分支写 `~/.claude/memories/<slug>.md`，但官方 `.claude` 目录参考与 memory 文档里
+  没有这个目录 —— Claude Code 只加载 CLAUDE.md 系列、`.claude/rules/` 与 `projects/<project>/memory/`
+  自动记忆 —— 写进去 Claude 永远读不到，故改为追加 CLAUDE.md。（Eureka「新建记忆」仍写
+  `~/.claude/memories/`，那是 Eureka 私有笔记，与本条无关，待另行决定。）
+- **新增评价体系**（本文未规划）：`prompt_eval` 派生表（schema v24），设计见
+  `docs/superpowers/plans/2026-08-24-prompt-evaluation.md`，方法论调研见
+  `docs/research/2026-08-24-prompt-evaluation-methods.md`。
+- **未做**：阶段三 #15 会话详情页的"本会话的 prompt"卡（详情页 TOC 已列出全部用户消息，
+  算部分替代）、#16 热门 prompt 排行（周报的"复用最多"是部分替代）。§7 的两条测试
+  （FTS 命中 prompt、命令面板含 `.prompt`）在 `KnowledgeLinkTests` 里补齐。
+
 ## 1. 背景与目标
 
 ### 1.1 问题

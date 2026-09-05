@@ -87,6 +87,41 @@ func promptLibraryTests(_ t: TestRunner) {
         try expect(prompts[0].text.contains("重构数据管道的增量加载逻辑"))
     }
 
+    t.test("排噪：注入块剥净跳过、caveat 后的真实提问保留、裸斜杠命令跳过") {
+        let file = try tempJSONL([
+            // 纯斜杠命令回显：剥净剩空 → 跳过
+            #"{"type":"user","message":{"role":"user","content":"<command-name>/plan</command-name><command-message>plan</command-message>"},"timestamp":"2026-08-23T10:00:00Z"}"#,
+            // caveat 注入块后跟真实提问：剥块后保留提问本体
+            #"{"type":"user","message":{"role":"user","content":"<local-command-caveat>注入的说明</local-command-caveat>帮我修复分页越界并补测试"},"timestamp":"2026-08-23T10:01:00Z"}"#,
+            // 本地命令输出：跳过
+            #"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Enabled plan mode</local-command-stdout>"},"timestamp":"2026-08-23T10:02:00Z"}"#,
+            // 裸斜杠命令：跳过
+            #"{"type":"user","message":{"role":"user","content":"/compact"},"timestamp":"2026-08-23T10:03:00Z"}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: file) }
+        let session = AgentSessionInfo(
+            source: .claude, id: "sess-noise", cwd: "/w/proj", name: nil,
+            lastActiveAt: Date(), sizeBytes: 0, transcriptPath: file.path)
+        let prompts = PromptExtractor.extract(from: session, at: Date())
+        try expectEqual(prompts.count, 1, "四条里只有 caveat 后带真实提问的那条该留下")
+        try expectEqual(prompts[0].text, "帮我修复分页越界并补测试", "注入块必须剥净")
+    }
+
+    t.test("超长粘贴截断入库（64K 上限 + 截断标记）") {
+        let huge = String(repeating: "x", count: 70000)
+        let file = try tempJSONL([
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"\(huge)\"},\"timestamp\":\"2026-08-23T10:00:00Z\"}"
+        ])
+        defer { try? FileManager.default.removeItem(at: file) }
+        let session = AgentSessionInfo(
+            source: .claude, id: "sess-huge", cwd: nil, name: nil,
+            lastActiveAt: Date(), sizeBytes: 0, transcriptPath: file.path)
+        let prompts = PromptExtractor.extract(from: session, at: Date())
+        try expectEqual(prompts.count, 1)
+        try expect(prompts[0].text.hasSuffix("…[已截断]"))
+        try expect(prompts[0].text.count < 66000)
+    }
+
     t.suite("PromptsRepo · upsert 与用户标注")
 
     func tempStore() throws -> (EurekaStore, URL) {
@@ -164,12 +199,40 @@ func promptLibraryTests(_ t: TestRunner) {
                 id: "claude:sess-2:0", source: .codex, sessionId: "sess-2", messageIdx: 0,
                 text: "b", timestamp: nil, cwd: nil, firstSeen: Date()),
         ])
-        try store.prompts.delete(id: "claude:sess-1:0")
+        try store.prompts.hide("claude:sess-1:0")
         let removed = try store.prompts.entry(id: "claude:sess-1:0")
         try expect(removed == nil)
         let kept = try store.prompts.entry(id: "claude:sess-2:0")
         try expect(kept?.text == "b")
         try expectEqual(try store.prompts.all().count, 1)
+    }
+
+    t.test("移除是用户事实：会话重提取不复活；all / favoriteCount / entry / 周报都不再计入") {
+        let (store, dbPath) = try tempStore()
+        defer { try? FileManager.default.removeItem(at: dbPath) }
+        let removedId = "claude:sess-1:0"
+        try store.prompts.upsertExtracted([
+            entry(removedId, text: "被移除的提问"),
+            entry("claude:sess-1:1", text: "留下的提问"),
+        ])
+        try store.prompts.setFavorite(removedId, favorite: true)
+        try store.prompts.recordUse(removedId, at: Date(timeIntervalSince1970: 150))
+        try store.prompts.hide(removedId)
+        // 会话还在活跃：下一次增量提取会把同一批 prompt 再 upsert 一遍
+        try store.prompts.upsertExtracted([
+            entry(removedId, text: "被移除的提问（会话追加后重提取）"),
+            entry("claude:sess-1:1", text: "留下的提问"),
+        ])
+        try expectEqual(
+            try store.prompts.all().map(\.id), ["claude:sess-1:1"],
+            "被移除的条目不得随重提取复活")
+        let hidden = try store.prompts.entry(id: removedId)
+        try expect(hidden == nil, "entry(id:) 不应再取回被移除的条目")
+        try expectEqual(try store.prompts.favoriteCount(), 0, "被移除条目的收藏不再计入")
+        let stats = try store.prompts.weeklyStats(
+            from: Date(timeIntervalSince1970: 0), to: Date(timeIntervalSince1970: 1_000))
+        try expectEqual(stats.askedCount, 1, "被移除条目不计入周报提问数")
+        try expect(stats.topReused.isEmpty, "被移除条目的复用记录不进周报")
     }
 
     t.test("tags JSON 编解码：空数组与非 ASCII 往返") {
@@ -222,5 +285,28 @@ func promptLibraryTests(_ t: TestRunner) {
         try expectEqual(stats.topReused.count, 1, "只有 s1 的 last_used_at 落窗")
         try expectEqual(stats.topReused[0].id, "claude:s1:0")
         try expectEqual(stats.topReused[0].useCount, 2)
+    }
+
+    t.test("asked 口径排除存量噪音（`<` 标签前缀与 `/` 斜杠命令），与分类器判据一致") {
+        let (store, dbPath) = try tempStore()
+        defer { try? FileManager.default.removeItem(at: dbPath) }
+        func at(_ id: String, text: String) -> PromptEntry {
+            PromptEntry(
+                id: id, source: .claude, sessionId: "s", messageIdx: 0,
+                text: text, timestamp: Date(timeIntervalSince1970: 1500), cwd: nil,
+                firstSeen: Date(timeIntervalSince1970: 1500))
+        }
+        try store.prompts.upsertExtracted([
+            at("claude:s:0", text: "<command-name>/plan</command-name>"),
+            at("claude:s:1", text: "/compact"),
+            at("claude:s:2", text: "真实提问：修复分页越界"),
+        ])
+        let stats = try store.prompts.weeklyStats(
+            from: Date(timeIntervalSince1970: 1000), to: Date(timeIntervalSince1970: 2000))
+        try expectEqual(stats.askedCount, 1, "两条噪音行不计入 asked")
+        // SQL 侧近似判据必须与内存分类器一致：这三条里恰好前两条是 noise
+        try expectEqual(PromptClassifier.classify("<command-name>/plan</command-name>"), .noise)
+        try expectEqual(PromptClassifier.classify("/compact"), .noise)
+        try expect(PromptClassifier.classify("真实提问：修复分页越界") != .noise)
     }
 }

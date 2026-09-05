@@ -235,7 +235,9 @@ struct PopoverRootView: View {
         case .plans:
             PlansView(service: plansService)
         case .prompts:
-            PromptsView(service: promptsService, sessionBrowser: sessionBrowser)
+            PromptsView(
+                service: promptsService, sessionBrowser: sessionBrowser,
+                skillMemory: skillMemoryService)
         case .agents:
             AgentsView(service: agentConfigService, usageService: usageService)
         case .mcp:

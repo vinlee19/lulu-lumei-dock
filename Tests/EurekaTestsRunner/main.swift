@@ -124,5 +124,8 @@ knowledgeLinkTests(t)
 contextBreakdownTests(t)
 historyPageTests(t)
 promptLibraryTests(t)
+promptClassifierTests(t)
+promptEvalTests(t)
+promptGraduationTests(t)
 
 t.finish()

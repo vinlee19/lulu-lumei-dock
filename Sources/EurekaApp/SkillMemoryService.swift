@@ -377,6 +377,88 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
+    /// Prompt 毕业为技能：建目录并一次写入完整 SKILL.md（与 createSkill 的空模板不同，
+    /// 毕业自带内容）。同名已存在则失败回 nil、绝不覆盖。成功回创建的 SKILL.md 路径
+    /// （调用方拿它发 .eurekaRevealKnowledge 跳转）。
+    func createSkillFromPrompt(
+        source: AgentSource, name: String, description: String, body: String,
+        completion: ((String?) -> Void)? = nil
+    ) {
+        queue.async { [weak self] in
+            let root = Self.writableSkillRoot(for: source)
+            let slug = Self.slugify(name)
+            let dir = root.appendingPathComponent(slug, isDirectory: true)
+            let file = dir.appendingPathComponent("SKILL.md")
+            var created: String?
+            do {
+                if !FileManager.default.fileExists(atPath: file.path) {
+                    try FileManager.default.createDirectory(
+                        at: dir, withIntermediateDirectories: true)
+                    // 正文生成在 EurekaInstall（纯文本、有单测）：frontmatter 的 YAML 转义不在这里手搓
+                    let content = PromptGraduationDocument.skill(
+                        slug: slug, description: description, body: body)
+                    try content.write(to: file, atomically: true, encoding: .utf8)
+                    created = file.path
+                }
+            } catch {
+                self?.report(error)
+            }
+            DispatchQueue.main.async { completion?(created); self?.refresh(force: true) }
+        }
+    }
+
+    /// Prompt 毕业为持久指令：追加一节到该 agent **每次会话都加载**的共享指令文件。落点由
+    /// `PromptInstructionDestination` 裁定（UI 的目标列表、reveal 的 kind 同源）：claude →
+    /// `~/.claude/CLAUDE.md`（不是 `~/.claude/memories/`，Claude Code 不读那个目录，见枚举注释）；
+    /// codex → `~/.codex/AGENTS.md`，存在 `AGENTS.override.md` 时追加到它（Codex 只加载两者中第一个）。
+    /// 读-追加-写，写前留 .bak —— 共享文件绝不整写覆盖；**读失败即放弃**，绝不拿默认头替换掉
+    /// 读不出来的原文。正文拼接在 EurekaInstall.PromptGraduationDocument（纯文本、有单测）。
+    /// 成功回写入的文件路径。
+    func graduatePromptToInstructions(
+        source: AgentSource, name: String, body: String,
+        completion: ((String?) -> Void)? = nil
+    ) {
+        guard let destination = PromptInstructionDestination.destination(for: source) else {
+            DispatchQueue.main.async { completion?(nil) }
+            return
+        }
+        queue.async { [weak self] in
+            var created: String?
+            let fm = FileManager.default
+            do {
+                let file: URL
+                switch destination {
+                case .claudeUserInstructions:
+                    file = SkillMemoryIndexer.claudeHome().appendingPathComponent("CLAUDE.md")
+                case .codexAgentsFile:
+                    let home = SkillMemoryIndexer.codexHome()
+                    let overrideExists = fm.fileExists(
+                        atPath: home.appendingPathComponent("AGENTS.override.md").path)
+                    file = home.appendingPathComponent(
+                        PromptGraduationDocument.codexInstructionFileName(
+                            overrideExists: overrideExists))
+                }
+                try fm.createDirectory(
+                    at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                var existing: String?
+                if fm.fileExists(atPath: file.path) {
+                    existing = try String(contentsOf: file, encoding: .utf8)
+                    let backup = file.path + ".bak.eureka.\(Self.timestamp())"
+                    try? fm.removeItem(atPath: backup)
+                    try? fm.copyItem(atPath: file.path, toPath: backup)
+                }
+                try PromptGraduationDocument.appendingInstructionSection(
+                    to: existing, title: name, body: body,
+                    defaultHeader: destination.defaultHeader)
+                    .write(to: file, atomically: true, encoding: .utf8)
+                created = file.path
+            } catch {
+                self?.report(error)
+            }
+            DispatchQueue.main.async { completion?(created); self?.refresh(force: true) }
+        }
+    }
+
     func createSkill(source: AgentSource, name: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             let root = Self.writableSkillRoot(for: source)

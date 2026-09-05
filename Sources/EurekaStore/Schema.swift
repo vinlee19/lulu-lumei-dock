@@ -1,6 +1,12 @@
 import Foundation
 
 enum Schema {
+    /// （v24 内补列，不升版本）prompts 新增 hidden_at（用户"移除"= 软删除时间戳）。
+    ///      硬删会被下一次增量提取 upsert 复活（会话还活跃时整批重写），所以移除必须像
+    ///      favorite 一样是留在行上的用户事实。补列走幂等 ALTER；不升版本是因为升版本会
+    ///      DROP 全部派生表触发一次全量重扫，为一列不值。老版本读这张表也不受影响。
+    /// v24：新增 prompt_eval（Prompt 评价：轮内诊断 + 轮后纠偏 + 静态结构，全列由
+    ///      transcript 重算可得 → 纯派生表，走 DROP 块，丢了只会触发一次全量重评价）。
     /// v23：新增 prompts + prompt_sessions（Prompt 库）。prompts 混合派生与事实：
     ///      正文/时间戳可由 transcript 重提取，但 favorite/tags/use_count/last_used_at
     ///      是用户写入 → 与 task_history 同待遇，升级不 DROP；prompt_sessions 是纯
@@ -31,7 +37,7 @@ enum Schema {
     /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
     /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
     /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
-    static let version: Int64 = 23
+    static let version: Int64 = 24
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
@@ -52,6 +58,7 @@ enum Schema {
             DROP TABLE IF EXISTS knowledge_fts;
             DROP TABLE IF EXISTS knowledge_docs;
             DROP TABLE IF EXISTS prompt_sessions;
+            DROP TABLE IF EXISTS prompt_eval;
             """)
         }
         // v15 建的 session_terminals 主键含可空列，upsert 失效攒了重复行。该表尚未随任何
@@ -255,7 +262,9 @@ enum Schema {
 
         -- Prompt 库条目：从会话 transcript 提取的用户提问（一行一条）。
         -- 正文列（text/timestamp/cwd/first_seen）可由 transcript 重提取；用户标注列
-        -- （favorite/tags/use_count/last_used_at）是事实 → 升级不 DROP，重提取只刷新正文列。
+        -- （favorite/tags/use_count/last_used_at/hidden_at）是事实 → 升级不 DROP，
+        -- 重提取只刷新正文列。hidden_at 非空 = 用户已从库中移除（软删除：行必须留着，
+        -- 否则会话下一次重提取会把它原样 upsert 回来）；所有读路径按 hidden_at IS NULL 过滤。
         CREATE TABLE IF NOT EXISTS prompts (
             id TEXT PRIMARY KEY,
             source TEXT NOT NULL,
@@ -269,7 +278,8 @@ enum Schema {
             use_count INTEGER NOT NULL DEFAULT 0,
             last_used_at REAL,
             first_seen REAL NOT NULL,
-            updated_at REAL NOT NULL
+            updated_at REAL NOT NULL,
+            hidden_at REAL
         );
         CREATE INDEX IF NOT EXISTS idx_prompts_source ON prompts(source);
         CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id);
@@ -283,6 +293,24 @@ enum Schema {
             source TEXT NOT NULL,
             extracted_at REAL NOT NULL
         );
+
+        -- Prompt 评价（轮内诊断 + 轮后纠偏 + 静态结构）。**全列纯派生**：随提取管线
+        -- 从 transcript 重算，升级随 DROP 块重建。评价不可用的源不写行（区分
+        -- "没算"与"clean"）。severity 对应 TurnDiagnostics.Severity.rawValue。
+        CREATE TABLE IF NOT EXISTS prompt_eval (
+            prompt_id TEXT PRIMARY KEY,
+            severity INTEGER NOT NULL DEFAULT 0,
+            rule_ids TEXT NOT NULL DEFAULT '',
+            step_count INTEGER NOT NULL DEFAULT 0,
+            error_steps INTEGER NOT NULL DEFAULT 0,
+            duration REAL,
+            reformulated INTEGER NOT NULL DEFAULT 0,
+            corrective INTEGER NOT NULL DEFAULT 0,
+            outcome TEXT NOT NULL DEFAULT 'clean',
+            structure_flags TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_prompt_eval_severity
+            ON prompt_eval(severity) WHERE severity > 0;
         """)
 
         // task_history 不参与 drop/重建（真实历史），旧库补列走幂等 ALTER
@@ -290,6 +318,8 @@ enum Schema {
         // sync_state 也是事实表（记录远端已有什么），同样只补列不重建。
         // category 是备份构成分两级展示的依据；老行为 NULL → 回退按 remote_key 解析。
         try addColumnIfMissing(db, table: "sync_state", column: "category", type: "TEXT")
+        // prompts 同为事实表（收藏/标签/移除是用户写入），v24 库补软删除列，不重建。
+        try addColumnIfMissing(db, table: "prompts", column: "hidden_at", type: "REAL")
 
         try db.execute("PRAGMA user_version = \(version)")
     }

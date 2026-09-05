@@ -2,7 +2,8 @@ import EurekaKit
 import Foundation
 
 /// Prompt 库持久化：提取 upsert（保留用户标注）+ 增量指纹 + 列表/标注读写。
-/// favorite/tags/use_count 是用户写入的事实——重提取只刷新正文列，绝不覆盖标注列。
+/// favorite/tags/use_count/hidden_at 是用户写入的事实——重提取只刷新正文列，绝不覆盖标注列。
+/// "移除"是软删除（hidden_at）：行留在表里挡住重提取的 upsert，所有读路径按 hidden_at IS NULL 过滤。
 public final class PromptsRepo {
     private let db: SQLiteDB
 
@@ -36,6 +37,62 @@ public final class PromptsRepo {
         }
     }
 
+    /// 评价入库：prompt_eval 全列纯派生 → ON CONFLICT 整行覆盖（无用户列要保）
+    public func upsertEval(_ rows: [PromptEval]) throws {
+        guard !rows.isEmpty else { return }
+        try db.transaction {
+            for row in rows {
+                try db.run("""
+                INSERT INTO prompt_eval
+                    (prompt_id, severity, rule_ids, step_count, error_steps, duration,
+                     reformulated, corrective, outcome, structure_flags)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(prompt_id) DO UPDATE SET
+                    severity = excluded.severity,
+                    rule_ids = excluded.rule_ids,
+                    step_count = excluded.step_count,
+                    error_steps = excluded.error_steps,
+                    duration = excluded.duration,
+                    reformulated = excluded.reformulated,
+                    corrective = excluded.corrective,
+                    outcome = excluded.outcome,
+                    structure_flags = excluded.structure_flags
+                """, [
+                    .text(row.promptId), .int(Int64(row.severity.rawValue)),
+                    .text(row.ruleIds.joined(separator: ",")),
+                    .int(Int64(row.stepCount)), .int(Int64(row.errorSteps)),
+                    row.duration.map { SQLiteValue.real($0) } ?? .null,
+                    .int(Int64(row.reformulated.rawValue)),
+                    .int(row.corrective ? 1 : 0),
+                    .text(row.outcome), .text(row.structureFlags.encoded),
+                ])
+            }
+        }
+    }
+
+    /// 全量评价（prompt_id → 评价）；服务层随刷新读回缓存
+    public func evalMap() throws -> [String: PromptEval] {
+        let rows = try db.query("""
+        SELECT prompt_id, severity, rule_ids, step_count, error_steps, duration,
+               reformulated, corrective, outcome, structure_flags
+        FROM prompt_eval
+        """) { row -> PromptEval in
+            PromptEval(
+                promptId: row.text(0) ?? "",
+                severity: TurnDiagnostics.Severity(rawValue: Int(row.int(1))) ?? .clean,
+                ruleIds: (row.text(2) ?? "").split(separator: ",").map(String.init),
+                stepCount: Int(row.int(3)),
+                errorSteps: Int(row.int(4)),
+                duration: row.isNull(5) ? nil : row.real(5),
+                reformulated: PromptFollowupSignal.Reformulation(
+                    rawValue: Int(row.int(6))) ?? .none,
+                corrective: row.int(7) != 0,
+                outcome: row.text(8) ?? "clean",
+                structureFlags: PromptStructure.Flags.decode(row.text(9) ?? ""))
+        }
+        return Dictionary(uniqueKeysWithValues: rows.map { ($0.promptId, $0) })
+    }
+
     /// 记录会话提取指纹（lastActiveAt 未变即可跳过）
     public func markExtracted(sessionId: String, source: AgentSource, at date: Date) throws {
         try db.run("""
@@ -54,28 +111,28 @@ public final class PromptsRepo {
         return Dictionary(uniqueKeysWithValues: rows)
     }
 
-    /// 全量列表（first_seen 倒序 = 最新提取在前）
+    /// 全量列表（first_seen 倒序 = 最新提取在前；已移除的不返回）
     public func all() throws -> [PromptEntry] {
         try db.query("""
         SELECT id, source, session_id, message_idx, text, timestamp, cwd,
                favorite, tags, use_count, last_used_at, first_seen
-        FROM prompts ORDER BY first_seen DESC, id
+        FROM prompts WHERE hidden_at IS NULL ORDER BY first_seen DESC, id
         """) { Self.mapRow($0) }
     }
 
-    /// 收藏计数（统计卡用）
+    /// 收藏计数（统计卡用；已移除的不计）
     public func favoriteCount() throws -> Int {
         try db.query(
-            "SELECT COUNT(*) FROM prompts WHERE favorite = 1"
+            "SELECT COUNT(*) FROM prompts WHERE favorite = 1 AND hidden_at IS NULL"
         ) { Int($0.int(0)) }.first ?? 0
     }
 
-    /// 按 id 取单条（详情直达）
+    /// 按 id 取单条（详情直达；已移除的视同不存在）
     public func entry(id: String) throws -> PromptEntry? {
         try db.query("""
         SELECT id, source, session_id, message_idx, text, timestamp, cwd,
                favorite, tags, use_count, last_used_at, first_seen
-        FROM prompts WHERE id = ?
+        FROM prompts WHERE id = ? AND hidden_at IS NULL
         """, [.text(id)]) { Self.mapRow($0) }.first
     }
 
@@ -101,9 +158,13 @@ public final class PromptsRepo {
         """, [.date(date), .text(id)])
     }
 
-    /// 单条移除（用户主动删；会话消失不自动删——收藏可能指向已结束的会话）
-    public func delete(id: String) throws {
-        try db.run("DELETE FROM prompts WHERE id = ?", [.text(id)])
+    /// 单条移除 = 软删除（置 hidden_at）。硬删不行：会话还活跃时下一次增量提取会把
+    /// 整批 prompt 重新 upsert，被删的那条会原样复活；留行则 ON CONFLICT 只刷正文列，
+    /// hidden_at 与其它用户标注一样被保住。会话消失也不自动删——收藏可能指向已结束的会话。
+    public func hide(_ id: String, at date: Date = Date()) throws {
+        try db.run(
+            "UPDATE prompts SET hidden_at = ? WHERE id = ?",
+            [.date(date), .text(id)])
     }
 
     // MARK: - 周报统计
@@ -119,10 +180,18 @@ public final class PromptsRepo {
 
     /// 周报统计：提问时间取 COALESCE(timestamp, first_seen)（个别源无消息时间戳，
     /// 退化为提取时间）；复用按 last_used_at 落窗判定（use_count 是全期累计值）。
+    ///
+    /// asked 口径排除存量噪音行：库里遗留的伪用户消息全以 `<`（注入标签）或 `/`
+    /// （裸斜杠命令）开头 —— 与内存分类器 PromptClassifier.isInjectedArtifact 的
+    /// 前缀判据对应（SQL 侧做近似即可；采集端已排噪，新行不会再有这些前缀）。
+    /// 琐碎短语（"继续"）仍计入：口径是"你问了几次"，不是"几次有价值"。
+    /// 用户移除的条目（hidden_at）两边都不计：移除多半是误粘贴/不想再看到的东西。
     public func weeklyStats(from: Date, to: Date, topLimit: Int = 5) throws -> WeeklyPromptStats {
         let askedRows = try db.query("""
         SELECT source, COUNT(*) FROM prompts
         WHERE COALESCE(timestamp, first_seen) >= ? AND COALESCE(timestamp, first_seen) < ?
+          AND hidden_at IS NULL
+          AND text NOT LIKE '<%' AND SUBSTR(text, 1, 1) != '/'
         GROUP BY source
         """, [.date(from), .date(to)]) { row in
             (AgentSource(rawValue: row.text(0) ?? "") ?? .claude, Int(row.int(1)))
@@ -137,7 +206,7 @@ public final class PromptsRepo {
         SELECT id, source, session_id, message_idx, text, timestamp, cwd,
                favorite, tags, use_count, last_used_at, first_seen
         FROM prompts
-        WHERE last_used_at >= ? AND last_used_at < ? AND use_count > 0
+        WHERE last_used_at >= ? AND last_used_at < ? AND use_count > 0 AND hidden_at IS NULL
         ORDER BY use_count DESC LIMIT ?
         """, [.date(from), .date(to), .int(Int64(topLimit))]) { Self.mapRow($0) }
         return WeeklyPromptStats(askedCount: asked, bySource: bySource, topReused: reused)

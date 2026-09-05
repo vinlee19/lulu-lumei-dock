@@ -93,6 +93,33 @@ func knowledgeLinkTests(_ t: TestRunner) {
         try expectEqual(try store.knowledge.search("修复").count, 1)
     }
 
+    t.test("knowledge：prompt 以 kind=prompt / path=库 id 入索引可命中；两种 prune 互不误删") {
+        let path = tempStorePath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let store = try EurekaStore(path: path)
+        // indexPrompts 写入的形态：path 就是 prompt 库 id（"source:sessionId:msgIdx"）
+        try store.knowledge.replaceDoc(
+            path: "claude:sess-1:3", kind: "prompt", source: "claude",
+            title: "修复分页越界", project: "eureka", size: 10, mtime: 1,
+            body: "修复分页越界并补边界测试")
+        try store.knowledge.replaceDoc(
+            path: "/tmp/a/SKILL.md", kind: "skill", source: "claude",
+            title: "paging", project: nil, size: 10, mtime: 1,
+            body: "分页越界处理套路")
+        let hits = try store.knowledge.search("分页越界")
+        try expectEqual(hits.map(\.kind).sorted(), ["prompt", "skill"])
+        let prompt = hits.first { $0.kind == "prompt" }
+        try expectEqual(prompt?.path, "claude:sess-1:3", "prompt 命中的 path 就是库 id，⌘K 直达靠它")
+        // 文件型 prune 不能拿 prompt id 当路径误删；prompt 自己的 prune 也不碰文件型
+        try store.knowledge.prune(keeping: ["/tmp/a/SKILL.md"])
+        try expectEqual(
+            try store.knowledge.search("分页越界").count, 2, "文件型 prune 不该删 prompt 文档")
+        try store.knowledge.prunePrompts(keeping: [])
+        try expectEqual(
+            try store.knowledge.search("分页越界").map(\.kind), ["skill"],
+            "prunePrompts 只删 prompt，技能文档保留")
+    }
+
     t.test("indexer：条目映射成 doc（kind / title / project 各归各位）") {
         let skill = SkillEntry(
             source: .claude, name: "tdd", description: nil,
@@ -141,6 +168,25 @@ func knowledgeLinkTests(_ t: TestRunner) {
         let merged = CommandPalette.merge([a, b, dup], perKindCap: 5)
         try expectEqual(merged.count, 2)
         try expectEqual(merged.filter { $0.kind == .skill }.count, 1)
+    }
+
+    t.test("palette：Prompt 类别 —— 有显示名、reveal 不带 kind（走 .eurekaRevealPrompt）、参与合并与截断") {
+        try expectEqual(CommandPalette.Kind.prompt.label, "Prompt")
+        try expect(CommandPalette.Kind.prompt.revealKind == nil, "Prompt 直达走专用通知，不走知识页 kind 路由")
+        // 元数据命中（标题）与 FTS 命中（正文）指向同一条 prompt：按 key（库 id）去重取先出现者
+        let meta = CommandPalette.Hit(
+            kind: .prompt, key: "claude:s:1", title: "修复分页越界", subtitle: "Claude Code",
+            snippet: nil, sessionId: nil, messageIdx: nil)
+        let fts = CommandPalette.Hit(
+            kind: .prompt, key: "claude:s:1", title: "修复分页越界", subtitle: "Claude Code",
+            snippet: "…分页越界并补…", sessionId: nil, messageIdx: nil)
+        let other = CommandPalette.Hit(
+            kind: .prompt, key: "codex:s:2", title: "补集成测试", subtitle: "Codex",
+            snippet: nil, sessionId: nil, messageIdx: nil)
+        let merged = CommandPalette.merge([meta, fts, other], perKindCap: 5)
+        try expectEqual(merged.map(\.key), ["claude:s:1", "codex:s:2"])
+        try expect(merged[0].snippet == nil, "同 key 取先出现者（元数据命中）")
+        try expectEqual(CommandPalette.merge([meta, other], perKindCap: 1).count, 1, "按组截断对 prompt 同样生效")
     }
 
     t.test("palette：snippet 就近裁剪，命中词在窗口内") {
