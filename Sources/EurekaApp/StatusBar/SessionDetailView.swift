@@ -18,6 +18,13 @@ struct SessionDetailView: View {
     @State private var roleFilter: RoleFilter = .all
     @State private var searchQuery = ""
     @State private var matchIndex = 0
+    /// 搜索命中（顺序数组供上下条导航，Set 供行渲染 O(1) 查询）。
+    /// 在后台算而不是 computed property：加载全部后的超长会话逐键全文扫描会卡主线程，
+    /// 且 computed 版本在每个可见行的 contains 里被反复重算过
+    @State private var matches: [Int] = []
+    @State private var matchSet: Set<Int> = []
+    /// 命中重算代际：慢结果回来时已被更新的输入超越则丢弃
+    @State private var matchGeneration = 0
     @State private var exportNote: String?
     /// 已展开的轨迹消息 id（切会话时清空，避免新会话同 id 意外展开）
     @State private var expandedTrails: Set<Int> = []
@@ -51,7 +58,7 @@ struct SessionDetailView: View {
                             .frame(maxWidth: .infinity)
                         if showTOC && !userMessages.isEmpty {
                             tocPane
-                                .frame(minWidth: 160, idealWidth: 210, maxWidth: 360)
+                                .frame(minWidth: 160, idealWidth: 230, maxWidth: 560)
                         }
                     }
                 }
@@ -83,7 +90,10 @@ struct SessionDetailView: View {
         }
         // 全文命中跳转：transcript 加载完成后滚到目标消息（延迟一拍等 LazyVStack 布局）
         .onChange(of: service.transcriptLoading) { _, loading in
-            guard !loading, let pending = service.consumePendingJump() else { return }
+            guard !loading else { return }
+            // 首次加载 / 切会话 / 「加载全部」都从这里对新正文重算搜索命中
+            recomputeMatches(debounce: false)
+            guard let pending = service.consumePendingJump() else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 NotificationCenter.default.post(name: .eurekaJumpToMessage, object: pending)
             }
@@ -103,13 +113,34 @@ struct SessionDetailView: View {
         }
     }
 
-    /// 搜索命中的消息 id（在 displayMessages 内）
-    private var matchIDs: [Int] {
-        let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return [] }
-        return displayMessages
-            .filter { $0.text.lowercased().contains(query) }
-            .map(\.id)
+    /// 重算搜索命中：250ms 防抖（打字路径）+ 后台全文扫描 + 代际防串。
+    /// 算完自动跳到第一处命中（保持原 computed 版本的交互语义）。
+    private func recomputeMatches(debounce: Bool) {
+        matchGeneration += 1
+        let generation = matchGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + (debounce ? 0.25 : 0)) {
+            guard generation == matchGeneration else { return }
+            let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !query.isEmpty else {
+                matches = []
+                matchSet = []
+                matchIndex = 0
+                return
+            }
+            let messages = displayMessages
+            DispatchQueue.global(qos: .userInitiated).async {
+                let ids = messages
+                    .filter { $0.text.lowercased().contains(query) }
+                    .map(\.id)
+                DispatchQueue.main.async {
+                    guard generation == matchGeneration else { return }
+                    matches = ids
+                    matchSet = Set(ids)
+                    matchIndex = 0
+                    jumpToCurrentMatch()
+                }
+            }
+        }
     }
 
     // MARK: - 头部
@@ -121,6 +152,7 @@ struct SessionDetailView: View {
                 Text(session.displayName)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
+                    .help(session.displayName)
                 Spacer(minLength: 8)
                 Button {
                     service.resumeInTerminal(session)
@@ -419,8 +451,7 @@ struct SessionDetailView: View {
             .frame(width: 150)
             .controlSize(.mini)
             .onChange(of: roleFilter) { _, _ in
-                matchIndex = 0
-                jumpToCurrentMatch()
+                recomputeMatches(debounce: false)
             }
 
             Image(systemName: "magnifyingglass")
@@ -430,20 +461,19 @@ struct SessionDetailView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
                 .onChange(of: searchQuery) { _, _ in
-                    matchIndex = 0
-                    jumpToCurrentMatch()
+                    recomputeMatches(debounce: true)
                 }
-            if !matchIDs.isEmpty {
-                Text("\(min(matchIndex + 1, matchIDs.count))/\(matchIDs.count)")
+            if !matches.isEmpty {
+                Text("\(min(matchIndex + 1, matches.count))/\(matches.count)")
                     .font(.system(size: 9.5).monospacedDigit())
                     .foregroundStyle(.secondary)
                 Button {
-                    matchIndex = (matchIndex - 1 + matchIDs.count) % matchIDs.count
+                    matchIndex = (matchIndex - 1 + matches.count) % matches.count
                     jumpToCurrentMatch()
                 } label: { Image(systemName: "chevron.up").font(.system(size: 9)) }
                 .buttonStyle(.borderless)
                 Button {
-                    matchIndex = (matchIndex + 1) % matchIDs.count
+                    matchIndex = (matchIndex + 1) % matches.count
                     jumpToCurrentMatch()
                 } label: { Image(systemName: "chevron.down").font(.system(size: 9)) }
                 .buttonStyle(.borderless)
@@ -458,8 +488,8 @@ struct SessionDetailView: View {
     }
 
     private func jumpToCurrentMatch() {
-        guard matchIndex < matchIDs.count else { return }
-        NotificationCenter.default.post(name: .eurekaJumpToMessage, object: matchIDs[matchIndex])
+        guard matchIndex < matches.count else { return }
+        NotificationCenter.default.post(name: .eurekaJumpToMessage, object: matches[matchIndex])
     }
 
     // MARK: - 导出
@@ -506,6 +536,13 @@ struct SessionDetailView: View {
                     Text("仅显示前 \(service.transcript.count) 条")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.orange)
+                    Button("加载全部") {
+                        service.loadFullTranscript()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(Theme.brandFg)
+                    .help("超长会话默认按预算截断，点击完整加载（大文件会稍慢）")
                 }
                 Spacer()
             }
@@ -529,7 +566,7 @@ struct SessionDetailView: View {
                             ForEach(displayMessages) { message in
                                 MessageRowView(
                                     message: message,
-                                    isMatch: matchIDs.contains(message.id),
+                                    isMatch: matchSet.contains(message.id),
                                     expandedTrails: $expandedTrails)
                                     .id(message.id)
                             }
@@ -598,12 +635,15 @@ private struct TOCRow: View {
                 name: .eurekaJumpToMessage, object: message.id)
         } label: {
             HStack(alignment: .top, spacing: 6) {
+                // 胶囊而非定宽圆：三位数以上的序号（长会话到 400+）不能被截成「4…」
                 Text("\(index + 1)")
                     .font(.system(size: 9, weight: .semibold).monospacedDigit())
                     .foregroundStyle(hovering ? Theme.onBrand : Theme.brandFg)
-                    .frame(width: 16, height: 16)
+                    .padding(.horizontal, 4)
+                    .frame(minWidth: 16, minHeight: 16)
                     .background(
-                        Circle().fill(hovering ? Theme.brand : Theme.brand.opacity(0.1)))
+                        Capsule().fill(hovering ? Theme.brand : Theme.brand.opacity(0.1)))
+                    .fixedSize()
                 VStack(alignment: .leading, spacing: 1.5) {
                     if let ts = message.timestamp {
                         Text(ts, format: .dateTime.month(.twoDigits).day(.twoDigits)

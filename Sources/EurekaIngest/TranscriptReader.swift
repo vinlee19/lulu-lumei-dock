@@ -49,9 +49,14 @@ public enum TranscriptReader {
         return formatter
     }()
 
+    /// 默认加载预算。Claude 的预算同时计消息与工具步（一条 13k 行的真实会话
+    /// 在 2000 时只render出 1241 条消息就截断了）；LazyVStack 惰性建行，
+    /// 上限的意义只是防住病态超大文件，而不是省渲染。
+    public static let defaultMaxMessages = 20_000
+
     /// 统一入口：按 source 分派
     public static func load(
-        session: AgentSessionInfo, maxMessages: Int = 2000
+        session: AgentSessionInfo, maxMessages: Int = defaultMaxMessages
     ) -> Result {
         switch session.source {
         case .claude:

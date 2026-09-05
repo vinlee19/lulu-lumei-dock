@@ -418,9 +418,24 @@ final class SessionBrowserService: ObservableObject {
         transcriptTruncated = false
         contextBreakdown = nil  // 切会话即清空，估算完成后按 id 校验回填
         guard let session else { return }
+        loadTranscript(session)
+    }
+
+    /// 截断兜底：不设预算整段重载（详情页「加载全部」按钮用）。
+    /// 整文件本来就会读进内存解析，预算只约束消息数组的规模——
+    /// 用户显式要求时放开是安全的。
+    func loadFullTranscript() {
+        guard let session = selected else { return }
+        loadTranscript(session, maxMessages: Int.max)
+    }
+
+    private func loadTranscript(
+        _ session: AgentSessionInfo,
+        maxMessages: Int = TranscriptReader.defaultMaxMessages
+    ) {
         transcriptLoading = true
         queue.async { [weak self] in
-            let result = TranscriptReader.load(session: session)
+            let result = TranscriptReader.load(session: session, maxMessages: maxMessages)
             // 上下文用量估算：trae/antigravity 正文不可得，直接 nil
             var breakdown: ContextBreakdown?
             if session.source != .trae && session.source != .antigravity {

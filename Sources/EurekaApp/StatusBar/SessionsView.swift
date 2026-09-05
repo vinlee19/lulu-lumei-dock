@@ -74,8 +74,10 @@ struct SessionsView: View {
 
     private var twoPane: some View {
         HSplitView {
+            // maxWidth 决定分隔线的可拖行程：420 时只有 170pt，宽窗下拖起来
+            // 几乎无感（被反馈"不能调"）；620 在保住详情区 380 底线的前提下放开
             listPane
-                .frame(minWidth: 250, idealWidth: 300, maxWidth: 420)
+                .frame(minWidth: 250, idealWidth: 300, maxWidth: 620)
             SessionDetailView(
                 service: service,
                 skillMemory: skillMemory,
@@ -624,6 +626,7 @@ private struct SessionRow: View {
                     Text(session.displayName)
                         .font(.system(size: 12.5))
                         .lineLimit(1)
+                        .help(session.displayName)
                 }
                 HStack(spacing: 4) {
                     Text(relativeFormatter.localizedString(
