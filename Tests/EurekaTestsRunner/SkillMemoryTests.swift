@@ -103,6 +103,56 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expect(memories.contains { $0.source == .codex && $0.scope == "全局" }, "缺 Codex AGENTS.md")
     }
 
+    // 官方口径（code.claude.com/docs/en/memory「Organize rules with .claude/rules/」）：
+    // 用户级 ~/.claude/rules/ 与项目级 <repo>/.claude/rules/ 都是持久指令，.md 递归发现，
+    // 目录支持符号链接（共享一套规则到多个项目）且要能处理环。
+    t.test("Claude 规则目录：~/.claude/rules 与 <repo>/.claude/rules 递归收 .md 为指令，跟随符号链接且防环") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory
+            .appendingPathComponent("eureka-claude-rules-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: base) }
+        func write(_ text: String, to url: URL) throws {
+            try fm.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        let claudeHome = base.appendingPathComponent("claude", isDirectory: true)
+        let repo = base.appendingPathComponent("repo", isDirectory: true)
+        // 用户级：平铺 + 子目录；非 .md 不收
+        try write("- 2 空格缩进\n", to: claudeHome.appendingPathComponent("rules/preferences.md"))
+        try write("- 先 rebase 再 push\n", to: claudeHome.appendingPathComponent("rules/workflows/git.md"))
+        try write("scratch", to: claudeHome.appendingPathComponent("rules/notes.txt"))
+        // 项目级：带 paths: frontmatter 的路径规则 + 子目录
+        try write("---\npaths:\n  - \"src/api/**/*.ts\"\n---\n\n# API 规则\n",
+                  to: repo.appendingPathComponent(".claude/rules/testing.md"))
+        try write("# 样式\n", to: repo.appendingPathComponent(".claude/rules/frontend/style.md"))
+        // 共享规则目录经符号链接挂进项目；目录里再放一个指回自己的环
+        let shared = base.appendingPathComponent("shared-rules", isDirectory: true)
+        try write("# 安全\n", to: shared.appendingPathComponent("security.md"))
+        try fm.createSymbolicLink(
+            at: shared.appendingPathComponent("loop"), withDestinationURL: shared)
+        try fm.createSymbolicLink(
+            at: repo.appendingPathComponent(".claude/rules/shared"), withDestinationURL: shared)
+
+        let entries = SkillMemoryIndexer.indexMemory(
+            claudeHome: claudeHome,
+            codexHome: base.appendingPathComponent("nope"),
+            opencodeHome: base.appendingPathComponent("nope"),
+            claudeProjectsRoot: base.appendingPathComponent("nope"),
+            projectRoots: [(root: repo, name: "repo")]
+        ).filter { $0.source == .claude }
+        try expect(entries.allSatisfy { $0.kind == .instructions }, "规则文件全部是指令，不是记忆")
+        let global = entries.filter { $0.projectName == nil }
+        try expectEqual(
+            Set(global.map(\.scope)), ["preferences", "workflows/git"],
+            "用户级规则 scope = rules 内相对路径；实得 \(global.map(\.scope))")
+        let project = entries.filter { $0.projectName == "repo" }
+        try expectEqual(
+            Set(project.map(\.scope)), ["testing", "frontend/style", "shared/security"],
+            "项目级规则含符号链接目录里的文件；实得 \(project.map(\.scope))")
+        try expectEqual(project.count, 3, "环不得产出重复条目")
+    }
+
     t.test("Codex 记忆语义：override 优先、目录链指令可见、生成 memory 只读") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory

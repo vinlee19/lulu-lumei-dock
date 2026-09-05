@@ -632,6 +632,11 @@ public enum SkillMemoryIndexer {
         // Claude 全局 CLAUDE.md
         add(claudeHome.appendingPathComponent("CLAUDE.md"), source: .claude,
             scope: "全局", kind: .instructions)
+        // Claude 用户级规则 ~/.claude/rules/**/*.md（官方：无 paths: 的每次会话都加载，
+        // 有 paths: frontmatter 的按文件匹配按需加载）→ 指令，scope = rules 内相对路径
+        for rule in enumerateRules(claudeHome.appendingPathComponent("rules", isDirectory: true)) {
+            add(rule.url, source: .claude, scope: rule.scope, kind: .instructions)
+        }
         // Claude ~/.claude/memories/**/*.md（用户自建记忆）
         for file in enumerateMarkdown(claudeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .claude, scope: file.deletingPathExtension().lastPathComponent)
@@ -824,6 +829,12 @@ public enum SkillMemoryIndexer {
         for (root, name) in projectRoots {
             add(root.appendingPathComponent("CLAUDE.md"), source: .claude,
                 scope: name, projectName: name, kind: .instructions)
+            // Claude 项目规则 <repo>/.claude/rules/**/*.md（同用户级；官方支持用符号链接
+            // 把共享规则目录挂进项目，枚举跟随链接并防环）
+            for rule in enumerateRules(root.appendingPathComponent(".claude/rules", isDirectory: true)) {
+                add(rule.url, source: .claude, scope: rule.scope,
+                    projectName: name, kind: .instructions)
+            }
             add(root.appendingPathComponent("GEMINI.md"), source: .gemini,
                 scope: name, projectName: name, kind: .instructions)
             add(root.appendingPathComponent("QWEN.md"), source: .qwen,
@@ -909,6 +920,39 @@ public enum SkillMemoryIndexer {
             files.append(url)
         }
         return files
+    }
+
+    /// Claude 规则目录枚举（官方 `.claude/rules/`：.md 递归发现；目录支持符号链接，用来把一套
+    /// 共享规则挂进多个项目；环要能处理）。`enumerateMarkdown` 的 FileManager.enumerator 不进
+    /// 符号链接目录，所以这里手写递归：跟随链接、用已访问的**真实路径**集合挡环、断链跳过。
+    /// 列目录必须用 path 版 `contentsOfDirectory(atPath:)` 配真实路径 —— URL 版对"指向目录的
+    /// 符号链接"直接返回空（实测），path 版走 opendir 会跟随。子项 URL 仍拼在**逻辑**路径上：
+    /// 条目 path 与 scope 都用用户在项目里看到的名字（`shared/security`），不暴露链接目标。
+    static func enumerateRules(_ dir: URL) -> [(url: URL, scope: String)] {
+        let fm = FileManager.default
+        var visited = Set<String>()
+        var result: [(url: URL, scope: String)] = []
+        func walk(_ directory: URL, prefix: String) {
+            let real = directory.resolvingSymlinksInPath().standardizedFileURL.path
+            guard !visited.contains(real) else { return }
+            visited.insert(real)
+            let names = ((try? fm.contentsOfDirectory(atPath: real)) ?? [])
+                .filter { !$0.hasPrefix(".") }
+                .sorted()
+            for name in names {
+                let child = directory.appendingPathComponent(name)
+                var isDirectory: ObjCBool = false
+                // fileExists 跟随符号链接：链接目录按目录走，断链直接跳过
+                guard fm.fileExists(atPath: child.path, isDirectory: &isDirectory) else { continue }
+                if isDirectory.boolValue {
+                    walk(child, prefix: prefix + name + "/")
+                } else if child.pathExtension.lowercased() == "md" {
+                    result.append((child, prefix + child.deletingPathExtension().lastPathComponent))
+                }
+            }
+        }
+        walk(dir, prefix: "")
+        return result
     }
 
     /// qoder 记忆的展示 scope：相对 memories 根的去扩展名路径；
