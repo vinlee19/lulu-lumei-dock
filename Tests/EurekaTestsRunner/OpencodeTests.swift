@@ -224,3 +224,104 @@ func opencodeEventDecoderTests(_ t: TestRunner) {
         try expect(events.count == 1 && events[0].kind == .activity(tool: "glob"))
     }
 }
+
+// MARK: - 事件 tailer：水位与 stale 判定
+
+/// 2026-09-05 实测事故：某一轮 `MAX(rowid)` 查询失败被当成"rowid 回退"，水位归零，
+/// 25,571 条历史事件全部当实时事件重放 —— 灵动岛排进上百张完成卡收不回去，
+/// 22 个 7、8 月的旧会话被重新建成运行中、一分钟后又被判"中断"写进历史。
+func opencodeEventTailerTests(_ t: TestRunner) {
+    t.suite("OpencodeEventTailer · 水位与 stale")
+
+    func userMessage(_ session: String, createdMs: Int) -> String {
+        #"{"sessionID":"\#(session)","info":{"role":"user","time":{"created":\#(createdMs)}}}"#
+    }
+    func assistantDone(_ session: String, completedMs: Int) -> String {
+        #"{"sessionID":"\#(session)","info":{"role":"assistant","finish":"stop","time":{"created":\#(completedMs - 1000),"completed":\#(completedMs)}}}"#
+    }
+    func insert(_ db: SQLiteDB, _ id: String, _ type: String, _ json: String) throws {
+        try db.run(
+            "INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?,?,?,?,?)",
+            [.text(id), .text("ses_a"), .int(0), .text(type), .text(json)])
+    }
+    func checkpoint(_ db: SQLiteDB) { try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)") }
+    func nowMs() -> Int { Int(Date().timeIntervalSince1970 * 1000) }
+
+    t.test("水位：MAX(rowid) 查询失败（库暂不可读）不得当成 rowid 回退去重放历史") {
+        let fm = FileManager.default
+        let dir = tempDir("octail-fail")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let dbURL = dir.appendingPathComponent("opencode.db")
+        try makeOpencodeDB(at: dbURL) { db in
+            try insert(db, "e1", "message.updated.1", userMessage("ses_a", createdMs: nowMs()))
+            try insert(db, "e2", "message.updated.1", assistantDone("ses_a", completedMs: nowMs()))
+        }
+        var received: [(TaskEvent, Bool)] = []
+        let tailer = OpencodeEventTailer(dbPath: dbURL) { event, stale in received.append((event, stale)) }
+        tailer.scanOnce()
+        try expect(received.isEmpty, "首扫只定基线")
+
+        // 连接能打开、但 MAX(rowid) 这一句查询失败（IO 抖动 / 锁超时 / 表暂不可用）：
+        // 用"把表临时改名"精确模拟这一层失败，再改回来
+        let writer = try SQLiteDB(path: dbURL.path)
+        try writer.execute("ALTER TABLE event RENAME TO event_hidden")
+        checkpoint(writer)
+        tailer.scanOnce()
+        try writer.execute("ALTER TABLE event_hidden RENAME TO event")
+        checkpoint(writer)
+        tailer.scanOnce()
+        try expect(
+            received.isEmpty,
+            "查询失败必须保住水位，历史不得重放；实得 \(received.count) 条")
+    }
+
+    t.test("水位：事件表被重建变小（rowid 真回退）→ 重定基线，不把重建后的历史当实时事件") {
+        let fm = FileManager.default
+        let dir = tempDir("octail-shrink")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let dbURL = dir.appendingPathComponent("opencode.db")
+        try makeOpencodeDB(at: dbURL) { db in
+            for i in 1...3 {
+                try insert(db, "e\(i)", "message.updated.1", assistantDone("ses_a", completedMs: nowMs()))
+            }
+        }
+        var received: [(TaskEvent, Bool)] = []
+        let tailer = OpencodeEventTailer(dbPath: dbURL) { event, stale in received.append((event, stale)) }
+        tailer.scanOnce()  // 基线 = 3
+        // 模拟 opencode 重建库：清表后写入 1 条历史事件（rowid 从 1 重新计）
+        let writer = try SQLiteDB(path: dbURL.path)
+        try writer.run("DELETE FROM event")
+        try insert(writer, "e9", "message.updated.1", assistantDone("ses_a", completedMs: nowMs()))
+        checkpoint(writer)
+        tailer.scanOnce()
+        try expect(received.isEmpty, "回退后只重定基线；实得 \(received.count) 条")
+        // 之后的新事件照常实时送达
+        try insert(writer, "e10", "message.updated.1", userMessage("ses_a", createdMs: nowMs()))
+        checkpoint(writer)
+        tailer.scanOnce()
+        try expectEqual(received.count, 1, "重定基线之后的新事件要能收到")
+    }
+
+    t.test("stale：事件按自身时间戳判定（>5 分钟 = 积压），与其它源同一条规则") {
+        let fm = FileManager.default
+        let dir = tempDir("octail-stale")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let dbURL = dir.appendingPathComponent("opencode.db")
+        try makeOpencodeDB(at: dbURL) { db in
+            try insert(db, "e1", "message.updated.1", userMessage("ses_a", createdMs: nowMs()))
+        }
+        var received: [(TaskEvent, Bool)] = []
+        let tailer = OpencodeEventTailer(dbPath: dbURL) { event, stale in received.append((event, stale)) }
+        tailer.scanOnce()
+        let writer = try SQLiteDB(path: dbURL.path)
+        try insert(writer, "e2", "message.updated.1",
+                   assistantDone("ses_a", completedMs: nowMs() - 3600 * 1000))  // 一小时前完成
+        try insert(writer, "e3", "message.updated.1", assistantDone("ses_a", completedMs: nowMs()))
+        checkpoint(writer)
+        tailer.scanOnce()
+        try expectEqual(received.map(\.1), [true, false], "旧事件 stale、新事件不 stale")
+    }
+}
