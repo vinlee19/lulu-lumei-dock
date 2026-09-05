@@ -1362,6 +1362,8 @@ private struct MemoryLibraryView: View {
     @State private var typeFilter: MemoryType?
     /// 只看「未被索引收录」的条目（漂移提示里的开关）
     @State private var showingUnindexedOnly = false
+    /// 索引一键修复进行中（防连点；完成后强制重扫会让漂移提示自行消失）
+    @State private var repairingIndex = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1446,6 +1448,17 @@ private struct MemoryLibraryView: View {
                         .buttonStyle(.borderless)
                         .font(.system(size: 10.5))
                     }
+                    Button(repairingIndex ? "修复中…" : "一键修复") {
+                        repairingIndex = true
+                        service.repairLibraryIndex(library) { _ in
+                            repairingIndex = false
+                            showingUnindexedOnly = false
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .disabled(repairingIndex)
+                    .help("补录未收录条目、删除指向已不存在文件的索引行（写前自动备份 MEMORY.md）")
                 }
                 if !unindexed.isEmpty {
                     Text("\(unindexed.count) 条记忆没被 MEMORY.md 收录 —— agent 读索引时看不到它们："

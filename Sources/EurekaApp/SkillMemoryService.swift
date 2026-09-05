@@ -337,6 +337,20 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
+    /// 一键修复记忆库索引漂移：删悬空行 + 补未收录行。
+    /// 读**完整**索引文件（索引器的解析带 64KB 头部上限，重写必须全量），
+    /// 写走 save()（备份 + 原子写 + 完成后强制重扫，漂移提示随之消失）。
+    func repairLibraryIndex(_ library: MemoryLibrary, completion: ((Bool) -> Void)? = nil) {
+        guard let index = library.index,
+              let text = try? String(contentsOfFile: index.path, encoding: .utf8),
+              let outcome = MemoryIndexRepair.repair(indexText: text, entries: library.entries)
+        else {
+            completion?(false)
+            return
+        }
+        save(path: index.path, content: outcome.text, completion: completion)
+    }
+
     /// 各源的**可写**技能根（新建与跨源安装共用同一口径）。
     /// Hermes 走顶层无分类深度（实勘存在，扫描器也认）；Trae 优先已装渠道（CN 在前）；
     /// zcode 是共享的 ~/.agents/skills —— 装进去其它兼容 CLI 也会读到。
