@@ -1,10 +1,16 @@
 import Foundation
 
-/// 展开卡片队列：完成卡排队逐显（不刷屏），等待卡置顶且同任务去重。
+/// 展开卡片队列：完成卡排队逐显（不刷屏、待显封顶），等待卡置顶且同任务去重。
 /// 纯逻辑；自动收起的计时由 UI 层负责。
 public struct IslandCardQueue: Equatable, Sendable {
     public private(set) var current: IslandState.Card?
     public private(set) var pending: [IslandState.Card] = []
+
+    /// 完成/提示这类"知会型"卡的待显上限：超出时丢最旧的（历史页有全部记录）。
+    /// 一次爆发几百个完成事件（2026-09-05 实测：opencode 事件表被整表重放）不能把岛按住
+    /// 几分钟 —— 每张卡都要占满一个收起窗口，队列不封顶 = 岛永远收不回去。
+    /// 等待/告警卡不受限：它们本就按任务 / 告警 id 去重，且是需要用户处理的事。
+    public static let maxPendingPassive = 5
 
     public init() {}
 
@@ -34,7 +40,24 @@ public struct IslandCardQueue: Equatable, Sendable {
                 current = card
             } else {
                 pending.append(card)
+                trimPassiveOverflow()
             }
+        }
+    }
+
+    private static func isPassive(_ card: IslandState.Card) -> Bool {
+        switch card {
+        case .finished, .notice: return true
+        case .waiting, .alert: return false
+        }
+    }
+
+    /// 知会型卡超出上限时从最旧的开始丢；等待/告警卡原位不动
+    private mutating func trimPassiveOverflow() {
+        var overflow = pending.filter(Self.isPassive).count - Self.maxPendingPassive
+        while overflow > 0, let index = pending.firstIndex(where: Self.isPassive) {
+            pending.remove(at: index)
+            overflow -= 1
         }
     }
 

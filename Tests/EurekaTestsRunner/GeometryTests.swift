@@ -188,6 +188,25 @@ func cardQueueTests(_ t: TestRunner) {
         try expect(queue.isEmpty)
     }
 
+    t.test("完成/提示卡待显数封顶：超出丢最旧；等待/告警卡不受限也不被挤掉") {
+        // 一次爆发几百个完成事件（实测：opencode 事件表被整表重放）不能把岛按住几分钟：
+        // 每张卡都占满一个收起窗口，队列不封顶 = 岛永远收不回去。历史页有全部记录。
+        let cap = IslandCardQueue.maxPendingPassive
+        var queue = IslandCardQueue()
+        for i in 0..<(cap + 4) { queue.enqueue(finished("f\(i)")) }
+        try expectEqual(queue.current, finished("f0"), "正在展示的卡不受影响")
+        try expectEqual(queue.pendingCount, cap, "待显完成卡封顶")
+        try expectEqual(queue.pending.last, finished("f\(cap + 3)"), "留下的是最新的")
+        try expectEqual(queue.pending.first, finished("f4"), "丢掉的是最旧的")
+
+        queue.enqueue(waiting("w"))
+        try expectEqual(queue.pendingCount, cap + 1, "等待卡不算在封顶内")
+        queue.enqueue(notice("n"))
+        try expectEqual(queue.pendingCount, cap + 1, "提示卡与完成卡共用封顶：挤掉最旧的完成卡")
+        try expect(queue.pending.contains(waiting("w")), "被挤掉的绝不能是等待卡")
+        try expectEqual(queue.pending.last, notice("n"))
+    }
+
     t.test("等待卡插队且同任务去重") {
         var queue = IslandCardQueue()
         queue.enqueue(finished("a"))
