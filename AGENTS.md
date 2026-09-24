@@ -54,14 +54,17 @@ fix(packaging): load app resources from signed bundle layout
    English): `## [X.Y.Z] - YYYY-MM-DD` with `### Added` / `### Changed` /
    `### Fixed` sections, and append the version link at the bottom of the file.
 2. Bump `VERSION` to `X.Y.Z`.
-3. Verify: `make build && make test` (all tests must pass).
-4. Commit (e.g. `docs(changelog): …` or as part of the feature commit), push `main`.
-5. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-6. CI (`.github/workflows/release.yml`) then: validates tag ↔ `VERSION`, runs the
+3. Refresh the bundled pricing snapshot: `make pricing-catalog` (re-fetches
+   LiteLLM + models.dev into `Sources/EurekaApp/Resources/pricing-catalog.json`,
+   so an offline first launch still has release-day prices). Commit the result.
+4. Verify: `make build && make test` (all tests must pass).
+5. Commit (e.g. `docs(changelog): …` or as part of the feature commit), push `main`.
+6. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+7. CI (`.github/workflows/release.yml`) then: validates tag ↔ `VERSION`, runs the
    full test suite, builds the release, EdDSA-signs the ZIP, generates
    `appcast.xml`, and creates the GitHub Release. Do not create the release
    manually before CI finishes.
-7. **Polish the release page** after CI completes:
+8. **Polish the release page** after CI completes:
    - Title → `vX.Y.Z — Short summary`
    - Notes → handwritten English changelog copied from the `CHANGELOG.md` entry
      (replace the auto-generated compare link).

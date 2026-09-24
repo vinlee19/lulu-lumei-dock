@@ -59,6 +59,10 @@ final class AppSettings: ObservableObject {
     @Published var fullTextSearchEnabled: Bool {
         didSet { defaults.set(fullTextSearchEnabled, forKey: "fullTextSearchEnabled") }
     }
+    /// 联网更新模型价格（LiteLLM / models.dev 公开价格表，PricingCatalogService 读同一 key）
+    @Published var remotePricingEnabled: Bool {
+        didSet { defaults.set(remotePricingEnabled, forKey: "remotePricingEnabled") }
+    }
     /// 限额临近打满预警岛卡（RateLimitsService 告警时读同一 key）
     @Published var limitAlertsEnabled: Bool {
         didSet { defaults.set(limitAlertsEnabled, forKey: "limitAlertsEnabled") }
@@ -190,6 +194,7 @@ final class AppSettings: ObservableObject {
         wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
         fullTextSearchEnabled = defaults.object(forKey: "fullTextSearchEnabled") as? Bool ?? true
+        remotePricingEnabled = defaults.object(forKey: "remotePricingEnabled") as? Bool ?? true
         limitAlertsEnabled = defaults.object(forKey: "limitAlertsEnabled") as? Bool ?? true
         hookAutoUpdate = defaults.object(forKey: "hookAutoUpdate") as? Bool ?? true
         suppressCardWhenTerminalFrontmost = defaults.object(

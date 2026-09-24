@@ -94,6 +94,7 @@ struct UsageDashboardView: View {
         }
         .onChange(of: customFrom) { _, _ in if period == .custom { page = 1; reload() } }
         .onChange(of: customTo) { _, _ in if period == .custom { page = 1; reload() } }
+        .onChange(of: usageService.pricingRevision) { _, _ in reload() }
     }
 
     // MARK: - 区间与数据聚合
@@ -356,14 +357,29 @@ struct UsageDashboardView: View {
 
     @ViewBuilder
     private var byModelChart: some View {
-        let models = usageService.modelTotals
-            .filter { sourceFilter == nil || $0.source == sourceFilter }
-            .map { totals in
+        // 同 (来源, 模型) 的多个 provider 行先合并，再取前 8（否则同一模型占多根柱）
+        let merged = Dictionary(
+            grouping: usageService.modelTotals.filter { sourceFilter == nil || $0.source == sourceFilter },
+            by: { "\($0.source.rawValue)\u{1}\($0.model)" }
+        ).values.map { group -> (UsageTotals, cost: Double) in
+            var first = group[0]
+            for extra in group.dropFirst() {
+                first.inputTokens += extra.inputTokens
+                first.outputTokens += extra.outputTokens
+                first.cacheCreationTokens += extra.cacheCreationTokens
+                first.cacheCreation1hTokens += extra.cacheCreation1hTokens
+                first.cacheReadTokens += extra.cacheReadTokens
+                first.requestCount += extra.requestCount
+            }
+            return (first, group.compactMap { usageService.cost(of: $0) }.reduce(0, +))
+        }
+        let models = merged
+            .map { totals, cost in
                 (totals,
                  metricValue: trendMetric == .tokens
                     ? Double(totals.inputTokens + totals.outputTokens
                         + totals.cacheCreationTokens + totals.cacheReadTokens)
-                    : (usageService.cost(of: totals) ?? 0))
+                    : cost)
             }
             .sorted { $0.metricValue > $1.metricValue }
             .prefix(8)
@@ -986,6 +1002,14 @@ struct UsageDashboardView: View {
                                 .font(.system(size: 10).monospaced())
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                            // 同名模型按 provider 分行（订阅套餐 vs 按量计费）
+                            if let provider = totals.provider {
+                                Text(provider)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
                         }
                         .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
                         Text("\(totals.requestCount)")
@@ -1005,6 +1029,7 @@ struct UsageDashboardView: View {
                             .font(.system(size: 10.5).monospacedDigit())
                             .foregroundStyle(Theme.cost)
                             .frame(width: 66, alignment: .trailing)
+                            .help(usageService.priceResolution(of: totals).summary)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, Theme.spacing.row)
@@ -1161,7 +1186,7 @@ struct UsageDashboardView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text("费用为本地估算（按公开价目），与账单可能有出入；价格表可在 ~/Library/Application Support/Eureka/pricing.json 覆盖。")
+            Text("费用为本地估算（LiteLLM / models.dev 公开价格，订阅套餐按 API 等价价折算），与账单可能有出入；悬停费用可看价格来源，设置 → 高级 → 模型价格可查看未定价模型并自定义。")
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
         }

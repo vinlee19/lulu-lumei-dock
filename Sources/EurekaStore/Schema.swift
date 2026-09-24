@@ -94,7 +94,8 @@ enum Schema {
             output_tokens INTEGER NOT NULL DEFAULT 0,
             cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
             cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
-            cache_read_tokens INTEGER NOT NULL DEFAULT 0
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            provider TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_records(ts);
         CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_records(session_id);
@@ -320,6 +321,9 @@ enum Schema {
         try addColumnIfMissing(db, table: "sync_state", column: "category", type: "TEXT")
         // prompts 同为事实表（收藏/标签/移除是用户写入），v24 库补软删除列，不重建。
         try addColumnIfMissing(db, table: "prompts", column: "hidden_at", type: "REAL")
+        // usage_records 补计费 provider（区分同名模型的订阅/按量）。不升版本：升版本会整表重扫，
+        // 已删除的 transcript 用量就永久丢了。老行为 NULL → 价格解析按模型名推断厂商。
+        try addColumnIfMissing(db, table: "usage_records", column: "provider", type: "TEXT")
 
         try db.execute("PRAGMA user_version = \(version)")
     }

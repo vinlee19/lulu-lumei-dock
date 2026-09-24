@@ -17,6 +17,9 @@ public struct UsageRecord: Equatable, Sendable {
     public var cacheCreation1hTokens: Int
     /// 缓存读取（Claude cache_read / Codex cached_input）
     public var cacheReadTokens: Int
+    /// 计费 provider（opencode providerID / codex model_provider / hermes billing_provider…），
+    /// 区分同名模型走订阅套餐还是按量计费；无此信息的来源为 nil
+    public var provider: String?
 
     public init(
         source: AgentSource,
@@ -28,7 +31,8 @@ public struct UsageRecord: Equatable, Sendable {
         outputTokens: Int,
         cacheCreationTokens: Int = 0,
         cacheCreation1hTokens: Int = 0,
-        cacheReadTokens: Int = 0
+        cacheReadTokens: Int = 0,
+        provider: String? = nil
     ) {
         self.source = source
         self.model = model
@@ -40,5 +44,6 @@ public struct UsageRecord: Equatable, Sendable {
         self.cacheCreationTokens = cacheCreationTokens
         self.cacheCreation1hTokens = cacheCreation1hTokens
         self.cacheReadTokens = cacheReadTokens
+        self.provider = provider
     }
 }

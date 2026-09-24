@@ -74,6 +74,7 @@ public final class OpencodeUsageScanner {
                 path: path, .init(inode: inode, offset: newWatermark, extra: nil))
             inserted = records.count
         }
+        try backfillProviders(db: db, inode: inode)
         try scanPartsForTools(db: db, inode: inode)
         try recordPromptCounts(db: db)
         return inserted
@@ -149,6 +150,8 @@ public final class OpencodeUsageScanner {
             return nil
         }
         let model = (data["modelID"] as? String) ?? (data["providerID"] as? String) ?? "opencode"
+        // providerID 区分同名模型的计费方式（volcengine-agent-plan 订阅 vs zhipuai 按量…）
+        let provider = data["modelID"] != nil ? data["providerID"] as? String : nil
         let createdMs = ((data["time"] as? [String: Any])?["created"] as? NSNumber)?.doubleValue ?? 0
         let timestamp = createdMs > 0 ? Date(timeIntervalSince1970: createdMs / 1000) : Date()
         return UsageRecord(
@@ -160,7 +163,35 @@ public final class OpencodeUsageScanner {
             inputTokens: input,
             outputTokens: output + reasoning,  // reasoning 计入 output 侧
             cacheCreationTokens: cacheWrite,
-            cacheReadTokens: cacheRead)
+            cacheReadTokens: cacheRead,
+            provider: provider)
+    }
+
+    /// 一次性回填 provider：provider 列上线前入库的行都是 NULL，而水位已越过它们、不会重扫。
+    /// 按 (会话, 模型, 时间戳) 精确匹配回写（ts 与入库时同一算法，双精度相等），只动 NULL 行。
+    private func backfillProviders(db: SQLiteDB, inode: Int64) throws {
+        let key = dbPath.path + "#provider-v1"
+        guard try store.scanState.fileState(path: key)?.inode != inode else { return }
+        let rows = (try? db.query("""
+            SELECT session_id,
+                   json_extract(data, '$.modelID'), json_extract(data, '$.providerID'),
+                   json_extract(data, '$.time.created')
+            FROM message
+            WHERE json_extract(data, '$.role') = 'assistant'
+              AND json_extract(data, '$.providerID') IS NOT NULL
+              AND json_extract(data, '$.modelID') IS NOT NULL
+            """) { row -> (String, String, String, Double) in
+            (row.text(0) ?? "", row.text(1) ?? "", row.text(2) ?? "", row.real(3))
+        }) ?? []
+        try store.scanState.transaction {
+            for (sessionId, model, provider, createdMs) in rows
+            where !sessionId.isEmpty && !provider.isEmpty && createdMs > 0 {
+                try store.usage.backfillProvider(
+                    source: .opencode, sessionId: sessionId, model: model,
+                    ts: createdMs / 1000, provider: provider)
+            }
+            try store.scanState.setFileState(path: key, .init(inode: inode, offset: 1))
+        }
     }
 
     private func fileInode(_ path: String) -> Int64 {

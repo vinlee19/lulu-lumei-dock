@@ -85,6 +85,8 @@ public enum WeeklyReportBuilder {
         var requestCount = 0
         var sourceAgg: [String: (tokens: Int, cost: Double?)] = [:]
         var modelEntries: [WeeklyReport.Entry] = []
+        // 同 (来源, 模型) 可能按 provider 拆成多行，合并回一条（口径同改动前）
+        var modelIndex: [String: Int] = [:]
         for totals in byModelTotals {
             let tokenCount = tokens(totals)
             let cost = pricing.cost(of: totals)
@@ -95,7 +97,14 @@ public enum WeeklyReportBuilder {
             slot.tokens += tokenCount
             if let cost { slot.cost = (slot.cost ?? 0) + cost }
             sourceAgg[totals.source.rawValue] = slot
-            modelEntries.append(.init(name: totals.model, tokens: tokenCount, costUSD: cost))
+            let key = "\(totals.source.rawValue)\u{1}\(totals.model)"
+            if let index = modelIndex[key] {
+                modelEntries[index].tokens += tokenCount
+                if let cost { modelEntries[index].costUSD = (modelEntries[index].costUSD ?? 0) + cost }
+            } else {
+                modelIndex[key] = modelEntries.count
+                modelEntries.append(.init(name: totals.model, tokens: tokenCount, costUSD: cost))
+            }
         }
         modelEntries.sort { ($0.costUSD ?? 0, $0.tokens) > ($1.costUSD ?? 0, $1.tokens) }
 

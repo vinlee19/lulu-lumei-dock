@@ -127,6 +127,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         usageService.start()
         limitsService.start()
+        // 模型价格目录：换价后费用重算（用量汇总 + 会话页）
+        PricingCatalogService.shared.onPricingChanged = { [weak self] in
+            self?.usageService.pricingDidChange()
+            self?.sessionBrowser.refresh()
+        }
+        PricingCatalogService.shared.start()
 
         // 安全审计：Codex 定时扫描 + Claude 旁路事件；高危命中 → 岛红卡 + 系统通知（各受开关门控）
         auditService.onRiskAlert = { [weak self] alert in

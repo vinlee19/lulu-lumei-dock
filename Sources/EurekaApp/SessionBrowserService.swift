@@ -127,7 +127,7 @@ final class SessionBrowserService: ObservableObject {
     private var searchWorkItem: DispatchWorkItem?
     // 以下仅 queue 上访问
     private var store: EurekaStore?
-    private var pricing = PricingTable(models: [])
+    private var pricing: PricingTable { PricingCatalogStore.shared.current }
     private var storeLoaded = false
 
     /// 惰性打开只读 store 连接（refresh / 全文搜索共用，仅 queue 上调用）
@@ -135,9 +135,7 @@ final class SessionBrowserService: ObservableObject {
         guard !storeLoaded else { return }
         storeLoaded = true
         store = try? EurekaStore(path: EurekaStore.defaultURL())
-        pricing = PricingTable.load(
-            bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
-            overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
+        PricingCatalogStore.shared.loadIfNeeded(paths: .app)
     }
 
     func refresh() {

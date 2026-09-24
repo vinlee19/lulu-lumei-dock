@@ -156,8 +156,8 @@ public final class UsageRepo {
         try db.run("""
         INSERT INTO usage_records
             (source, model, project, session_id, ts, input_tokens, output_tokens,
-             cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+             cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens, provider)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, [
             .text(record.source.rawValue), .text(record.model),
             .string(record.project),
@@ -167,8 +167,28 @@ public final class UsageRepo {
             .int(Int64(record.cacheCreationTokens)),
             .int(Int64(record.cacheCreation1hTokens)),
             .int(Int64(record.cacheReadTokens)),
+            .string(record.provider),
         ])
         return db.lastInsertRowID
+    }
+
+    /// provider 回填：只写仍为 NULL 的行（ts 为 nil 时按整个会话 × 模型匹配）
+    public func backfillProvider(
+        source: AgentSource, sessionId: String, model: String?, ts: Double?, provider: String
+    ) throws {
+        var conditions = ["source = ?", "session_id = ?", "provider IS NULL"]
+        var bindings: [SQLiteValue] = [.text(source.rawValue), .text(sessionId)]
+        if let model {
+            conditions.append("model = ?")
+            bindings.append(.text(model))
+        }
+        if let ts {
+            conditions.append("ts = ?")
+            bindings.append(.real(ts))
+        }
+        try db.run(
+            "UPDATE usage_records SET provider = ? WHERE " + conditions.joined(separator: " AND "),
+            [.text(provider)] + bindings)
     }
 
     /// 流式重复行的 output 递增：用更大的最终值覆盖
@@ -184,10 +204,10 @@ public final class UsageRepo {
         SELECT project, source, model,
                SUM(input_tokens), SUM(output_tokens),
                SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
-               SUM(cache_read_tokens), COUNT(*)
+               SUM(cache_read_tokens), COUNT(*), provider
         FROM usage_records
         WHERE ts >= ? AND ts < ?
-        GROUP BY project, source, model
+        GROUP BY project, source, model, provider
         """, [.real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970)]) { row in
             (row.text(0), UsageTotals(
                 source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,
@@ -197,7 +217,8 @@ public final class UsageRepo {
                 cacheCreationTokens: Int(row.int(5)),
                 cacheCreation1hTokens: Int(row.int(6)),
                 cacheReadTokens: Int(row.int(7)),
-                requestCount: Int(row.int(8))
+                requestCount: Int(row.int(8)),
+                provider: row.text(9)
             ))
         }
     }
@@ -213,10 +234,10 @@ public final class UsageRepo {
             SELECT session_id, source, model,
                    SUM(input_tokens), SUM(output_tokens),
                    SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
-                   SUM(cache_read_tokens), COUNT(*)
+                   SUM(cache_read_tokens), COUNT(*), provider
             FROM usage_records
             WHERE session_id IN (\(placeholders))
-            GROUP BY session_id, source, model
+            GROUP BY session_id, source, model, provider
             """, chunk.map { .text($0) }) { row -> (String, UsageTotals) in
                 (row.text(0) ?? "", UsageTotals(
                     source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,
@@ -226,7 +247,8 @@ public final class UsageRepo {
                     cacheCreationTokens: Int(row.int(5)),
                     cacheCreation1hTokens: Int(row.int(6)),
                     cacheReadTokens: Int(row.int(7)),
-                    requestCount: Int(row.int(8))
+                    requestCount: Int(row.int(8)),
+                    provider: row.text(9)
                 ))
             }
             for (sessionId, totals) in rows {
@@ -258,10 +280,10 @@ public final class UsageRepo {
                source, model, COALESCE(project, ''),
                SUM(input_tokens), SUM(output_tokens),
                SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
-               SUM(cache_read_tokens), COUNT(*)
+               SUM(cache_read_tokens), COUNT(*), provider
         FROM usage_records
         WHERE ts >= ? AND ts < ?
-        GROUP BY day, source, model, project
+        GROUP BY day, source, model, project, provider
         ORDER BY day, source, model
         """, [.real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970)]) { row in
             DailyUsageRow(
@@ -275,7 +297,8 @@ public final class UsageRepo {
                     cacheCreationTokens: Int(row.int(6)),
                     cacheCreation1hTokens: Int(row.int(7)),
                     cacheReadTokens: Int(row.int(8)),
-                    requestCount: Int(row.int(9))
+                    requestCount: Int(row.int(9)),
+                    provider: row.text(10)
                 )
             )
         }
@@ -292,6 +315,7 @@ public final class UsageRepo {
         public var cacheCreationTokens: Int
         public var cacheCreation1hTokens: Int
         public var cacheReadTokens: Int
+        public var provider: String?
     }
 
     /// 请求日志：按时间倒序分页取原始记录（idx_usage_ts 支撑）
@@ -302,7 +326,7 @@ public final class UsageRepo {
         let (whereClause, bindings) = Self.recordFilter(from: from, to: to, source: source)
         return try db.query("""
         SELECT source, model, project, ts, input_tokens, output_tokens,
-               cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens
+               cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens, provider
         FROM usage_records \(whereClause)
         ORDER BY ts DESC LIMIT ? OFFSET ?
         """, bindings + [.int(Int64(limit)), .int(Int64(offset))]) { row in
@@ -315,7 +339,8 @@ public final class UsageRepo {
                 outputTokens: Int(row.int(5)),
                 cacheCreationTokens: Int(row.int(6)),
                 cacheCreation1hTokens: Int(row.int(7)),
-                cacheReadTokens: Int(row.int(8)))
+                cacheReadTokens: Int(row.int(8)),
+                provider: row.text(9))
         }
     }
 
@@ -375,10 +400,10 @@ public final class UsageRepo {
         SELECT session_id, source, model, MAX(project), MAX(ts),
                SUM(input_tokens), SUM(output_tokens),
                SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
-               SUM(cache_read_tokens), COUNT(*)
+               SUM(cache_read_tokens), COUNT(*), provider
         FROM usage_records
         WHERE \(conditions.joined(separator: " AND "))
-        GROUP BY session_id, source, model
+        GROUP BY session_id, source, model, provider
         """, bindings) { row in
             SessionUsageRow(
                 sessionId: row.text(0) ?? "",
@@ -392,7 +417,8 @@ public final class UsageRepo {
                     cacheCreationTokens: Int(row.int(7)),
                     cacheCreation1hTokens: Int(row.int(8)),
                     cacheReadTokens: Int(row.int(9)),
-                    requestCount: Int(row.int(10))
+                    requestCount: Int(row.int(10)),
+                    provider: row.text(11)
                 ))
         }
     }
@@ -454,15 +480,39 @@ public final class UsageRepo {
         }
     }
 
+    /// 账本里出现过的全部 (source, model, provider) 及其 token 量（未定价模型清单用）
+    public func distinctModels() throws -> [UsageTotals] {
+        try db.query("""
+        SELECT source, model,
+               SUM(input_tokens), SUM(output_tokens),
+               SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
+               SUM(cache_read_tokens), COUNT(*), provider
+        FROM usage_records
+        GROUP BY source, model, provider
+        ORDER BY source, model
+        """) { row in
+            UsageTotals(
+                source: AgentSource(rawValue: row.text(0) ?? "") ?? .claude,
+                model: row.text(1) ?? "?",
+                inputTokens: Int(row.int(2)),
+                outputTokens: Int(row.int(3)),
+                cacheCreationTokens: Int(row.int(4)),
+                cacheCreation1hTokens: Int(row.int(5)),
+                cacheReadTokens: Int(row.int(6)),
+                requestCount: Int(row.int(7)),
+                provider: row.text(8))
+        }
+    }
+
     public func totalsByModel(from: Date, to: Date) throws -> [UsageTotals] {
         try db.query("""
         SELECT source, model,
                SUM(input_tokens), SUM(output_tokens),
                SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
-               SUM(cache_read_tokens), COUNT(*)
+               SUM(cache_read_tokens), COUNT(*), provider
         FROM usage_records
         WHERE ts >= ? AND ts < ?
-        GROUP BY source, model
+        GROUP BY source, model, provider
         """, [.real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970)]) { row in
             UsageTotals(
                 source: AgentSource(rawValue: row.text(0) ?? "") ?? .claude,
@@ -472,7 +522,8 @@ public final class UsageRepo {
                 cacheCreationTokens: Int(row.int(4)),
                 cacheCreation1hTokens: Int(row.int(5)),
                 cacheReadTokens: Int(row.int(6)),
-                requestCount: Int(row.int(7))
+                requestCount: Int(row.int(7)),
+                provider: row.text(8)
             )
         }
     }
@@ -491,7 +542,7 @@ public struct DailyUsageRow: Equatable, Sendable {
     }
 }
 
-/// (source, model) 聚合结果
+/// (source, model, provider) 聚合结果；provider 只参与算钱，展示层按 model 合并
 public struct UsageTotals: Equatable, Sendable {
     public var source: AgentSource
     public var model: String
@@ -501,12 +552,14 @@ public struct UsageTotals: Equatable, Sendable {
     public var cacheCreation1hTokens: Int
     public var cacheReadTokens: Int
     public var requestCount: Int
+    public var provider: String?
 
     public init(
         source: AgentSource, model: String,
         inputTokens: Int, outputTokens: Int,
         cacheCreationTokens: Int, cacheCreation1hTokens: Int,
-        cacheReadTokens: Int, requestCount: Int
+        cacheReadTokens: Int, requestCount: Int,
+        provider: String? = nil
     ) {
         self.source = source
         self.model = model
@@ -516,6 +569,7 @@ public struct UsageTotals: Equatable, Sendable {
         self.cacheCreation1hTokens = cacheCreation1hTokens
         self.cacheReadTokens = cacheReadTokens
         self.requestCount = requestCount
+        self.provider = provider
     }
 }
 

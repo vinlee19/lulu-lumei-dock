@@ -36,6 +36,7 @@ let package = Package(
             path: "Sources/EurekaApp",
             resources: [
                 .copy("Resources/pricing.json"),
+                .copy("Resources/pricing-catalog.json"),
                 .copy("Resources/AppIcon.icns"),
                 .copy("Resources/mascots"),
                 .copy("Resources/source-logos"),

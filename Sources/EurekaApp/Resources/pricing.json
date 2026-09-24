@@ -1,7 +1,19 @@
 {
-  "version": 2,
-  "comment": "USD / 百万 token。match 为模型名前缀，最长前缀优先；unknown=true 表示明确未定价（只显示 token，不算钱，并阻断更短前缀回退）。可放置同结构文件到 ~/Library/Application Support/Eureka/pricing.json 整表覆盖。",
+  "version": 3,
+  "comment": "USD / 百万 token。兜底价格表：优先级低于远程价格目录（LiteLLM / models.dev，见 PriceResolver）。match 为模型名，先精确后前缀（前缀命中标“估算”）；unknown=true 表示未定价，默认只在远程目录也查不到时生效，authoritative=true 则硬性不算钱（如 cursor/）。可在 ~/Library/Application Support/Eureka/pricing.json 放同结构文件作最高优先级覆盖，并可用 providers 为自定义 provider 指定厂商与计费方式：{\"providers\": {\"my-proxy\": {\"vendor\": \"openai\", \"billing\": \"payg\"}}}。",
   "models": [
+    { "match": "claude-opus-5-5", "inputPerM": 4, "outputPerM": 20, "cacheReadPerM": 0.2, "cacheWrite5mPerM": 5, "cacheWrite1hPerM": 8 },
+    { "match": "claude-opus-5", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
+    { "match": "claude-fable-5-1", "inputPerM": 10, "outputPerM": 50, "cacheReadPerM": 0.25, "cacheWrite5mPerM": 12.5, "cacheWrite1hPerM": 20 },
+    { "match": "claude-fable-5", "inputPerM": 10, "outputPerM": 50, "cacheReadPerM": 1, "cacheWrite5mPerM": 12.5, "cacheWrite1hPerM": 20 },
+    { "match": "claude-sonnet-5", "inputPerM": 2, "outputPerM": 10, "cacheReadPerM": 0.2, "cacheWrite5mPerM": 2.5, "cacheWrite1hPerM": 4 },
+    { "match": "gpt-6-astra", "inputPerM": 10, "outputPerM": 50, "cacheReadPerM": 1 },
+    { "match": "gpt-6-sol", "inputPerM": 2, "outputPerM": 10, "cacheReadPerM": 0.2 },
+    { "match": "gpt-5.6-sol", "inputPerM": 4, "outputPerM": 20, "cacheReadPerM": 0.4 },
+    { "match": "gpt-5.6-terra", "inputPerM": 2, "outputPerM": 12, "cacheReadPerM": 0.2 },
+    { "match": "gpt-5.6-luna", "inputPerM": 0.2, "outputPerM": 1.2, "cacheReadPerM": 0.02 },
+    { "match": "gpt-5.4", "inputPerM": 2.5, "outputPerM": 15, "cacheReadPerM": 0.25 },
+    { "match": "gpt-5.2", "inputPerM": 1.75, "outputPerM": 14, "cacheReadPerM": 0.175 },
     { "match": "claude-fable", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
     { "match": "claude-opus-4-5", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
     { "match": "claude-opus-4-7", "inputPerM": 5, "outputPerM": 25, "cacheReadPerM": 0.5, "cacheWrite5mPerM": 6.25, "cacheWrite1hPerM": 10 },
@@ -25,6 +37,6 @@
     { "match": "qwen", "unknown": true },
     { "match": "glm-", "unknown": true },
     { "match": "qmodel", "unknown": true },
-    { "match": "cursor/", "unknown": true }
+    { "match": "cursor/", "unknown": true, "authoritative": true }
   ]
 }

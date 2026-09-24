@@ -33,6 +33,8 @@ public final class CodexUsageScanner {
         var model: String?
         var project: String?
         var sessionId: String?
+        /// session_meta.model_provider（小写；自定义代理时价格按模型名推断厂商）
+        var provider: String?
     }
 
     public init(sessionsRoot: URL, store: EurekaStore) {
@@ -113,6 +115,10 @@ public final class CodexUsageScanner {
                 if let id = payload["id"] as? String {
                     extra.sessionId = id
                 }
+                // 只认第一个 session_meta（resume/fork 的文件里第二个属于别的会话）
+                if extra.provider == nil, let provider = payload["model_provider"] as? String {
+                    extra.provider = provider.lowercased()
+                }
                 continue
             }
             if type == "turn_context" {
@@ -165,7 +171,8 @@ public final class CodexUsageScanner {
                 // OpenAI 口径：cached 是 input 的子集 → 拆开记
                 inputTokens: max(0, deltaInput - deltaCached),
                 outputTokens: deltaOutput,
-                cacheReadTokens: deltaCached
+                cacheReadTokens: deltaCached,
+                provider: extra.provider
             ))
         }
 

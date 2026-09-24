@@ -44,6 +44,17 @@ enum EurekaCLI {
             printStatus()
         case "--usage-snapshot":
             usageSnapshot()
+        case "--pricing-resolve":
+            pricingResolve(args: Array(args.dropFirst()))
+        case "--pricing-refresh":
+            let started = Date()
+            let outcome = CatalogRefresher.refresh(previous: .empty, fetch: PricingCatalogService.fetch)
+            print("联网拉取价格目录：\(outcome.succeeded ? "成功" : "失败")，耗时 "
+                + String(format: "%.1fs", Date().timeIntervalSince(started))
+                + "；LiteLLM \(outcome.catalog.litellm.count) 条，models.dev \(outcome.catalog.modelsDev.count) 个 provider")
+            for error in outcome.errors { print("  \(error)") }
+        case "--build-pricing-catalog":
+            buildPricingCatalog(args: Array(args.dropFirst()))
         case "--limits-snapshot":
             limitsSnapshot(includeClaude: args.contains("--claude"))
         case "--audit-snapshot":
@@ -384,6 +395,85 @@ enum EurekaCLI {
         semaphore.wait()
     }
 
+    /// --pricing-resolve <model…> [--provider p] [--catalog 目录快照]：打印价格解析结果与出处。
+    /// 不给模型名时解析本地账本里出现过的全部 (source, model, provider)。
+    private static func pricingResolve(args: [String]) {
+        var models: [String] = []
+        var provider: String?
+        var catalogPath: String?
+        var index = 0
+        while index < args.count {
+            switch args[index] {
+            case "--provider" where index + 1 < args.count:
+                provider = args[index + 1]
+                index += 1
+            case "--catalog" where index + 1 < args.count:
+                catalogPath = args[index + 1]
+                index += 1
+            default:
+                models.append(args[index])
+            }
+            index += 1
+        }
+        let store = PricingCatalogStore()
+        var paths = PricingPaths.app
+        if let catalogPath {
+            paths.bundledSnapshot = URL(fileURLWithPath: catalogPath)
+            paths.cache = nil
+        }
+        store.loadIfNeeded(paths: paths)
+        let table = store.current
+        var pairs: [(source: String, model: String, provider: String?)] = models.map {
+            ("-", $0, provider)
+        }
+        if pairs.isEmpty, let db = try? EurekaStore(path: EurekaStore.defaultURL()) {
+            pairs = ((try? db.usage.distinctModels()) ?? []).map {
+                ($0.source.rawValue, $0.model, $0.provider)
+            }
+        }
+        print("价格目录来源：\(store.currentOrigin.rawValue)")
+        for pair in pairs {
+            let resolution = table.resolution(for: pair.model, provider: pair.provider)
+            let price = resolution.price.map {
+                String(format: "$%g / $%g", $0.inputPerM ?? 0, $0.outputPerM ?? 0)
+            } ?? "—"
+            let label = pair.provider.map { "\(pair.model) @\($0)" } ?? pair.model
+            print("\(pair.source.padding(toLength: 9, withPad: " ", startingAt: 0)) "
+                + "\(label.padding(toLength: 48, withPad: " ", startingAt: 0)) "
+                + "\(price.padding(toLength: 16, withPad: " ", startingAt: 0)) \(resolution.summary)")
+        }
+    }
+
+    /// --build-pricing-catalog <litellm.json> <models.dev.json> <输出>：生成随包价格目录快照
+    /// （Scripts/update-pricing-catalog.sh 调用；与运行时同一套解析/校验代码）
+    private static func buildPricingCatalog(args: [String]) {
+        guard args.count >= 3 else {
+            FileHandle.standardError.write(Data(
+                "用法：--build-pricing-catalog <litellm.json> <models.dev.json> <输出>\n".utf8))
+            exit(2)
+        }
+        do {
+            let now = Date()
+            let litellm = try PriceCatalogParser.parseLiteLLM(
+                Data(contentsOf: URL(fileURLWithPath: args[0])))
+            let modelsDev = try PriceCatalogParser.parseModelsDev(
+                Data(contentsOf: URL(fileURLWithPath: args[1])))
+            let catalog = PriceCatalog(
+                litellm: litellm, modelsDev: modelsDev,
+                litellmMeta: .init(fetchedAt: now, entryCount: litellm.count),
+                modelsDevMeta: .init(
+                    fetchedAt: now, entryCount: modelsDev.values.reduce(0) { $0 + $1.models.count }))
+            let data = try PricingCatalogStore.encode(catalog)
+            try data.write(to: URL(fileURLWithPath: args[2]), options: .atomic)
+            FileHandle.standardError.write(Data(
+                ("已生成 \(args[2])：LiteLLM \(litellm.count) 条，models.dev \(modelsDev.count) 个 provider，"
+                    + "\(data.count / 1024) KB\n").utf8))
+        } catch {
+            FileHandle.standardError.write(Data("生成失败：\(error)\n".utf8))
+            exit(1)
+        }
+    }
+
     private static func printUsage() {
         print("""
         eureka [选项]
@@ -394,6 +484,9 @@ enum EurekaCLI {
           --uninstall-codex-notify  卸载 Codex notify
           --hooks-status            查看安装状态
           --audit-snapshot          扫描并输出 agent 操作审计流水（--risk-only 仅风险 / --limit N）
+          --pricing-resolve [模型…]  打印价格解析结果与出处（--provider p；不给模型则解析本地账本全部模型）
+          --build-pricing-catalog <litellm> <models.dev> <输出>  生成随包价格目录快照
+          --pricing-refresh         用 app 同一套网络代码拉一次价格目录（只打印结果，不写缓存）
           --mcp-inspect <名字>       检测某个 MCP server（remote 握手 / stdio 深探），结果落缓存
           --render-previews [目录]   离屏渲染灵动岛各形态 PNG
           --render-mascot [目录]     离屏渲染全部吉祥物变体与分镜 PNG

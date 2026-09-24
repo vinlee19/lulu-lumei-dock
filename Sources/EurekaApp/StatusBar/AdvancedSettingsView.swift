@@ -2,6 +2,7 @@ import EurekaIngest
 import EurekaInstall
 import EurekaKit
 import EurekaStore
+import EurekaUsage
 import SwiftUI
 
 /// 设置→高级：折叠卡片组（仿参考设计：图标+标题+描述+chevron）
@@ -26,6 +27,13 @@ struct AdvancedSettingsView: View {
                 subtitle: "导出用量 CSV、查看本地数据库"
             ) {
                 dataContent
+            }
+            CollapsibleCard(
+                icon: "dollarsign.circle", tint: Theme.brand,
+                title: "模型价格",
+                subtitle: "价格来源、联网更新与未定价模型"
+            ) {
+                PricingSection(usageService: usageService, settings: settings)
             }
             CollapsibleCard(
                 icon: "waveform.path.ecg", tint: Theme.brand,
@@ -116,6 +124,101 @@ struct AdvancedSettingsView: View {
             .foregroundStyle(.tertiary)
         Button("清空全文索引") { usageService.clearSearchIndex() }
             .controlSize(.small)
+    }
+}
+
+// MARK: - 模型价格
+
+/// 价格目录状态 + 联网开关 + 未定价/估算模型清单（一键复制覆盖模板）
+private struct PricingSection: View {
+    @ObservedObject var usageService: UsageService
+    @ObservedObject var settings: AppSettings
+    @ObservedObject private var pricing = PricingCatalogService.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("联网更新模型价格（LiteLLM / models.dev）", isOn: $settings.remotePricingEnabled)
+            Text("每天拉取一次公开价格表，不发送任何用户数据；失败时继续用本地缓存或随包快照。"
+                + "订阅套餐（Kimi Code、智谱 / 火山 Coding Plan 等）按厂商按量价折算 API 等价费用；"
+                + "只有转售平台报价的模型不计价。")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+            statusLine
+            HStack(spacing: 8) {
+                Button(pricing.status.refreshing ? "更新中…" : "立即更新") { pricing.refreshNow() }
+                    .disabled(pricing.status.refreshing)
+                Button("打开 pricing.json 所在目录") {
+                    NSWorkspace.shared.open(SpoolPaths.root())
+                }
+                Button("重新载入自定义价格") { pricing.reloadOverride() }
+            }
+            .controlSize(.small)
+            Divider()
+            unpricedList
+        }
+        .onAppear { usageService.loadPricingDiagnostics() }
+        .onChange(of: usageService.pricingRevision) { _, _ in usageService.loadPricingDiagnostics() }
+    }
+
+    private var statusLine: some View {
+        let status = pricing.status
+        let formatter = RelativeDateTimeFormatter()
+        func age(_ date: Date?) -> String {
+            date.map { formatter.localizedString(for: $0, relativeTo: Date()) } ?? "无"
+        }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("当前来源：\(status.origin.rawValue) · LiteLLM \(status.litellmCount) 条（\(age(status.litellmFetchedAt))）"
+                + " · models.dev \(status.modelsDevCount) 条（\(age(status.modelsDevFetchedAt))）")
+            if let error = status.lastError {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .font(.system(size: 10))
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var unpricedList: some View {
+        let rows = usageService.pricingDiagnostics
+        if rows.isEmpty {
+            Text("所有模型都已定价").font(.system(size: 10)).foregroundStyle(.secondary)
+        } else {
+            HStack {
+                Text("未定价 / 估算（\(rows.count)）").font(.system(size: 10.5, weight: .semibold))
+                Spacer()
+                Button("复制覆盖模板") { copyTemplate(rows) }.controlSize(.small)
+            }
+            ForEach(rows.prefix(30)) { row in
+                HStack(spacing: 6) {
+                    Text(row.source.displayName).frame(width: 64, alignment: .leading)
+                    Text(row.provider.map { "\(row.model) @\($0)" } ?? row.model)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Text(row.resolution.estimated ? row.resolution.summary : "未定价")
+                        .foregroundStyle(.secondary)
+                    Text(formatTokens(row.tokens)).monospacedDigit()
+                        .frame(width: 56, alignment: .trailing)
+                }
+                .font(.system(size: 10))
+            }
+            Text("把模板里的价格（USD / 百万 token）填好后保存为 ~/Library/Application Support/Eureka/pricing.json，"
+                + "再点「重新载入自定义价格」。自定义价格优先级最高。")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func copyTemplate(_ rows: [UsageService.PricingDiagnostic]) {
+        var seen = Set<String>()
+        let models: [[String: Any]] = rows.compactMap { row in
+            guard seen.insert(row.model).inserted else { return nil }
+            return ["match": row.model, "inputPerM": 0, "outputPerM": 0]
+        }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: ["models": models], options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(String(decoding: data, as: UTF8.self), forType: .string)
     }
 }
 

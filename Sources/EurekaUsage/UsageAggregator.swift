@@ -141,12 +141,21 @@ public enum UsageAggregator {
 
             let rowTokens = row.inputTokens + row.outputTokens
                 + row.cacheReadTokens + row.cacheCreationTokens
-            if let cost = pricing.cost(of: row) {
+            let cost = pricing.cost(of: row)
+            if let cost {
                 summary.costUSD = (summary.costUSD ?? 0) + cost
-                summary.models.append(.init(model: row.model, totalTokens: rowTokens, costUSD: cost))
             } else {
                 summary.unpricedTokens += rowTokens
-                summary.models.append(.init(model: row.model, totalTokens: rowTokens, costUSD: nil))
+            }
+            // 同名模型可能按 provider 拆成多行（订阅 vs 按量），展示按模型合并：
+            // 费用为已定价部分之和，全部未定价才是 nil
+            if let index = summary.models.firstIndex(where: { $0.model == row.model }) {
+                summary.models[index].totalTokens += rowTokens
+                if let cost {
+                    summary.models[index].costUSD = (summary.models[index].costUSD ?? 0) + cost
+                }
+            } else {
+                summary.models.append(.init(model: row.model, totalTokens: rowTokens, costUSD: cost))
             }
             bySource[row.source] = summary
         }

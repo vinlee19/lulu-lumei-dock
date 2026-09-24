@@ -85,7 +85,9 @@ Grok weekly / Claude), colored 60% amber / 85% red, with a tooltip breakdown.
 
 **Usage ledger** (0.00% diff vs. `ccusage`) — today / this week / this month / custom range, broken
 down by source, model, project (grouped to repo root) and session; estimated cost (with separate
-cache pricing); a day/hour trend chart; a weekday×hour activity heatmap; and a
+cache pricing, resolved from the LiteLLM + models.dev public price catalogs — refreshed daily, with a
+local cache and a bundled snapshot as offline fallback; subscription plans such as Kimi Code or GLM
+Coding Plan are shown at their pay-as-you-go API-equivalent price); a day/hour trend chart; a weekday×hour activity heatmap; and a
 **skills / plugins** tab counting `skill` / `mcp` / `agent` / `command` / `tool` invocations. Export
 the last 30 days to CSV.
 
@@ -342,10 +344,13 @@ All data lives in `~/Library/Application Support/Eureka/`:
 | `eureka.sqlite` | history / usage / sessions / audit (inspect directly with `sqlite3`) |
 | `events/` | event spool (hooks → relay writes here atomically, app consumes) |
 | `bin/eureka-relay` | the stable path referenced by hooks/notify (re‑synced by hash on launch) |
-| `pricing.json` (optional) | override the built‑in price table (USD / million tokens, prefix match) |
+| `pricing.json` (optional) | highest-priority price overrides (USD / million tokens, prefix match) plus optional `providers` aliases, e.g. `{"providers": {"my-proxy": {"vendor": "openai"}}}` |
+| `pricing-catalog-cache.json` | last successfully fetched LiteLLM + models.dev price catalog (kept indefinitely) |
 | `context-windows.json` (optional) | override per‑model context window size, e.g. `{"claude-opus": 1000000}` |
 
 **Privacy:** automatic update checks contact this repository's GitHub Releases feed and can be disabled.
+The model price catalogs are fetched once a day from `raw.githubusercontent.com` (jsDelivr as mirror) and
+`models.dev` — plain GETs of public files, no user data — and can be turned off in Settings → Advanced → 模型价格.
 The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. The MCP tab's
 "检测连接" probe fires only when you click it and only contacts the server URL configured for that entry
 (with its own configured headers); it speaks MCP 2026-07-28 (sending the negotiated `MCP-Protocol-Version`

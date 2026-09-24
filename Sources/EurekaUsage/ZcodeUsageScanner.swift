@@ -118,7 +118,10 @@ public final class ZcodeUsageScanner {
                         inputTokens: input,
                         outputTokens: output,
                         cacheCreationTokens: cacheWrite,
-                        cacheReadTokens: cacheRead))
+                        cacheReadTokens: cacheRead,
+                        // model.providerId 如 `builtin:bigmodel`（别名表映射到智谱按量价）
+                        provider: ((root["model"] as? [String: Any])?["providerId"] as? String)?
+                            .lowercased()))
                 }
             }
 

@@ -27,7 +27,10 @@ install: app
 demo:
 	Scripts/demo-island.sh
 
+pricing-catalog:
+	Scripts/update-pricing-catalog.sh
+
 clean:
 	rm -rf .build dist
 
-.PHONY: build test run release app package-release install demo clean
+.PHONY: build test run release app package-release install demo pricing-catalog clean

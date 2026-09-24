@@ -49,6 +49,19 @@ final class UsageService: ObservableObject {
     @Published private(set) var sessionTotals: [SessionTotal] = []
     /// 活跃时段热力格（选中区间/来源，周 × 24h）
     @Published private(set) var heatmapCells: [UsageRepo.HeatmapCell] = []
+    /// 价格表版本（换价后 +1，看板据此重算费用）
+    @Published private(set) var pricingRevision = 0
+    /// 未定价 / 估算的模型清单（设置 → 模型价格；token 降序）
+    @Published private(set) var pricingDiagnostics: [PricingDiagnostic] = []
+
+    struct PricingDiagnostic: Identifiable, Equatable {
+        var id: String { "\(source.rawValue)|\(model)|\(provider ?? "")" }
+        var source: AgentSource
+        var model: String
+        var provider: String?
+        var tokens: Int
+        var resolution: PriceResolution
+    }
 
     struct ProjectTotal: Identifiable, Equatable {
         var id: String { name }
@@ -149,7 +162,8 @@ final class UsageService: ObservableObject {
     private var cursorScanner: CursorUsageScanner?
     private var zcodeScanner: ZcodeUsageScanner?
     private var searchIndexer: TranscriptSearchIndexer?
-    private var pricing = PricingTable(models: [])
+    /// 共享价格表（远程目录到达时原子替换；读取加锁，主线程渲染与后台扫描都安全）
+    private var pricing: PricingTable { PricingCatalogStore.shared.current }
 
     private static let claudeHealthName = "用量扫描 Claude"
     private static let codexHealthName = "用量扫描 Codex"
@@ -221,9 +235,7 @@ final class UsageService: ObservableObject {
                     dbPath: ZcodePaths.db(), store: store)
                 try? self.zcodeScanner?.recordPromptCounts()
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
-                self.pricing = PricingTable.load(
-                    bundledURL: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
-                    overrideURL: SpoolPaths.root().appendingPathComponent("pricing.json"))
+                PricingCatalogStore.shared.loadIfNeeded(paths: .app)
                 self.scanAndPublish()
             } catch {
                 self.publish { $0.lastError = "数据库打开失败: \(error)" }
@@ -286,6 +298,32 @@ final class UsageService: ObservableObject {
     /// popover 打开时主动刷一次
     func refreshNow() {
         queue.async { [weak self] in self?.scanAndPublish() }
+    }
+
+    /// 扫一遍账本里出现过的 (来源, 模型, provider)，挑出未定价与估算的（设置页打开时调用）
+    func loadPricingDiagnostics() {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let pricing = self.pricing
+            let rows = ((try? store.usage.distinctModels()) ?? []).compactMap { totals -> PricingDiagnostic? in
+                let resolution = pricing.resolution(for: totals.model, provider: totals.provider)
+                guard resolution.price == nil || resolution.estimated else { return nil }
+                return PricingDiagnostic(
+                    source: totals.source, model: totals.model, provider: totals.provider,
+                    tokens: totals.inputTokens + totals.outputTokens
+                        + totals.cacheCreationTokens + totals.cacheReadTokens,
+                    resolution: resolution)
+            }
+            .sorted { $0.tokens > $1.tokens }
+            self.publish { $0.pricingDiagnostics = rows }
+        }
+    }
+
+    /// 价格表换了（远程目录到达 / 用户改 pricing.json）：费用是读时现算的，重发汇总即可；
+    /// pricingRevision 自增让看板 .onChange 重载明细
+    func pricingDidChange() {
+        pricingRevision += 1
+        refreshNow()
     }
 
     /// 请求日志分页加载（page 从 1 起）；行成本用价格表折算
@@ -622,6 +660,11 @@ final class UsageService: ObservableObject {
     /// 行成本折算（模型统计合计行用）
     func cost(of totals: UsageTotals) -> Double? {
         pricing.cost(of: totals)
+    }
+
+    /// 价格出处（看板费用格悬停）
+    func priceResolution(of totals: UsageTotals) -> PriceResolution {
+        pricing.resolution(for: totals.model, provider: totals.provider)
     }
 
     /// 导出近 30 天用量 CSV 到 ~/Downloads 并在 Finder 中显示

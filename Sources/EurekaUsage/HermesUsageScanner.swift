@@ -154,6 +154,7 @@ public final class HermesUsageScanner {
                 identity: ([1, 2, 3, 4, 5] as [Int32])
                     .map { row.text($0) ?? "" }.joined(separator: "\u{1}"),
                 model: row.text(1) ?? "hermes-unknown",
+                provider: row.text(2).flatMap { $0.isEmpty || $0 == "auto" ? nil : $0 },
                 task: row.text(5) ?? "",
                 tokens: Counted(
                     input: Int(row.int(6)), output: Int(row.int(7)),
@@ -197,7 +198,7 @@ public final class HermesUsageScanner {
             snapshot[row.identity] = row.tokens
             guard !delta.isEmpty else { continue }
             records.append(record(
-                model: row.model, meta: meta, sessionID: sessionID,
+                model: row.model, provider: row.provider, meta: meta, sessionID: sessionID,
                 timestamp: row.lastSeen > 0 ? Date(timeIntervalSince1970: row.lastSeen) : now,
                 tokens: delta))
         }
@@ -215,7 +216,7 @@ public final class HermesUsageScanner {
             snapshot[key] = residual
             if !delta.isEmpty {
                 records.append(record(
-                    model: meta.model, meta: meta, sessionID: sessionID,
+                    model: meta.model, provider: nil, meta: meta, sessionID: sessionID,
                     timestamp: meta.timestamp, tokens: delta))
             }
         }
@@ -224,7 +225,8 @@ public final class HermesUsageScanner {
 
     /// model 原样入库（自由文本、多 provider，如 `gpt-5.6-sol`；价目表按前缀匹配，不硬编码清单）
     private func record(
-        model: String, meta: SessionMeta?, sessionID: String, timestamp: Date, tokens: Counted
+        model: String, provider: String?, meta: SessionMeta?, sessionID: String,
+        timestamp: Date, tokens: Counted
     ) -> UsageRecord {
         UsageRecord(
             source: .hermes,
@@ -235,7 +237,8 @@ public final class HermesUsageScanner {
             inputTokens: tokens.input,
             outputTokens: tokens.output,
             cacheCreationTokens: tokens.cacheWrite,
-            cacheReadTokens: tokens.cacheRead)
+            cacheReadTokens: tokens.cacheRead,
+            provider: provider)
     }
 
     // MARK: - 官方成本
@@ -322,6 +325,8 @@ public final class HermesUsageScanner {
         var sessionID: String
         var identity: String
         var model: String
+        /// billing_provider（`auto` / 空 = 未知）
+        var provider: String?
         var task: String
         var tokens: Counted
         var lastSeen: Double
