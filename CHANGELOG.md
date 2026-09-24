@@ -4,6 +4,46 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.32.0] - 2026-09-24
+
+### Added
+
+- **Model prices now come from live public catalogs instead of a hardcoded
+  table.** Costs are resolved from [LiteLLM](https://github.com/BerriAI/litellm)
+  and [models.dev](https://models.dev), fetched once a day (plain GETs of
+  public files, no user data; jsDelivr mirror when GitHub raw is blocked).
+  New models like `gpt-6-sol` / `gpt-6-astra` are priced the day the catalogs
+  list them — no app release needed.
+  - *Offline-safe*: a failed or invalid fetch keeps the last good catalog
+    (disk cache → bundled release-day snapshot → handwritten table). Remote
+    data is size-capped and validated; a catalog that shrinks by half is
+    rejected.
+  - *Matching*: model names are normalized (date / `-thinking` / `-256k`
+    suffixes, `glm-5-2` ↔ `glm-5.2`, `k3` → `kimi-k3`) and looked up by the
+    provider you actually used, then by the model's vendor. Reseller prices
+    (OpenRouter, Poe…) are only used when you route through that reseller.
+  - *Subscription plans* (Kimi Code, GLM / Volcengine coding plans) show the
+    vendor's pay-as-you-go **API-equivalent** cost, like Claude Max already did.
+  - *Settings → Advanced → 模型价格*: fetch toggle, catalog status, "update
+    now", and a list of unpriced / estimated models with a copyable override
+    template. Hovering a cost in the model table shows where the price came
+    from. `pricing.json` is now a top-priority override layer (no longer a
+    full replacement) and accepts `providers` aliases for custom proxies.
+- Usage records now keep the billing **provider** (OpenCode history is
+  backfilled; Codex, Hermes and ZCode record it going forward), so the same
+  model via a coding plan and via pay-as-you-go are priced — and listed —
+  separately.
+
+### Fixed
+
+- **Several prices were silently wrong because unknown models fell back to a
+  family prefix.** Historic costs are re-priced automatically:
+  `claude-opus-5` drops to about a third ($15/$75 → $5/$25), `claude-opus-5-5`
+  is $4/$20, `claude-fable-5*` doubles ($5/$25 → $10/$50), `claude-sonnet-5`
+  is $2/$10, and `gpt-5.6-sol` rises from gpt-5's $1.25/$10 to $4/$20.
+- A data race where the dashboard read the price table on the main thread
+  while the usage queue replaced it.
+
 ## [0.31.1] - 2026-09-24
 
 ### Fixed
@@ -1681,6 +1721,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.32.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.32.0
 [0.31.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.1
 [0.31.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.0
 [0.30.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.30.0
