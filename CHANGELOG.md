@@ -4,6 +4,17 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.31.1] - 2026-09-24
+
+### Fixed
+
+- **The usage page no longer shows a stale "扫描失败: database is locked"
+  forever.** The scan error was only ever set, never cleared, so a single
+  transient lock timeout (another connection's write transaction outliving
+  the 5s busy timeout, e.g. during warm-up or a large full-text index run)
+  stayed on screen until the app restarted. A successful scan now clears it,
+  so a one-off contention disappears on the next tick.
+
 ## [0.31.0] - 2026-09-05
 
 ### Added
@@ -1670,6 +1681,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.31.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.1
 [0.31.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.0
 [0.30.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.30.0
 [0.29.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.29.0
