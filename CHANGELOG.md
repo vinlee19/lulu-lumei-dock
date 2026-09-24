@@ -4,6 +4,25 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.34.0] - 2026-09-24
+
+### Added
+
+- **Experimental Antigravity usage and quota** (off by default — turn it on
+  in the Limits panel). Antigravity keeps everything in undocumented
+  protobuf, so both readers decode it by structure and hide themselves when
+  anything doesn't parse:
+  - *Usage*: per-call input / output / cache-read tokens from each
+    conversation database, priced from the public catalogs (e.g.
+    `gemini-3.8-flash`). The field mapping was checked against local data:
+    thinking + response tokens equal output tokens on every one of 1,248
+    calls. Databases are read from a temporary copy, never opened in place.
+  - *Quota*: the per-model remaining quota and plan that the Antigravity IDE
+    caches locally, shown as a Gemini gauge and a Claude / GPT-OSS gauge.
+    Only the quota fields are decoded — the account name and email stored
+    next to them are never read into the app. The cache only refreshes while
+    the IDE is running, so the card is often marked stale.
+
 ## [0.33.0] - 2026-09-24
 
 ### Added
@@ -1740,6 +1759,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.34.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.0
 [0.33.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.33.0
 [0.32.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.32.0
 [0.31.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.1
