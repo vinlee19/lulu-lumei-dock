@@ -4,6 +4,18 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.34.1] - 2026-09-24
+
+### Fixed
+
+- **Removed the experimental Antigravity quota card — its numbers were
+  wrong.** Antigravity's real quotas are a weekly and a 5-hour limit per model
+  group (Gemini / Claude + GPT), which `agy` fetches online and never writes
+  to disk. The IDE cache the card read holds an older per-model value that
+  doesn't match them: it showed 0% used while `agy` reported 27% of the weekly
+  Gemini quota gone. The app also no longer opens that IDE database at all.
+  Experimental Antigravity **usage** statistics are unaffected.
+
 ## [0.34.0] - 2026-09-24
 
 ### Added
@@ -1759,6 +1771,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.34.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.1
 [0.34.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.0
 [0.33.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.33.0
 [0.32.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.32.0
