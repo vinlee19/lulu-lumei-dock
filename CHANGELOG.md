@@ -4,6 +4,33 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.35.0] - 2026-09-24
+
+### Added
+
+- **Audit trail archive to S3 as Parquet** (off by default — Settings →
+  Backup → Configure). Audit records are written as one Parquet file per UTC
+  day and uploaded with your regular backup to
+  `<prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/`, ready to query with Athena,
+  Trino or DuckDB (templates in `Scripts/analytics/`).
+  - *Redacted before upload*: authorization headers, secret-looking
+    environment variables, password flags, credentials in URLs, common API key
+    formats and anything typed into a process's stdin are replaced with
+    `[REDACTED]`. Commands and paths otherwise stay intact. The local database
+    is not modified.
+  - *No more silent history loss*: with archiving on, local retention only
+    deletes whole days that are confirmed uploaded. If uploads keep failing,
+    records are kept past the retention window instead of being dropped.
+  - Only days that actually changed are rewritten (for example when Codex
+    fills in an exit code afterwards), so each backup round uploads little.
+  - The Parquet writer is built in (no new dependencies) and was checked
+    against Apache's reference reader on 54,000 real records.
+
+### Fixed
+
+- README: Codex audit records come from its rollout files, not the hook
+  channel.
+
 ## [0.34.1] - 2026-09-24
 
 ### Fixed
@@ -1771,6 +1798,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.35.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.0
 [0.34.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.1
 [0.34.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.0
 [0.33.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.33.0
