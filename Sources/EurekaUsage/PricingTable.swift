@@ -99,6 +99,16 @@ public struct PricingTable: Sendable {
         resolution(for: model, provider: nil).price
     }
 
+    /// 一组聚合的价格出处（有自报费用时为 .reported）
+    public func resolution(of totals: UsageTotals) -> PriceResolution {
+        if totals.reportedCostUSD != nil {
+            return PriceResolution(
+                price: ModelPrice(match: totals.model, inputPerM: 0, outputPerM: 0),
+                source: .reported, matchedKey: nil)
+        }
+        return resolution(for: totals.model, provider: totals.provider)
+    }
+
     public func resolution(for model: String, provider: String?) -> PriceResolution {
         let key = provider.map { "\(model)\u{1}\($0)" } ?? model
         if let cached = memo.get(key) { return cached }
@@ -107,8 +117,9 @@ public struct PricingTable: Sendable {
         return result
     }
 
-    /// 一组聚合的费用；nil = 该模型未定价
+    /// 一组聚合的费用；nil = 该模型未定价。agent 自报费用（Grok）优先于价格表
     public func cost(of totals: UsageTotals) -> Double? {
+        if let reported = totals.reportedCostUSD { return reported }
         guard let price = resolution(for: totals.model, provider: totals.provider).price else {
             return nil
         }

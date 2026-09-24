@@ -187,7 +187,7 @@ func grokRolloutTests(_ t: TestRunner) {
 func grokUsageScannerTests(_ t: TestRunner) {
     t.suite("GrokUsageScanner")
 
-    t.test("tool_started → 工具计数；turn_started → 提问数；不写费用账；水位幂等") {
+    t.test("tool_started → 工具计数；turn_started → 提问数；无 updates.jsonl 不写用量；水位幂等") {
         let session = try makeGrokSession()
         defer { try? FileManager.default.removeItem(at: session.root) }
         try appendLines([
@@ -218,7 +218,7 @@ func grokUsageScannerTests(_ t: TestRunner) {
         try expectEqual(
             try store.sessionStats.promptCounts(for: ["grok-sess-1"])["grok-sess-1"] ?? 0, 2)
 
-        // grok 不写 usage_records（无 token/费用）
+        // 没有 updates.jsonl（老版本 grok）→ 不写 usage_records
         let usageRows = try store.usage.totalsForSessions(["grok-sess-1"])
         try expect(usageRows["grok-sess-1"] == nil, "grok 不应有用量行")
 
@@ -227,6 +227,67 @@ func grokUsageScannerTests(_ t: TestRunner) {
         try expectEqual(try count("read_file"), 2)
         try expectEqual(
             try store.sessionStats.promptCounts(for: ["grok-sess-1"])["grok-sess-1"] ?? 0, 2)
+    }
+    /// 合成的 turn_completed 行（字段结构照抄 Grok 1.0.41；数值自拟）
+    func turnCompleted(
+        promptId: String, ms: Int, input: Int, cached: Int, output: Int, ticks: Int
+    ) -> String {
+        let counts = #""inputTokens":\#(input),"outputTokens":\#(output),"totalTokens":\#(input + output),"#
+            + #""cachedReadTokens":\#(cached),"cacheCreationTokens":0,"reasoningTokens":10,"#
+            + #""modelCalls":3,"apiDurationMs":1000,"costUsdTicks":\#(ticks)"#
+        return #"{"timestamp":\#(ms / 1000),"method":"_x.ai/session/update","params":{"sessionId":"grok-sess-1","#
+            + #""update":{"sessionUpdate":"turn_completed","prompt_id":"\#(promptId)","stop_reason":"end_turn","#
+            + #""usage":{\#(counts),"modelUsage":{"grok-4.7-build":{\#(counts)}},"numTurns":3}},"#
+            + #""_meta":{"eventId":"e-\#(promptId)","agentTimestampMs":\#(ms)}}}"#
+    }
+
+    t.test("updates.jsonl turn_completed → 每轮用量入账，采用自报费用，增量续读，重写不重复") {
+        let session = try makeGrokSession()
+        defer { try? FileManager.default.removeItem(at: session.root) }
+        try appendLines([#"{"ts":"2026-09-20T09:00:00.000Z","type":"turn_started"}"#], to: session.events)
+        let updates = session.events.deletingLastPathComponent().appendingPathComponent("updates.jsonl")
+        try appendLines([
+            // 流式正文行：不是 turn_completed，必须忽略
+            #"{"timestamp":1790067000,"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}}}"#,
+            turnCompleted(promptId: "p1", ms: 1_790_067_696_000,
+                          input: 1_000_000, cached: 800_000, output: 50_000, ticks: 27_941_104_400),
+        ], to: updates)
+
+        let store = try EurekaStore(path: session.root.appendingPathComponent("eureka.sqlite"))
+        let scanner = GrokUsageScanner(sessionsRoot: session.root, store: store)
+        _ = try scanner.scanOnce()
+        var rows = try store.usage.totalsForSessions(["grok-sess-1"])["grok-sess-1"] ?? []
+        try expectEqual(rows.count, 1)
+        var row = try expectSome(rows.first)
+        try expectEqual(row.model, "grok-4.7-build")
+        try expectEqual(row.provider, "xai")
+        try expectEqual(row.inputTokens, 200_000)   // 1M − 缓存读 800k
+        try expectEqual(row.cacheReadTokens, 800_000)
+        try expectEqual(row.outputTokens, 50_000)
+        try expect(abs((row.reportedCostUSD ?? 0) - 2.79411044) < 1e-9, "\(String(describing: row.reportedCostUSD))")
+        // 费用直接采用自报值，不走价格表
+        try expectEqual(PricingTable(models: []).cost(of: row), row.reportedCostUSD)
+        try expectEqual(PricingTable(models: []).resolution(of: row).source, .reported)
+
+        // 增量：追加一轮只新增一轮
+        try appendLines([
+            turnCompleted(promptId: "p2", ms: 1_790_067_800_000,
+                          input: 500_000, cached: 100_000, output: 10_000, ticks: 10_000_000_000),
+        ], to: updates)
+        _ = try scanner.scanOnce()
+        _ = try scanner.scanOnce()
+        rows = try store.usage.totalsForSessions(["grok-sess-1"])["grok-sess-1"] ?? []
+        row = try expectSome(rows.first)
+        try expectEqual(row.requestCount, 2)
+        try expect(abs((row.reportedCostUSD ?? 0) - 3.79411044) < 1e-9)
+
+        // 文件被重写（新 inode）：从头重扫，先清后写，不翻倍
+        let content = try Data(contentsOf: updates)
+        try FileManager.default.removeItem(at: updates)
+        try content.write(to: updates)
+        _ = try scanner.scanOnce()
+        rows = try store.usage.totalsForSessions(["grok-sess-1"])["grok-sess-1"] ?? []
+        try expectEqual(rows.first?.requestCount, 2)
     }
 }
 

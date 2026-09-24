@@ -95,7 +95,8 @@ enum Schema {
             cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
             cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
             cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-            provider TEXT
+            provider TEXT,
+            reported_cost_usd REAL
         );
         CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_records(ts);
         CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_records(session_id);
@@ -324,6 +325,8 @@ enum Schema {
         // usage_records 补计费 provider（区分同名模型的订阅/按量）。不升版本：升版本会整表重扫，
         // 已删除的 transcript 用量就永久丢了。老行为 NULL → 价格解析按模型名推断厂商。
         try addColumnIfMissing(db, table: "usage_records", column: "provider", type: "TEXT")
+        // agent 自报费用（Grok costUsdTicks 折算）；有值时优先于价格表
+        try addColumnIfMissing(db, table: "usage_records", column: "reported_cost_usd", type: "REAL")
 
         try db.execute("PRAGMA user_version = \(version)")
     }

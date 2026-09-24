@@ -271,7 +271,7 @@ enum EurekaCLI {
             let newClaude = try claude.scanOnce()
             let newCodex = try codex.scanOnce()
             let newOpencode = try opencode.scanOnce()
-            let newGrok = try grok.scanOnce()  // grok 无 token，仅入工具调用计数
+            let newGrok = try grok.scanOnce()  // 工具调用计数 + updates.jsonl 每轮用量
             let newKimi = try kimi.scanOnce()
             let newGemini = try gemini.scanOnce()
             let newQwen = try qwen.scanOnce()
@@ -282,7 +282,7 @@ enum EurekaCLI {
             try? zcode.recordPromptCounts()
             FileHandle.standardError.write(Data(
                 ("扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，"
-                    + "grok 工具 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
+                    + "grok 工具/用量 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
                     + "qwen +\(newQwen) 条，hermes +\(newHermes) 条，codebuddy +\(newCodeBuddy) 条，"
                     + "cursor +\(newCursor) 条，zcode +\(newZcode) 条\n").utf8))
 

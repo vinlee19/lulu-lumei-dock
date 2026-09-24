@@ -343,7 +343,8 @@ final class UsageService: ObservableObject {
                         inputTokens: row.inputTokens, outputTokens: row.outputTokens,
                         cacheCreationTokens: row.cacheCreationTokens,
                         cacheCreation1hTokens: row.cacheCreation1hTokens,
-                        cacheReadTokens: row.cacheReadTokens, requestCount: 1)))
+                        cacheReadTokens: row.cacheReadTokens, requestCount: 1,
+                        provider: row.provider, reportedCostUSD: row.reportedCostUSD)))
                 }
                 self.publish {
                     $0.records = displays
@@ -664,7 +665,7 @@ final class UsageService: ObservableObject {
 
     /// 价格出处（看板费用格悬停）
     func priceResolution(of totals: UsageTotals) -> PriceResolution {
-        pricing.resolution(for: totals.model, provider: totals.provider)
+        pricing.resolution(of: totals)
     }
 
     /// 导出近 30 天用量 CSV 到 ~/Downloads 并在 Finder 中显示

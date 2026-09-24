@@ -187,7 +187,7 @@ many concurrent sessions, or late‑night runs.
 | **Claude Code** | ✅ | ✅ | ✅ (opt‑in) | ✅ | ✅ |
 | **Codex CLI** | ✅ | ✅ | ✅ (local) | ✅ | ✅ |
 | **opencode** | ✅ | ✅ | — | ✅ | ✅ |
-| **Grok** | ✅ | activity only¹ | ✅ (local) | ✅ | ✅ |
+| **Grok** | ✅ | ✅ (self‑reported cost)¹ | ✅ (local) | ✅ | ✅ |
 | **Antigravity** | ✅ | activity only¹ | — | ✅ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅ (skills) |
 | **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
@@ -197,10 +197,12 @@ many concurrent sessions, or late‑night runs.
 | **Qoder** | ✅ | —³ | — | ✅ | ✅ (memory/plans) |
 | **Cursor** | ✅⁴ | ✅ (no cost)⁴ | — | ✅ | ✅ |
 | **Trae** | hooks only⁵ | —⁵ | — | ✅ (from memory)⁵ | ✅ (skills/memory/rules/plans) |
-| **ZCode** | ✅⁶ | ✅ (no cost)⁶ | — | ✅⁶ | ✅ (skills)⁶ |
+| **ZCode** | ✅⁶ | ✅⁶ | — | ✅⁶ | ✅ (skills)⁶ |
 
-¹ Grok is subscription‑based and Antigravity stores conversations as protobuf, so neither exposes
-per‑request token accounting locally — only activity (invocations / sessions) is available.
+¹ Grok (1.0.4x+) writes each turn's per-model usage to `updates.jsonl` (`turn_completed`), including
+its own cost in `costUsdTicks`; that self-reported cost is used as-is, because Grok's `*-build` models
+have no entry in the public price catalogs. Antigravity stores conversations as protobuf, so it
+exposes no per‑request token accounting locally — only activity (invocations / sessions) is available.
 Kimi Code has no local rate‑limit snapshot and no global memory / on‑disk agent-definition
 convention, so those columns are skipped for it. Gemini CLI has no local rate-limit snapshot
 or agent-definition convention either; its `~/.gemini/skills` directory is shared with
@@ -297,8 +299,8 @@ can hold API keys. Slash commands (`<dataFolder>/commands`) are not indexed — 
 `~/.zcode/cli`: sessions and messages in one SQLite database (`db/db.sqlite`, same schema family
 as opencode, read-only), and a per-session append-only model-IO stream
 (`rollout/model-io-sess_<id>.jsonl`) that carries per-request usage — that stream is tailed for
-live cards and token accounting, subagent streams included. Tokens are counted but every `glm/*`
-model is marked `unknown` in the price table (plan-based subscription), so **cost is always $0**.
+live cards and token accounting, subagent streams included. Costs are the API-equivalent price of
+the GLM model from the public catalogs (ZCode itself is plan-based, so this is not what you are billed).
 Sessions live in the shared database, so per-session deletion and full-text search are skipped
 like opencode. Context-window percentages use the per-model `limit.context` from `~/.zcode/v2/config.json`
 (ZCode's own model catalog). Skills live in the shared `~/.agents/skills` (SKILL.md, same

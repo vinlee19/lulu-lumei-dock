@@ -20,6 +20,9 @@ public struct UsageRecord: Equatable, Sendable {
     /// 计费 provider（opencode providerID / codex model_provider / hermes billing_provider…），
     /// 区分同名模型走订阅套餐还是按量计费；无此信息的来源为 nil
     public var provider: String?
+    /// agent 自报的本条费用（USD）。有值时优先于价格表（Grok 的 costUsdTicks 已含 build
+    /// 模型实价与阶梯，价格目录里没有对应条目）；其余来源为 nil
+    public var reportedCostUSD: Double?
 
     public init(
         source: AgentSource,
@@ -32,7 +35,8 @@ public struct UsageRecord: Equatable, Sendable {
         cacheCreationTokens: Int = 0,
         cacheCreation1hTokens: Int = 0,
         cacheReadTokens: Int = 0,
-        provider: String? = nil
+        provider: String? = nil,
+        reportedCostUSD: Double? = nil
     ) {
         self.source = source
         self.model = model
@@ -45,5 +49,6 @@ public struct UsageRecord: Equatable, Sendable {
         self.cacheCreation1hTokens = cacheCreation1hTokens
         self.cacheReadTokens = cacheReadTokens
         self.provider = provider
+        self.reportedCostUSD = reportedCostUSD
     }
 }

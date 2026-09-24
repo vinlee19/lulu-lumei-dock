@@ -7,6 +7,7 @@ public struct PriceResolution: Equatable, Sendable {
         case litellm              // LiteLLM 目录
         case modelsDev(String)    // models.dev 的某个 provider
         case bundled              // 随包手写表
+        case reported             // agent 自报费用（Grok costUsdTicks）
     }
 
     /// nil = 未定价（只显示 token，不算钱）
@@ -32,6 +33,7 @@ public struct PriceResolution: Equatable, Sendable {
         case .litellm: parts.append("LiteLLM")
         case .modelsDev(let provider): parts.append("models.dev/\(provider)")
         case .bundled: parts.append(estimated ? "内置价格（估算）" : "内置价格")
+        case .reported: parts.append("agent 自报费用")
         }
         if let matchedKey { parts.append(matchedKey) }
         var text = parts.joined(separator: " · ")

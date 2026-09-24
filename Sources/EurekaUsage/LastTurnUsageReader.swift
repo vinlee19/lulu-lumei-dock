@@ -29,7 +29,7 @@ public enum LastTurnUsageReader {
         case .codebuddy:
             return lastCodeBuddyUsage(path: transcriptPath)
         case .grok:
-            // grok transcript 无 per-request token（订阅制不记账）-> 无真实总量
+            // grok 的 updates.jsonl 只有每轮汇总（一轮内多次模型调用之和），不是单次上下文规模
             return nil
         case .zcode:
             // zcode 的 transcriptPath 是共享 sqlite 库；真实 usage 在逐会话 rollout 文件里，
