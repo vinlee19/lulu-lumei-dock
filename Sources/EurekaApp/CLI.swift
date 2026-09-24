@@ -386,16 +386,6 @@ enum EurekaCLI {
             print("Codex: \(describe(codex))")
             let grok = await GrokRateLimitProvider(logURL: GrokPaths.unifiedLog()).snapshot()
             print("Grok: \(describe(grok))")
-            // Antigravity（实验）：IDE 缓存；stale 阈值放宽到 7 天只为调试能看到值
-            let antigravity = await AntigravityRateLimitProvider(
-                stateDBs: AntigravityPaths.ideStateDBs()).snapshot()
-            print("Antigravity: \(describe(antigravity))")
-            if let antigravity {
-                for window in [antigravity.primary, antigravity.secondary].compactMap({ $0 }) {
-                    print("  \(window.label ?? "?")：已用 \(String(format: "%.1f", window.usedPercent))%"
-                        + "，重置 \(window.resetsAt.map { "\($0)" } ?? "—")")
-                }
-            }
             if includeClaude {
                 let provider = ClaudeOAuthUsageProvider()
                 let claude = await provider.snapshot()

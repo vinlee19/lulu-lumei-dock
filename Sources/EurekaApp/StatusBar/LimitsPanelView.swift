@@ -41,7 +41,7 @@ struct LimitsPanelView: View {
 
                 AntigravityOptInRow(settings: settings, service: service)
 
-                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏；Antigravity（实验）读 IDE 本地缓存，IDE 不运行时不更新。OpenCode / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。")
+                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。OpenCode / Antigravity / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -51,19 +51,19 @@ struct LimitsPanelView: View {
     }
 }
 
-/// Antigravity 实验开关：同时控制用量扫描与限额读取（格式未公开，默认关）
+/// Antigravity 实验开关：控制用量扫描（格式未公开，默认关）
 private struct AntigravityOptInRow: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var service: RateLimitsService
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Antigravity 用量 / 限额（实验）", isOn: $settings.antigravityExperimentalEnabled)
+            Toggle("Antigravity 用量统计（实验）", isOn: $settings.antigravityExperimentalEnabled)
                 .font(.system(size: 11))
                 .onChange(of: settings.antigravityExperimentalEnabled) { _, _ in service.refresh() }
-            Text("解析 Antigravity 未公开的本地数据：会话库里的逐次调用 token（按公开价格折算 API 等价费用），"
-                + "以及 Antigravity IDE 缓存的各模型剩余额度（只读额度字段，不读取账号信息）。"
-                + "格式随版本可能变化，解析不了时自动隐藏。")
+            Text("解析 Antigravity 会话库里未公开的逐次调用 token（按公开价格折算 API 等价费用），结果在用量页。"
+                + "格式随版本可能变化，解析不了时自动隐藏。Antigravity 的每周 / 5 小时额度只由 agy 在线获取、"
+                + "不落本地，暂不显示。")
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
         }

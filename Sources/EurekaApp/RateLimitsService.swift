@@ -12,7 +12,7 @@ final class RateLimitsService: ObservableObject {
     @Published private(set) var codex: RateLimitSnapshot?
     @Published private(set) var grok: RateLimitSnapshot?
     @Published private(set) var claude: RateLimitSnapshot?
-    /// Antigravity（实验，默认关）：读 IDE 本地缓存，IDE 不开就不更新
+    /// Antigravity：暂无可靠的本地额度来源（agy 只在内存里持有线上额度），恒为 nil
     @Published private(set) var antigravity: RateLimitSnapshot?
     @Published private(set) var claudeFailureHint: String?
     /// 各窗口的预计打满时刻（key = "\(source.rawValue)#primary" / "#secondary"；无风险即缺席）
@@ -39,7 +39,6 @@ final class RateLimitsService: ObservableObject {
     // Grok 配额同 Codex：本地日志快照、零网络、失败即隐藏 → 无需 opt-in
     private let grokProvider = GrokRateLimitProvider(logURL: GrokPaths.unifiedLog())
     private let claudeProvider = ClaudeOAuthUsageProvider()
-    private let antigravityProvider = AntigravityRateLimitProvider(stateDBs: AntigravityPaths.ideStateDBs())
     private var timer: Timer?
     private var refreshing = false
 
@@ -62,13 +61,12 @@ final class RateLimitsService: ObservableObject {
         guard !refreshing else { return }
         refreshing = true
         let wantClaude = claudeEnabled
-        let wantAntigravity = AntigravityExperiment.isEnabled
         Task { [weak self] in
             guard let self else { return }
             let codexSnapshot = await self.codexProvider.snapshot()
             let grokSnapshot = await self.grokProvider.snapshot()
             let claudeSnapshot = wantClaude ? await self.claudeProvider.snapshot() : nil
-            let antigravitySnapshot = wantAntigravity ? await self.antigravityProvider.snapshot() : nil
+            let antigravitySnapshot: RateLimitSnapshot? = nil
             let hint = wantClaude ? self.claudeProvider.lastFailure : nil
             await MainActor.run {
                 self.codex = codexSnapshot

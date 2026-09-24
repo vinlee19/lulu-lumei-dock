@@ -127,45 +127,4 @@ func antigravityUsageTests(_ t: TestRunner) {
             atPath: FileManager.default.temporaryDirectory.path))?.filter { $0.hasPrefix("eureka-agy-") && !$0.hasPrefix("eureka-agy-test-") } ?? []
         try expect(leftovers.isEmpty, "\(leftovers)")
     }
-
-    t.suite("AntigravityRateLimitProvider")
-
-    /// 构造 userStatus：外层 base64(1{1:key, 2{1: base64(inner)}})；inner 里混入假姓名/邮箱字段
-    func userStatus(models: [(String, Float, UInt64)], plan: String) -> Data {
-        var quotas = Data()
-        for (label, remaining, reset) in models {
-            let quota = PB.float(1, remaining) + PB.bytes(2, PB.uint(1, reset))
-            quotas += PB.bytes(1, PB.string(1, label) + PB.bytes(15, quota))
-        }
-        let inner = PB.string(3, "Test Person") + PB.string(7, "someone@example.com")
-            + PB.bytes(33, quotas) + PB.bytes(36, PB.string(1, "tier") + PB.string(2, plan))
-        let wrapped = PB.bytes(1, PB.string(1, "userStatusSentinelKey")
-            + PB.bytes(2, PB.string(1, inner.base64EncodedString())))
-        return Data(wrapped.base64EncodedString().utf8)
-    }
-
-    t.test("按模型家族取剩余最少者，套餐名取 36.2") {
-        let raw = userStatus(models: [
-            ("Gemini 3.6 Flash (High)", 0.8, 1_790_100_000),
-            ("Gemini 3.1 Pro (High)", 0.25, 1_790_050_000),
-            ("Claude Opus 4.6 (Thinking)", 1.0, 1_790_200_000),
-        ], plan: "Google AI Pro")
-        let snapshot = try expectSome(AntigravityRateLimitProvider.parse(
-            userStatus: raw, asOf: Date(timeIntervalSince1970: 1_790_000_000)))
-        try expectEqual(snapshot.planType, "Google AI Pro")
-        try expect(abs((snapshot.primary?.usedPercent ?? 0) - 75) < 0.001)
-        try expectEqual(snapshot.primary?.label, "Gemini 模型")
-        try expectEqual(snapshot.primary?.resetsAt, Date(timeIntervalSince1970: 1_790_050_000))
-        try expectEqual(snapshot.secondary?.usedPercent, 0)
-        // 快照里只有额度与套餐，不含账号信息
-        let dump = String(describing: snapshot)
-        try expect(!dump.contains("someone@example.com") && !dump.contains("Test Person"), dump)
-    }
-
-    t.test("格式不符 / 剩余比例越界 → nil") {
-        try expect(AntigravityRateLimitProvider.parse(
-            userStatus: Data("not base64!".utf8), asOf: Date()) == nil)
-        let bad = userStatus(models: [("Gemini X", 1.5, 1)], plan: "p")
-        try expect(AntigravityRateLimitProvider.parse(userStatus: bad, asOf: Date()) == nil)
-    }
 }

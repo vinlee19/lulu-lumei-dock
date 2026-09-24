@@ -188,7 +188,7 @@ many concurrent sessions, or late‑night runs.
 | **Codex CLI** | ✅ | ✅ | ✅ (local) | ✅ | ✅ |
 | **opencode** | ✅ | ✅ | — | ✅ | ✅ |
 | **Grok** | ✅ | ✅ (self‑reported cost)¹ | ✅ (local) | ✅ | ✅ |
-| **Antigravity** | ✅ | ✅ (experimental)¹ | ✅ (experimental)¹ | ✅ | ✅ |
+| **Antigravity** | ✅ | ✅ (experimental)¹ | — | ✅ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅ (skills) |
 | **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 | **Qwen Code** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
@@ -203,9 +203,8 @@ many concurrent sessions, or late‑night runs.
 its own cost in `costUsdTicks`; that self-reported cost is used as-is, because Grok's `*-build` models
 have no entry in the public price catalogs. Antigravity stores conversations as undocumented protobuf; an opt-in
 experimental toggle (Limits panel) decodes per-call token usage from each conversation database's
-`gen_metadata` table and the per-model remaining quota that the Antigravity IDE caches locally (quota fields
-only — account fields are never decoded). The IDE cache only refreshes while the IDE runs, so the limits card is
-often marked stale. Off by default; anything that fails to decode is simply hidden.
+`gen_metadata` table. Off by default; anything that fails to decode is simply hidden. Antigravity's weekly /
+5-hour quotas are fetched online by `agy` and never written to disk, so there is no rate-limit card.
 Kimi Code has no local rate‑limit snapshot and no global memory / on‑disk agent-definition
 convention, so those columns are skipped for it. Gemini CLI has no local rate-limit snapshot
 or agent-definition convention either; its `~/.gemini/skills` directory is shared with

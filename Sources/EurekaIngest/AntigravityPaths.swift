@@ -71,16 +71,6 @@ public enum AntigravityPaths {
             .appendingPathComponent("antigravity/skills", isDirectory: true)
     }
 
-    /// Antigravity IDE 的 VS Code 式全局状态库（两个安装：新版 `Antigravity IDE`、旧版 `Antigravity`）。
-    /// ⚠️ 与 Cursor 的 state.vscdb 同理含登录态与个人信息：只允许按单个键读额度缓存，
-    /// **永不备份 / 同步 / 整库读取**（见 AntigravityRateLimitProvider）。
-    public static func ideStateDBs() -> [URL] {
-        let support = home().appendingPathComponent("Library/Application Support", isDirectory: true)
-        return ["Antigravity IDE", "Antigravity"].map {
-            support.appendingPathComponent("\($0)/User/globalStorage/state.vscdb")
-        }
-    }
-
     // MARK: - 会话 db 裸读（避开 live-WAL 只读打开问题；不依赖 SQLite）
 
     /// 从会话 db（及其 -wal）字节里裸扫工作区 `file://` URI → 本地路径。
