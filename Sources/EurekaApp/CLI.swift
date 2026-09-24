@@ -2,6 +2,7 @@ import EurekaIngest
 import EurekaInstall
 import EurekaKit
 import EurekaStore
+import EurekaSync
 import EurekaUsage
 import Foundation
 
@@ -46,6 +47,20 @@ enum EurekaCLI {
             usageSnapshot()
         case "--pricing-resolve":
             pricingResolve(args: Array(args.dropFirst()))
+        case "--audit-archive":
+            // 调试：把审计记录按 UTC 日物化为 Parquet（已脱敏）到指定目录；不上传、不动台账以外的数据
+            let dir = args.count > 1 ? args[1] : "/tmp/eureka-audit-archive"
+            do {
+                let store = try EurekaStore(path: EurekaStore.defaultURL())
+                let outcome = AuditArchive.materialize(
+                    store: store, outDir: URL(fileURLWithPath: dir, isDirectory: true),
+                    host: ProcessInfo.processInfo.hostName, appVersion: Self.appVersion, cutoff: nil)
+                print("写入 \(outcome.writtenDays.count) 天 → \(dir)")
+                for error in outcome.errors { print("  \(error)") }
+            } catch {
+                print("打开数据库失败：\(error)")
+                exit(1)
+            }
         case "--pricing-refresh":
             let started = Date()
             let outcome = CatalogRefresher.refresh(previous: .empty, fetch: PricingCatalogService.fetch)
@@ -476,6 +491,10 @@ enum EurekaCLI {
             FileHandle.standardError.write(Data("生成失败：\(error)\n".utf8))
             exit(1)
         }
+    }
+
+    static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
     private static func printUsage() {

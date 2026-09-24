@@ -701,6 +701,10 @@ private struct BackupConfigSheet: View {
 
                     Divider().padding(.vertical, 2)
 
+                    auditArchiveSection
+
+                    Divider().padding(.vertical, 2)
+
                     row("SecretId") {
                         SecureField("", text: $secretId)
                             .textFieldStyle(.roundedBorder)
@@ -774,6 +778,21 @@ private struct BackupConfigSheet: View {
 
     /// 自定义同步目录：任意本地目录 → 远端 custom/<远端名>/…
     @ViewBuilder
+    /// 审计归档：脱敏后的审计记录按天写成 Parquet 随备份上传（Athena / DuckDB 可直接查）
+    private var auditArchiveSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("审计归档（Parquet）", isOn: $settings.auditArchiveEnabled)
+                .font(.system(size: 11))
+            Text("把审计记录按 UTC 日写成 Parquet，上传到 <前缀>/<主机>/eureka/audit/dt=YYYY-MM-DD/。"
+                + "上传前自动遮掉命令里的密钥、令牌、密码（Authorization、KEY=、URL 凭证、常见密钥格式等），"
+                + "但命令、路径等其余内容保留，建议给存储桶配置访问控制与服务端加密。"
+                + "开启后，本地只清理已确认上传的日期：上传失败时记录会超过保留期继续保留，不会丢。")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var customFoldersSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {

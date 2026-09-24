@@ -839,7 +839,7 @@ private struct TraeMemoryFixture {
 
 /// 全部源都指向临时空目录的 SyncRoots —— 只留 traeRoots 由调用方填。
 /// 漏传任何一个根都会让 enumerate 去读真实 ~/，测试就不自洽了。
-private func emptySyncRoots(base: URL) throws -> SyncRoots {
+func emptySyncRoots(base: URL) throws -> SyncRoots {
     func dir(_ name: String) -> URL {
         base.appendingPathComponent("empty-\(name)", isDirectory: true)
     }

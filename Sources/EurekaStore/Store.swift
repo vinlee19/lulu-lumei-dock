@@ -12,6 +12,7 @@ public final class EurekaStore {
     public let syncRuns: SyncRunsRepo
     public let toolCalls: ToolCallsRepo
     public let audit: AuditRepo
+    public let auditArchive: AuditArchiveRepo
     public let search: SearchRepo
     public let knowledge: KnowledgeSearchRepo
     public let limitSamples: LimitSamplesRepo
@@ -31,6 +32,7 @@ public final class EurekaStore {
         syncRuns = SyncRunsRepo(db: db)
         toolCalls = ToolCallsRepo(db: db)
         audit = AuditRepo(db: db)
+        auditArchive = AuditArchiveRepo(db: db)
         search = SearchRepo(db: db)
         knowledge = KnowledgeSearchRepo(db: db)
         limitSamples = LimitSamplesRepo(db: db)
@@ -1235,6 +1237,56 @@ public final class ToolCallsRepo {
 }
 
 /// agent 操作审计流水（append-only 事实表；命令/路径全文，无输出正文）。
+/// 审计归档台账（audit_archive）
+public final class AuditArchiveRepo {
+    private let db: SQLiteDB
+
+    init(db: SQLiteDB) {
+        self.db = db
+    }
+
+    public struct Entry: Equatable, Sendable {
+        public let day: String
+        public let fingerprint: String
+        public let rows: Int
+        public let filePath: String
+        public let writtenAt: Date
+        public let uploadedAt: Date?
+        /// 上传时文件对应的指纹；与当前库指纹一致才算"这一天已完整归档"
+        public let uploadedFingerprint: String?
+    }
+
+    public func all() throws -> [Entry] {
+        try db.query("""
+        SELECT day, fingerprint, rows, file_path, written_at, uploaded_at, uploaded_fingerprint
+        FROM audit_archive ORDER BY day
+        """) { row in
+            Entry(
+                day: row.text(0) ?? "", fingerprint: row.text(1) ?? "", rows: Int(row.int(2)),
+                filePath: row.text(3) ?? "", writtenAt: Date(timeIntervalSince1970: row.real(4)),
+                uploadedAt: row.date(5), uploadedFingerprint: row.text(6))
+        }
+    }
+
+    /// 写完本地 Parquet 后登记（保留已有的上传记录，直到新文件也传上去）
+    public func recordWritten(day: String, fingerprint: String, rows: Int, filePath: String, at date: Date) throws {
+        try db.run("""
+        INSERT INTO audit_archive (day, fingerprint, rows, file_path, written_at)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(day) DO UPDATE SET
+            fingerprint = excluded.fingerprint, rows = excluded.rows,
+            file_path = excluded.file_path, written_at = excluded.written_at
+        """, [.text(day), .text(fingerprint), .int(Int64(rows)), .text(filePath), .date(date)])
+    }
+
+    /// 该日文件已上传成功：把"上传指纹"对齐到当时文件的指纹
+    public func markUploaded(day: String, fingerprint: String, at date: Date) throws {
+        try db.run(
+            "UPDATE audit_archive SET uploaded_at = ?, uploaded_fingerprint = ? WHERE day = ? AND fingerprint = ?",
+            [.date(date), .text(fingerprint), .text(day), .text(fingerprint)])
+    }
+}
+
 public final class AuditRepo {
     private let db: SQLiteDB
 
@@ -1355,6 +1407,62 @@ public final class AuditRepo {
 
     public func deleteAll() throws {
         try db.run("DELETE FROM audit_events")
+    }
+
+    // MARK: - 归档（按 UTC 日）
+
+    /// 每个 UTC 日的指纹：行数 : 最大 id : 已回填 exit_code 数 : 失败数。
+    /// 覆盖三种变化——新插入、补插旧时间戳的行（id 变大）、Codex 事后回填结果（UPDATE）。
+    public struct DayFingerprint: Equatable, Sendable {
+        public let day: String
+        public let fingerprint: String
+        public let rows: Int
+    }
+
+    public func dayFingerprints() throws -> [DayFingerprint] {
+        try db.query("""
+        SELECT strftime('%Y-%m-%d', ts, 'unixepoch') AS day,
+               COUNT(*), MAX(id), COUNT(exit_code), SUM(is_error)
+        FROM audit_events GROUP BY day ORDER BY day
+        """) { row in
+            DayFingerprint(
+                day: row.text(0) ?? "",
+                fingerprint: "\(row.int(1)):\(row.int(2)):\(row.int(3)):\(row.int(4))",
+                rows: Int(row.int(1)))
+        }
+    }
+
+    /// 某个 UTC 日的全部记录（按时间升序，id 兜底保证稳定）
+    public func events(onDay day: String) throws -> [AuditEvent] {
+        guard let (start, end) = Self.utcDayRange(day) else { return [] }
+        return try db.query("""
+        SELECT op_id, source, session_id, ts, kind, tool, detail, cwd, exit_code,
+               is_error, risk_level, risk_rule
+        FROM audit_events WHERE ts >= ? AND ts < ?
+        ORDER BY ts ASC, id ASC
+        """, [.real(start), .real(end)]) { Self.mapRow($0) }
+    }
+
+    /// 删除整个 UTC 日（归档联动清理用）。只按整天删：删一部分会改变该天指纹，
+    /// 下一轮就会用更少的行重写并覆盖远端那份完整的归档
+    public func deleteDay(_ day: String) throws {
+        guard let (start, end) = Self.utcDayRange(day) else { return }
+        try db.run(
+            "DELETE FROM audit_events WHERE ts >= ? AND ts < ?", [.real(start), .real(end)])
+    }
+
+    public func totalCount() throws -> Int {
+        try db.query("SELECT COUNT(*) FROM audit_events") { Int($0.int(0)) }.first ?? 0
+    }
+
+    /// "YYYY-MM-DD"（UTC）→ [起, 止) 的 Unix 秒
+    static func utcDayRange(_ day: String) -> (Double, Double)? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        guard let start = formatter.date(from: day)?.timeIntervalSince1970 else { return nil }
+        return (start, start + 86400)
     }
 
     /// 动态拼 WHERE，返回子句与绑定

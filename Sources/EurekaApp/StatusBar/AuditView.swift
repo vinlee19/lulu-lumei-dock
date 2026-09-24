@@ -175,6 +175,12 @@ struct AuditView: View {
                     .labelsHidden()
                     .frame(maxWidth: 110)
                 }
+                if settings.auditArchiveEnabled {
+                    Text(archiveLine)
+                        .font(Theme.font.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text("高危规则为启发式提示（sudo / rm -rf 绝对路径 / 管道执行下载脚本 / 读写密钥等），"
                     + "非沙箱拦截；命中会去重节流。")
                     .font(Theme.font.caption)
@@ -188,6 +194,18 @@ struct AuditView: View {
         .font(.system(size: 11.5))
         .padding(Theme.spacing.card)
         .frame(width: 320)
+    }
+
+    /// 审计归档状态一行（开启归档才显示）
+    private var archiveLine: String {
+        guard settings.cloudBackupEnabled else {
+            return "审计归档已开启，但云端备份未开启：不会上传，清理按原保留时长执行。"
+        }
+        guard let status = service.archiveStatus else { return "审计归档：等待第一轮备份…" }
+        var text = "审计归档：已上传 \(status.uploadedDays) 天"
+        if let day = status.latestUploadedDay { text += "（最近 \(day)）" }
+        if status.pendingDays > 0 { text += "，\(status.pendingDays) 天待上传" }
+        return text + "。只清理已上传的日期。"
     }
 
     /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）

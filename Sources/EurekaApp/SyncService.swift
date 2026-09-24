@@ -246,6 +246,18 @@ final class SyncService: ObservableObject {
         if FileManager.default.fileExists(atPath: snapshotURL.path) {
             roots.eurekaSnapshot = snapshotURL
         }
+        // 审计归档：脱敏后按 UTC 日写 Parquet（只重写指纹变了的日期），随本轮一起上传
+        let archiveActive = AuditArchiveSettings.isActive
+        let archiveCutoff = AuditArchiveSettings.retentionCutoff
+        if archiveActive {
+            let outcome = AuditArchive.materialize(
+                store: store, outDir: Self.auditArchiveDir(), host: SyncKeyMapper.deviceNamespace(),
+                appVersion: AuditArchiveSettings.appVersion, cutoff: archiveCutoff)
+            if let error = outcome.errors.first {
+                HealthRegistry.shared.failure(Self.healthName, note: "审计归档：\(error)")
+            }
+            roots.auditArchiveDir = Self.auditArchiveDir()
+        }
         // 项目级 skill 纳入备份（复用 Skills 页的项目发现；分类 <source>/skills/project/<项目名>）
         roots.projectSkills = SkillMemoryIndexer
             .projectSkillRoots(repoRoots: ProjectScopeDiscovery.repoRoots(resolver: ProjectResolver()))
@@ -260,6 +272,13 @@ final class SyncService: ObservableObject {
         }
         let report = engine.runCycle()
         publish { $0.progress = nil }
+        if archiveActive {
+            // 传上去的日期记入台账（审计页据此放行本地清理）；过期且已上传的本地文件删掉，远端保留
+            AuditArchive.reconcileUploads(store: store)
+            if let archiveCutoff {
+                AuditArchive.removeUploadedLocalFiles(store: store, cutoff: archiveCutoff)
+            }
+        }
 
         if report.uploaded > 0 {
             HealthRegistry.shared.event(Self.healthName)
@@ -336,6 +355,12 @@ final class SyncService: ObservableObject {
             zcodeAgents: ZcodePaths.agentsRoot(),
             zcodeSkills: ZcodePaths.skillsRoot(),
             antigravitySkills: AntigravityPaths.userSkillsRoot())
+    }
+
+    /// 审计归档的本地落点（export/audit/dt=YYYY-MM-DD/part-*.parquet）
+    static func auditArchiveDir() -> URL {
+        EurekaStore.defaultURL().deletingLastPathComponent()
+            .appendingPathComponent("export/audit", isDirectory: true)
     }
 
     /// eureka 分析快照的固定落点（eureka.sqlite 同级的 export/ 子目录）

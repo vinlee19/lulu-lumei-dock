@@ -34,4 +34,15 @@ duckdb -c ".read bootstrap.sql"
 - `task_history(id, source, session_id, title, cwd, started_at, session_started_at, finished_at, outcome, detail)` — 每个已完结任务一行
 - `tool_calls(day, source, kind, name, session_id, count, last_ts, tokens)` — 工具/技能/MCP 调用按日聚合
 
-下一步（P1 数据湖 v0）：客户端导出归一化 JSONL 增量，服务器端 `COPY TO` 分区 Parquet。
+## 审计归档（Parquet）
+
+在「设置 → 备份 → 配置」里打开「审计归档」后，审计记录会**脱敏**后按 UTC 日写成 Parquet，随备份上传到：
+
+```
+<prefix>/<设备命名空间>/eureka/audit/dt=YYYY-MM-DD/part-0000.parquet
+```
+
+- 列：`event_id, source, session_id, ts (timestamp, UTC), kind, tool, detail（已脱敏）, detail_redacted, cwd, exit_code, is_error, risk_level, risk_rule, host, app_version`；GZIP 压缩。
+- 某天有变化（新记录、Codex 事后回填结果）才重写那一天；超过保留期且已上传的日期不再改写。
+- 开启后本地只**整天**清理已确认上传的日期，上传失败时记录会超期保留，不会丢。
+- 查询：Athena / Trino 用 `audit-athena.sql`（分区投影），DuckDB 用 `audit-duckdb.sql`。

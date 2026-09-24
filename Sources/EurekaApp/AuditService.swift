@@ -2,6 +2,7 @@ import AppKit
 import EurekaIngest
 import EurekaKit
 import EurekaStore
+import EurekaSync
 import Foundation
 
 /// 安全审计服务：持有独立 SQLite 连接 + AuditPipeline + Codex/CodeBuddy/Qoder 审计扫描器。
@@ -19,6 +20,17 @@ final class AuditService: ObservableObject {
     /// 绝不能每次都查库。
     @Published private(set) var sourceCounts: [AgentSource: Int] = [:]
     @Published private(set) var kindCounts: [ToolKind: Int] = [:]
+    /// 审计归档台账摘要（设置浮层展示；未开启归档时为 nil）
+    @Published private(set) var archiveStatus: ArchiveStatus?
+
+    struct ArchiveStatus: Equatable {
+        /// 已上传且与本地一致的天数
+        var uploadedDays: Int
+        /// 本地有新变化、等待下一轮备份上传的天数
+        var pendingDays: Int
+        /// 最近一个已上传日期（UTC，YYYY-MM-DD）
+        var latestUploadedDay: String?
+    }
 
     /// 命中高危规则时回调（主线程）：AppDelegate 转成岛卡 + 系统通知
     var onRiskAlert: ((RiskAlert) -> Void)?
@@ -155,7 +167,10 @@ final class AuditService: ObservableObject {
                 kindQuery.kind = nil
                 let bySource = try store.audit.counts(by: .source, sourceQuery)
                 let byKind = try store.audit.counts(by: .kind, kindQuery)
+                let archive = AuditArchiveSettings.isActive
+                    ? Self.archiveStatus(store: store) : nil
                 self.publish {
+                    $0.archiveStatus = archive
                     $0.events = rows
                     $0.total = total
                     $0.riskTotal = riskTotal
@@ -290,10 +305,29 @@ final class AuditService: ObservableObject {
         }
     }
 
+    private static func archiveStatus(store: EurekaStore) -> ArchiveStatus? {
+        guard let days = try? store.audit.dayFingerprints(),
+              let ledger = try? store.auditArchive.all()
+        else { return nil }
+        let uploaded = Dictionary(uniqueKeysWithValues: ledger.compactMap { entry in
+            entry.uploadedFingerprint.map { (entry.day, $0) }
+        })
+        let current = days.filter { uploaded[$0.day] == $0.fingerprint }
+        return ArchiveStatus(
+            uploadedDays: current.count,
+            pendingDays: days.count - current.count,
+            latestUploadedDay: ledger.filter { $0.uploadedAt != nil }.map(\.day).max())
+    }
+
     /// 每小时清理一次：按天数窗口 + 兜底 20 万行上限
     private func pruneIfDue() {
         guard let store, Date().timeIntervalSince(lastPruneAt) > 3600 else { return }
         lastPruneAt = Date()
+        // 开启归档：只整天删除已上传的日期（上传失败宁可超期保留，也不丢未归档的记录）
+        if AuditArchiveSettings.isActive {
+            AuditArchive.prune(store: store, cutoff: AuditArchiveSettings.retentionCutoff, maxRows: 200_000)
+            return
+        }
         if retentionDays > 0 {
             try? store.audit.prune(
                 olderThan: Date().addingTimeInterval(-Double(retentionDays) * 86400))

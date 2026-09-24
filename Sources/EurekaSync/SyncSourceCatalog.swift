@@ -97,6 +97,9 @@ public struct SyncRoots {
     /// eureka 自身的分析快照（EurekaDBSnapshot 产出的三事实表 SQLite）。
     /// 默认 nil → 既有构造点不受影响；由 app 侧在每轮同步前物化后注入。
     public var eurekaSnapshot: URL?
+    /// 审计归档目录（AuditArchive 产出的 dt=YYYY-MM-DD/part-*.parquet，已脱敏）。
+    /// 默认 nil；只有用户打开「审计归档」才由 app 侧注入。
+    public var auditArchiveDir: URL?
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
     /// 默认空；由 app 侧从 ProjectScopeDiscovery 注入，与全局 skill 并列备份。
     public var projectSkills: [(root: URL, category: String)] = []
@@ -393,6 +396,13 @@ public enum SyncSourceCatalog {
         if let snapshot = roots.eurekaSnapshot {
             add(snapshot, category: "eureka/db",
                 relativePath: snapshot.lastPathComponent, priority: 1)
+        }
+
+        // 审计归档：保留 dt=… 目录层级 → 远端 Hive 分区；临时文件以 . 开头，walk 自动跳过
+        if let archive = roots.auditArchiveDir {
+            walk(root: archive, category: "eureka/audit", priority: 1) {
+                $0.hasPrefix("dt=") && $0.hasSuffix(".parquet")
+            }
         }
 
         // 用户自定义目录：远端类目由用户指定（custom/<名>），全部常规文件（隐藏文件仍跳过）

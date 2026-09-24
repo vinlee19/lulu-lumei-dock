@@ -168,10 +168,14 @@ removals are yours and survive re‑extraction. The tab is built around reuse, n
   block. Enabling it prompts a one‑time Keychain authorization (choose "Always Allow").
 
 **Audit** — an append‑only trail of agent tool calls (full commands / file paths, no output bodies),
-with risk flagging. Covers Claude Code and Codex (hook channel) plus CodeBuddy, Qoder, Grok and
-Qwen (transcript scanners) and Cursor (SQLite scanner).
+with risk flagging. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
+Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
+Optionally also archives the audit trail as daily **Parquet** files
+(`<prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/`), with credentials redacted before upload, so it can be
+queried with Athena / Trino / DuckDB (templates in `Scripts/analytics/`). With archiving on, local
+retention only deletes days that have been confirmed uploaded.
 
 **Signed in-app updates** — checks once per installed-app launch by default, then lets you explicitly
 approve download/install in Sparkle's standard UI. Automatic download and unattended installation stay off.

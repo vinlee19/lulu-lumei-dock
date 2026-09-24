@@ -215,6 +215,18 @@ enum Schema {
         CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id);
         CREATE INDEX IF NOT EXISTS idx_audit_risk ON audit_events(risk_level) WHERE risk_level > 0;
 
+        -- 审计归档台账（每个 UTC 日一行）：哪天写成了 Parquet、指纹多少、是否已上传。
+        -- 本地清理只删"已上传且指纹未变"的日期 → 记录的是事实，升级绝不 DROP。
+        CREATE TABLE IF NOT EXISTS audit_archive (
+            day TEXT PRIMARY KEY,
+            fingerprint TEXT NOT NULL,
+            rows INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            written_at REAL NOT NULL,
+            uploaded_at REAL,
+            uploaded_fingerprint TEXT
+        );
+
         -- 跨会话全文搜索（派生表，可由 transcript 重扫恢复，升级重建）。
         -- trigram 分词：中文/英文都按子串匹配（unicode61 不切 CJK，中文查询会失效）。
         -- transcript_fts.rowid == fts_docs.id（写入两表时对齐）。

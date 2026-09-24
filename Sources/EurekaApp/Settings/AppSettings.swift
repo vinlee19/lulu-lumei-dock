@@ -179,6 +179,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(auditSystemNotifyEnabled, forKey: "auditSystemNotifyEnabled") }
     }
     /// 审计流水保留天数（0 = 永久）。默认 90。
+    /// 审计归档：把脱敏后的审计记录按天写成 Parquet 随备份上传（默认关；依赖云端备份开启）
+    @Published var auditArchiveEnabled: Bool {
+        didSet { defaults.set(auditArchiveEnabled, forKey: AuditArchiveSettings.key) }
+    }
     @Published var auditRetentionDays: Int {
         didSet { defaults.set(auditRetentionDays, forKey: "auditRetentionDays") }
     }
@@ -228,6 +232,7 @@ final class AppSettings: ObservableObject {
         auditRiskAlertsEnabled = defaults.object(forKey: "auditRiskAlertsEnabled") as? Bool ?? true
         auditSystemNotifyEnabled = defaults.bool(forKey: "auditSystemNotifyEnabled")
         auditRetentionDays = defaults.object(forKey: "auditRetentionDays") as? Int ?? 90
+        auditArchiveEnabled = defaults.bool(forKey: AuditArchiveSettings.key)
         launchAtLogin = SMAppService.mainApp.status == .enabled
         // 启动即同步界面风格（init 内 didSet 不触发，须在全部属性初始化后显式同步）
         ThemeStyle.current = ThemeStyle.resolve(themeStyle)
@@ -256,4 +261,24 @@ final class AppSettings: ObservableObject {
 enum AntigravityExperiment {
     static let key = "antigravityExperimentalEnabled"
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: key) }
+}
+
+/// 审计归档开关（SyncService / AuditService 在各自队列上直接读 UserDefaults）
+enum AuditArchiveSettings {
+    static let key = "auditArchiveEnabled"
+
+    /// 真正生效需要备份也开着：备份关了就传不上去，清理联动会让本地无限增长
+    static var isActive: Bool {
+        UserDefaults.standard.bool(forKey: key) && UserDefaults.standard.bool(forKey: "cloudBackupEnabled")
+    }
+
+    /// 审计保留期截止时间（0 = 永久保留 → nil）
+    static var retentionCutoff: Date? {
+        let days = UserDefaults.standard.object(forKey: "auditRetentionDays") as? Int ?? 90
+        return days > 0 ? Date().addingTimeInterval(-Double(days) * 86400) : nil
+    }
+
+    static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
 }

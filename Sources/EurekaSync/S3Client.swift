@@ -57,8 +57,10 @@ public final class S3Client {
         // PUT 超时按体积放宽：基础 60s + 每 MB 5s，封顶 300s
         let megabytes = Double(data.count) / 1_048_576.0
         let timeout: TimeInterval = min(300.0, 60.0 + megabytes * 5.0)
+        // 审计归档的 Parquet 带标准类型，便于桶端工具识别（Content-Type 不参与 SigV4 签名）
+        let contentType = key.hasSuffix(".parquet") ? "application/vnd.apache.parquet" : nil
         let reply = try send(
-            method: "PUT", path: path, payload: data, timeout: timeout)
+            method: "PUT", path: path, payload: data, timeout: timeout, contentType: contentType)
         guard (200..<300).contains(reply.status) else {
             throw S3Error(status: reply.status, body: reply.body)
         }
@@ -74,7 +76,8 @@ public final class S3Client {
     }
 
     private func send(
-        method: String, path: String, payload: Data?, timeout: TimeInterval
+        method: String, path: String, payload: Data?, timeout: TimeInterval,
+        contentType: String? = nil
     ) throws -> HTTPReply {
         let host = config.resolvedHost
         let payloadHash = payload.map { SigV4Signer.sha256Hex($0) }
@@ -93,6 +96,7 @@ public final class S3Client {
         for (key, value) in signed {
             request.setValue(value, forHTTPHeaderField: key)
         }
+        if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         return try transport.send(request, body: payload)
     }
 }
