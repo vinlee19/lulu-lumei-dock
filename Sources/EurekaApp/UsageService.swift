@@ -707,7 +707,9 @@ final class UsageService: ObservableObject {
                 searchIndexer?.indexOnce(sessions: AgentSessionDiscovery.forIndexing())
             }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
-            publish { $0.summary = summary }
+            // 成功一轮即清掉上次的错误：偶发的锁争用（启动预热/大文件建索引时
+            // 另一连接写事务超过 busy_timeout）下一轮就恢复，红字不该一直挂着。
+            publish { $0.summary = summary; $0.lastError = nil }
             publishHistory(store: store)
         } catch {
             HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
