@@ -459,8 +459,9 @@ struct UsageDashboardView: View {
                 // antigravity 无本地 token；qoder 的 CN 后端报零；
                 // trae 的会话库经 SQLCipher 加密，本地一个 token 都读不到。
                 // （grok 1.0.4x 起 updates.jsonl 每轮带 usage，已入账）
+                // antigravity 只在实验开关打开时有账
                 ForEach(AgentSource.allCases.filter {
-                    $0 != .antigravity && $0 != .qoder && $0 != .trae
+                    ($0 != .antigravity || AntigravityExperiment.isEnabled) && $0 != .qoder && $0 != .trae
                 }, id: \.self) { source in
                     sourceChip(source, label: source.displayName)
                 }

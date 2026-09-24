@@ -59,6 +59,10 @@ final class AppSettings: ObservableObject {
     @Published var fullTextSearchEnabled: Bool {
         didSet { defaults.set(fullTextSearchEnabled, forKey: "fullTextSearchEnabled") }
     }
+    /// Antigravity 用量 / 限额（实验，默认关；读未公开 protobuf）
+    @Published var antigravityExperimentalEnabled: Bool {
+        didSet { defaults.set(antigravityExperimentalEnabled, forKey: AntigravityExperiment.key) }
+    }
     /// 联网更新模型价格（LiteLLM / models.dev 公开价格表，PricingCatalogService 读同一 key）
     @Published var remotePricingEnabled: Bool {
         didSet { defaults.set(remotePricingEnabled, forKey: "remotePricingEnabled") }
@@ -195,6 +199,7 @@ final class AppSettings: ObservableObject {
         wellnessThresholdHours = defaults.object(forKey: "wellnessThresholdHours") as? Double ?? 2
         fullTextSearchEnabled = defaults.object(forKey: "fullTextSearchEnabled") as? Bool ?? true
         remotePricingEnabled = defaults.object(forKey: "remotePricingEnabled") as? Bool ?? true
+        antigravityExperimentalEnabled = defaults.bool(forKey: AntigravityExperiment.key)
         limitAlertsEnabled = defaults.object(forKey: "limitAlertsEnabled") as? Bool ?? true
         hookAutoUpdate = defaults.object(forKey: "hookAutoUpdate") as? Bool ?? true
         suppressCardWhenTerminalFrontmost = defaults.object(
@@ -245,4 +250,10 @@ final class AppSettings: ObservableObject {
                 + "或在 系统设置 > 通用 > 登录项 手动添加。"
         }
     }
+}
+
+/// Antigravity 实验开关（UsageService / RateLimitsService 在各自队列上直接读 UserDefaults）
+enum AntigravityExperiment {
+    static let key = "antigravityExperimentalEnabled"
+    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: key) }
 }

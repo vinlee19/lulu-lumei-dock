@@ -44,6 +44,12 @@ final class StatusItemController: NSObject {
                 MainActor.assumeIsolated { self?.renderTitle() }
             }
             .store(in: &cancellables)
+        // combineLatest 最多 4 路，Antigravity（实验）单独订阅
+        limitsService.$antigravity
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.renderTitle() } }
+            .store(in: &cancellables)
         renderTitle()
     }
 
@@ -62,7 +68,7 @@ final class StatusItemController: NSObject {
             taskCount: lastTasks.count,
             hasWaiting: waiting,
             maxUsedPercent: StatusTitleComposer.maxPrimaryPercent(
-                [limitsService.codex, limitsService.grok, limitsService.claude]),
+                [limitsService.codex, limitsService.grok, limitsService.claude, limitsService.antigravity]),
             showLimit: settings.menuBarShowsLimit
         )
 
@@ -84,7 +90,7 @@ final class StatusItemController: NSObject {
 
     private func limitsTooltip() -> String {
         var parts: [String] = []
-        for snapshot in [limitsService.codex, limitsService.grok, limitsService.claude] {
+        for snapshot in [limitsService.codex, limitsService.grok, limitsService.claude, limitsService.antigravity] {
             guard let snapshot, let primary = snapshot.primary else { continue }
             var text = "\(snapshot.source.displayName) \(Int(primary.usedPercent.rounded()))%"
             if let secondary = snapshot.secondary {

@@ -279,12 +279,16 @@ enum EurekaCLI {
             let newCodeBuddy = try codebuddy.scanOnce()  // qoder 无 token（CN 后端全零），不扫描
             let newCursor = try cursor.scanOnce()  // cursor 有 token 无价（成本恒 0）
             let newZcode = try zcode.scanOnce()
+            // Antigravity（实验）：CLI 调试入口总是扫（app 里受设置开关门控）
+            let newAntigravity = try AntigravityUsageScanner(
+                conversationsRoot: AntigravityPaths.conversationsRoot(), store: store,
+                cwdResolver: { AntigravityPaths.cwd(dbURL: $0) }).scanOnce()
             try? zcode.recordPromptCounts()
             FileHandle.standardError.write(Data(
                 ("扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，"
                     + "grok 工具/用量 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
                     + "qwen +\(newQwen) 条，hermes +\(newHermes) 条，codebuddy +\(newCodeBuddy) 条，"
-                    + "cursor +\(newCursor) 条，zcode +\(newZcode) 条\n").utf8))
+                    + "cursor +\(newCursor) 条，zcode +\(newZcode) 条，antigravity +\(newAntigravity) 条\n").utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(
@@ -382,6 +386,16 @@ enum EurekaCLI {
             print("Codex: \(describe(codex))")
             let grok = await GrokRateLimitProvider(logURL: GrokPaths.unifiedLog()).snapshot()
             print("Grok: \(describe(grok))")
+            // Antigravity（实验）：IDE 缓存；stale 阈值放宽到 7 天只为调试能看到值
+            let antigravity = await AntigravityRateLimitProvider(
+                stateDBs: AntigravityPaths.ideStateDBs()).snapshot()
+            print("Antigravity: \(describe(antigravity))")
+            if let antigravity {
+                for window in [antigravity.primary, antigravity.secondary].compactMap({ $0 }) {
+                    print("  \(window.label ?? "?")：已用 \(String(format: "%.1f", window.usedPercent))%"
+                        + "，重置 \(window.resetsAt.map { "\($0)" } ?? "—")")
+                }
+            }
             if includeClaude {
                 let provider = ClaudeOAuthUsageProvider()
                 let claude = await provider.snapshot()

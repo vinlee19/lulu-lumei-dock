@@ -4,6 +4,7 @@ import SwiftUI
 /// 限额面板：5h / 周窗口用量进度条 + 重置时间。数据不可得即整块隐藏。
 struct LimitsPanelView: View {
     @ObservedObject var service: RateLimitsService
+    @ObservedObject var settings: AppSettings
 
     var body: some View {
         ScrollView {
@@ -13,6 +14,10 @@ struct LimitsPanelView: View {
                 }
                 if let grok = service.grok {
                     LimitCard(snapshot: grok, forecasts: service.forecasts)
+                }
+
+                if let antigravity = service.antigravity {
+                    LimitCard(snapshot: antigravity, forecasts: service.forecasts)
                 }
 
                 if service.claudeEnabled {
@@ -34,13 +39,36 @@ struct LimitsPanelView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。OpenCode / Antigravity / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。")
+                AntigravityOptInRow(settings: settings, service: service)
+
+                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏；Antigravity（实验）读 IDE 本地缓存，IDE 不运行时不更新。OpenCode / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
             .padding(Theme.spacing.page)
         }
         .onAppear { service.refresh() }
+    }
+}
+
+/// Antigravity 实验开关：同时控制用量扫描与限额读取（格式未公开，默认关）
+private struct AntigravityOptInRow: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var service: RateLimitsService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Antigravity 用量 / 限额（实验）", isOn: $settings.antigravityExperimentalEnabled)
+                .font(.system(size: 11))
+                .onChange(of: settings.antigravityExperimentalEnabled) { _, _ in service.refresh() }
+            Text("解析 Antigravity 未公开的本地数据：会话库里的逐次调用 token（按公开价格折算 API 等价费用），"
+                + "以及 Antigravity IDE 缓存的各模型剩余额度（只读额度字段，不读取账号信息）。"
+                + "格式随版本可能变化，解析不了时自动隐藏。")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(Theme.spacing.card)
+        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 }
 
@@ -64,20 +92,22 @@ private struct LimitCard: View {
                 }
                 Spacer()
                 if snapshot.isStale {
-                    Text("截至 \(snapshot.asOf, format: .dateTime.hour().minute())")
+                    Text(Calendar.current.isDateInToday(snapshot.asOf)
+                        ? "截至 \(snapshot.asOf.formatted(.dateTime.hour().minute()))"
+                        : "截至 \(snapshot.asOf.formatted(.dateTime.month().day().hour().minute()))")
                         .font(.system(size: 10))
                         .foregroundStyle(.orange)
                 }
             }
             if let primary = snapshot.primary {
                 WindowGauge(
-                    label: Self.windowLabel(primary.windowMinutes, fallback: "5 小时窗口"),
+                    label: primary.label ?? Self.windowLabel(primary.windowMinutes, fallback: "5 小时窗口"),
                     window: primary,
                     fullAt: forecasts["\(snapshot.source.rawValue)#primary"])
             }
             if let secondary = snapshot.secondary {
                 WindowGauge(
-                    label: Self.windowLabel(secondary.windowMinutes, fallback: "每周窗口"),
+                    label: secondary.label ?? Self.windowLabel(secondary.windowMinutes, fallback: "每周窗口"),
                     window: secondary,
                     fullAt: forecasts["\(snapshot.source.rawValue)#secondary"])
             }

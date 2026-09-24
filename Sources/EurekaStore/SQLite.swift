@@ -38,6 +38,14 @@ public struct SQLiteRow {
         sqlite3_column_double(statement, index)
     }
 
+    /// BLOB 列（NULL → nil；零长度 → 空 Data）
+    public func blob(_ index: Int32) -> Data? {
+        guard !isNull(index) else { return nil }
+        let count = Int(sqlite3_column_bytes(statement, index))
+        guard count > 0, let pointer = sqlite3_column_blob(statement, index) else { return Data() }
+        return Data(bytes: pointer, count: count)
+    }
+
     public func isNull(_ index: Int32) -> Bool {
         sqlite3_column_type(statement, index) == SQLITE_NULL
     }

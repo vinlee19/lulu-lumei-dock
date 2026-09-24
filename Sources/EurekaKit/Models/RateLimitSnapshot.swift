@@ -5,11 +5,14 @@ public struct RateLimitWindow: Equatable, Sendable {
     public var usedPercent: Double
     public var windowMinutes: Int
     public var resetsAt: Date?
+    /// 自定义窗口名（Antigravity 按模型家族分额度，不是 5h/周窗口）；nil = 按 windowMinutes 推
+    public var label: String?
 
-    public init(usedPercent: Double, windowMinutes: Int, resetsAt: Date? = nil) {
+    public init(usedPercent: Double, windowMinutes: Int, resetsAt: Date? = nil, label: String? = nil) {
         self.usedPercent = usedPercent
         self.windowMinutes = windowMinutes
         self.resetsAt = resetsAt
+        self.label = label
     }
 }
 

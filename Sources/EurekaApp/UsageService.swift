@@ -161,6 +161,10 @@ final class UsageService: ObservableObject {
     private var codeBuddyScanner: CodeBuddyUsageScanner?
     private var cursorScanner: CursorUsageScanner?
     private var zcodeScanner: ZcodeUsageScanner?
+    /// Antigravity（实验，默认关）：每轮按开关决定是否扫
+    private var antigravityScanner: AntigravityUsageScanner?
+    /// 开关首次打开时才登记健康项（关着时不该在健康页亮红灯）；仅 queue 上访问
+    private var antigravityHealthRegistered = false
     private var searchIndexer: TranscriptSearchIndexer?
     /// 共享价格表（远程目录到达时原子替换；读取加锁，主线程渲染与后台扫描都安全）
     private var pricing: PricingTable { PricingCatalogStore.shared.current }
@@ -176,6 +180,7 @@ final class UsageService: ObservableObject {
     private static let codeBuddyHealthName = "用量扫描 CodeBuddy"
     private static let cursorHealthName = "用量扫描 Cursor"
     private static let zcodeHealthName = "用量扫描 ZCode"
+    private static let antigravityHealthName = "用量扫描 Antigravity（实验）"
 
     func start() {
         HealthRegistry.shared.register(Self.claudeHealthName, expectedInterval: 60)
@@ -234,6 +239,9 @@ final class UsageService: ObservableObject {
                     rolloutRoot: ZcodePaths.rolloutRoot(),
                     dbPath: ZcodePaths.db(), store: store)
                 try? self.zcodeScanner?.recordPromptCounts()
+                self.antigravityScanner = AntigravityUsageScanner(
+                    conversationsRoot: AntigravityPaths.conversationsRoot(), store: store,
+                    cwdResolver: { AntigravityPaths.cwd(dbURL: $0) })
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
                 PricingCatalogStore.shared.loadIfNeeded(paths: .app)
                 self.scanAndPublish()
@@ -742,6 +750,20 @@ final class UsageService: ObservableObject {
             HealthRegistry.shared.beat(Self.zcodeHealthName)
             if zcodeNew > 0 { HealthRegistry.shared.event(Self.zcodeHealthName) }
             try? zcodeScanner?.recordPromptCounts()
+            if AntigravityExperiment.isEnabled {
+                if !antigravityHealthRegistered {
+                    antigravityHealthRegistered = true
+                    HealthRegistry.shared.register(Self.antigravityHealthName, expectedInterval: 60)
+                }
+                // 实验源：解析失败只记健康，不中断整轮扫描
+                do {
+                    let agyNew = try autoreleasepool { try antigravityScanner?.scanOnce() ?? 0 }
+                    HealthRegistry.shared.beat(Self.antigravityHealthName)
+                    if agyNew > 0 { HealthRegistry.shared.event(Self.antigravityHealthName) }
+                } catch {
+                    HealthRegistry.shared.failure(Self.antigravityHealthName, note: "\(error)")
+                }
+            }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
             // 全文索引**不跟用量同节奏**：见 indexInterval。

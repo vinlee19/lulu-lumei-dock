@@ -174,7 +174,8 @@ struct PopoverRootView: View {
     /// 限额徽标：三源主窗口用量的最大百分比（无数据时不显示）
     private var limitsBadge: (text: String, color: Color)? {
         guard let percent = StatusTitleComposer.maxPrimaryPercent(
-            [limitsService.codex, limitsService.grok, limitsService.claude]) else { return nil }
+            [limitsService.codex, limitsService.grok, limitsService.claude, limitsService.antigravity])
+        else { return nil }
         return ("\(Int(percent.rounded()))%", Theme.percentColor(percent))
     }
 
@@ -245,7 +246,7 @@ struct PopoverRootView: View {
         case .usage:
             UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
         case .limits:
-            LimitsPanelView(service: limitsService)
+            LimitsPanelView(service: limitsService, settings: settings)
         case .audit:
             AuditView(
                 service: auditService, installer: installer, settings: settings,
