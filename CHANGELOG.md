@@ -4,6 +4,25 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.33.0] - 2026-09-24
+
+### Added
+
+- **Grok usage and cost.** Grok 1.0.4x records each turn's per-model token
+  usage in `updates.jsonl`; those turns now land in the usage ledger, and
+  Grok appears in the dashboard's source filter. Cost is Grok's own
+  self-reported figure (`costUsdTicks`), because its `*-build` models have no
+  entry in the public price catalogs — pricing them as plain `grok-4.7` would
+  overstate the cost by about 2.5×. Checked against Grok's per-session
+  `usage.json`: 12 of 13 sessions match exactly; the 13th differs only by a
+  final turn that `usage.json` had not recorded yet.
+
+### Fixed
+
+- The request log priced rows without their provider, so a model used
+  through a subscription plan could show a different per-row cost than the
+  same row in the model table.
+
 ## [0.32.0] - 2026-09-24
 
 ### Added
@@ -1721,6 +1740,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.33.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.33.0
 [0.32.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.32.0
 [0.31.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.1
 [0.31.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.31.0
