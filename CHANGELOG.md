@@ -4,6 +4,22 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.35.1] - 2026-10-14
+
+### Fixed
+
+- **Codex session transcripts show user and assistant messages again.**
+  Current Codex (Desktop, the TUI, and the Chrome extension) writes those
+  turns as `item_completed` records (`UserMessage` / `AgentMessage`). The
+  reader still looked only for the older `user_message` / `agent_message`
+  strings, so the session page kept tool trails and the User / Assistant
+  filters rendered blank. Chrome-extension tab boilerplate is folded down to
+  the actual request, attached images are noted by filename, and imported
+  external-agent tool protocol lines are not shown as replies. Older
+  rollouts that still use the string fields keep working.
+- Release packaging accepts the Swift 6.4 resource bundle layout, where
+  `pricing.json`, fonts and mascots live under `Contents/Resources`.
+
 ## [0.35.0] - 2026-09-24
 
 ### Added
@@ -1798,6 +1814,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.35.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.1
 [0.35.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.0
 [0.34.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.1
 [0.34.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.0

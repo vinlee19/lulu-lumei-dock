@@ -560,7 +560,19 @@ public enum TranscriptReader {
 
     // MARK: - Codex（~/.codex/sessions/.../rollout-*.jsonl）
 
-    /// 正文用 event_msg（user_message / agent_message 纯字符串）；
+    /// 正文有两代格式，必须都认：
+    /// - **当前**（Desktop / TUI / Chrome 扩展，本机 2026 年的 rollout 已全部切过来）：
+    ///   `event_msg/item_completed`，`item.type` 为 `UserMessage` / `AgentMessage`，
+    ///   正文在 `content[]`（用户 `type:text`，助手 `type:Text`）。
+    ///   旧的 `user_message` / `agent_message` 纯字符串在这些文件里出现 0 次，
+    ///   只解析旧字段时，会话详情只剩工具轨迹——筛「用户」或「助手」就是空白。
+    /// - **旧版**：`event_msg` 的 `user_message` / `agent_message` 纯字符串。测试夹具和
+    ///   更早的 rollout 仍走这条，不能删。
+    ///
+    /// `response_item/message` 与上面两条重复（还有 developer 指令、environment_context），
+    /// 继续跳过。导入的外部会话会把工具调用塞进没有 `phase` 的 `AgentMessage`
+    /// （`[external_agent_tool_call:…]` / `[external_agent_tool_result]`），那不是回复，丢掉。
+    ///
     /// 工具轨迹用 response_item（**custom_tool_call** / function_call / web_search_call）
     /// + event_msg 的 mcp_tool_call_end。
     ///
@@ -569,6 +581,7 @@ public enum TranscriptReader {
     ///     `exec` 1334 + `apply_patch` 97）。以前完全没解析 → Codex 轨迹是残缺的。
     ///  2. **思考明文可得**：加密的是 `response_item/reasoning`（`encrypted_content`），
     ///     而 `event_msg/agent_reasoning.text` 是明文（实勘 265 条）。
+    ///     新格式的 `item_completed/Reasoning` 在本机样本里 `summary_text` 全空，不另开一条。
     ///
     /// 轮边界优先用 rollout 自带的真 `turn_id`（覆盖 15 种行类型，实勘单文件 107 个 turn），
     /// 取不到才退回「用户消息 = 新一轮」。
@@ -662,6 +675,25 @@ public enum TranscriptReader {
                                 in: invocation?["arguments"] as? [String: Any])),
                             isError: isError),
                         callId: nil, timestamp: timestamp)
+                case "item_completed":
+                    guard let item = payload["item"] as? [String: Any] else { break }
+                    switch item["type"] as? String {
+                    case "UserMessage":
+                        if let text = codexItemVisibleText(item, userFacing: true) {
+                            trailIndex = nil  // 用户消息 = 新一轮（turn_id 缺失时的兜底）
+                            batch = 0
+                            messages.append(TranscriptMessage(
+                                id: messages.count, role: .user, text: text, timestamp: timestamp))
+                        }
+                    case "AgentMessage":
+                        if let text = codexItemVisibleText(item, userFacing: false) {
+                            messages.append(TranscriptMessage(
+                                id: messages.count, role: .assistant, text: text,
+                                timestamp: timestamp))
+                        }
+                    default:
+                        break  // CommandExecution / Reasoning 等：轨迹已从 response_item 来
+                    }
                 default:
                     break
                 }
@@ -711,8 +743,72 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
+    /// `item_completed` 的可见正文。
+    ///
+    /// 用户侧 Chrome 扩展会把标签页说明和「## My request:」包在真正的输入外面，
+    /// 每轮都重复；会话页只留请求本身。附图没有图片视图，记文件名。
+    /// 助手侧丢掉导入会话的工具协议行——没有 `phase` 的历史回复仍要保留
+    /// （`commentary` / `final_answer` 是后来才加上的）。
+    static func codexItemVisibleText(_ item: [String: Any], userFacing: Bool) -> String? {
+        let parts: [Any]
+        if let content = item["content"] as? [Any] {
+            parts = content
+        } else if let text = item["content"] as? String {
+            parts = [["type": "text", "text": text] as [String: Any]] as [Any]
+        } else {
+            return nil
+        }
+        var texts: [String] = []
+        var images: [String] = []
+        for case let part as [String: Any] in parts {
+            let type = (part["type"] as? String)?.lowercased() ?? ""
+            if type == "text" || type == "output_text" || type == "input_text" {
+                if let text = part["text"] as? String {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { texts.append(trimmed) }
+                }
+            } else if type == "local_image" {
+                let name = (part["path"] as? String).map {
+                    URL(fileURLWithPath: $0).lastPathComponent
+                } ?? ""
+                images.append(name.isEmpty ? "（附图）" : "（附图：\(name)）")
+            }
+        }
+        var body = texts.joined(separator: "\n\n")
+        if userFacing {
+            body = unwrapCodexUserEnvelope(body)
+        } else if codexAgentTextIsProtocolNoise(body) {
+            return nil
+        }
+        var lines: [String] = []
+        if !body.isEmpty { lines.append(body) }
+        lines.append(contentsOf: images)
+        let joined = lines.joined(separator: "\n\n")
+        return joined.isEmpty ? nil : joined
+    }
+
+    /// Chrome 扩展 / 粘贴附件把模型指令包在用户输入外。只认这两种已知开头，
+    /// 避免误伤正文里恰好出现「My request」的普通消息。
+    static func unwrapCodexUserEnvelope(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let enveloped = trimmed.hasPrefix("# Chrome tabs:")
+            || trimmed.hasPrefix("# Files mentioned by the user:")
+        guard enveloped, let range = trimmed.range(of: "## My request:") else { return trimmed }
+        let body = trimmed[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? trimmed : body
+    }
+
+    /// 导入的外部 agent 把工具调用记成 AgentMessage。这些行不是给用户看的回复。
+    static func codexAgentTextIsProtocolNoise(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("[external_agent_tool_call:") { return true }
+        if trimmed.hasPrefix("[external_agent_tool_result]") { return true }
+        if trimmed.hasPrefix("<EXTERNAL SESSION IMPORTED>") { return true }
+        return false
+    }
+
     /// rollout 行里的真 `turn_id`。实勘落在 `internal_chat_message_metadata_passthrough.turn_id`
-    /// 或 payload 顶层（`task_started` / `task_complete` / `turn_aborted`）。
+    /// 或 payload 顶层（`task_started` / `task_complete` / `turn_aborted` / `item_completed`）。
     static func codexTurnId(_ payload: [String: Any]) -> String? {
         if let passthrough = payload["internal_chat_message_metadata_passthrough"]
             as? [String: Any], let id = passthrough["turn_id"] as? String, !id.isEmpty {

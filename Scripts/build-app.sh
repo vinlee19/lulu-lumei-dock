@@ -52,9 +52,13 @@ cp "$BUILD_PATH/eureka-relay" "$APP_PATH/Contents/MacOS/eureka-relay"
 # 资源 bundle 放在标准 Resources/ 目录；只拷应用自己的 bundle。
 readonly PACKAGED_BUNDLE="$APP_PATH/Contents/Resources/eureka_eureka.bundle"
 ditto "$APP_BUNDLE" "$PACKAGED_BUNDLE"
-[[ -f "$PACKAGED_BUNDLE/pricing.json" ]] || { echo "✗ 资源包缺少 pricing.json" >&2; exit 1; }
-[[ -f "$PACKAGED_BUNDLE/mascots/lulu/idle-1.png" ]] || { echo "✗ 资源包缺少内置吉祥物素材" >&2; exit 1; }
-[[ -f "$PACKAGED_BUNDLE/Fonts/SpaceGrotesk-Bold.ttf" ]] || { echo "✗ 资源包缺少主题字体" >&2; exit 1; }
+# Swift 6.4 起资源落在 Contents/Resources/；更早的工具链是 bundle 根目录扁平布局。
+bundle_has() {
+  [[ -f "$PACKAGED_BUNDLE/$1" || -f "$PACKAGED_BUNDLE/Contents/Resources/$1" ]]
+}
+bundle_has "pricing.json" || { echo "✗ 资源包缺少 pricing.json" >&2; exit 1; }
+bundle_has "mascots/lulu/idle-1.png" || { echo "✗ 资源包缺少内置吉祥物素材" >&2; exit 1; }
+bundle_has "Fonts/SpaceGrotesk-Bold.ttf" || { echo "✗ 资源包缺少主题字体" >&2; exit 1; }
 
 if [[ -f Sources/EurekaApp/Resources/AppIcon.icns ]]; then
   cp Sources/EurekaApp/Resources/AppIcon.icns "$APP_PATH/Contents/Resources/AppIcon.icns"

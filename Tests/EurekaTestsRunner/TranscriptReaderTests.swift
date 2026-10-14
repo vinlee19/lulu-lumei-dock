@@ -36,6 +36,46 @@ func transcriptReaderTests(_ t: TestRunner) {
         try expectEqual(result.messages[1].text, "集成测试全部通过，修复了 2 个失败用例。")
     }
 
+    t.test("Codex：item_completed 的 UserMessage/AgentMessage 才是当前正文") {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent("eureka-cxtr-\(UUID())")
+        defer { try? fm.removeItem(at: base) }
+        try fm.createDirectory(at: base, withIntermediateDirectories: true)
+        let path = base.appendingPathComponent("rollout.jsonl")
+        // 当前 Codex 不再写 user_message/agent_message。扩展把标签页说明包在请求外，
+        // 导入会话还会把工具协议塞进没有 phase 的 AgentMessage。
+        let lines = [
+            #"{"timestamp":"2026-10-13T15:34:55.097Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","content":[{"type":"text","text":"\n# Chrome tabs:\n- Current URL: https://example.test\n\n## My request:\n分析怎么回复\n"},{"type":"local_image","path":"/tmp/shot.png"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:35:01.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","phase":"commentary","content":[{"type":"Text","text":"我先读订单留言。"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:35:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"rg order","call_id":"c1"}}"#,
+            #"{"timestamp":"2026-10-13T15:36:54.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","phase":"final_answer","content":[{"type":"Text","text":"支付方式为 Google Pay。"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:37:10.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"UserMessage","content":[{"type":"text","text":"还有具体的过程"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:37:20.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"工程骨架已创建完成。"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:37:21.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"[external_agent_tool_call: Read] file: /tmp/a.swift"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:37:22.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"[external_agent_tool_result] ok"}]}}}"#,
+            #"{"timestamp":"2026-10-13T15:37:23.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"<EXTERNAL SESSION IMPORTED>"}]}}}"#,
+            // 普通消息里出现同样的字样，不能被信封剥离误伤
+            #"{"timestamp":"2026-10-13T15:37:30.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t3","item":{"type":"UserMessage","content":[{"type":"text","text":"请保留这行 ## My request: 不要删"}]}}}"#,
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: path, atomically: true, encoding: .utf8)
+
+        let result = TranscriptReader.loadCodex(path: path.path, maxMessages: 2000)
+        try expect(!result.truncated)
+        let roles = result.messages.map(\.role)
+        try expectEqual(roles, [.user, .assistant, .turnTrail, .assistant, .user, .assistant, .user])
+        try expectEqual(result.messages[0].text, "分析怎么回复\n\n（附图：shot.png）")
+        try expect(!result.messages[0].text.contains("Chrome tabs"))
+        try expectEqual(result.messages[1].text, "我先读订单留言。")
+        try expectEqual(result.messages[2].steps.count, 1)
+        try expectEqual(result.messages[3].text, "支付方式为 Google Pay。")
+        try expectEqual(result.messages[4].text, "还有具体的过程")
+        try expectEqual(result.messages[5].text, "工程骨架已创建完成。")
+        try expectEqual(result.messages[6].text, "请保留这行 ## My request: 不要删")
+        try expect(result.messages.allSatisfy {
+            !$0.text.contains("external_agent_tool") && !$0.text.contains("EXTERNAL SESSION")
+        })
+    }
+
     t.test("maxMessages 截断标记") {
         let path = try fixtureURL("codex-rollout-lifecycle.jsonl").path
         let result = TranscriptReader.loadCodex(path: path, maxMessages: 1)
