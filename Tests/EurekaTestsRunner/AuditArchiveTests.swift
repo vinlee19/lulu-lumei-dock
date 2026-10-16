@@ -98,6 +98,38 @@ func auditArchiveTests(_ t: TestRunner) {
             isError: false, riskLevel: nil, riskRule: nil)
     }
 
+    t.test("文件名自描述：首块无后缀，溢出块 -2/-3，且不再叫 part-*") {
+        try expectEqual(AuditArchive.fileName(day: "2026-09-21", chunk: 0), "audit-events-2026-09-21.parquet")
+        try expectEqual(AuditArchive.fileName(day: "2026-09-21", chunk: 1), "audit-events-2026-09-21-2.parquet")
+        try expectEqual(AuditArchive.fileName(day: "2026-09-21", chunk: 2), "audit-events-2026-09-21-3.parquet")
+    }
+
+    t.test("旧版 part-NNNN 文件改名迁移：幂等，不覆盖已存在的新文件") {
+        let (_, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let out = root.appendingPathComponent("audit")
+        let fm = FileManager.default
+        let day1 = out.appendingPathComponent("dt=2026-09-21")
+        let day2 = out.appendingPathComponent("dt=2026-09-22")
+        try fm.createDirectory(at: day1, withIntermediateDirectories: true)
+        try fm.createDirectory(at: day2, withIntermediateDirectories: true)
+        try Data("a".utf8).write(to: day1.appendingPathComponent("part-0000.parquet"))
+        try Data("b".utf8).write(to: day1.appendingPathComponent("part-0001.parquet"))
+        // day2 already has the new name (newer content) next to a stale legacy copy
+        try Data("new".utf8).write(to: day2.appendingPathComponent("audit-events-2026-09-22.parquet"))
+        try Data("old".utf8).write(to: day2.appendingPathComponent("part-0000.parquet"))
+
+        try expectEqual(AuditArchive.migrateLegacyFileNames(in: out), 2)
+        try expectEqual(
+            try String(contentsOf: day1.appendingPathComponent("audit-events-2026-09-21.parquet"), encoding: .utf8), "a")
+        try expectEqual(
+            try String(contentsOf: day1.appendingPathComponent("audit-events-2026-09-21-2.parquet"), encoding: .utf8), "b")
+        try expectEqual(
+            try String(contentsOf: day2.appendingPathComponent("audit-events-2026-09-22.parquet"), encoding: .utf8), "new")
+        try expect(!fm.fileExists(atPath: day2.appendingPathComponent("part-0000.parquet").path), "stale legacy copy removed")
+        try expectEqual(AuditArchive.migrateLegacyFileNames(in: out), 0)  // idempotent
+    }
+
     t.test("按 UTC 日分区、指纹变化才重写、回填 exit_code 触发重写") {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -109,7 +141,7 @@ func auditArchiveTests(_ t: TestRunner) {
             store: store, outDir: out, host: "h", appVersion: "t", cutoff: nil)
         try expectEqual(outcome.writtenDays, ["2026-09-21", "2026-09-22"])
         try expect(FileManager.default.fileExists(
-            atPath: out.appendingPathComponent("dt=2026-09-21/part-0000.parquet").path))
+            atPath: out.appendingPathComponent("dt=2026-09-21/audit-events-2026-09-21.parquet").path))
 
         outcome = AuditArchive.materialize(store: store, outDir: out, host: "h", appVersion: "t", cutoff: nil)
         try expectEqual(outcome.writtenDays, [])
@@ -129,7 +161,7 @@ func auditArchiveTests(_ t: TestRunner) {
         try expect(AuditArchive.prunableDays(store: store).isEmpty, "未上传不应可清理")
 
         // 模拟备份引擎上传成功：sync_state 记下与本地文件一致的 size+mtime
-        let file = out.appendingPathComponent("dt=2026-09-21/part-0000.parquet")
+        let file = out.appendingPathComponent("dt=2026-09-21/audit-events-2026-09-21.parquet")
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         try store.syncState.upsert(.init(
             path: file.path, remoteKey: "k",
@@ -156,12 +188,12 @@ func auditArchiveTests(_ t: TestRunner) {
         try store.audit.insert(event("a", at: 1_790_000_000))
         let out = root.appendingPathComponent("audit")
         AuditArchive.materialize(store: store, outDir: out, host: "h", appVersion: "t", cutoff: nil)
-        try Data("x".utf8).write(to: out.appendingPathComponent("dt=2026-09-21/.part-0001.parquet.tmp"))
+        try Data("x".utf8).write(to: out.appendingPathComponent("dt=2026-09-21/.audit-events-2026-09-21-2.parquet.tmp"))
         var roots = try emptySyncRoots(base: root)
         roots.auditArchiveDir = out
         let result = SyncSourceCatalog.enumerate(roots: roots, prefix: "p", host: "h", maxFileSize: 1 << 30)
         let audit = result.candidates.filter { $0.category == "eureka/audit" }
-        try expectEqual(audit.map(\.remoteKey), ["p/h/eureka/audit/dt=2026-09-21/part-0000.parquet"])
+        try expectEqual(audit.map(\.remoteKey), ["p/h/eureka/audit/dt=2026-09-21/audit-events-2026-09-21.parquet"])
     }
 }
 
@@ -171,7 +203,8 @@ func auditArchivePruneTests(_ t: TestRunner) {
     func uploadAll(_ store: EurekaStore, _ out: URL) throws {
         let dirs = (try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []
         for dir in dirs {
-            let file = out.appendingPathComponent(dir).appendingPathComponent("part-0000.parquet")
+            let file = out.appendingPathComponent(dir)
+                .appendingPathComponent("audit-events-\(dir.dropFirst(3)).parquet")
             let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
             try store.syncState.upsert(.init(
                 path: file.path, remoteKey: "k/\(dir)",

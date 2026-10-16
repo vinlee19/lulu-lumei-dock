@@ -365,7 +365,7 @@ final class SyncService: ObservableObject {
             antigravitySkills: AntigravityPaths.userSkillsRoot())
     }
 
-    /// 审计归档的本地落点（export/audit/dt=YYYY-MM-DD/part-*.parquet）
+    /// 审计归档的本地落点（export/audit/dt=YYYY-MM-DD/audit-events-*.parquet）
     static func auditArchiveDir() -> URL {
         EurekaStore.defaultURL().deletingLastPathComponent()
             .appendingPathComponent("export/audit", isDirectory: true)

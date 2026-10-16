@@ -12,7 +12,7 @@ public enum ParquetWriter {
         case gzip = 2
     }
 
-    public enum Values {
+    public enum Values: Equatable {
         /// BYTE_ARRAY + STRING 逻辑类型
         case string([String?])
         case int32([Int32?])
@@ -30,7 +30,7 @@ public enum ParquetWriter {
         }
     }
 
-    public struct Column {
+    public struct Column: Equatable {
         public let name: String
         public let values: Values
         /// true = REQUIRED（不允许 nil）；false = OPTIONAL

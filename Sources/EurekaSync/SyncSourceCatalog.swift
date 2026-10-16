@@ -97,7 +97,7 @@ public struct SyncRoots {
     /// eureka 自身的分析快照（EurekaDBSnapshot 产出的三事实表 SQLite）。
     /// 默认 nil → 既有构造点不受影响；由 app 侧在每轮同步前物化后注入。
     public var eurekaSnapshot: URL?
-    /// 审计归档目录（AuditArchive 产出的 dt=YYYY-MM-DD/part-*.parquet，已脱敏）。
+    /// 审计归档目录（AuditArchive 产出的 dt=YYYY-MM-DD/audit-events-*.parquet，已脱敏）。
     /// 默认 nil；只有用户打开「审计归档」才由 app 侧注入。
     public var auditArchiveDir: URL?
     /// 项目级 skill 根：(本地根 <repo>/<agentDir>/skills, 远端类目 "<source>/skills/project/<项目名>")。
