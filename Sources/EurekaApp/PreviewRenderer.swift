@@ -163,6 +163,23 @@ enum PreviewRenderer {
         snapshot("12-compact-subagent-marker", screen: notched) {
             $0.updateActiveTasks([withSubs, running2])
         }
+        // Crowded floating pill, reproduced from two real screenshots (2026-10-16): one source
+        // (so the wing carries the "claude" word), a two-digit count, a waiting task, subagents
+        // and a cross-day start time with a two-digit month. Neither the count nor the time may
+        // wrap; the wings drop the word label / the subagent marker before that happens.
+        snapshot("13-compact-crowded-floating", screen: plain) {
+            var crowd: [AgentTask] = [waitingTask, withSubs]
+            for index in 0..<28 {
+                crowd.append(AgentTask(
+                    source: .claude, sessionId: "crowd-\(index)", title: "会话 \(index)",
+                    cwd: "/Users/me/work/crowd",
+                    startedAt: now.addingTimeInterval(-Double(index) * 600)))
+            }
+            crowd[0].startedAt = now.addingTimeInterval(-6 * 86400)  // 两位月份，如 10/10
+            $0.isFloating = true
+            $0.showStartTime = true
+            $0.updateActiveTasks(crowd)
+        }
     }
 
     /// 离屏渲染知识库页（Plans/Skills/Memory/Agents × 卡片/列表）做视觉走查。
