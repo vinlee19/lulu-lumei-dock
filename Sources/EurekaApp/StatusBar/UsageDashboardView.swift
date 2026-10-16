@@ -326,7 +326,10 @@ struct UsageDashboardView: View {
             emptyChart("该时段暂无用量")
         } else {
             let sources = orderedSources(points.map(\.source))
-            let rangeDays = range.to.timeIntervalSince(range.from) / 86400
+            // "All" starts at 1970: clamp the domain to the first data day, scale ticks to the span
+            let axis = TrendAxis.layout(
+                rangeFrom: range.from, rangeTo: range.to,
+                firstBucket: points.map(\.bucket).min())
             Chart(points) { point in
                 BarMark(
                     x: .value("时间", point.bucket, unit: hourly ? .hour : .day),
@@ -337,7 +340,7 @@ struct UsageDashboardView: View {
             }
             .chartForegroundStyleScale(domain: sources.map(\.displayName),
                                        range: sources.map(brandColor))
-            .chartXScale(domain: range.from...range.to)  // 固定轴域，防单柱铺满
+            .chartXScale(domain: axis.domain)  // fixed domain so a lone bar cannot fill the axis
             .chartYAxis {
                 AxisMarks { value in
                     AxisGridLine()
@@ -357,9 +360,13 @@ struct UsageDashboardView: View {
                         AxisValueLabel(format: .dateTime.hour(.twoDigits(amPM: .omitted)))
                     }
                 } else {
-                    AxisMarks(values: .stride(by: .day, count: rangeDays <= 8 ? 1 : 5)) { _ in
+                    AxisMarks(values: .stride(by: .day, count: axis.strideDays)) { _ in
                         AxisGridLine()
-                        AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                        if axis.showsYear {
+                            AxisValueLabel(format: .dateTime.year(.twoDigits).month(.defaultDigits))
+                        } else {
+                            AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                        }
                     }
                 }
             }
