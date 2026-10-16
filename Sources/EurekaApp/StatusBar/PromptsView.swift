@@ -22,6 +22,18 @@ struct PromptsView: View {
     /// 「最费劲」排序：severity 降序 → 步数降序（找出最该改写/模板化的提问）
     @State private var effortSort = false
 
+    /// Offscreen-render / preview injection: open straight into one entry's detail
+    /// (same convention as `PlansView(initialLayout:)`).
+    init(
+        service: PromptsService, sessionBrowser: SessionBrowserService,
+        skillMemory: SkillMemoryService, initialDetail: PromptEntry? = nil
+    ) {
+        self._service = ObservedObject(wrappedValue: service)
+        self.sessionBrowser = sessionBrowser
+        self.skillMemory = skillMemory
+        self._detail = State(initialValue: initialDetail)
+    }
+
     /// 搜索 + 来源 + 收藏筛选后的列表（service 已按 first_seen 倒序）；
     /// 「最费劲」开关按评价重排（无评价的排后，保持原相对顺序）
     private var filtered: [PromptEntry] {

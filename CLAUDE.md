@@ -31,6 +31,7 @@ swift run eureka --mcp-inspect <name>      # probe one MCP server (remote handsh
 swift run eureka --render-previews [dir]   # offscreen-render every island state to PNG
 swift run eureka --render-shell [dir] [--style brutal]  # offscreen-render the sidebar + audit page (light/dark, both styles)
 swift run eureka --render-lineage [dir]    # offscreen-render the turn lineage graph (golden + live)
+swift run eureka --render-pages [dir] [--style brutal]  # offscreen-render history / sessions / usage / limits / prompts / settings / ⌘K (+ 675×512 and dark variants)
 swift run eureka-relay inject --event stop --session demo  # inject a test event into the spool
 ```
 

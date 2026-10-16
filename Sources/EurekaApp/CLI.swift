@@ -129,6 +129,24 @@ enum EurekaCLI {
             MainActor.assumeIsolated {
                 PreviewRenderer.renderLineage(to: dir)
             }
+        case "--render-pages":
+            // Same argument parsing as --render-shell: the value of --style is not positional
+            var positional = [String]()
+            var styleRaw = "classic"
+            var index = 1
+            while index < args.count {
+                if args[index] == "--style", args.indices.contains(index + 1) {
+                    styleRaw = args[index + 1]
+                    index += 2
+                    continue
+                }
+                if !args[index].hasPrefix("--") { positional.append(args[index]) }
+                index += 1
+            }
+            let dir = positional.first ?? "/tmp/eureka-pages"
+            MainActor.assumeIsolated {
+                PreviewRenderer.renderPages(to: dir, style: ThemeStyle.resolve(styleRaw))
+            }
         case "--mcp-inspect":
             // 走真实探测路径（remote 握手 / stdio 深探），结果落真缓存——
             // 显式执行本命令等同于在 UI 点「重新检测」（同一次性、同披露）。

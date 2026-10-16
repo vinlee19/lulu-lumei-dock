@@ -444,6 +444,211 @@ enum PreviewRenderer {
         snap("shell-audit-settings", auditView.settingsPopover, width: 340, height: 300)
     }
 
+    /// Offscreen-render the remaining pages: 历史 / 会话 (two-pane + detail) / 用量 (all six
+    /// sub-tabs) / 限额 / Prompts (list + detail) / 设置 (five sections) / ⌘K palette.
+    ///
+    /// These pages had no automated way to be looked at (knowledge pages and the audit page
+    /// each have a renderer; nothing covered the rest). Driven by real local data, same
+    /// skeleton as `renderShell` / `renderKnowledge`. Services publish from their own queues
+    /// and the CLI has no main runloop, so every wait pumps the runloop by hand.
+    @MainActor
+    static func renderPages(to directory: String, style: ThemeStyle = .classic) {
+        ThemeFonts.register()
+        ThemeStyle.current = style
+        defer { ThemeStyle.current = .classic }
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        @MainActor func snap<V: View>(
+            _ name: String, _ view: V, dark: Bool = false,
+            width: CGFloat = 780, height: CGFloat = 980
+        ) {
+            let hosting = NSHostingView(rootView: ZStack {
+                style == .classic ? Color(nsColor: .windowBackgroundColor) : Theme.windowBackground
+                view
+            })
+            hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            hosting.frame = CGRect(x: 0, y: 0, width: width, height: height)
+            hosting.layoutSubtreeIfNeeded()
+            guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+            else { print("渲染失败: \(name)"); return }
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:])
+            else { print("渲染失败: \(name)"); return }
+            try? png.write(to: dir.appendingPathComponent("\(name).png"))
+            print("已渲染 \(name).png")
+        }
+
+        @MainActor func pump(_ seconds: Double) {
+            RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+        }
+        @MainActor func wait(_ label: String, upTo seconds: Double, until done: () -> Bool) {
+            let deadline = Date().addingTimeInterval(seconds)
+            while !done(), Date() < deadline { pump(0.2) }
+            if !done() { print("等待超时：\(label)") }
+        }
+
+        let settings = AppSettings()
+        // AppSettings.init resets ThemeStyle.current from the persisted preference
+        ThemeStyle.current = style
+        let usage = UsageService()
+        let sessions = SessionBrowserService()
+        let skillMemory = SkillMemoryService()
+        let plans = PlansService()
+        let prompts = PromptsService(sessionBrowser: sessions)
+        let limits = RateLimitsService()
+        let installer = InstallerService()
+        let cliTools = CLIToolsService()
+        let notifications = NotificationService()
+        let update = UpdateService()
+        let sync = SyncService()
+        let palette = CommandPaletteService(
+            sessionBrowser: sessions, skillMemory: skillMemory, plans: plans,
+            prompts: prompts, settings: settings)
+
+        usage.start()
+        installer.refresh()
+        cliTools.detectLocal()
+        skillMemory.refresh()
+        sessions.refresh()
+        limits.refresh()
+        wait("用量汇总", upTo: 180) { usage.summary != nil }
+        wait("会话索引", upTo: 300) { !sessions.scanning }
+        wait("知识扫描", upTo: 180) { !skillMemory.scanning }
+        prompts.refresh()
+        wait("Prompt 库", upTo: 120) { !prompts.scanning }
+        print("数据就绪：history=\(usage.recentHistory.count) "
+            + "sessions=\(sessions.summary.sessionCount) prompts=\(prompts.totalCount) "
+            + "codex=\(limits.codex != nil) grok=\(limits.grok != nil) "
+            + "antigravity=\(limits.antigravity != nil)")
+
+        // MARK: 历史
+        let history = HistoryView(
+            tasks: usage.recentHistory, dailyOutcomes: usage.historyDailyOutcomes,
+            tokens: usage.historyTokens, runningTasks: usage.runningTasks,
+            terminals: sessions.terminals, settings: settings)
+        snap("pages-history", history)
+        snap("pages-history-dark", history, dark: true)
+        snap("pages-history-min", history, width: 675, height: 512)
+
+        // MARK: 会话（两栏 + 详情）
+        if let first = sessions.flatSessions.first ?? sessions.groups.first?.sessions.first {
+            sessions.select(first)
+            wait("对话记录", upTo: 60) { !sessions.transcriptLoading }
+            pump(1)
+        }
+        func sessionsPage() -> SessionsView {
+            SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans)
+        }
+        snap("pages-sessions", sessionsPage(), width: 1270)
+        snap("pages-sessions-min", sessionsPage(), width: 675, height: 512)
+        snap("pages-sessions-dark", sessionsPage(), dark: true, width: 1270)
+        if sessions.selected != nil {
+            snap("pages-session-lineage-list",
+                 TurnLineageView(
+                    sessionName: sessions.selected?.displayName ?? "会话",
+                    turns: TurnSlicer.slice(sessions.transcript), onBack: {}),
+                 width: 1270)
+        }
+
+        // MARK: 用量：六个子页签（本月区间；onAppear 在离屏下不可靠，手动拉数据）
+        let month = UsageService.DashboardPeriod.month
+        let range = (from: month.startDate, to: Date())
+        usage.loadRecords(page: 1, pageSize: 50, source: nil, from: range.from, to: range.to)
+        usage.loadModelTotals(from: range.from, to: range.to)
+        usage.loadProjectTotals(from: range.from, to: range.to)
+        usage.loadToolCalls(source: nil, from: range.from, to: range.to)
+        usage.loadTrend(from: range.from, to: range.to)
+        usage.loadSessionTotals(from: range.from, to: range.to, source: nil)
+        usage.loadHeatmap(from: range.from, to: range.to, source: nil)
+        usage.loadSkillStats()
+        usage.loadMCPStats()
+        usage.loadAgentStats()
+        usage.loadSkillRanking(from: range.from, to: range.to)
+        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())
+            ?? DateInterval(start: Date(), duration: 7 * 86400)
+        usage.loadWeeklyReport(weekStart: week.start, weekEnd: week.end)
+        wait("用量明细", upTo: 60) {
+            !usage.records.isEmpty && !usage.modelTotals.isEmpty && usage.weeklyReport != nil
+        }
+        pump(1)
+        print("用量明细：records=\(usage.records.count)/\(usage.recordTotal) "
+            + "models=\(usage.modelTotals.count) projects=\(usage.projectTotals.count) "
+            + "sessions=\(usage.sessionTotals.count) heatmap=\(usage.heatmapCells.count) "
+            + "weekly=\(usage.weeklyReport != nil)")
+        let subTabs: [(UsageDashboardView.SubTab, String)] = [
+            (.log, "log"), (.models, "models"), (.projects, "projects"),
+            (.sessions, "sessions"), (.tools, "tools"), (.weekly, "weekly"),
+        ]
+        for (tab, suffix) in subTabs {
+            let view = UsageDashboardView(
+                usageService: usage, sessionBrowser: sessions,
+                initialPeriod: .month, initialSubTab: tab)
+            snap("pages-usage-\(suffix)", view, width: 1270, height: 2000)
+        }
+        snap("pages-usage-log-min",
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+                                initialPeriod: .month, initialSubTab: .log),
+             width: 675, height: 1600)
+        snap("pages-usage-log-dark",
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+                                initialPeriod: .month, initialSubTab: .log),
+             dark: true, width: 1270, height: 2000)
+        // 侧栏 + 用量页并排（核对分隔线两侧的字号/留白衔接）
+        snap("pages-full-usage", HStack(spacing: 0) {
+            SidebarView(
+                selected: .usage, limitsBadge: ("9%", Theme.enabledGreen),
+                historyBadge: "\(usage.recentHistory.count)", appVersion: "0.35.1",
+                onSelect: { _ in })
+            Divider()
+            UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+                               initialPeriod: .month, initialSubTab: .models)
+        }, width: SidebarView.width + 1 + 1270, height: 1400)
+
+        // MARK: 限额
+        pump(2)
+        snap("pages-limits", LimitsPanelView(service: limits, settings: settings), height: 700)
+        snap("pages-limits-dark", LimitsPanelView(service: limits, settings: settings),
+             dark: true, height: 700)
+
+        // MARK: Prompts（列表 + 详情）
+        snap("pages-prompts",
+             PromptsView(service: prompts, sessionBrowser: sessions, skillMemory: skillMemory))
+        snap("pages-prompts-wide",
+             PromptsView(service: prompts, sessionBrowser: sessions, skillMemory: skillMemory),
+             width: 1270)
+        if let entry = prompts.prompts.first {
+            snap("pages-prompt-detail",
+                 PromptsView(service: prompts, sessionBrowser: sessions,
+                             skillMemory: skillMemory, initialDetail: entry))
+        }
+
+        // MARK: 设置：五个子栏目
+        for section in SettingsView.SettingsSection.allCases {
+            let view = SettingsView(
+                section: .constant(section), settings: settings, installer: installer,
+                usageService: usage, cliTools: cliTools, notificationService: notifications,
+                updateService: update, syncService: sync)
+            snap("pages-settings-\(section)", view, height: 1200)
+        }
+        snap("pages-settings-general-dark",
+             SettingsView(
+                section: .constant(.general), settings: settings, installer: installer,
+                usageService: usage, cliTools: cliTools, notificationService: notifications,
+                updateService: update, syncService: sync),
+             dark: true, height: 1200)
+
+        // MARK: ⌘K 面板
+        palette.query = "metricflow"
+        wait("⌘K 命中", upTo: 20) { !palette.hits.isEmpty }
+        print("⌘K 命中：\(palette.hits.count)")
+        snap("pages-palette", VStack {
+            CommandPaletteView(service: palette, onClose: {})
+                .padding(.top, 40)
+            Spacer()
+        }, width: 700, height: 560)
+    }
+
     /// 离屏渲染**轮次血缘图**。
     ///
     /// 输入用**手搓的 `TurnInput` 字面量**而不是本机真实会话：验收形态是一个具体形状

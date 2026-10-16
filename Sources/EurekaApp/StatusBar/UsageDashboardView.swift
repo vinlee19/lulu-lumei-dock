@@ -22,13 +22,25 @@ struct UsageDashboardView: View {
     @State private var customTo = Date()
     @State private var pageInput = ""
 
-    private enum SubTab: String, CaseIterable {
+    enum SubTab: String, CaseIterable {
         case log = "请求日志"
         case models = "模型统计"
         case projects = "项目统计"
         case sessions = "按会话"
         case tools = "技能/插件"
         case weekly = "周报"
+    }
+
+    /// Offscreen-render / preview injection: pick the initial period and sub-tab
+    /// (same convention as `PlansView(initialLayout:)`).
+    init(
+        usageService: UsageService, sessionBrowser: SessionBrowserService,
+        initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .log
+    ) {
+        self._usageService = ObservedObject(wrappedValue: usageService)
+        self._sessionBrowser = ObservedObject(wrappedValue: sessionBrowser)
+        self._period = State(initialValue: initialPeriod)
+        self._subTab = State(initialValue: initialSubTab)
     }
 
     /// 周报周偏移：0 = 本周，1 = 上周…
