@@ -126,7 +126,7 @@ public enum UsageAggregator {
     ) -> [UsageSummary.ProjectLine] {
         var byProject: [String: UsageSummary.ProjectLine] = [:]
         for (project, totals) in rows {
-            let name = project ?? "（未知项目）"
+            let name = project ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
             var line = byProject[name]
                 ?? UsageSummary.ProjectLine(name: name, totalTokens: 0, costUSD: nil)
             line.totalTokens += totals.inputTokens + totals.outputTokens

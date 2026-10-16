@@ -83,7 +83,19 @@ final class IslandPanelController {
             name: .eurekaResetIslandPosition,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange),
+            name: .eurekaLanguageDidChange,
+            object: nil
+        )
         reposition()
+    }
+
+    @objc private func languageDidChange() {
+        MainActor.assumeIsolated {
+            viewModel.noteLanguage(L10n.current)
+        }
     }
 
     @objc private func screensChanged() {

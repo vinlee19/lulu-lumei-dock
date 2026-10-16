@@ -20,6 +20,35 @@ final class CLIToolsService: ObservableObject {
         var latestVersion: String?
         var detecting = false
         var checkingLatest = false
+
+        /// 关于页展示与复制用。散文提示随当前界面语言现算；
+        /// 纯命令行（npm / curl）两种语言相同，直接用存储值。
+        var displayInstallCommand: String {
+            switch id {
+            case "antigravity":
+                return L10n.text(
+                    "Download Antigravity from https://antigravity.google, then run `agy install`",
+                    zhHans: "从 https://antigravity.google 下载 Antigravity 后运行 `agy install`")
+            case "qoder":
+                return L10n.text(
+                    "Download and install Qoder from https://qoder.com (the CN CLI is bundled with the client)",
+                    zhHans: "从 https://qoder.com 下载安装 Qoder（CN 版 CLI 随客户端分发）")
+            case "cursor":
+                return L10n.text(
+                    "Download and install Cursor from https://cursor.com (in the IDE, use Cmd+Shift+P → Install 'cursor' command to enable the CLI)",
+                    zhHans: "从 https://cursor.com 下载安装 Cursor（命令行入口在 IDE 内 Cmd+Shift+P → Install 'cursor' command）")
+            case "trae":
+                return L10n.text(
+                    "Download and install Trae from https://trae.cn (China) or https://trae.ai",
+                    zhHans: "从 https://trae.cn（国内）或 https://trae.ai 下载安装 Trae")
+            case "zcode":
+                return L10n.text(
+                    "Download and install ZCode from https://z.ai (the CLI is bundled with the desktop app)",
+                    zhHans: "从 https://z.ai 下载安装 ZCode（CLI 随桌面版分发）")
+            default:
+                return installCommand
+            }
+        }
     }
 
     @Published private(set) var tools: [Tool] = [
@@ -41,7 +70,7 @@ final class CLIToolsService: ObservableObject {
              updateCommand: "grok update"),
         Tool(id: "antigravity", name: "Antigravity CLI (agy)", source: .antigravity,
              command: "agy", npmPackage: "",
-             installCommand: "从 https://antigravity.google 下载 Antigravity 后运行 `agy install`",
+             installCommand: "Download Antigravity from https://antigravity.google, then run `agy install`",
              updateCommand: "agy update"),
         Tool(id: "kimi", name: "Kimi Code CLI", source: .kimi,
              command: "kimi", npmPackage: "@moonshot-ai/kimi-code",
@@ -70,14 +99,13 @@ final class CLIToolsService: ObservableObject {
         // 无已知自更新命令 → updateCommand 留空，仅提供下载指引。
         Tool(id: "qoder", name: "Qoder", source: .qoder,
              command: QoderPaths.cliBinary()?.path ?? "qoderclicn", npmPackage: "",
-             installCommand: "从 https://qoder.com 下载安装 Qoder（CN 版 CLI 随客户端分发）",
+             installCommand: "Download and install Qoder from https://qoder.com (the CN CLI is bundled with the client)",
              updateCommand: ""),
         // Cursor 是 IDE，`cursor` 命令行入口要在 IDE 内 Cmd+Shift+P →
         // "Install 'cursor' command" 才会装到 /usr/local/bin；应用自身走内置更新器。
         Tool(id: "cursor", name: "Cursor", source: .cursor,
              command: "cursor", npmPackage: "",
-             installCommand: "从 https://cursor.com 下载安装 Cursor（命令行入口在 IDE 内 "
-                 + "Cmd+Shift+P → Install 'cursor' command）",
+             installCommand: "Download and install Cursor from https://cursor.com (in the IDE, use Cmd+Shift+P → Install 'cursor' command to enable the CLI)",
              updateCommand: ""),
         // Trae 也是 IDE。命令行入口由客户端自己装到 /usr/local/bin：CN 版是 `trae-cn`、
         // 国际版是 `trae`（两个都可能装着，这里报已装渠道的第一个，CN 优先）。
@@ -85,14 +113,14 @@ final class CLIToolsService: ObservableObject {
         Tool(id: "trae", name: "Trae", source: .trae,
              command: TraePaths.installedChannels().first?.cliCommand ?? "trae-cn",
              npmPackage: "",
-             installCommand: "从 https://trae.cn（国内）或 https://trae.ai 下载安装 Trae",
+             installCommand: "Download and install Trae from https://trae.cn (China) or https://trae.ai",
              updateCommand: ""),
         // ZCode CLI 随 /Applications/ZCode.app 分发（PATH 上通常没有 zcode 命令）。
         // 版本检测读 App Bundle 的 Info.plist（见 detectLocal 的 zcode 分支）；
         // 应用自身走客户端更新 → updateCommand 留空。
         Tool(id: "zcode", name: "ZCode", source: .zcode,
              command: "zcode", npmPackage: "",
-             installCommand: "从 https://z.ai 下载安装 ZCode（CLI 随桌面版分发）",
+             installCommand: "Download and install ZCode from https://z.ai (the CLI is bundled with the desktop app)",
              updateCommand: ""),
     ]
     @Published private(set) var detected = false
@@ -161,7 +189,7 @@ final class CLIToolsService: ObservableObject {
 
     func copyInstallCommand(_ tool: Tool) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(tool.installCommand, forType: .string)
+        NSPasteboard.general.setString(tool.displayInstallCommand, forType: .string)
     }
 
     /// 在可见 Terminal 里执行该工具的更新命令（各 CLI 自带 update/upgrade，或 npm @latest）。

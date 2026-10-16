@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 import ServiceManagement
 
@@ -106,6 +107,15 @@ final class AppSettings: ObservableObject {
     @Published var appearanceMode: String {
         didSet { defaults.set(appearanceMode, forKey: "appearanceMode") }
     }
+    /// 界面语言（`AppLanguage` rawValue）。缺省英文。
+    /// didSet 同步 `L10n.current`，并通知主菜单和灵动岛重绘。init 里 didSet 不触发，末尾要再同步一次。
+    @Published var appLanguage: String {
+        didSet {
+            defaults.set(appLanguage, forKey: AppLanguage.defaultsKey)
+            L10n.current = AppLanguage.resolve(appLanguage)
+            NotificationCenter.default.post(name: .eurekaLanguageDidChange, object: nil)
+        }
+    }
     /// 界面风格：classic=经典（默认）/ brutal=新粗野主义（Neo-Brutalism，参考 raft.build）。
     /// didSet 里同步 ThemeStyle.current，配合根视图 .id 整树重建即时生效。
     @Published var themeStyle: String {
@@ -212,6 +222,7 @@ final class AppSettings: ObservableObject {
         historySortMode = defaults.string(forKey: "historySortMode") ?? "active"
         sessionSortMode = defaults.string(forKey: "sessionSortMode") ?? "time"
         appearanceMode = defaults.string(forKey: "appearanceMode") ?? "system"
+        appLanguage = AppLanguage.resolve(defaults.string(forKey: AppLanguage.defaultsKey)).rawValue
         themeStyle = defaults.string(forKey: "themeStyle") ?? ThemeStyle.classic.rawValue
         mascotEnabled = defaults.bool(forKey: "mascotEnabled")
         mascotPack = defaults.string(forKey: "mascotPack") ?? "built-in"
@@ -234,8 +245,9 @@ final class AppSettings: ObservableObject {
         auditRetentionDays = defaults.object(forKey: "auditRetentionDays") as? Int ?? 90
         auditArchiveEnabled = defaults.bool(forKey: AuditArchiveSettings.key)
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        // 启动即同步界面风格（init 内 didSet 不触发，须在全部属性初始化后显式同步）
+        // 启动即同步界面风格与语言（init 内 didSet 不触发，须在全部属性初始化后显式同步）
         ThemeStyle.current = ThemeStyle.resolve(themeStyle)
+        L10n.current = AppLanguage.resolve(appLanguage)
     }
 
     /// SMAppService 对 ad-hoc/开发态注册可能不稳：失败给降级提示而不是静默
@@ -250,9 +262,10 @@ final class AppSettings: ObservableObject {
             launchAtLoginHint = nil
         } catch {
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            launchAtLoginHint = "注册失败（\(error.localizedDescription)）。"
-                + "请先 make install 安装到 ~/Applications 后再开启，"
-                + "或在 系统设置 > 通用 > 登录项 手动添加。"
+            launchAtLoginHint = L10n.format(
+                "Registration failed (%@). Run make install into ~/Applications first, or add the app under System Settings > General > Login Items.",
+                zhHans: "注册失败（%@）。请先 make install 安装到 ~/Applications 后再开启，或在 系统设置 > 通用 > 登录项 手动添加。",
+                error.localizedDescription)
         }
     }
 }

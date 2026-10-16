@@ -1,6 +1,9 @@
 import AppKit
+import EurekaKit
 
-// CLI 模式（hooks 装卸/状态查询）直接处理后退出，不起 GUI
+// CLI 模式（hooks 装卸/状态查询）直接处理后退出，不起 GUI。
+// 语言偏好要在 CLI 打出任何文案之前装上；没有存过偏好时是英文。
+L10n.applyStoredPreference()
 if EurekaCLI.runIfNeeded() {
     exit(0)
 }

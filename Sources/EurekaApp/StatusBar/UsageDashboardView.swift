@@ -29,6 +29,17 @@ struct UsageDashboardView: View {
         case sessions = "按会话"
         case tools = "技能/插件"
         case weekly = "周报"
+
+        var title: String {
+            switch self {
+            case .log: return L10n.text("Request log", zhHans: "请求日志")
+            case .models: return L10n.text("Models", zhHans: "模型统计")
+            case .projects: return L10n.text("Projects", zhHans: "项目统计")
+            case .sessions: return L10n.text("By session", zhHans: "按会话")
+            case .tools: return L10n.text("Skills / plugins", zhHans: "技能/插件")
+            case .weekly: return L10n.text("Weekly", zhHans: "周报")
+            }
+        }
     }
 
     /// Offscreen-render / preview injection: pick the initial period and sub-tab
@@ -50,11 +61,25 @@ struct UsageDashboardView: View {
     private enum TrendMode: String, CaseIterable {
         case byDate = "按日期"
         case byModel = "按模型"
+
+        var title: String {
+            switch self {
+            case .byDate: return L10n.text("By date", zhHans: "按日期")
+            case .byModel: return L10n.text("By model", zhHans: "按模型")
+            }
+        }
     }
 
     private enum TrendMetric: String, CaseIterable {
         case tokens = "Tokens"
         case cost = "成本"
+
+        var title: String {
+            switch self {
+            case .tokens: return "Tokens"
+            case .cost: return L10n.text("Cost", zhHans: "成本")
+            }
+        }
     }
 
     private let pageSize = 50
@@ -85,7 +110,7 @@ struct UsageDashboardView: View {
                     }
                     footerRow
                 } else {
-                    ProgressView("正在扫描本地会话…")
+                    ProgressView(L10n.text("Scanning local sessions…", zhHans: "正在扫描本地会话…"))
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
                 }
@@ -159,19 +184,23 @@ struct UsageDashboardView: View {
 
     @State private var toolKindFilter: String?  // nil = 全部；skill/mcp/agent/command/tool
 
-    private static let kindLabels: [(key: String, label: String, icon: String, color: Color)] = [
-        ("skill", "技能", "wand.and.stars", .purple),
-        ("mcp", "MCP 插件", "puzzlepiece.extension.fill", .indigo),
-        ("agent", "子代理", "person.2.fill", .teal),
-        ("command", "命令", "terminal.fill", .gray),
-        ("tool", "工具", "wrench.and.screwdriver.fill", .secondary),
-    ]
+    private static let kindOrder = ["skill", "mcp", "agent", "command", "tool"]
 
     private static func kindMeta(_ kind: String) -> (label: String, icon: String, color: Color) {
-        if let m = kindLabels.first(where: { $0.key == kind }) {
-            return (m.label, m.icon, m.color)
+        switch kind {
+        case "skill":
+            return (L10n.text("Skill", zhHans: "技能"), "wand.and.stars", .purple)
+        case "mcp":
+            return (L10n.text("MCP plugin", zhHans: "MCP 插件"), "puzzlepiece.extension.fill", .indigo)
+        case "agent":
+            return (L10n.text("Subagent", zhHans: "子代理"), "person.2.fill", .teal)
+        case "command":
+            return (L10n.text("Command", zhHans: "命令"), "terminal.fill", .gray)
+        case "tool":
+            return (L10n.text("Tool", zhHans: "工具"), "wrench.and.screwdriver.fill", .secondary)
+        default:
+            return (kind, "questionmark", .secondary)
         }
-        return (kind, "questionmark", .secondary)
     }
 
     @ViewBuilder
@@ -182,9 +211,9 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // kind 筛选 chips
             HStack(spacing: 4) {
-                kindChip(nil, "全部")
-                ForEach(Self.kindLabels, id: \.key) { item in
-                    kindChip(item.key, item.label)
+                kindChip(nil, L10n.text("All", zhHans: "全部"))
+                ForEach(Self.kindOrder, id: \.self) { key in
+                    kindChip(key, Self.kindMeta(key).label)
                 }
                 Spacer()
             }
@@ -193,7 +222,7 @@ struct UsageDashboardView: View {
             Divider()
 
             if rows.isEmpty {
-                Text("该时段暂无技能/插件调用记录")
+                Text(L10n.text("No skill or plugin calls in this range", zhHans: "该时段暂无技能/插件调用记录"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -272,10 +301,10 @@ struct UsageDashboardView: View {
     private var trendCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("趋势")
+                Text(L10n.text("Trend", zhHans: "趋势"))
                     .font(.system(size: 12, weight: .semibold))
                 if usageService.trendIsHourly && trendMode == .byDate {
-                    Text("小时粒度")
+                    Text(L10n.text("Hourly", zhHans: "小时粒度"))
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 5)
@@ -284,14 +313,14 @@ struct UsageDashboardView: View {
                 }
                 Spacer()
                 Picker("", selection: $trendMetric) {
-                    ForEach(TrendMetric.allCases, id: \.self) { Text($0.rawValue) }
+                    ForEach(TrendMetric.allCases, id: \.self) { Text($0.title) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 110)
                 .controlSize(.mini)
                 Picker("", selection: $trendMode) {
-                    ForEach(TrendMode.allCases, id: \.self) { Text($0.rawValue) }
+                    ForEach(TrendMode.allCases, id: \.self) { Text($0.title) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -323,7 +352,7 @@ struct UsageDashboardView: View {
         let hourly = usageService.trendIsHourly
         let range = currentRange()
         if points.isEmpty {
-            emptyChart("该时段暂无用量")
+            emptyChart(L10n.text("No usage in this range", zhHans: "该时段暂无用量"))
         } else {
             let sources = orderedSources(points.map(\.source))
             // "All" starts at 1970: clamp the domain to the first data day, scale ticks to the span
@@ -332,11 +361,11 @@ struct UsageDashboardView: View {
                 firstBucket: points.map(\.bucket).min())
             Chart(points) { point in
                 BarMark(
-                    x: .value("时间", point.bucket, unit: hourly ? .hour : .day),
+                    x: .value(L10n.text("Time", zhHans: "时间"), point.bucket, unit: hourly ? .hour : .day),
                     y: .value(
-                        trendMetric.rawValue,
+                        trendMetric.title,
                         trendMetric == .tokens ? Double(point.tokens) : point.costUSD))
-                .foregroundStyle(by: .value("来源", point.source.displayName))
+                .foregroundStyle(by: .value(L10n.text("Source", zhHans: "来源"), point.source.displayName))
             }
             .chartForegroundStyleScale(domain: sources.map(\.displayName),
                                        range: sources.map(brandColor))
@@ -403,12 +432,14 @@ struct UsageDashboardView: View {
             .sorted { $0.metricValue > $1.metricValue }
             .prefix(8)
         if models.isEmpty || models.allSatisfy({ $0.metricValue == 0 }) {
-            emptyChart(trendMetric == .tokens ? "该时段暂无模型用量" : "该时段暂无可计价用量")
+            emptyChart(trendMetric == .tokens
+                ? L10n.text("No model usage in this range", zhHans: "该时段暂无模型用量")
+                : L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量"))
         } else {
             Chart(Array(models.enumerated()), id: \.offset) { _, item in
                 BarMark(
-                    x: .value(trendMetric.rawValue, item.metricValue),
-                    y: .value("模型", item.0.model))
+                    x: .value(trendMetric.title, item.metricValue),
+                    y: .value(L10n.text("Model", zhHans: "模型"), item.0.model))
                 .foregroundStyle(brandColor(item.0.source))
                 .annotation(position: .trailing, alignment: .leading) {
                     Text(trendMetric == .tokens
@@ -452,7 +483,7 @@ struct UsageDashboardView: View {
             HStack(spacing: 8) {
                 Picker("", selection: $period) {
                     ForEach(UsageService.DashboardPeriod.allCases, id: \.self) {
-                        Text($0.rawValue)
+                        Text(periodTitle($0))
                     }
                 }
                 .pickerStyle(.segmented)
@@ -463,7 +494,7 @@ struct UsageDashboardView: View {
                 Spacer(minLength: 8)
 
                 // 手动刷新：增量重扫本地用量 + 重算当前区间聚合（同 onAppear）
-                RefreshButton(help: "刷新统计（重新扫描本地用量）") {
+                RefreshButton(help: L10n.text("Refresh statistics (rescan local usage)", zhHans: "刷新统计（重新扫描本地用量）")) {
                     usageService.refreshNow()
                     reload()
                 }
@@ -473,7 +504,7 @@ struct UsageDashboardView: View {
             // （antigravity 内容为 protobuf 无法取用量；qoder 的 CN 后端 token 全零无用量，
             //   故均不入用量；grok / kimi 有真实 token 账 → 自动包含）
             FlowLayout(spacing: 8, lineSpacing: 6) {
-                sourceChip(nil, label: "全部")
+                sourceChip(nil, label: L10n.text("All", zhHans: "全部"))
                 // 没有 token 记账的源不给 chip（否则永远是空列表）：
                 // antigravity 无本地 token；qoder 的 CN 后端报零；
                 // trae 的会话库经 SQLCipher 加密，本地一个 token 都读不到。
@@ -491,7 +522,7 @@ struct UsageDashboardView: View {
                         .labelsHidden()
                         .datePickerStyle(.field)
                         .controlSize(.small)
-                    Text("至").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(L10n.text("to", zhHans: "至")).font(.system(size: 10)).foregroundStyle(.secondary)
                     DatePicker("", selection: $customTo, displayedComponents: .date)
                         .labelsHidden()
                         .datePickerStyle(.field)
@@ -534,7 +565,7 @@ struct UsageDashboardView: View {
                 .frame(width: 40, height: 40)
                 .background(Circle().fill(Theme.brandFill(0.12)))
             VStack(alignment: .leading, spacing: 2) {
-                Text("消耗 Tokens（\(period.rawValue)）")
+                Text(L10n.format("Tokens used (%@)", zhHans: "消耗 Tokens（%@）", periodTitle(period)))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -552,7 +583,7 @@ struct UsageDashboardView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("总请求数")
+                        Text(L10n.text("Requests", zhHans: "总请求数"))
                             .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
                         Text("\(totalRequests)")
@@ -560,7 +591,7 @@ struct UsageDashboardView: View {
                     }
                     Divider().frame(height: 26)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("总成本")
+                        Text(L10n.text("Total cost", zhHans: "总成本"))
                             .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
                         Text(totalCost.map { String(format: "$%.4f", $0) } ?? "—")
@@ -581,10 +612,10 @@ struct UsageDashboardView: View {
 
     private var metricGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            metricCard("新增输入", totalInput, icon: "arrow.down.to.line", tint: .blue)
-            metricCard("输出", totalOutput, icon: "arrow.up.to.line", tint: .purple)
-            metricCard("缓存创建", totalCacheWrite, icon: "externaldrive.badge.plus", tint: .orange)
-            metricCard("缓存命中", totalCacheRead, icon: "sparkles", tint: Theme.brandFg)
+            metricCard(L10n.text("New input", zhHans: "新增输入"), totalInput, icon: "arrow.down.to.line", tint: .blue)
+            metricCard(L10n.text("Output", zhHans: "输出"), totalOutput, icon: "arrow.up.to.line", tint: .purple)
+            metricCard(L10n.text("Cache write", zhHans: "缓存创建"), totalCacheWrite, icon: "externaldrive.badge.plus", tint: .orange)
+            metricCard(L10n.text("Cache read", zhHans: "缓存命中"), totalCacheRead, icon: "sparkles", tint: Theme.brandFg)
         }
     }
 
@@ -611,7 +642,7 @@ struct UsageDashboardView: View {
     private var cacheHitCard: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("缓存命中率")
+                Text(L10n.text("Cache hit rate", zhHans: "缓存命中率"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -641,7 +672,7 @@ struct UsageDashboardView: View {
         CapsuleTabTray {
             ForEach(SubTab.allCases, id: \.self) { tab in
                 CapsuleTabButton(
-                    title: tab.rawValue, fillWidth: false, isSelected: subTab == tab
+                    title: tab.title, fillWidth: false, isSelected: subTab == tab
                 ) {
                     subTab = tab
                 }
@@ -662,7 +693,11 @@ struct UsageDashboardView: View {
                     loadWeekly()
                 } label: { Image(systemName: "chevron.left").font(.system(size: 10)) }
                 .buttonStyle(.borderless)
-                Text(weekOffset == 0 ? "本周" : (weekOffset == 1 ? "上周" : "\(weekOffset) 周前"))
+                Text(weekOffset == 0
+                    ? L10n.text("This week", zhHans: "本周")
+                    : (weekOffset == 1
+                        ? L10n.text("Last week", zhHans: "上周")
+                        : L10n.format("%@ weeks ago", zhHans: "%@ 周前", String(weekOffset))))
                     .font(.system(size: 12, weight: .semibold))
                 Text("\(range.start, format: .dateTime.month().day()) – \(range.end.addingTimeInterval(-1), format: .dateTime.month().day())")
                     .font(.system(size: 10.5).monospacedDigit())
@@ -676,7 +711,7 @@ struct UsageDashboardView: View {
                 // The report is a whole-week digest with its own 按来源 breakdown; say so instead of
                 // letting a highlighted source chip imply the numbers below are filtered.
                 if sourceFilter != nil {
-                    Text("周报按全部来源统计，不受来源筛选影响")
+                    Text(L10n.text("The weekly report counts every source and ignores the source filter", zhHans: "周报按全部来源统计，不受来源筛选影响"))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
@@ -686,7 +721,7 @@ struct UsageDashboardView: View {
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
-                Button("导出 Markdown") { exportWeekly() }
+                Button(L10n.text("Export Markdown", zhHans: "导出 Markdown")) { exportWeekly() }
                     .controlSize(.small)
                     .disabled(usageService.weeklyReport?.isEmpty ?? true)
             }
@@ -694,7 +729,7 @@ struct UsageDashboardView: View {
             if let report = usageService.weeklyReport, !report.isEmpty {
                 weeklyStats(report)
             } else {
-                Text("该周没有活动记录")
+                Text(L10n.text("No activity that week", zhHans: "该周没有活动记录"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -710,37 +745,42 @@ struct UsageDashboardView: View {
     private func weeklyStats(_ report: WeeklyReport) -> some View {
         // 概览行
         HStack(spacing: 16) {
-            weeklyStat("活跃时长", "≈\(report.activeHours) 小时")
-            weeklyStat("消耗", formatTokens(report.totalTokens))
-            weeklyStat("费用", formatCost(report.totalCostUSD ?? 0), color: Theme.cost)
+            weeklyStat(L10n.text("Active time", zhHans: "活跃时长"), L10n.format("≈%@ hours", zhHans: "≈%@ 小时", String(report.activeHours)))
+            weeklyStat(L10n.text("Tokens", zhHans: "消耗"), formatTokens(report.totalTokens))
+            weeklyStat(L10n.text("Cost", zhHans: "费用"), formatCost(report.totalCostUSD ?? 0), color: Theme.cost)
             let total = report.successCount + report.errorCount + report.interruptedCount
             if total > 0 {
-                weeklyStat("任务", "\(total) 个 · 成功 \(report.successCount)")
+                weeklyStat(
+                    L10n.text("Tasks", zhHans: "任务"),
+                    L10n.format("%@ · %@ succeeded", zhHans: "%@ 个 · 成功 %@", String(total), String(report.successCount)))
             }
             if let prompts = report.promptSection, prompts.askedCount > 0 {
-                weeklyStat("提问", "\(prompts.askedCount) 个")
+                weeklyStat(L10n.text("Prompts", zhHans: "提问"), L10n.format("%@ asked", zhHans: "%@ 个", String(prompts.askedCount)))
             }
             if report.lateNightDays > 0 {
-                weeklyStat("深夜编码", "\(report.lateNightDays) 天", color: .orange)
+                weeklyStat(
+                    L10n.text("Late-night coding", zhHans: "深夜编码"),
+                    L10n.format("%@ days", zhHans: "%@ 天", String(report.lateNightDays)),
+                    color: .orange)
             }
             Spacer(minLength: 0)
         }
         Divider()
         HStack(alignment: .top, spacing: 18) {
-            weeklyRankColumn("按来源", report.bySource)
-            weeklyRankColumn("模型 Top", report.byModel)
-            weeklyRankColumn("项目 Top", report.byProject)
+            weeklyRankColumn(L10n.text("By source", zhHans: "按来源"), report.bySource)
+            weeklyRankColumn(L10n.text("Top models", zhHans: "模型 Top"), report.byModel)
+            weeklyRankColumn(L10n.text("Top projects", zhHans: "项目 Top"), report.byProject)
         }
         if !report.topSessions.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                Text("最贵会话")
+                Text(L10n.text("Most expensive sessions", zhHans: "最贵会话"))
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(report.topSessions) { entry in
                     HStack(spacing: 6) {
                         Text(sessionBrowser.sessionsById[entry.sessionId]?.name
-                            ?? "会话 \(entry.sessionId.prefix(8))")
+                            ?? L10n.format("Session %@", zhHans: "会话 %@", String(entry.sessionId.prefix(8))))
                             .font(.system(size: 11))
                             .lineLimit(1)
                         if let project = entry.project {
@@ -762,7 +802,7 @@ struct UsageDashboardView: View {
         if !report.topSkills.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                Text("技能调用 Top")
+                Text(L10n.text("Top skill calls", zhHans: "技能调用 Top"))
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(report.topSkills, id: \.name) { skill in
@@ -771,7 +811,7 @@ struct UsageDashboardView: View {
                             .font(.system(size: 11))
                             .lineLimit(1)
                         Spacer(minLength: 6)
-                        Text("\(skill.count) 次")
+                        Text(L10n.format("%@ times", zhHans: "%@ 次", String(skill.count)))
                             .font(.system(size: 10).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -781,7 +821,7 @@ struct UsageDashboardView: View {
         if let prompts = report.promptSection, !prompts.topReused.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                Text("提问复用 Top")
+                Text(L10n.text("Most reused prompts", zhHans: "提问复用 Top"))
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(prompts.topReused, id: \.name) { prompt in
@@ -790,7 +830,7 @@ struct UsageDashboardView: View {
                             .font(.system(size: 11))
                             .lineLimit(1)
                         Spacer(minLength: 6)
-                        Text("累计 \(prompt.count) 次")
+                        Text(L10n.format("%@ times total", zhHans: "累计 %@ 次", String(prompt.count)))
                             .font(.system(size: 10).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -850,7 +890,7 @@ struct UsageDashboardView: View {
         panel.allowedContentTypes = [.plainText]
         if panel.runModal() == .OK, let url = panel.url {
             try? Data(md.utf8).write(to: url)
-            weeklyExportNote = "已导出 \(url.lastPathComponent)"
+            weeklyExportNote = L10n.format("Exported %@", zhHans: "已导出 %@", url.lastPathComponent)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { weeklyExportNote = nil }
         }
     }
@@ -861,12 +901,12 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // 表头
             HStack(spacing: 8) {
-                Text("时间").frame(width: 76, alignment: .leading)
-                Text("来源").frame(width: 66, alignment: .leading)
-                Text("模型").frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
-                Text("输入").frame(width: 76, alignment: .trailing)
-                Text("输出").frame(width: 56, alignment: .trailing)
-                Text("成本").frame(width: 66, alignment: .trailing)
+                Text(L10n.text("Time", zhHans: "时间")).frame(width: 76, alignment: .leading)
+                Text(L10n.text("Source", zhHans: "来源")).frame(width: 66, alignment: .leading)
+                Text(L10n.text("Model", zhHans: "模型")).frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
+                Text(L10n.text("Input", zhHans: "输入")).frame(width: 76, alignment: .trailing)
+                Text(L10n.text("Output", zhHans: "输出")).frame(width: 56, alignment: .trailing)
+                Text(L10n.text("Cost", zhHans: "成本")).frame(width: 66, alignment: .trailing)
             }
             .font(.system(size: 9.5, weight: .semibold))
             .foregroundStyle(.tertiary)
@@ -876,7 +916,7 @@ struct UsageDashboardView: View {
             Divider()
 
             if usageService.records.isEmpty {
-                Text("该时段暂无请求记录")
+                Text(L10n.text("No requests in this range", zhHans: "该时段暂无请求记录"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -940,7 +980,7 @@ struct UsageDashboardView: View {
 
     private var paginationBar: some View {
         HStack(spacing: 8) {
-            Text("共 \(usageService.recordTotal) 条")
+            Text(L10n.format("%@ total", zhHans: "共 %@ 条", String(usageService.recordTotal)))
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -964,7 +1004,7 @@ struct UsageDashboardView: View {
             .buttonStyle(.borderless)
             .disabled(page >= totalPages)
             // 跳页
-            Text("跳至").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(L10n.text("Go to", zhHans: "跳至")).font(.system(size: 10)).foregroundStyle(.tertiary)
             TextField("", text: $pageInput)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 40)
@@ -987,12 +1027,12 @@ struct UsageDashboardView: View {
     private var modelStats: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text("模型").frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
-                Text("请求").frame(width: 46, alignment: .trailing)
-                Text("输入").frame(width: 62, alignment: .trailing)
-                Text("输出").frame(width: 62, alignment: .trailing)
-                Text("缓存").frame(width: 62, alignment: .trailing)
-                Text("成本").frame(width: 66, alignment: .trailing)
+                Text(L10n.text("Model", zhHans: "模型")).frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+                Text(L10n.text("Requests", zhHans: "请求")).frame(width: 46, alignment: .trailing)
+                Text(L10n.text("Input", zhHans: "输入")).frame(width: 62, alignment: .trailing)
+                Text(L10n.text("Output", zhHans: "输出")).frame(width: 62, alignment: .trailing)
+                Text(L10n.text("Cache", zhHans: "缓存")).frame(width: 62, alignment: .trailing)
+                Text(L10n.text("Cost", zhHans: "成本")).frame(width: 66, alignment: .trailing)
             }
             .font(.system(size: 9.5, weight: .semibold))
             .foregroundStyle(.tertiary)
@@ -1005,7 +1045,7 @@ struct UsageDashboardView: View {
                 sourceFilter == nil || $0.source == sourceFilter
             }
             if filtered.isEmpty {
-                Text("该时段暂无模型用量")
+                Text(L10n.text("No model usage in this range", zhHans: "该时段暂无模型用量"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -1063,12 +1103,12 @@ struct UsageDashboardView: View {
     private var sessionStats: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text("会话").frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
-                Text("项目").frame(width: 90, alignment: .leading)
-                Text("请求").frame(width: 42, alignment: .trailing)
+                Text(L10n.text("Session", zhHans: "会话")).frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
+                Text(L10n.text("Project", zhHans: "项目")).frame(width: 90, alignment: .leading)
+                Text(L10n.text("Requests", zhHans: "请求")).frame(width: 42, alignment: .trailing)
                 Text("Tokens").frame(width: 58, alignment: .trailing)
-                Text("成本").frame(width: 62, alignment: .trailing)
-                Text("最近活跃").frame(width: 64, alignment: .trailing)
+                Text(L10n.text("Cost", zhHans: "成本")).frame(width: 62, alignment: .trailing)
+                Text(L10n.text("Last active", zhHans: "最近活跃")).frame(width: 64, alignment: .trailing)
                 Text("").frame(width: 12)
             }
             .font(.system(size: 9.5, weight: .semibold))
@@ -1079,7 +1119,7 @@ struct UsageDashboardView: View {
             Divider()
 
             if usageService.sessionTotals.isEmpty {
-                Text("该时段暂无会话用量")
+                Text(L10n.text("No session usage in this range", zhHans: "该时段暂无会话用量"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -1112,7 +1152,7 @@ struct UsageDashboardView: View {
             HStack(spacing: 8) {
                 HStack(spacing: 4) {
                     SourceBadge(source: line.source, size: 9)
-                    Text(info?.name ?? "会话 \(line.sessionId.prefix(8))")
+                    Text(info?.name ?? L10n.format("Session %@", zhHans: "会话 %@", String(line.sessionId.prefix(8))))
                         .font(.system(size: 10.5))
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1150,7 +1190,9 @@ struct UsageDashboardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(canJump ? "跳转到会话页签查看详情" : "该会话不在索引窗口内（仅显示用量）")
+        .help(canJump
+            ? L10n.text("Open this session", zhHans: "跳转到会话页签查看详情")
+            : L10n.text("This session is outside the index window (usage only)", zhHans: "该会话不在索引窗口内（仅显示用量）"))
     }
 
     // MARK: - 项目统计
@@ -1158,7 +1200,7 @@ struct UsageDashboardView: View {
     private var projectStats: some View {
         VStack(alignment: .leading, spacing: 0) {
             if usageService.projectTotals.isEmpty {
-                Text("该时段暂无项目用量")
+                Text(L10n.text("No project usage in this range", zhHans: "该时段暂无项目用量"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -1195,7 +1237,7 @@ struct UsageDashboardView: View {
     private var footerRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Button("导出近 30 天 CSV") { usageService.exportCSV() }
+                Button(L10n.text("Export the last 30 days as CSV", zhHans: "导出近 30 天 CSV")) { usageService.exportCSV() }
                     .controlSize(.small)
                 if let message = usageService.exportMessage {
                     Text(message)
@@ -1203,9 +1245,19 @@ struct UsageDashboardView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text("费用为本地估算（LiteLLM / models.dev 公开价格，订阅套餐按 API 等价价折算），与账单可能有出入；悬停费用可看价格来源，设置 → 高级 → 模型价格可查看未定价模型并自定义。")
+            Text(L10n.text("Cost is estimated locally from public LiteLLM / models.dev prices. Subscription plans use the API-equivalent rate, so it can differ from your bill. Hover a cost to see where the price came from. Settings → Advanced → Model prices lists unpriced models and accepts custom prices.", zhHans: "费用为本地估算（LiteLLM / models.dev 公开价格，订阅套餐按 API 等价价折算），与账单可能有出入；悬停费用可看价格来源，设置 → 高级 → 模型价格可查看未定价模型并自定义。"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func periodTitle(_ period: UsageService.DashboardPeriod) -> String {
+        switch period {
+        case .today: return L10n.text("Today", zhHans: "今日")
+        case .week: return L10n.text("This week", zhHans: "本周")
+        case .month: return L10n.text("This month", zhHans: "本月")
+        case .all: return L10n.text("All", zhHans: "全部")
+        case .custom: return L10n.text("Custom", zhHans: "自定义")
         }
     }
 
@@ -1213,8 +1265,10 @@ struct UsageDashboardView: View {
     private func chineseUnit(_ value: Int) -> String {
         switch value {
         case ..<10_000: return "\(value)"
-        case ..<100_000_000: return String(format: "%.1f 万", Double(value) / 10_000)
-        default: return String(format: "%.2f 亿", Double(value) / 100_000_000)
+        case ..<100_000_000:
+            return L10n.format("%@ ×10k", zhHans: "%@ 万", String(format: "%.1f", Double(value) / 10_000))
+        default:
+            return L10n.format("%@ ×100M", zhHans: "%@ 亿", String(format: "%.2f", Double(value) / 100_000_000))
         }
     }
 }

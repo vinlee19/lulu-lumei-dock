@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 public enum InstallError: Error, CustomStringConvertible {
@@ -6,8 +7,8 @@ public enum InstallError: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .invalidJSON: return "目标文件不是合法 JSON"
-        case .foreignConfig(let detail): return "存在他人配置，拒绝自动修改：\(detail)"
+        case .invalidJSON: return L10n.text("The target file is not valid JSON", zhHans: "目标文件不是合法 JSON")
+        case .foreignConfig(let detail): return L10n.format("Other configuration exists; automatic changes are refused: %@", zhHans: "存在他人配置，拒绝自动修改：%@", String(detail))
         }
     }
 }
@@ -49,8 +50,8 @@ public enum ClaudeHooksInstaller {
     private static func rejectUnsupportedShape(_ hooks: [String: Any]) throws {
         guard let event = unsupportedShapeEvent(in: hooks) else { return }
         throw InstallError.foreignConfig(
-            "settings.json 的 hooks.\(event) 结构无法识别（不是条目数组）。"
-                + "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。")
+            L10n.format("The hooks.%@ structure in settings.json is not recognized (expected an array of entries).", zhHans: "settings.json 的 hooks.%@ 结构无法识别（不是条目数组）。", String(event))
+                + L10n.text(" No changes were made to avoid removing unrecognized content. Please fix this field manually first.", zhHans: "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。"))
     }
 
     public static func install(into json: String, relayPath: String) throws -> String {
@@ -119,12 +120,12 @@ public enum ClaudeHooksInstaller {
         relayIsExecutable: (String) -> Bool
     ) -> HookDiagnosis {
         guard let root = try? parse(json) else {
-            return .unparseable(reason: "settings.json 不是合法 JSON")
+            return .unparseable(reason: L10n.text("settings.json is not valid JSON", zhHans: "settings.json 不是合法 JSON"))
         }
         guard let hooks = root["hooks"] as? [String: Any] else { return .notInstalled }
         // 不认识的形态一律按"无法解析"处理：宁可什么都不做，也不能覆盖掉看不懂的内容
         if let event = unsupportedShapeEvent(in: hooks) {
-            return .unparseable(reason: "hooks.\(event) 的结构无法识别（不是条目数组）")
+            return .unparseable(reason: L10n.format("The hooks.%@ structure is not recognized (expected an array of entries)", zhHans: "hooks.%@ 的结构无法识别（不是条目数组）", String(event)))
         }
 
         let ourCommands = eurekaCommands(in: hooks)

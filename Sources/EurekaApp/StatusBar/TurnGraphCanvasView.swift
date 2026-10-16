@@ -252,20 +252,28 @@ struct TurnGraphNodeView: View {
         var lines: [String] = []
         switch node.kind {
         case .fork:
-            lines.append("分叉：这里同时发起了多个操作")
-            lines.append("（Claude 的思考明文被 CLI 剥离，只能按并行批次推断决策点）")
+            lines.append(L10n.text("Fork: several actions started here at once", zhHans: "分叉：这里同时发起了多个操作"))
+            lines.append(L10n.text("(Claude strips the thinking text and keeps only an encrypted signature, so the decision point is inferred from the parallel batch)", zhHans: "（Claude 的思考明文被 CLI 剥离，只能按并行批次推断决策点）"))
         case .thinking:
-            lines.append("思考")
+            lines.append(L10n.text("Thinking", zhHans: "思考"))
         case .folded:
-            lines.append("\(node.title)（点击展开）")
+            lines.append(L10n.format("%@ (click to expand)", zhHans: "%@（点击展开）", node.title))
         case .subagent:
-            lines.append("子代理 \(node.title)（点击展开/收起它做了什么）")
+            lines.append(L10n.format(
+                "Subagent %@ (click to expand or collapse what it did)",
+                zhHans: "子代理 %@（点击展开/收起它做了什么）",
+                node.title))
         default:
             lines.append(node.title)
         }
         if !node.subtitle.isEmpty { lines.append(node.subtitle) }
-        if node.occurrences > 1 { lines.append("本轮出现 \(node.occurrences) 次") }
-        if node.isError { lines.append("有失败") }
+        if node.occurrences > 1 {
+            lines.append(L10n.format(
+                "Seen %@ times this turn",
+                zhHans: "本轮出现 %@ 次",
+                String(node.occurrences)))
+        }
+        if node.isError { lines.append(L10n.text("Has failures", zhHans: "有失败")) }
         lines.append(contentsOf: overflowBadges)
         return lines.joined(separator: "\n")
     }

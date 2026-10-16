@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// MCP server 连接检测的**纯逻辑层**：状态分类、initialize 握手响应解析、
@@ -37,9 +38,9 @@ public enum MCPProbe {
         public var summary: String {
             var parts: [String] = []
             if let version = serverVersion, !version.isEmpty { parts.append("v\(version)") }
-            if let proto = protocolVersion, !proto.isEmpty { parts.append("协议 \(proto)") }
+            if let proto = protocolVersion, !proto.isEmpty { parts.append(L10n.format("Protocol %@", zhHans: "协议 %@", String(proto))) }
             if !capabilities.isEmpty {
-                parts.append("能力 \(capabilities.joined(separator: ", "))")
+                parts.append(L10n.format("Capabilities %@", zhHans: "能力 %@", String(capabilities.joined(separator: ", "))))
             }
             return parts.joined(separator: " · ")
         }
@@ -63,13 +64,13 @@ public enum MCPProbe {
 
         public var label: String {
             switch self {
-            case .connected: return "已连接"
-            case .notMCP: return "非 MCP 端点"
-            case .unauthorized: return "需要授权"
-            case .httpError(let code): return "异常 \(code)"
-            case .unreachable: return "不可达"
-            case .commandFound: return "命令可用"
-            case .commandMissing: return "命令缺失"
+            case .connected: return L10n.text("Connected", zhHans: "已连接")
+            case .notMCP: return L10n.text("Not an MCP endpoint", zhHans: "非 MCP 端点")
+            case .unauthorized: return L10n.text("Authorization required", zhHans: "需要授权")
+            case .httpError(let code): return L10n.format("Error %@", zhHans: "异常 %@", String(code))
+            case .unreachable: return L10n.text("Unreachable", zhHans: "不可达")
+            case .commandFound: return L10n.text("Command available", zhHans: "命令可用")
+            case .commandMissing: return L10n.text("Command missing", zhHans: "命令缺失")
             }
         }
 
@@ -88,14 +89,14 @@ public enum MCPProbe {
             switch self {
             case .unauthorized(_, let authServer):
                 if let authServer {
-                    return "该 server 走 OAuth 授权（元数据: \(authServer)）——"
-                        + "请到对应 CLI 完成授权（codex mcp login / Claude 的 /mcp）"
+                    return L10n.format("This server uses OAuth (metadata: %@).", zhHans: "该 server 走 OAuth 授权（元数据: %@）——", String(authServer))
+                        + L10n.text(" Authorize in the corresponding CLI (codex mcp login / Claude's /mcp)", zhHans: "请到对应 CLI 完成授权（codex mcp login / Claude 的 /mcp）")
                 }
-                return "未公布 OAuth 元数据，多半是 API key/请求头鉴权——"
-                    + "用「编辑请求头」填入或更新密钥；确为 OAuth 托管的"
-                    + "请在对应 CLI 内重新授权（如 Claude Code 输入 /mcp）"
+                return L10n.text("No OAuth metadata was published; this likely uses API key/header authentication.", zhHans: "未公布 OAuth 元数据，多半是 API key/请求头鉴权——")
+                    + L10n.text(" Use “Edit headers” to enter or update the key. For OAuth-managed servers,", zhHans: "用「编辑请求头」填入或更新密钥；确为 OAuth 托管的")
+                    + L10n.text(" reauthorize in the corresponding CLI (for example, /mcp in Claude Code)", zhHans: "请在对应 CLI 内重新授权（如 Claude Code 输入 /mcp）")
             case .notMCP:
-                return "端点返回了非 MCP 响应——检查 URL 是否正确（常见于填了网页地址而非 /mcp 端点）"
+                return L10n.text("The endpoint returned a non-MCP response. Check the URL (a webpage may have been entered instead of an /mcp endpoint)", zhHans: "端点返回了非 MCP 响应——检查 URL 是否正确（常见于填了网页地址而非 /mcp 端点）")
             default:
                 return nil
             }

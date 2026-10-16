@@ -90,7 +90,7 @@ public enum AuditExtractor {
         case "view_image":
             return Operation(kind: .read, name: name, detail: trim(args?["path"] as? String))
         case "update_plan":
-            return Operation(kind: .other, name: name, detail: "更新计划")
+            return Operation(kind: .other, name: name, detail: L10n.text("Update plan", zhHans: "更新计划"))
         default:
             return Operation(kind: .other, name: name, detail: trim(firstString(in: args)))
         }
@@ -138,7 +138,7 @@ public enum AuditExtractor {
                     kind: .read, name: inner,
                     detail: jsStringArgument(source, key: "path") ?? "")
             case "update_plan":
-                return Operation(kind: .other, name: inner, detail: "更新计划")
+                return Operation(kind: .other, name: inner, detail: L10n.text("Update plan", zhHans: "更新计划"))
             default:
                 let isWeb = inner.hasPrefix("web") || inner.contains("search")
                 return Operation(
@@ -352,7 +352,7 @@ public enum AuditExtractor {
                 ?? patchFilePaths(str("patch", "input", cursorRawArgsKey))
             return Operation(kind: .edit, name: canonical, detail: trim(path))
         case "todo_write":
-            return Operation(kind: .other, name: canonical, detail: "更新计划")
+            return Operation(kind: .other, name: canonical, detail: L10n.text("Update plan", zhHans: "更新计划"))
         // 以下几个只在 Grok 出现（Cursor 没有），归类口径与同类工具保持一致
         case "web_fetch":
             return Operation(kind: .web, name: canonical, detail: trim(str("url")))
@@ -373,13 +373,13 @@ public enum AuditExtractor {
                 name: rawName.contains("__") ? cleanMCPName(rawName) : rawName,
                 detail: trim(str("tool_input") ?? firstString(in: inner)))
         case "exit_plan_mode":
-            return Operation(kind: .other, name: canonical, detail: "退出计划模式")
+            return Operation(kind: .other, name: canonical, detail: L10n.text("Exit plan mode", zhHans: "退出计划模式"))
         case "agent":
             return Operation(
                 kind: .agent, name: str("subagent_type") ?? canonical,
                 detail: trim(str("description", "prompt")))
         case "ask_user_question":
-            return Operation(kind: .other, name: canonical, detail: "向用户提问")
+            return Operation(kind: .other, name: canonical, detail: L10n.text("Ask the user", zhHans: "向用户提问"))
         default:
             return Operation(kind: .other, name: canonical, detail: trim(firstString(in: input)))
         }

@@ -49,7 +49,7 @@ struct SidebarView: View {
                             .padding(.top, 2)
                         ForEach(group.tabs, id: \.self) { tab in
                             SidebarNavButton(
-                                title: tab.rawValue, icon: tab.icon, tileColor: tab.tileColor,
+                                title: tab.title, icon: tab.icon, tileColor: tab.tileColor,
                                 badge: tab == .limits ? limitsBadge?.text
                                     : (tab == .history ? historyBadge : nil),
                                 badgeColor: (tab == .limits ? limitsBadge?.color : nil)
@@ -106,7 +106,7 @@ struct SidebarView: View {
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.sidebar))
         }
         .buttonStyle(.plain)
-        .help("关于 lulu-lumei-dock")
+        .help(L10n.text("About lulu-lumei-dock", zhHans: "关于 lulu-lumei-dock"))
         .padding(.bottom, 4)
     }
 }

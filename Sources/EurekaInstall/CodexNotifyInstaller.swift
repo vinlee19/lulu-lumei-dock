@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// ~/.codex/config.toml 的 notify 安装器（行级编辑，不整体重写 TOML）。
@@ -27,8 +28,8 @@ public enum CodexNotifyInstaller {
             let line = lines[existing]
             guard let argv = notifyArgv(in: line) else {
                 throw InstallError.foreignConfig(
-                    "config.toml 的 notify 无法安全解析（如跨多行的数组）：\(trimmed(line))\n"
-                        + "请先手动改成单行再安装")
+                    L10n.format("Cannot safely parse notify in config.toml (for example, a multiline array): %@\n", zhHans: "config.toml 的 notify 无法安全解析（如跨多行的数组）：%@\n", String(trimmed(line)))
+                        + L10n.text("Please change it to a single line manually before installing", zhHans: "请先手动改成单行再安装"))
             }
             // Ours: keep whatever we were already chaining (the path may have changed).
             // Someone else's: wrap it so it keeps receiving every notification
@@ -101,12 +102,12 @@ public enum CodexNotifyInstaller {
                 return .chainable(owner: URL(fileURLWithPath: program).lastPathComponent)
             }
             return .foreignOccupied(detail:
-                "config.toml 的顶层 notify 已被他人占用，且无法安全解析（如跨多行的数组）：\n\(line)\n"
-                    + "notify 只能有一个，不会自动改写。改成单行后可串联安装，"
-                    + "或手动改为：\(notifyLine(relayPath: expectedRelayPath, chaining: ["<原命令>", "…"]))")
+                L10n.format("The top-level notify in config.toml is used by another program and cannot be safely parsed (for example, a multiline array):\n%@\n", zhHans: "config.toml 的顶层 notify 已被他人占用，且无法安全解析（如跨多行的数组）：\n%@\n", String(line))
+                    + L10n.text("Only one notify is allowed, so it will not be rewritten automatically. Change it to a single line to chain the installation,", zhHans: "notify 只能有一个，不会自动改写。改成单行后可串联安装，")
+                    + L10n.format(" or change it manually to: %@", zhHans: "或手动改为：%@", String(notifyLine(relayPath: expectedRelayPath, chaining: [L10n.text("<original command>", zhHans: "<原命令>"), "…"]))))
         }
         guard let argv, let path = argv.first else {
-            return .unparseable(reason: "config.toml 的 notify 无法解析：\(line)")
+            return .unparseable(reason: L10n.format("Cannot parse notify in config.toml: %@", zhHans: "config.toml 的 notify 无法解析：%@", String(line)))
         }
         if path != expectedRelayPath,
            !RelayIdentity.isLegacyStablePath(path, expected: expectedRelayPath) {

@@ -55,7 +55,7 @@ final class AgentConfigService: ObservableObject {
         guard !scanning else { return }
         if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
-        scanPhase = "正在扫描子代理…"
+        scanPhase = L10n.text("Scanning subagents…", zhHans: "正在扫描子代理…")
         queue.async { [weak self] in
             guard let self else { return }
             // 项目级 agent 根：各项目仓库根下的 .claude/agents、.opencode/agents 与 .grok/agents

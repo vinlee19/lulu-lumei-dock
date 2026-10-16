@@ -111,7 +111,7 @@ public enum WeeklyReportBuilder {
         // 按项目（totalsByProject 的 UsageTotals 逐行带模型，可直接计价）
         var projectAgg: [String: (tokens: Int, cost: Double?)] = [:]
         for (project, totals) in try store.usage.totalsByProject(from: weekStart, to: weekEnd) {
-            let name = project?.isEmpty == false ? project! : "（未知项目）"
+            let name = project?.isEmpty == false ? project! : L10n.text("(Unknown project)", zhHans: "（未知项目）")
             var slot = projectAgg[name] ?? (0, nil)
             slot.tokens += tokens(totals)
             if let cost = pricing.cost(of: totals) { slot.cost = (slot.cost ?? 0) + cost }
@@ -186,8 +186,8 @@ public enum WeeklyReportBuilder {
         _ report: WeeklyReport, sessionNames: [String: String] = [:]
     ) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "M 月 d 日"
+        formatter.locale = L10n.current.locale
+        formatter.dateFormat = L10n.text("MMM d", zhHans: "M 月 d 日")
         func cost(_ usd: Double?) -> String {
             usd.map { String(format: "$%.2f", $0) } ?? "—"
         }
@@ -200,64 +200,64 @@ public enum WeeklyReportBuilder {
         }
 
         var lines: [String] = []
-        lines.append("# vibe coding 周报（\(formatter.string(from: report.weekStart)) – "
+        lines.append(L10n.format("# vibe coding weekly report (%@ – ", zhHans: "# vibe coding 周报（%@ – ", String(formatter.string(from: report.weekStart)))
             + "\(formatter.string(from: report.weekEnd.addingTimeInterval(-1))))")
         lines.append("")
-        lines.append("- 活跃时长：约 \(report.activeHours) 小时（有请求的小时数）")
-        lines.append("- 总消耗：\(tokens(report.totalTokens)) tokens · "
-            + "\(report.requestCount) 次请求 · ≈\(cost(report.totalCostUSD))")
+        lines.append(L10n.format("- Active time: about %@ hours (hours with requests)", zhHans: "- 活跃时长：约 %@ 小时（有请求的小时数）", String(report.activeHours)))
+        lines.append(L10n.format("- Total usage: %@ tokens · ", zhHans: "- 总消耗：%@ tokens · ", String(tokens(report.totalTokens)))
+            + L10n.format("%@ requests · ≈%@", zhHans: "%@ 次请求 · ≈%@", String(report.requestCount), String(cost(report.totalCostUSD))))
         let total = report.successCount + report.errorCount + report.interruptedCount
         if total > 0 {
-            lines.append("- 任务：\(total) 个（成功 \(report.successCount) / "
-                + "出错 \(report.errorCount) / 中断 \(report.interruptedCount)）")
+            lines.append(L10n.format("- Tasks: %@ (success %@ / ", zhHans: "- 任务：%@ 个（成功 %@ / ", String(total), String(report.successCount))
+                + L10n.format("error %@ / interrupted %@)", zhHans: "出错 %@ / 中断 %@）", String(report.errorCount), String(report.interruptedCount)))
         }
         if let prompts = report.promptSection {
-            var line = "- 提问：本周 \(prompts.askedCount) 个"
+            var line = L10n.format("- Prompts: %@ this week", zhHans: "- 提问：本周 %@ 个", String(prompts.askedCount))
             if !prompts.topReused.isEmpty {
-                line += "；复用最多：" + prompts.topReused
-                    .map { "\($0.name)（\($0.count) 次）" }
-                    .joined(separator: "、")
+                line += L10n.text("; most reused: ", zhHans: "；复用最多：") + prompts.topReused
+                    .map { L10n.format("%@ (%@ times)", zhHans: "%@（%@ 次）", String($0.name), String($0.count)) }
+                    .joined(separator: L10n.text(", ", zhHans: "、"))
             }
             lines.append(line)
         }
         if report.lateNightDays > 0 {
-            lines.append("- 深夜编码：\(report.lateNightDays) 天（23 点后仍在跑任务）")
+            lines.append(L10n.format("- Late-night coding: %@ days (tasks still running after 23:00)", zhHans: "- 深夜编码：%@ 天（23 点后仍在跑任务）", String(report.lateNightDays)))
         }
         if !report.bySource.isEmpty {
             lines.append("")
-            lines.append("## 按来源")
+            lines.append(L10n.text("## By source", zhHans: "## 按来源"))
             for entry in report.bySource {
-                lines.append("- \(entry.name)：\(tokens(entry.tokens)) tokens · ≈\(cost(entry.costUSD))")
+                lines.append(L10n.format("- %@: %@ tokens · ≈%@", zhHans: "- %@：%@ tokens · ≈%@", String(entry.name), String(tokens(entry.tokens)), String(cost(entry.costUSD))))
             }
         }
         if !report.byModel.isEmpty {
             lines.append("")
-            lines.append("## 模型 Top \(report.byModel.count)")
+            lines.append(L10n.format("## Top %@ models", zhHans: "## 模型 Top %@", String(report.byModel.count)))
             for entry in report.byModel {
-                lines.append("- \(entry.name)：\(tokens(entry.tokens)) tokens · ≈\(cost(entry.costUSD))")
+                lines.append(L10n.format("- %@: %@ tokens · ≈%@", zhHans: "- %@：%@ tokens · ≈%@", String(entry.name), String(tokens(entry.tokens)), String(cost(entry.costUSD))))
             }
         }
         if !report.byProject.isEmpty {
             lines.append("")
-            lines.append("## 项目 Top \(report.byProject.count)")
+            lines.append(L10n.format("## Top %@ projects", zhHans: "## 项目 Top %@", String(report.byProject.count)))
             for entry in report.byProject {
-                lines.append("- \(entry.name)：\(tokens(entry.tokens)) tokens · ≈\(cost(entry.costUSD))")
+                lines.append(L10n.format("- %@: %@ tokens · ≈%@", zhHans: "- %@：%@ tokens · ≈%@", String(entry.name), String(tokens(entry.tokens)), String(cost(entry.costUSD))))
             }
         }
         if !report.topSessions.isEmpty {
             lines.append("")
-            lines.append("## 最贵会话 Top \(report.topSessions.count)")
+            lines.append(L10n.format("## Top %@ most expensive sessions", zhHans: "## 最贵会话 Top %@", String(report.topSessions.count)))
             for entry in report.topSessions {
-                let name = sessionNames[entry.sessionId] ?? "会话 \(entry.sessionId.prefix(8))"
-                let project = entry.project.map { "（\($0)）" } ?? ""
-                lines.append("- \(name)\(project)：\(tokens(entry.tokens)) tokens · ≈\(cost(entry.costUSD))")
+                let name = sessionNames[entry.sessionId] ?? L10n.format("Session %@", zhHans: "会话 %@", String(entry.sessionId.prefix(8)))
+                let project = entry.project.map { L10n.format("(%@)", zhHans: "（%@）", String($0)) } ?? ""
+                lines.append(L10n.format("- %@%@: %@ tokens · ≈%@", zhHans: "- %@%@：%@ tokens · ≈%@", String(name), String(project), String(tokens(entry.tokens)), String(cost(entry.costUSD))))
             }
         }
         if !report.topSkills.isEmpty {
             lines.append("")
-            lines.append("## 技能调用 Top \(report.topSkills.count)")
+            lines.append(L10n.format("## Top %@ skill calls", zhHans: "## 技能调用 Top %@", String(report.topSkills.count)))
             for skill in report.topSkills {
-                lines.append("- \(skill.name)：\(skill.count) 次")
+                lines.append(L10n.format("- %@: %@ times", zhHans: "- %@：%@ 次", String(skill.name), String(skill.count)))
             }
         }
         return lines.joined(separator: "\n") + "\n"

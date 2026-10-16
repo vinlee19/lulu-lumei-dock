@@ -29,6 +29,8 @@ final class IslandViewModel: ObservableObject {
     /// 时间显示模式：false=已持续时长（计时器），true=开始的日期时间。
     /// 真值在 AppSettings（设置页与岛上按钮共用），这里只是投影。
     @Published var showStartTime = false
+    /// 界面语言投影。岛上的文案在视图里现取，改语言时靠这次发布重绘。
+    @Published private(set) var language: AppLanguage = L10n.current
     /// 岛上切换按钮回调（AppDelegate 接到 AppSettings）
     var onToggleTimeMode: (@MainActor () -> Void)?
 
@@ -51,6 +53,10 @@ final class IslandViewModel: ObservableObject {
     private var timerCard: IslandState.Card?
 
     // MARK: - 输入
+
+    func noteLanguage(_ language: AppLanguage) {
+        self.language = language
+    }
 
     func updateScreen(_ info: IslandGeometry.ScreenInfo) {
         screen = info

@@ -16,15 +16,15 @@ public enum ToolKind: String, Equatable, Sendable, CaseIterable, Codable {
     /// 中文标签（分类速览 / Markdown 导出 / 审计筛选共用）
     public var label: String {
         switch self {
-        case .read: return "读取"
-        case .search: return "检索"
-        case .command: return "命令"
-        case .edit: return "编辑"
-        case .web: return "联网"
-        case .mcp: return "MCP"
-        case .agent: return "子代理"
-        case .skill: return "技能"
-        case .other: return "工具"
+        case .read: return L10n.text("Read", zhHans: "读取")
+        case .search: return L10n.text("Search", zhHans: "检索")
+        case .command: return L10n.text("Command", zhHans: "命令")
+        case .edit: return L10n.text("Edit", zhHans: "编辑")
+        case .web: return L10n.text("Web", zhHans: "联网")
+        case .mcp: return L10n.text("MCP", zhHans: "MCP")
+        case .agent: return L10n.text("Subagent", zhHans: "子代理")
+        case .skill: return L10n.text("Skill", zhHans: "技能")
+        case .other: return L10n.text("Tool", zhHans: "工具")
         }
     }
 }
@@ -58,8 +58,8 @@ public enum RiskLevel: Int, Codable, Sendable, Comparable {
 
     public var label: String {
         switch self {
-        case .notice: return "提醒"
-        case .high: return "高危"
+        case .notice: return L10n.text("Notice", zhHans: "提醒")
+        case .high: return L10n.text("High risk", zhHans: "高危")
         }
     }
 }

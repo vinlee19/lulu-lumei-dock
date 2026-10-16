@@ -1,4 +1,5 @@
 import EurekaIngest
+import EurekaKit
 import SwiftUI
 
 /// 设置→关于：应用信息 + CLI 工具版本卡片网格（仿参考设计）
@@ -24,7 +25,7 @@ struct AboutView: View {
             }
             installCommands
             Spacer(minLength: 8)
-            Button("退出 lulu-lumei-dock") { NSApp.terminate(nil) }
+            Button(L10n.text("Quit lulu-lumei-dock", zhHans: "退出 lulu-lumei-dock")) { NSApp.terminate(nil) }
                 .controlSize(.small)
         }
         .onAppear {
@@ -42,17 +43,23 @@ struct AboutView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("lulu-lumei-dock")
                         .font(.system(size: 14, weight: .semibold))
-                    Text("版本 \(appVersion) · 本地 AI 编码活动面板")
+                    Text(L10n.format(
+                        "Version %@ · local AI coding activity panel",
+                        zhHans: "版本 %@ · 本地 AI 编码活动面板",
+                        appVersion))
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
-                    Text("数据目录：\(SpoolPaths.root().path)")
+                    Text(L10n.format(
+                        "Data directory: %@",
+                        zhHans: "数据目录：%@",
+                        SpoolPaths.root().path))
                         .font(.system(size: 9.5).monospaced())
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Spacer()
-                Button("在 Finder 显示数据") {
+                Button(L10n.text("Show Data in Finder", zhHans: "在 Finder 显示数据")) {
                     NSWorkspace.shared.activateFileViewerSelecting([SpoolPaths.root()])
                 }
                 .controlSize(.small)
@@ -61,18 +68,18 @@ struct AboutView: View {
             Divider()
 
             HStack {
-                Toggle("启动时自动检查更新", isOn: Binding(
+                Toggle(L10n.text("Check for updates at launch", zhHans: "启动时自动检查更新"), isOn: Binding(
                     get: { updateService.automaticallyChecksForUpdates },
                     set: { updateService.setAutomaticallyChecksForUpdates($0) }
                 ))
                 .disabled(!updateService.isAvailable)
                 Spacer()
-                Button("检查更新…") { updateService.checkForUpdates() }
+                Button(L10n.text("Check for Updates…", zhHans: "检查更新…")) { updateService.checkForUpdates() }
                     .controlSize(.small)
                     .disabled(!updateService.canCheckForUpdates)
             }
             if !updateService.isAvailable {
-                Text("开发模式（swift run）不检查应用更新；安装为 .app 后可用。")
+                Text(L10n.text("Dev builds (swift run) do not check for app updates. That starts working after the app is installed as a .app.", zhHans: "开发模式（swift run）不检查应用更新；安装为 .app 后可用。"))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -86,10 +93,10 @@ struct AboutView: View {
 
     private var toolsHeader: some View {
         HStack {
-            Text("CLI 工具")
+            Text(L10n.text("CLI tools", zhHans: "CLI 工具"))
                 .font(.system(size: 12, weight: .semibold))
             Spacer()
-            Button("检查 CLI 更新") { cliTools.checkLatest() }
+            Button(L10n.text("Check for CLI Updates", zhHans: "检查 CLI 更新")) { cliTools.checkLatest() }
                 .controlSize(.small)
                 .disabled(cliTools.tools.contains { $0.checkingLatest })
         }
@@ -110,22 +117,30 @@ struct AboutView: View {
                 Spacer()
                 statusIcon(tool)
             }
-            versionRow("当前版本", tool.detecting ? "检测中…" : (tool.localVersion ?? "未安装"))
-            versionRow("最新版本", tool.checkingLatest ? "查询中…" : (tool.latestVersion ?? "—"))
+            versionRow(
+                L10n.text("Current version", zhHans: "当前版本"),
+                tool.detecting
+                    ? L10n.text("Detecting…", zhHans: "检测中…")
+                    : (tool.localVersion ?? L10n.text("Not installed", zhHans: "未安装")))
+            versionRow(
+                L10n.text("Latest version", zhHans: "最新版本"),
+                tool.checkingLatest
+                    ? L10n.text("Checking…", zhHans: "查询中…")
+                    : (tool.latestVersion ?? "—"))
             HStack(spacing: 6) {
                 if tool.localVersion != nil, tool.latestVersion != nil {
                     if CLIToolsService.hasUpdate(tool) {
-                        Text("可更新")
+                        Text(L10n.text("Update available", zhHans: "可更新"))
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.orange)
                     } else {
-                        Text("已就绪")
+                        Text(L10n.text("Up to date", zhHans: "已就绪"))
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.green)
                     }
                 }
                 Spacer()
-                Button(copiedToolId == tool.id ? "已复制" : "复制安装命令") {
+                Button(copiedToolId == tool.id ? L10n.text("Copied", zhHans: "已复制") : L10n.text("Copy install command", zhHans: "复制安装命令")) {
                     cliTools.copyInstallCommand(tool)
                     copiedToolId = tool.id
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -135,7 +150,7 @@ struct AboutView: View {
                 .controlSize(.small)
                 // 仅在确有新版本时显示「更新」（semver：latest > local），在可见 Terminal 里跑
                 if CLIToolsService.hasUpdate(tool), !tool.updateCommand.isEmpty {
-                    Button("更新") { cliTools.updateTool(tool) }
+                    Button(L10n.text("Update", zhHans: "更新")) { cliTools.updateTool(tool) }
                         .controlSize(.small)
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.brand)
@@ -178,7 +193,7 @@ struct AboutView: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                         .rotationEffect(.degrees(showInstallCommands ? 90 : 0))
-                    Text("手动安装命令")
+                    Text(L10n.text("Manual install commands", zhHans: "手动安装命令"))
                         .font(.system(size: 11, weight: .medium))
                 }
                 .foregroundStyle(.secondary)
@@ -188,7 +203,7 @@ struct AboutView: View {
             if showInstallCommands {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(cliTools.tools) { tool in
-                        Text(tool.installCommand)
+                        Text(tool.displayInstallCommand)
                             .font(.system(size: 10).monospaced())
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)

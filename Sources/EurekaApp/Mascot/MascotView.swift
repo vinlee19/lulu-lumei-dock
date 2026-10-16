@@ -66,8 +66,8 @@ struct MascotRootView: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.8), value: viewModel.bubble)
         .animation(.easeInOut(duration: 0.25), value: viewModel.state)
         .contextMenu {
-            Button("打开设置") { onOpenSettings() }
-            Button("隐藏吉祥物") { onHide() }
+            Button(L10n.text("Open Settings", zhHans: "打开设置")) { onOpenSettings() }
+            Button(L10n.text("Hide Mascot", zhHans: "隐藏吉祥物")) { onHide() }
         }
         .environment(\.mascotAnimationsActive, animationRuntime.animationsActive)
         .environment(\.mascotAnimationEpoch, animationRuntime.epoch)

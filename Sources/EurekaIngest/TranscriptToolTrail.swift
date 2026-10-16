@@ -97,9 +97,9 @@ public enum ToolStepExtractor {
 
     /// 轨迹纯文本渲染（turnTrail 消息的 text：会话内搜索/导出兜底可命中）
     public static func plainText(_ steps: [ToolStep]) -> String {
-        var lines = ["本轮轨迹（\(steps.count) 步）"]
+        var lines = [L10n.format("Turn activity (%@ steps)", zhHans: "本轮轨迹（%@ 步）", String(steps.count))]
         for step in steps {
-            let flag = step.isError ? "（失败）" : ""
+            let flag = step.isError ? L10n.text(" (failed)", zhHans: "（失败）") : ""
             let detail = step.detail.isEmpty ? "" : " \(step.detail)"
             lines.append("[\(step.kind.label)] \(step.name)\(flag)\(detail)")
         }

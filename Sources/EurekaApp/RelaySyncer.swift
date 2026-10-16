@@ -1,6 +1,7 @@
 import CryptoKit
 import EurekaIngest
 import EurekaInstall
+import EurekaKit
 import Foundation
 
 /// 把随 app 分发的 eureka-relay 同步到稳定路径
@@ -62,7 +63,7 @@ enum RelaySyncer {
             linkLegacyName()
             return target
         } catch {
-            fputs("[eureka] relay 同步失败: \(error)\n", stderr)
+            fputs(L10n.format("[eureka] relay sync failed: %@\n", zhHans: "[eureka] relay 同步失败: %@\n", String(describing: error)), stderr)
             return fm.fileExists(atPath: target.path) ? target : nil
         }
     }
@@ -87,7 +88,10 @@ enum RelaySyncer {
             }
         } catch {
             try? fm.removeItem(at: tmp)
-            fputs("[eureka] 旧名 relay 软链更新失败: \(error)\n", stderr)
+            fputs(L10n.format(
+                "[eureka] failed to update the legacy relay symlink: %@\n",
+                zhHans: "[eureka] 旧名 relay 软链更新失败: %@\n",
+                String(describing: error)), stderr)
         }
     }
 }

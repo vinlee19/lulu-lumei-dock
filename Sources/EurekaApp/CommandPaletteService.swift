@@ -143,7 +143,7 @@ final class CommandPaletteService: ObservableObject {
                     for hit in (try? store.search.search(query, limit: 20)) ?? [] {
                         content.append(Hit(
                             kind: .session, key: hit.sessionId,
-                            title: "会话 \(hit.sessionId.prefix(8))",
+                            title: L10n.format("Session %@", zhHans: "会话 %@", String(hit.sessionId.prefix(8))),
                             subtitle: hit.role,
                             snippet: CommandPalette.snippet(hit.text, query: query),
                             sessionId: hit.sessionId, messageIdx: hit.messageIdx))

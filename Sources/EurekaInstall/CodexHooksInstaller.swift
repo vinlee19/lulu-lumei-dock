@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 把 lululumei-relay 装进 Codex 的 `~/.codex/hooks.json`（Codex 0.145.0 实勘）。
@@ -43,8 +44,8 @@ public enum CodexHooksInstaller {
     private static func rejectUnsupportedShape(_ hooks: [String: Any]) throws {
         guard let event = unsupportedShapeEvent(in: hooks) else { return }
         throw InstallError.foreignConfig(
-            "hooks.json 的 hooks.\(event) 结构无法识别（不是条目数组）。"
-                + "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。")
+            L10n.format("The hooks.%@ structure in hooks.json is not recognized (expected an array of entries).", zhHans: "hooks.json 的 hooks.%@ 结构无法识别（不是条目数组）。", String(event))
+                + L10n.text(" No changes were made to avoid removing unrecognized content. Please fix this field manually first.", zhHans: "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。"))
     }
 
     public static func install(into json: String, relayPath: String) throws -> String {
@@ -106,11 +107,11 @@ public enum CodexHooksInstaller {
         relayIsExecutable: (String) -> Bool
     ) -> HookDiagnosis {
         guard let root = try? parse(json) else {
-            return .unparseable(reason: "hooks.json 不是合法 JSON")
+            return .unparseable(reason: L10n.text("hooks.json is not valid JSON", zhHans: "hooks.json 不是合法 JSON"))
         }
         guard let hooks = root["hooks"] as? [String: Any] else { return .notInstalled }
         if let event = unsupportedShapeEvent(in: hooks) {
-            return .unparseable(reason: "hooks.\(event) 的结构无法识别（不是条目数组）")
+            return .unparseable(reason: L10n.format("The hooks.%@ structure is not recognized (expected an array of entries)", zhHans: "hooks.%@ 的结构无法识别（不是条目数组）", String(event)))
         }
 
         let ourCommands = eurekaCommands(in: hooks)
@@ -187,7 +188,7 @@ public enum CodexHooksInstaller {
             let object = try? JSONSerialization.jsonObject(with: data),
             let root = object as? [String: Any]
         else {
-            throw InstallError.foreignConfig("hooks.json 不是合法 JSON 对象，未做改动")
+            throw InstallError.foreignConfig(L10n.text("hooks.json is not a valid JSON object; no changes were made", zhHans: "hooks.json 不是合法 JSON 对象，未做改动"))
         }
         return root
     }
@@ -196,7 +197,7 @@ public enum CodexHooksInstaller {
         let data = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         guard let text = String(data: data, encoding: .utf8) else {
-            throw InstallError.foreignConfig("序列化 hooks.json 失败")
+            throw InstallError.foreignConfig(L10n.text("Failed to serialize hooks.json", zhHans: "序列化 hooks.json 失败"))
         }
         return text + "\n"
     }

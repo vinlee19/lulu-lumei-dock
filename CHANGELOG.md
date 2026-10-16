@@ -4,6 +4,16 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Interface language, English by default.** Settings → General → Language
+  switches between English and Simplified Chinese immediately. The choice is
+  stored on this Mac. A fresh install, and any install that has never chosen
+  a language, comes up in English. Health-registry names stay stable keys and
+  are translated only where they are shown.
+
 ## [0.36.0] - 2026-10-16
 
 ### Added

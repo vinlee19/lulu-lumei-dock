@@ -111,7 +111,7 @@ public enum TranscriptReader {
         Result(
             messages: [TranscriptMessage(
                 id: 0, role: .toolNote,
-                text: "🔒 Trae 的会话库经 SQLCipher 加密，正文无法读取；本页信息来自 Trae 的明文记忆库")],
+                text: L10n.text("🔒 Trae's session database is encrypted with SQLCipher, so its content cannot be read; this page uses Trae's plaintext memory library", zhHans: "🔒 Trae 的会话库经 SQLCipher 加密，正文无法读取；本页信息来自 Trae 的明文记忆库"))],
             truncated: false)
     }
 
@@ -196,11 +196,11 @@ public enum TranscriptReader {
                     text: "🔧 \(call.name)", timestamp: timestamp))
             } else if root["type"] as? String == "function_call_result",
                       root["status"] as? String != "completed" {
-                let name = root["name"] as? String ?? "工具"
-                let status = root["status"] as? String ?? "失败"
+                let name = root["name"] as? String ?? L10n.text("Tool", zhHans: "工具")
+                let status = root["status"] as? String ?? L10n.text("Failed", zhHans: "失败")
                 messages.append(TranscriptMessage(
                     id: messages.count, role: .error,
-                    text: "🔧 \(name)：\(status)", timestamp: timestamp))
+                    text: L10n.format("🔧 %@: %@", zhHans: "🔧 %@：%@", String(name), String(status)), timestamp: timestamp))
             }
             return true
         }
@@ -265,7 +265,7 @@ public enum TranscriptReader {
                             id: messages.count, role: .assistant,
                             text: text, timestamp: timestamp))
                     case "tool_use":
-                        let name = block["name"] as? String ?? "工具"
+                        let name = block["name"] as? String ?? L10n.text("Tool", zhHans: "工具")
                         var step = ToolStepExtractor.claude(
                             name: name, input: block["input"] as? [String: Any])
                         step.batch = batch
@@ -330,7 +330,7 @@ public enum TranscriptReader {
             case "tool":
                 messages.append(TranscriptMessage(
                     id: messages.count, role: .toolNote,
-                    text: "🔧 \(toolName.isEmpty ? "工具" : toolName)", timestamp: timestamp))
+                    text: "🔧 \(toolName.isEmpty ? L10n.text("Tool", zhHans: "工具") : toolName)", timestamp: timestamp))
             default:
                 break  // system / 其它角色不进正文
             }
@@ -431,7 +431,7 @@ public enum TranscriptReader {
         Result(
             messages: [TranscriptMessage(
                 id: 0, role: .toolNote,
-                text: "🔒 Antigravity 对话为私有二进制（protobuf）格式，暂不支持正文预览")],
+                text: L10n.text("🔒 Antigravity conversations use a proprietary binary (protobuf) format; content previews are not supported yet", zhHans: "🔒 Antigravity 对话为私有二进制（protobuf）格式，暂不支持正文预览"))],
             truncated: false)
     }
 
@@ -501,7 +501,7 @@ public enum TranscriptReader {
                             id: messages.count, role: isError ? .error : .assistant,
                             text: text, timestamp: timestamp))
                     case "tool_use":
-                        let name = block["name"] as? String ?? "工具"
+                        let name = block["name"] as? String ?? L10n.text("Tool", zhHans: "工具")
                         var step = ToolStepExtractor.claude(
                             name: name, input: block["input"] as? [String: Any])
                         step.batch = batch
@@ -771,7 +771,7 @@ public enum TranscriptReader {
                 let name = (part["path"] as? String).map {
                     URL(fileURLWithPath: $0).lastPathComponent
                 } ?? ""
-                images.append(name.isEmpty ? "（附图）" : "（附图：\(name)）")
+                images.append(name.isEmpty ? L10n.text("(Attached image)", zhHans: "（附图）") : L10n.format("(Attached image: %@)", zhHans: "（附图：%@）", String(name)))
             }
         }
         var body = texts.joined(separator: "\n\n")
@@ -893,7 +893,7 @@ public enum TranscriptReader {
                         textPieces.append(text)
                     }
                 case "tool":
-                    toolNames.append(part["tool"] as? String ?? "工具")
+                    toolNames.append(part["tool"] as? String ?? L10n.text("Tool", zhHans: "工具"))
                 default:
                     break  // reasoning / step-start 等跳过
                 }
@@ -1052,32 +1052,32 @@ public enum TranscriptMarkdown {
     public static func render(session: AgentSessionInfo, messages: [TranscriptMessage]) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        var lines: [String] = ["# \(session.name ?? "会话 \(session.id)")", ""]
-        lines.append("- 来源：\(session.source.displayName)")
-        if let cwd = session.cwd { lines.append("- 项目：\(cwd)") }
-        lines.append("- 会话 ID：\(session.id)")
+        var lines: [String] = ["# \(session.name ?? L10n.format("Session %@", zhHans: "会话 %@", String(session.id)))", ""]
+        lines.append(L10n.format("- Source: %@", zhHans: "- 来源：%@", String(session.source.displayName)))
+        if let cwd = session.cwd { lines.append(L10n.format("- Project: %@", zhHans: "- 项目：%@", String(cwd))) }
+        lines.append(L10n.format("- Session ID: %@", zhHans: "- 会话 ID：%@", String(session.id)))
         lines.append("")
         for message in messages {
             let time = message.timestamp.map { " (\(formatter.string(from: $0)))" } ?? ""
             switch message.role {
             case .user:
-                lines.append("## 用户\(time)"); lines.append(""); lines.append(message.text)
+                lines.append(L10n.format("## User%@", zhHans: "## 用户%@", String(time))); lines.append(""); lines.append(message.text)
             case .assistant:
-                lines.append("## 助手\(time)"); lines.append(""); lines.append(message.text)
+                lines.append(L10n.format("## Assistant%@", zhHans: "## 助手%@", String(time))); lines.append(""); lines.append(message.text)
             case .error:
-                lines.append("## 错误\(time)"); lines.append(""); lines.append(message.text)
+                lines.append(L10n.format("## Error%@", zhHans: "## 错误%@", String(time))); lines.append(""); lines.append(message.text)
             case .toolNote:
                 lines.append("- \(message.text)")
             case .turnTrail:
-                lines.append("- 🛠 本轮轨迹（\(message.steps.count) 步）")
+                lines.append(L10n.format("- 🛠 Turn activity (%@ steps)", zhHans: "- 🛠 本轮轨迹（%@ 步）", String(message.steps.count)))
                 for step in message.steps {
-                    let flag = step.isError ? "（失败）" : ""
-                    let detail = step.detail.isEmpty ? "" : "：\(step.detail)"
+                    let flag = step.isError ? L10n.text(" (failed)", zhHans: "（失败）") : ""
+                    let detail = step.detail.isEmpty ? "" : L10n.format(": %@", zhHans: "：%@", String(step.detail))
                     lines.append("  - [\(step.kind.label)] \(step.name)\(flag)\(detail)")
                 }
             case .thinking:
                 // 引用块：思考不是回答，导出时要与正文区分开
-                lines.append("> 💭 思考\(time)")
+                lines.append(L10n.format("> 💭 Thinking%@", zhHans: "> 💭 思考%@", String(time)))
                 lines.append(">")
                 for line in message.text.split(separator: "\n", omittingEmptySubsequences: false) {
                     lines.append("> \(line)")

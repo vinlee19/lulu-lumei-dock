@@ -94,7 +94,10 @@ final class StatusItemController: NSObject {
             guard let snapshot, let primary = snapshot.primary else { continue }
             var text = "\(snapshot.source.displayName) \(Int(primary.usedPercent.rounded()))%"
             if let secondary = snapshot.secondary {
-                text += "（周 \(Int(secondary.usedPercent.rounded()))%）"
+                text += L10n.format(
+                    " (week %@%%)",
+                    zhHans: "（周 %@%%）",
+                    String(Int(secondary.usedPercent.rounded())))
             }
             parts.append(text)
         }
@@ -115,20 +118,20 @@ final class StatusItemController: NSObject {
         guard let item = statusItem else { return }
         let menu = NSMenu()
         let openItem = NSMenuItem(
-            title: "打开主窗口",
+            title: L10n.text("Open Main Window", zhHans: "打开主窗口"),
             action: #selector(openMainWindow),
             keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
         let resetItem = NSMenuItem(
-            title: "重置灵动岛位置",
+            title: L10n.text("Reset Dynamic Island Position", zhHans: "重置灵动岛位置"),
             action: #selector(resetIslandPosition),
             keyEquivalent: "")
         resetItem.target = self
         menu.addItem(resetItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
-            title: "退出 lulu-lumei-dock",
+            title: L10n.text("Quit lulu-lumei-dock", zhHans: "退出 lulu-lumei-dock"),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))

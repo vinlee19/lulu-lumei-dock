@@ -99,7 +99,7 @@ final class AuditService: ObservableObject {
                 self.scanQwen()
                 self.pruneIfDue()
             } catch {
-                self.publish { $0.lastError = "审计库打开失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to open audit database: %@", zhHans: "审计库打开失败: %@", String(describing: error)) }
             }
         }
         // 2s 近实时扫描 Codex/CodeBuddy/Qoder/Cursor/Grok/Qwen + 顺带到点清理
@@ -128,7 +128,7 @@ final class AuditService: ObservableObject {
                 let result = try pipeline.ingest(event, isStale: isStale)
                 if let alert = result.alert { self.emit(alert) }
             } catch {
-                self.publish { $0.lastError = "\(event.source.displayName) 审计写入失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("%@ audit write failed: %@", zhHans: "%@ 审计写入失败: %@", String(event.source.displayName), String(describing: error)) }
             }
         }
     }
@@ -185,7 +185,7 @@ final class AuditService: ObservableObject {
                         })
                 }
             } catch {
-                self.publish { $0.lastError = "读取审计流水失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to read audit log: %@", zhHans: "读取审计流水失败: %@", String(describing: error)) }
             }
         }
     }
@@ -213,12 +213,12 @@ final class AuditService: ObservableObject {
                 let url = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Downloads/eureka-audit-\(formatter.string(from: Date())).csv")
                 try Data(csv.utf8).write(to: url)
-                self.publish { $0.exportMessage = "已导出 \(url.lastPathComponent)（\(rows.count) 条）" }
+                self.publish { $0.exportMessage = L10n.format("Exported %@ (%@ records)", zhHans: "已导出 %@（%@ 条）", String(url.lastPathComponent), String(rows.count)) }
                 DispatchQueue.main.async {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             } catch {
-                self.publish { $0.exportMessage = "导出失败: \(error)" }
+                self.publish { $0.exportMessage = L10n.format("Export failed: %@", zhHans: "导出失败: %@", String(describing: error)) }
             }
         }
     }
@@ -232,7 +232,7 @@ final class AuditService: ObservableObject {
                 $0.events = []
                 $0.total = 0
                 $0.riskTotal = 0
-                $0.exportMessage = "审计数据已清空"
+                $0.exportMessage = L10n.text("Audit data cleared", zhHans: "审计数据已清空")
             }
         }
     }

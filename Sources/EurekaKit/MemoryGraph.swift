@@ -135,9 +135,9 @@ public enum MemoryGraph {
 
         public var label: String {
             switch self {
-            case .contains: return "收录"
-            case .link: return "引用"
-            case .origin: return "来源"
+            case .contains: return L10n.text("Contains", zhHans: "收录")
+            case .link: return L10n.text("References", zhHans: "引用")
+            case .origin: return L10n.text("Origin", zhHans: "来源")
             }
         }
     }
@@ -261,7 +261,7 @@ public enum MemoryGraphBuilder {
             let id = MemoryGraph.NodeID("index")
             nodes.insert(MemoryGraph.Node(
                 id: id, kind: .index, title: indexItem.title.isEmpty ? "MEMORY.md" : indexItem.title,
-                subtitle: "\(sorted.count) 条记忆", path: indexItem.id,
+                subtitle: L10n.format("%@ memories", zhHans: "%@ 条记忆", String(sorted.count)), path: indexItem.id,
                 modifiedAt: indexItem.modifiedAt, memberCount: sorted.count), at: 0)
         }
         for type in presentTypes {
@@ -269,7 +269,7 @@ public enum MemoryGraphBuilder {
             let count = sorted.filter { $0.type == type }.count
             nodes.append(MemoryGraph.Node(
                 id: id, kind: .category(type), title: type.label,
-                subtitle: "\(count) 条", memberCount: count))
+                subtitle: L10n.format("%@ items", zhHans: "%@ 条", String(count)), memberCount: count))
             if indexItem != nil {
                 edges.append(MemoryGraph.Edge(
                     from: MemoryGraph.NodeID("index"), to: id, role: .contains))
@@ -319,8 +319,8 @@ public enum MemoryGraphBuilder {
                 sessionNodeIDs[sessionId] = id
                 nodes.append(MemoryGraph.Node(
                     id: id, kind: .session(exists: item.originSessionExists),
-                    title: "会话 \(sessionId.prefix(8))",
-                    subtitle: item.originSessionExists ? "" : "已删除",
+                    title: L10n.format("Session %@", zhHans: "会话 %@", String(sessionId.prefix(8))),
+                    subtitle: item.originSessionExists ? "" : L10n.text("Deleted", zhHans: "已删除"),
                     sessionId: sessionId))
             }
             edges.append(MemoryGraph.Edge(from: from, to: id, role: .origin))

@@ -35,13 +35,13 @@ final class PlansService: ObservableObject {
         guard !scanning else { return }
         if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
-        scanPhase = "正在解析 Codex 会话…"
+        scanPhase = L10n.text("Parsing Codex sessions…", zhHans: "正在解析 Codex 会话…")
         queue.async { [weak self] in
             guard let self else { return }
             let staging = PlanMaterializer.defaultStagingRoot()
             PlanMaterializer.materializeCodex(
                 sessionsRoot: CodexRolloutTailer.defaultSessionsRoot(), into: staging)
-            self.publishPhase("正在解析其它 CLI 会话…")
+            self.publishPhase(L10n.text("Parsing other CLI sessions…", zhHans: "正在解析其它 CLI 会话…"))
             PlanMaterializer.materializeOpencode(dbPath: OpencodePaths.db(), into: staging)
             PlanMaterializer.materializeGrok(
                 sessionsRoot: GrokPaths.sessionsRoot(), into: staging)
@@ -56,7 +56,7 @@ final class PlansService: ObservableObject {
                 plansRoot: QoderPaths.plansRoot(), into: staging)
             // cursor 无 plans 目录，计划是会话里的 todos → 合成（同 codex 的 update_plan）
             PlanMaterializer.materializeCursor(into: staging)
-            self.publishPhase("正在索引计划…")
+            self.publishPhase(L10n.text("Indexing plans…", zhHans: "正在索引计划…"))
             // Hermes 计划：profile 级 ~/.hermes/plans + 各仓库内 <repo>/.hermes/plans
             // （`plan` 技能默认写项目内那一份），都是真 .md，无需物化
             let repoRoots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)

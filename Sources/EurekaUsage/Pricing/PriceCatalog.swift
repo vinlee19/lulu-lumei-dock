@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 远程价格目录（LiteLLM + models.dev）的规整形态：统一为 USD / 百万 token，键一律小写。
@@ -137,10 +138,10 @@ public enum PriceCatalogParser {
         _ data: Data, minEntries: Int = litellmMinEntries
     ) throws -> [String: CatalogPrice] {
         guard data.count <= litellmMaxBytes else {
-            throw CatalogValidationError(message: "LiteLLM 目录超过体积上限（\(data.count) 字节）")
+            throw CatalogValidationError(message: L10n.format("The LiteLLM catalog exceeds the size limit (%@ bytes)", zhHans: "LiteLLM 目录超过体积上限（%@ 字节）", String(data.count)))
         }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw CatalogValidationError(message: "LiteLLM 目录不是 JSON 对象")
+            throw CatalogValidationError(message: L10n.text("The LiteLLM catalog is not a JSON object", zhHans: "LiteLLM 目录不是 JSON 对象"))
         }
         var result: [String: CatalogPrice] = [:]
         var bad = 0
@@ -175,10 +176,10 @@ public enum PriceCatalogParser {
         _ data: Data, minProviders: Int = modelsDevMinProviders
     ) throws -> [String: PriceCatalog.Provider] {
         guard data.count <= modelsDevMaxBytes else {
-            throw CatalogValidationError(message: "models.dev 目录超过体积上限（\(data.count) 字节）")
+            throw CatalogValidationError(message: L10n.format("The models.dev catalog exceeds the size limit (%@ bytes)", zhHans: "models.dev 目录超过体积上限（%@ 字节）", String(data.count)))
         }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw CatalogValidationError(message: "models.dev 目录不是 JSON 对象")
+            throw CatalogValidationError(message: L10n.text("The models.dev catalog is not a JSON object", zhHans: "models.dev 目录不是 JSON 对象"))
         }
         var result: [String: PriceCatalog.Provider] = [:]
         var bad = 0
@@ -210,7 +211,7 @@ public enum PriceCatalogParser {
         try checkQuality(valid: total, bad: bad, min: 0, name: "models.dev")
         guard result.count >= minProviders else {
             throw CatalogValidationError(
-                message: "models.dev 目录 provider 过少（\(result.count) < \(minProviders)）")
+                message: L10n.format("The models.dev catalog has too few providers (%@ < %@)", zhHans: "models.dev 目录 provider 过少（%@ < %@）", String(result.count), String(minProviders)))
         }
         return result
     }
@@ -219,17 +220,17 @@ public enum PriceCatalogParser {
     public static func checkNotCollapsed(new: Int, previous: Int?, name: String) throws {
         guard let previous, previous > 0 else { return }
         if new * 2 < previous {
-            throw CatalogValidationError(message: "\(name) 条目骤减（\(previous) → \(new)），已拒收")
+            throw CatalogValidationError(message: L10n.format("%@ entries dropped sharply (%@ → %@); rejected", zhHans: "%@ 条目骤减（%@ → %@），已拒收", String(name), String(previous), String(new)))
         }
     }
 
     private static func checkQuality(valid: Int, bad: Int, min: Int, name: String) throws {
         guard valid >= min else {
-            throw CatalogValidationError(message: "\(name) 有效条目过少（\(valid) < \(min)）")
+            throw CatalogValidationError(message: L10n.format("%@ has too few valid entries (%@ < %@)", zhHans: "%@ 有效条目过少（%@ < %@）", String(name), String(valid), String(min)))
         }
         // 坏条目超过 5%：整体格式可能变了，宁可不用
         if bad * 20 > valid + bad {
-            throw CatalogValidationError(message: "\(name) 异常条目过多（\(bad)/\(valid + bad)）")
+            throw CatalogValidationError(message: L10n.format("%@ has too many invalid entries (%@/%@)", zhHans: "%@ 异常条目过多（%@/%@）", String(name), String(bad), String(valid + bad)))
         }
     }
 

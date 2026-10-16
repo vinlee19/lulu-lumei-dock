@@ -26,13 +26,13 @@ public enum SystemEventNotifications {
         switch task.outcome {
         case .success:
             guard completion else { return nil }
-            verb = "任务完成"
+            verb = L10n.text("Task completed", zhHans: "任务完成")
         case .error:
             guard error else { return nil }
-            verb = "任务出错"
+            verb = L10n.text("Task failed", zhHans: "任务出错")
         case .interrupted:
             guard error else { return nil }
-            verb = "任务中断"
+            verb = L10n.text("Task interrupted", zhHans: "任务中断")
         }
         return SystemEventNotification(
             identifier: "eureka-event-\(task.id)",
@@ -71,7 +71,7 @@ public enum SystemEventNotifications {
         } else if let projectName {
             parts.append(projectName)
         } else {
-            parts.append("会话 \(sessionId.prefix(8))")
+            parts.append(L10n.format("Session %@", zhHans: "会话 %@", String(sessionId.prefix(8))))
         }
         return parts.joined(separator: " · ")
     }

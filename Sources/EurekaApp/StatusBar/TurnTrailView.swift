@@ -1,4 +1,5 @@
 import EurekaIngest
+import EurekaKit
 import SwiftUI
 
 /// 一轮工具/检索轨迹行：默认折叠一行摘要（步数 + 分类速览），点击展开逐步列表。
@@ -35,7 +36,10 @@ struct TurnTrailRowView: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     Image(systemName: "wrench.adjustable")
                         .font(.system(size: 8.5))
-                    Text("本轮轨迹 · \(message.steps.count) 步")
+                    Text(L10n.format(
+                        "This turn · %@ steps",
+                        zhHans: "本轮轨迹 · %@ 步",
+                        String(message.steps.count)))
                         .font(.system(size: 10, weight: .medium))
                     Text(kindSummary)
                         .font(.system(size: 9.5))
@@ -45,7 +49,7 @@ struct TurnTrailRowView: View {
                         HStack(spacing: 2) {
                             Image(systemName: "exclamationmark.circle")
                                 .font(.system(size: 8.5))
-                            Text("\(errorCount) 失败")
+                            Text(L10n.format("%@ failed", zhHans: "%@ 失败", String(errorCount)))
                                 .font(.system(size: 9.5))
                         }
                         .foregroundStyle(Theme.failureRed)
@@ -166,7 +170,7 @@ struct ThinkingRowView: View {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 8, weight: .semibold))
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        Text("💭 思考")
+                        Text(L10n.text("💭 Thinking", zhHans: "💭 思考"))
                             .font(.system(size: 10, weight: .medium))
                         if !isExpanded {
                             Text(preview)

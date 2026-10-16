@@ -25,10 +25,10 @@ final class InstallerService: ObservableObject {
 
         var title: String {
             switch self {
-            case .claudeHooks: return "Claude Code hooks"
-            case .codexNotify: return "Codex notify"
-            case .codexHooks: return "Codex hooks"
-            case .traeHooks: return "Trae hooks"
+            case .claudeHooks: return L10n.text("Claude Code hooks", zhHans: "Claude Code 钩子")
+            case .codexNotify: return L10n.text("Codex notify", zhHans: "Codex 通知")
+            case .codexHooks: return L10n.text("Codex hooks", zhHans: "Codex 钩子")
+            case .traeHooks: return L10n.text("Trae hooks", zhHans: "Trae 钩子")
             }
         }
 
@@ -56,13 +56,13 @@ final class InstallerService: ObservableObject {
         var benefit: String {
             switch self {
             case .claudeHooks:
-                return "实时任务卡、等待授权提醒、工具调用审计、会话所在终端"
+                return L10n.text("Live task cards, permission reminders, tool-call auditing, and the session terminal", zhHans: "实时任务卡、等待授权提醒、工具调用审计、会话所在终端")
             case .codexNotify:
-                return "回合完成通知、会话所在终端"
+                return L10n.text("Turn completion notifications and the session terminal", zhHans: "回合完成通知、会话所在终端")
             case .codexHooks:
                 // 装它的主要理由就是等待授权：Codex 的 rollout 不落授权事件，
                 // 不装 hooks 这个状态对 Codex 永远不可见
-                return "等待授权提醒、实时任务卡、精确的会话所在终端"
+                return L10n.text("Permission reminders, live task cards, and the exact session terminal", zhHans: "等待授权提醒、实时任务卡、精确的会话所在终端")
             case .traeHooks:
                 // Trae 的会话库是 SQLCipher 加密的、也没有明文转录 → **不装 hooks，
                 // 灵动岛就完全看不见 Trae**（这是唯一破了「不装 hooks 也能看见」惯例的源）。
@@ -70,8 +70,7 @@ final class InstallerService: ObservableObject {
                 //
                 // ⚠️ Trae 的 hooks 是**按账号灰度**的服务端开关（见 `TraeHooksInstaller` 的说明），
                 // 没放开时装了也不会触发 —— 文案必须把这件事说在前面，否则用户会以为是我们坏了。
-                return "实时任务卡（Trae 唯一的实时通道）、工具调用审计、会话所在终端"
-                    + "；需 Trae 已对你的账号开放 hooks（设置里能看到 Hooks 页即已开放）"
+                return L10n.text("Live task cards (Trae’s only live channel), tool-call auditing, and the session terminal; requires hooks to be enabled for your Trae account (a Hooks page in Settings means they are enabled)", zhHans: "实时任务卡（Trae 唯一的实时通道）、工具调用审计、会话所在终端；需 Trae 已对你的账号开放 hooks（设置里能看到 Hooks 页即已开放）")
             }
         }
     }
@@ -146,36 +145,34 @@ final class InstallerService: ObservableObject {
     /// 否则任何一个"安装"按钮都会静默覆盖用户自己编辑过的路径。
     func install(_ integration: Integration, repairDriftedPath: Bool = false) {
         guard let relay = RelaySyncer.sync() else {
-            message = "找不到 eureka-relay（应与应用同目录），未做任何改动"
+            message = L10n.text("eureka-relay was not found (expected beside the app); no changes made", zhHans: "找不到 eureka-relay（应与应用同目录），未做任何改动")
             return
         }
         // 解析不了 / 他人占用 / 路径被手改 → 拒绝写入，把原因告诉用户
         let diagnosis = diagnosis(for: integration)
         if case .unparseable = diagnosis {
-            message = "\(integration.title)：\(diagnosis.detail ?? "配置无法解析")"
+            message = L10n.format("%@: %@", zhHans: "%@：%@", String(integration.title), String(diagnosis.detail ?? L10n.text("Unable to parse configuration", zhHans: "配置无法解析")))
             return
         }
         if case .foreignOccupied = diagnosis {
-            message = "\(integration.title)：\(diagnosis.detail ?? "已被他人占用")"
+            message = L10n.format("%@: %@", zhHans: "%@：%@", String(integration.title), String(diagnosis.detail ?? L10n.text("Already used by another program", zhHans: "已被他人占用")))
             return
         }
         if case .driftedPath = diagnosis, !repairDriftedPath {
-            message = "\(integration.title)：配置里的路径被改过，未做改动。"
-                + "确认要改回稳定路径请点该项的「改为稳定路径」。"
+            message = L10n.format("%@: the configured path was changed; no changes made. To restore the stable path, click “Use Stable Path” for this integration.", zhHans: "%@：配置里的路径被改过，未做改动。确认要改回稳定路径请点该项的「改为稳定路径」。", String(integration.title))
             return
         }
         do {
             try write(integration, relayPath: relay.path)
             let chainNote: String
             if case .chainable(let owner) = diagnosis {
-                chainNote = "，已与 \(owner) 串联"
+                chainNote = L10n.format(", chained to %@", zhHans: "，已与 %@ 串联", String(owner))
             } else {
                 chainNote = ""
             }
-            message = "\(integration.title) 已安装/更新\(chainNote)（原配置已备份到 "
-                + "\(integration.configURL.lastPathComponent).bak.eureka.*）"
+            message = L10n.format("%@ installed/updated%@ (original configuration backed up to %@.bak.eureka.*)", zhHans: "%@ 已安装/更新%@（原配置已备份到 %@.bak.eureka.*）", String(integration.title), String(chainNote), String(integration.configURL.lastPathComponent))
         } catch {
-            message = "\(integration.title) 失败：\(error)（未改动原文件）"
+            message = L10n.format("%@ failed: %@ (original file unchanged)", zhHans: "%@ 失败：%@（未改动原文件）", String(integration.title), String(describing: error))
         }
         refresh()
     }
@@ -185,7 +182,7 @@ final class InstallerService: ObservableObject {
             let url = integration.configURL
             let original = ConfigFile.read(url)
             guard !original.isEmpty else {
-                message = "\(integration.title)：配置文件为空，无需卸载"
+                message = L10n.format("%@: configuration file is empty; nothing to uninstall", zhHans: "%@：配置文件为空，无需卸载", String(integration.title))
                 return
             }
             let updated: String
@@ -197,10 +194,9 @@ final class InstallerService: ObservableObject {
             }
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
             let restored = integration == .codexNotify && codexNotifyChainedTo != nil
-            message = "\(integration.title) 已卸载（只移除了我们自己的条目"
-                + (restored ? "，已恢复原来的 notify）" : "）")
+            message = L10n.format("%@ uninstalled (only our own entries were removed%@", zhHans: "%@ 已卸载（只移除了我们自己的条目%@", String(integration.title), String(restored ? L10n.text(", original notify restored)", zhHans: "，已恢复原来的 notify）") : L10n.text(")", zhHans: "）")))
         } catch {
-            message = "\(integration.title) 卸载失败：\(error)（未改动原文件）"
+            message = L10n.format("Failed to uninstall %@: %@ (original file unchanged)", zhHans: "%@ 卸载失败：%@（未改动原文件）", String(integration.title), String(describing: error))
         }
         refresh()
     }
@@ -250,7 +246,8 @@ final class InstallerService: ObservableObject {
         }
         autoUpdateSkipped = skipped
         if !updated.isEmpty {
-            message = "已自动更新：\(updated.joined(separator: "、"))（原配置已备份）"
+            let separator = L10n.text(", ", zhHans: "、")
+            message = L10n.format("Automatically updated: %@ (original configuration backed up)", zhHans: "已自动更新：%@（原配置已备份）", String(updated.joined(separator: separator)))
         }
         if !updated.isEmpty || !skipped.isEmpty { refresh() }
     }

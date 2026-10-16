@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 价格相关文件的位置（EurekaUsage 不碰 Bundle，由 app 层传入）
@@ -20,11 +21,32 @@ public struct PricingPaths: Sendable {
 }
 
 /// 当前生效的价格目录从哪来（设置页展示）
-public enum CatalogOrigin: String, Sendable {
-    case none = "无"
-    case snapshot = "随包快照"
-    case cache = "本地缓存"
-    case remote = "远程"
+public enum CatalogOrigin: RawRepresentable, Hashable, Sendable {
+    case none
+    case snapshot
+    case cache
+    case remote
+
+    /// 此值只用于设置页展示；读取时跟随界面语言。
+    public var rawValue: String {
+        switch self {
+        case .none: return L10n.text("None", zhHans: "无")
+        case .snapshot: return L10n.text("Bundled snapshot", zhHans: "随包快照")
+        case .cache: return L10n.text("Local cache", zhHans: "本地缓存")
+        case .remote: return L10n.text("Remote", zhHans: "远程")
+        }
+    }
+
+    /// 兼容原来的中文原始值，也接受英文展示值。
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "None", "无": self = .none
+        case "Bundled snapshot", "随包快照": self = .snapshot
+        case "Local cache", "本地缓存": self = .cache
+        case "Remote", "远程": self = .remote
+        default: return nil
+        }
+    }
 }
 
 /// 全进程共享的价格表容器：加锁持有当前 PricingTable，新目录到达时原子替换。

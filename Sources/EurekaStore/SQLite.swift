@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 import SQLite3
 
@@ -70,7 +71,7 @@ public final class SQLiteDB {
             ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX)
             : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX)
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
-            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "无法打开"
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? L10n.text("Unable to open", zhHans: "无法打开")
             sqlite3_close_v2(db)
             throw SQLiteError(code: SQLITE_CANTOPEN, message: message)
         }
@@ -92,7 +93,7 @@ public final class SQLiteDB {
     public func execute(_ sql: String) throws {
         var errorMessage: UnsafeMutablePointer<CChar>?
         guard sqlite3_exec(handle, sql, nil, nil, &errorMessage) == SQLITE_OK else {
-            let message = errorMessage.map { String(cString: $0) } ?? "execute 失败"
+            let message = errorMessage.map { String(cString: $0) } ?? L10n.text("execute failed", zhHans: "execute 失败")
             sqlite3_free(errorMessage)
             throw SQLiteError(code: sqlite3_errcode(handle), message: "\(message) — \(sql)")
         }

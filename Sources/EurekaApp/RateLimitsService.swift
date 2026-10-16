@@ -146,19 +146,18 @@ final class RateLimitsService: ObservableObject {
             onAlert?(IslandNotice(
                 id: "limit-\(dedupKey)",
                 emoji: "⏳",
-                headline: "\(candidate.source.displayName) \(label)预计 \(timeText) 打满",
-                body: "当前已用 \(Int(candidate.window.usedPercent.rounded()))%，"
-                    + "按最近用量速度外推。注意安排任务，打满后需等窗口重置。"))
+                headline: L10n.format("%@ %@ is expected to reach its limit at %@", zhHans: "%@ %@预计 %@ 打满", String(candidate.source.displayName), String(label), String(timeText)),
+                body: L10n.format("Currently %@%% used, projected from recent usage. Schedule tasks accordingly; once full, you must wait for the window to reset.", zhHans: "当前已用 %@%%，按最近用量速度外推。注意安排任务，打满后需等窗口重置。", String(Int(candidate.window.usedPercent.rounded())))))
         }
     }
 
     /// 窗口时长 → 告警文案标签（与限额面板口径一致）
     private static func windowLabel(_ minutes: Int, isPrimary: Bool) -> String {
         switch minutes {
-        case 300: return "5 小时窗口"
-        case 10080: return "每周窗口"
-        case 43200: return "每月窗口"
-        default: return isPrimary ? "短窗口" : "长窗口"
+        case 300: return L10n.text("5-hour window", zhHans: "5 小时窗口")
+        case 10080: return L10n.text("Weekly window", zhHans: "每周窗口")
+        case 43200: return L10n.text("Monthly window", zhHans: "每月窗口")
+        default: return isPrimary ? L10n.text("Short window", zhHans: "短窗口") : L10n.text("Long window", zhHans: "长窗口")
         }
     }
 }

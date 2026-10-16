@@ -120,7 +120,7 @@ public enum CodexRolloutDecoder {
 
         case "turn_aborted":
             return [task(
-                .taskFinished(outcome: .interrupted, title: nil, detail: "已中断"),
+                .taskFinished(outcome: .interrupted, title: nil, detail: L10n.text("Interrupted", zhHans: "已中断")),
                 turnId: payload["turn_id"] as? String
             )]
 

@@ -84,17 +84,17 @@ struct MCPView: View {
         }
         .confirmationDialog(
             deletingEntry.map {
-                "从 \($0.source.displayName) 移除 server「\($0.name)」？写前会留 .bak.eureka 备份。"
+                L10n.format("From %@, remove server “%@”? A .bak.eureka backup is kept before writing.", zhHans: "从 %@ 移除 server「%@」？写前会留 .bak.eureka 备份。", String($0.source.displayName), String($0.name))
             } ?? "",
             isPresented: Binding(
                 get: { deletingEntry != nil },
                 set: { if !$0 { deletingEntry = nil } }),
             titleVisibility: .visible
         ) {
-            Button("移除", role: .destructive) {
+            Button(L10n.text("Remove", zhHans: "移除"), role: .destructive) {
                 if let entry = deletingEntry { service.remove(entry) }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -104,14 +104,14 @@ struct MCPView: View {
         HStack(spacing: 12) {
             Text("MCP").font(Theme.font.themed(15, .bold))
             SearchField(
-                placeholder: "搜索 MCP server", text: $service.searchText,
+                placeholder: L10n.text("Search MCP servers", zhHans: "搜索 MCP server"), text: $service.searchText,
                 scanning: service.scanning, resultCount: totalCount)
             Spacer(minLength: 12)
             createButton
             ScanStatusLabel(
                 scanning: service.scanning, phase: nil,
                 lastScanAt: service.lastScanAt)
-            RefreshButton(help: "强制重扫 MCP 配置") { service.refresh(force: true) }
+            RefreshButton(help: L10n.text("Force rescan of MCP config", zhHans: "强制重扫 MCP 配置")) { service.refresh(force: true) }
             LayoutToggle(layout: $layout)
         }
         .padding(.horizontal, 16)
@@ -134,7 +134,7 @@ struct MCPView: View {
                 .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
         }
         .buttonStyle(.plain)
-        .help("添加 MCP server")
+        .help(L10n.text("Add MCP server", zhHans: "添加 MCP server"))
     }
 
     // MARK: - 数据口径
@@ -165,11 +165,11 @@ struct MCPView: View {
         let names = Set(service.servers.map { $0.name.lowercased() })
         let measured = names.compactMap { service.toolCache[$0] }
         guard !measured.isEmpty else { return nil }
-        var parts = ["实测 \(measured.count) 个 · 工具 \(measured.reduce(0) { $0 + $1.toolCount })"]
+        var parts = [L10n.format("Probed %@ · tools %@", zhHans: "实测 %@ 个 · 工具 %@", String(measured.count), String(measured.reduce(0) { $0 + $1.toolCount }))]
         let prompts = measured.reduce(0) { $0 + ($1.promptCount ?? 0) }
         let resources = measured.reduce(0) { $0 + ($1.resourceCount ?? 0) }
-        if prompts > 0 { parts.append("提示词 \(prompts)") }
-        if resources > 0 { parts.append("资源 \(resources)") }
+        if prompts > 0 { parts.append(L10n.format("prompts %@", zhHans: "提示词 %@", String(prompts))) }
+        if resources > 0 { parts.append(L10n.format("resources %@", zhHans: "资源 %@", String(resources))) }
         return parts.joined(separator: " · ")
     }
 
@@ -192,13 +192,13 @@ struct MCPView: View {
             VStack(alignment: .leading, spacing: 14) {
                 StatOverviewCard(
                     value: "\(dedupedCount)", unit: "MCP server",
-                    subtitle: "\(totalCount) 处配置 · \(availableSources.count) 个源",
-                    distributionTitle: "传输方式",
+                    subtitle: L10n.format("%@ configs · %@ sources", zhHans: "%@ 处配置 · %@ 个源", String(totalCount), String(availableSources.count)),
+                    distributionTitle: L10n.text("Transport", zhHans: "传输方式"),
                     segments: transportSegments,
                     trailingNote: measuredCapabilityNote)
                 SourceFilterBar(
                     selected: $selectedSource,
-                    allLabel: "全部", allIcon: ToolKind.mcp.icon,
+                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: ToolKind.mcp.icon,
                     totalCount: totalCount,
                     sources: availableSources,
                     count: { count(for: $0) })
@@ -256,10 +256,10 @@ struct MCPView: View {
         HStack(spacing: 8) {
             if let progress = service.probeProgress {
                 ProgressView().controlSize(.small).scaleEffect(0.7)
-                Text("检测中 \(progress.done)/\(progress.total)")
+                Text(L10n.format("Probing %@/%@", zhHans: "检测中 %@/%@", String(progress.done), String(progress.total)))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
-                Button("取消") { service.cancelProbe() }
+                Button(L10n.text("Cancel", zhHans: "取消")) { service.cancelProbe() }
                     .font(Theme.font.themed(10))
             } else {
                 Button {
@@ -268,12 +268,12 @@ struct MCPView: View {
                     HStack(spacing: 3) {
                         Image(systemName: "antenna.radiowaves.left.and.right")
                             .font(.system(size: 9))
-                        Text(selectedSource == nil ? "检测全部" : "检测当前源")
+                        Text(selectedSource == nil ? L10n.text("Probe all", zhHans: "检测全部") : L10n.text("Probe this source", zhHans: "检测当前源"))
                             .font(Theme.font.themed(10))
                     }
                 }
                 .disabled(filteredEntries.isEmpty)
-                .help("逐处发起连接检测（\(filteredEntries.count) 处）：remote 走 MCP 握手；stdio 会短暂启动配置的命令，读完即退出")
+                .help(L10n.format("Probe each config (%@): remote does an MCP handshake; stdio briefly starts the configured command and exits after reading", zhHans: "逐处发起连接检测（%@ 处）：remote 走 MCP 握手；stdio 会短暂启动配置的命令，读完即退出", String(filteredEntries.count)))
             }
             Spacer()
         }
@@ -302,17 +302,17 @@ struct MCPView: View {
         if service.scanning {
             VStack(spacing: 8) {
                 ProgressView()
-                Text("正在扫描 MCP 配置…").font(Theme.font.themed(12)).foregroundStyle(.secondary)
+                Text(L10n.text("Scanning MCP config…", zhHans: "正在扫描 MCP 配置…")).font(Theme.font.themed(12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         } else {
             let filtered = service.isSearching || selectedSource != nil
             EmptyStateView(
                 icon: ToolKind.mcp.icon,
-                title: filtered ? "没有匹配的 MCP server" : "还没有 MCP server 配置",
+                title: filtered ? L10n.text("No matching MCP servers", zhHans: "没有匹配的 MCP server") : L10n.text("No MCP servers configured yet", zhHans: "还没有 MCP server 配置"),
                 hint: filtered
-                    ? nil : "新建一个，或粘贴 README 里的 mcpServers JSON 一键装到多个 CLI",
-                actionTitle: filtered ? nil : "新建 MCP Server",
+                    ? nil : L10n.text("Create one, or paste the mcpServers JSON from a README to install it into several CLIs at once", zhHans: "新建一个，或粘贴 README 里的 mcpServers JSON 一键装到多个 CLI"),
+                actionTitle: filtered ? nil : L10n.text("New MCP Server", zhHans: "新建 MCP Server"),
                 action: filtered ? nil : {
                     withAnimation(.easeOut(duration: 0.15)) {
                         formTarget = MCPFormTarget(id: "new", mode: .quick)
@@ -337,7 +337,7 @@ private func mcpPickProjectRoot() -> String? {
     panel.canChooseFiles = false
     panel.canChooseDirectories = true
     panel.canCreateDirectories = false
-    panel.message = "选择要写入 .mcp.json 的项目根目录"
+    panel.message = L10n.text("Choose the project root to write .mcp.json into", zhHans: "选择要写入 .mcp.json 的项目根目录")
     return panel.runModal() == .OK ? panel.url?.path : nil
 }
 
@@ -351,9 +351,9 @@ private func mcpSnapshotStale(_ snapshot: MCPProbeSnapshot) -> Bool {
 /// 总览行/卡的能力计数摘要："30 工具 · 5 提示词 · 2 资源"（实测过才有；0 略去不占位）
 func mcpCapabilitySummary(_ info: MCPToolCacheEntry?) -> String? {
     guard let info else { return nil }
-    var parts = ["\(info.toolCount) 工具"]
-    if let prompts = info.promptCount, prompts > 0 { parts.append("\(prompts) 提示词") }
-    if let resources = info.resourceCount, resources > 0 { parts.append("\(resources) 资源") }
+    var parts = [L10n.format("%@ tools", zhHans: "%@ 工具", String(info.toolCount))]
+    if let prompts = info.promptCount, prompts > 0 { parts.append(L10n.format("%@ prompts", zhHans: "%@ 提示词", String(prompts))) }
+    if let resources = info.resourceCount, resources > 0 { parts.append(L10n.format("%@ resources", zhHans: "%@ 资源", String(resources))) }
     return parts.joined(separator: " · ")
 }
 
@@ -424,9 +424,9 @@ struct MCPToolRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                if tool.readOnly == true { TagChip("只读", neutral: true) }
-                if tool.destructive == true { TagChip("破坏性", tint: mcpToneColor("bad")) }
-                if tool.hasOutputSchema == true { TagChip("结构化输出", neutral: true) }
+                if tool.readOnly == true { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
+                if tool.destructive == true { TagChip(L10n.text("Destructive", zhHans: "破坏性"), tint: mcpToneColor("bad")) }
+                if tool.hasOutputSchema == true { TagChip(L10n.text("Structured output", zhHans: "结构化输出"), neutral: true) }
                 Spacer(minLength: 0)
                 if expandable {
                     Image(systemName: "chevron.down")
@@ -444,13 +444,13 @@ struct MCPToolRowView: View {
             }
             if expanded, !params.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("参数")
+                    Text(L10n.text("Parameters", zhHans: "参数"))
                         .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                     FlowLayout(spacing: 4, lineSpacing: 4) {
                         ForEach(params, id: \.self) { TagChip($0, neutral: true) }
                     }
-                    Text("* 必填")
+                    Text(L10n.text("* required", zhHans: "* 必填"))
                         .font(Theme.font.themed(9))
                         .foregroundStyle(.tertiary)
                 }
@@ -572,13 +572,13 @@ private func mcpEntryActions(
 ) -> [CardAction] {
     [
         // 铅笔 = 应用内编辑表单（外部编辑器入口在右键菜单——直接弹整份配置文件太吓人）
-        CardAction(icon: "square.and.pencil", help: "编辑该处定义") {
+        CardAction(icon: "square.and.pencil", help: L10n.text("Edit this definition", zhHans: "编辑该处定义")) {
             onEdit()
         },
-        CardAction(icon: "folder", help: "在 Finder 中显示配置文件") {
+        CardAction(icon: "folder", help: L10n.text("Show the config file in Finder", zhHans: "在 Finder 中显示配置文件")) {
             service.reveal(path: entry.configPath)
         },
-        CardAction(icon: "trash", destructive: true, help: "从该配置移除（写前留备份）") {
+        CardAction(icon: "trash", destructive: true, help: L10n.text("Remove from this config (backup before writing)", zhHans: "从该配置移除（写前留备份）")) {
             onDelete()
         },
     ]
@@ -590,12 +590,12 @@ private func mcpEntryMenu(
     onOpen: @escaping () -> Void, onEdit: @escaping () -> Void,
     onDelete: @escaping () -> Void
 ) -> some View {
-    Button("查看详情 / 安装到其他 agent") { onOpen() }
-    Button("编辑该处定义") { onEdit() }
-    Button("用默认编辑器打开配置文件") { service.openInEditor(path: entry.configPath) }
-    Button("在 Finder 中显示") { service.reveal(path: entry.configPath) }
+    Button(L10n.text("View details / install into another agent", zhHans: "查看详情 / 安装到其他 agent")) { onOpen() }
+    Button(L10n.text("Edit this definition", zhHans: "编辑该处定义")) { onEdit() }
+    Button(L10n.text("Open the config file in the default editor", zhHans: "用默认编辑器打开配置文件")) { service.openInEditor(path: entry.configPath) }
+    Button(L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: entry.configPath) }
     Divider()
-    Button("从该配置移除", role: .destructive) { onDelete() }
+    Button(L10n.text("Remove from this config", zhHans: "从该配置移除"), role: .destructive) { onDelete() }
 }
 
 // MARK: - 列表行
@@ -630,8 +630,8 @@ private struct MCPRow: View {
                                     : mcpToneColor(snapshot.tone))
                                 .frame(width: 6, height: 6)
                                 .help(stale
-                                    ? "上次检测：\(snapshot.label)（已超过 7 天，建议重新检测）"
-                                    : "上次检测：\(snapshot.label)")
+                                    ? L10n.format("Last probe: %@ (over 7 days ago — probe again)", zhHans: "上次检测：%@（已超过 7 天，建议重新检测）", String(snapshot.label))
+                                    : L10n.format("Last probe: %@", zhHans: "上次检测：%@", String(snapshot.label)))
                         }
                         Text(entry.name)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
@@ -643,7 +643,7 @@ private struct MCPRow: View {
                             TagChip(project)
                         }
                         if entry.enabled == false {
-                            TagChip("已停用", tint: Theme.failureRed)
+                            TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
                         }
                     }
                     if let summary = entry.commandSummary ?? entry.urlSummary {
@@ -663,11 +663,11 @@ private struct MCPRow: View {
                             .foregroundStyle(.tertiary)
                     }
                     if let callStat, callStat.calls > 0 {
-                        Text("\(callStat.calls) 次调用")
+                        Text(L10n.format("%@ calls", zhHans: "%@ 次调用", String(callStat.calls)))
                             .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(.tertiary)
                     } else if toolInfo == nil, !entry.envKeys.isEmpty {
-                        Text("\(entry.envKeys.count) 个密钥键")
+                        Text(L10n.format("%@ secret keys", zhHans: "%@ 个密钥键", String(entry.envKeys.count)))
                             .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(.tertiary)
                     }
@@ -714,7 +714,7 @@ private struct MCPCard: View {
                         HStack(spacing: 5) {
                             TagChip(entry.transport, neutral: true)
                             if entry.enabled == false {
-                                TagChip("已停用", tint: Theme.failureRed)
+                                TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
                             }
                         }
                     }
@@ -742,7 +742,7 @@ private struct MCPCard: View {
                             .lineLimit(1)
                     }
                     if let callStat, callStat.calls > 0 {
-                        Text("\(callStat.calls) 次调用")
+                        Text(L10n.format("%@ calls", zhHans: "%@ 次调用", String(callStat.calls)))
                             .font(Theme.font.themedMono(10))
                             .foregroundStyle(.tertiary)
                     }
@@ -800,8 +800,8 @@ private struct MCPDetailView: View {
             Divider()
             if entries.isEmpty {
                 EmptyStateView(
-                    icon: ToolKind.mcp.icon, title: "该 server 已不在任何配置中",
-                    hint: nil, actionTitle: "返回", action: onBack)
+                    icon: ToolKind.mcp.icon, title: L10n.text("This server is no longer in any config", zhHans: "该 server 已不在任何配置中"),
+                    hint: nil, actionTitle: L10n.text("Back", zhHans: "返回"), action: onBack)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -830,7 +830,7 @@ private struct MCPDetailView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(Theme.font.themed(11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
@@ -855,11 +855,11 @@ private struct MCPDetailView: View {
         if let primary {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    sectionTitle("定义")
+                    sectionTitle(L10n.text("Definition", zhHans: "定义"))
                     CardActionButton(icon: "doc.on.doc", size: 20,
-                                     help: "复制为 mcpServers JSON（不含密钥值）") {
+                                     help: L10n.text("Copy as mcpServers JSON (secret values omitted)", zhHans: "复制为 mcpServers JSON（不含密钥值）")) {
                         service.copyDefinitionJSON(primary) { ok in
-                            copyNote = ok ? "已复制（密钥值以空串占位）" : "复制失败"
+                            copyNote = ok ? L10n.text("Copied (secret values left blank)", zhHans: "已复制（密钥值以空串占位）") : L10n.text("Copy failed", zhHans: "复制失败")
                             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { copyNote = nil }
                         }
                     }
@@ -869,18 +869,18 @@ private struct MCPDetailView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     if let command = primary.commandSummary {
-                        labeledMono("命令", command)
+                        labeledMono(L10n.text("Command", zhHans: "命令"), command)
                     }
                     if let url = primary.urlSummary {
-                        labeledMono("地址", url)
+                        labeledMono(L10n.text("URL", zhHans: "地址"), url)
                     }
                     if !primary.envKeys.isEmpty {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            fieldLabel("密钥键")
+                            fieldLabel(L10n.text("Secret keys", zhHans: "密钥键"))
                             FlowLayout(spacing: 5, lineSpacing: 5) {
                                 ForEach(primary.envKeys, id: \.self) { TagChip($0, neutral: true) }
                             }
-                            Text("（值不读取、不显示）")
+                            Text(L10n.text("(values are not read or shown)", zhHans: "（值不读取、不显示）"))
                                 .font(Theme.font.themed(9.5))
                                 .foregroundStyle(.tertiary)
                         }
@@ -922,14 +922,14 @@ private struct MCPDetailView: View {
     private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                sectionTitle("连接与授权")
+                sectionTitle(L10n.text("Connection and auth", zhHans: "连接与授权"))
                 Spacer(minLength: 8)
                 Button {
                     service.probe(entries)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "waveform.path.ecg").font(.system(size: 10))
-                        Text("重新检测").font(Theme.font.themed(11))
+                        Text(L10n.text("Probe again", zhHans: "重新检测")).font(Theme.font.themed(11))
                     }
                 }
                 .buttonStyle(.bordered)
@@ -946,9 +946,9 @@ private struct MCPDetailView: View {
                 authRouteSection
                 // ③ CLI 侧授权（按已配置的源逐行列出，带文字按钮直接可点）
                 cliAuthRows
-                Text("检测结果为上次快照，点「重新检测」获取最新；检测与授权请求只发往该 server 自己披露的地址。"
+                Text(L10n.text("The result is the last snapshot. Choose “Probe again” for a fresh one. Probe and auth requests go only to the address this server itself advertises.", zhHans: "检测结果为上次快照，点「重新检测」获取最新；检测与授权请求只发往该 server 自己披露的地址。")
                     + (primary?.transport == "stdio"
-                        ? "stdio 检测会短暂启动配置的命令以读取能力清单，完成即退出。" : ""))
+                        ? L10n.text(" A stdio probe briefly starts the configured command to read its capabilities, then exits.", zhHans: "stdio 检测会短暂启动配置的命令以读取能力清单，完成即退出。") : ""))
                     .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
             }
@@ -972,7 +972,7 @@ private struct MCPDetailView: View {
                 .frame(width: 90, alignment: .leading)
             if service.probeResults[entry.id] == .checking {
                 ProgressView().controlSize(.small).scaleEffect(0.6)
-                Text("检测中…").font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
+                Text(L10n.text("Probing…", zhHans: "检测中…")).font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
             } else if let snapshot = service.probeSnapshots[entry.id] {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -986,7 +986,7 @@ private struct MCPDetailView: View {
                         }
                         Text(relativeFormatter.localizedString(
                             for: snapshot.checkedAt, relativeTo: Date())
-                            + (mcpSnapshotStale(snapshot) ? " · 已过期" : ""))
+                            + (mcpSnapshotStale(snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""))
                             .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
                     }
@@ -997,7 +997,7 @@ private struct MCPDetailView: View {
                     }
                 }
             } else {
-                Text("尚未检测").font(Theme.font.themed(10.5)).foregroundStyle(.tertiary)
+                Text(L10n.text("Not probed yet", zhHans: "尚未检测")).font(Theme.font.themed(10.5)).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
         }
@@ -1031,33 +1031,33 @@ private struct MCPDetailView: View {
                 authInfoRow(
                     icon: "key.horizontal",
                     title: keys.isEmpty
-                        ? "鉴权方式：请求头密钥（待填入）"
-                        : "鉴权方式：请求头密钥（\(keys.joined(separator: ", "))）",
+                        ? L10n.text("Auth: header secret (not set yet)", zhHans: "鉴权方式：请求头密钥（待填入）")
+                        : L10n.format("Auth: header secret (%@)", zhHans: "鉴权方式：请求头密钥（%@）", String(keys.joined(separator: ", "))),
                     body: keys.isEmpty
-                        ? "上次检测返回 401 且未公布 OAuth 元数据——该 server 走 API key 鉴权，在编辑表单的「请求头」里填入密钥即可。"
-                        : "该 server 用静态请求头密钥鉴权，无 OAuth 跳转；密钥过期时在编辑表单里更新值。",
-                    buttonTitle: "编辑请求头", prominent: true
+                        ? L10n.text("The last probe returned 401 and published no OAuth metadata — this server uses an API key. Enter it under Headers in the edit form.", zhHans: "上次检测返回 401 且未公布 OAuth 元数据——该 server 走 API key 鉴权，在编辑表单的「请求头」里填入密钥即可。")
+                        : L10n.text("This server authenticates with a static header secret and has no OAuth redirect. When the secret expires, update it in the edit form.", zhHans: "该 server 用静态请求头密钥鉴权，无 OAuth 跳转；密钥过期时在编辑表单里更新值。"),
+                    buttonTitle: L10n.text("Edit headers", zhHans: "编辑请求头"), prominent: true
                 ) { onEditCredentials(primary) }
             case .envKeys(let keys):
                 authInfoRow(
                     icon: "key.horizontal",
-                    title: "鉴权方式：环境变量（\(keys.joined(separator: ", "))）",
-                    body: "stdio server 的凭证按 MCP 规范取自环境变量，无浏览器授权；密钥过期时在编辑表单的「环境变量」里更新值。",
-                    buttonTitle: "编辑环境变量", prominent: false
+                    title: L10n.format("Auth: environment variables (%@)", zhHans: "鉴权方式：环境变量（%@）", String(keys.joined(separator: ", "))),
+                    body: L10n.text("A stdio server takes credentials from environment variables, per the MCP spec, with no browser auth. When a secret expires, update it under Environment in the edit form.", zhHans: "stdio server 的凭证按 MCP 规范取自环境变量，无浏览器授权；密钥过期时在编辑表单的「环境变量」里更新值。"),
+                    buttonTitle: L10n.text("Edit environment", zhHans: "编辑环境变量"), prominent: false
                 ) { onEditCredentials(primary) }
             case .open:
                 authInfoRow(
                     icon: "lock.open",
-                    title: "无需鉴权",
+                    title: L10n.text("No auth required", zhHans: "无需鉴权"),
                     body: primary.transport == "stdio"
-                        ? "该 stdio server 未配置任何密钥。"
-                        : "上次检测未携带凭证即连通，无需授权。",
+                        ? L10n.text("This stdio server has no secrets configured.", zhHans: "该 stdio server 未配置任何密钥。")
+                        : L10n.text("The last probe connected without credentials. No auth is required.", zhHans: "上次检测未携带凭证即连通，无需授权。"),
                     buttonTitle: nil, prominent: false, action: nil)
             case .unknown:
                 authInfoRow(
                     icon: "questionmark.circle",
-                    title: "鉴权方式待检测",
-                    body: "点「重新检测」自动识别：401 公布 OAuth 元数据 → 浏览器授权；未公布 → API key（编辑请求头）。",
+                    title: L10n.text("Auth method not probed yet", zhHans: "鉴权方式待检测"),
+                    body: L10n.text("Choose “Probe again” to detect it: a 401 that publishes OAuth metadata means browser auth; otherwise it’s an API key (edit headers).", zhHans: "点「重新检测」自动识别：401 公布 OAuth 元数据 → 浏览器授权；未公布 → API key（编辑请求头）。"),
                     buttonTitle: nil, prominent: false, action: nil)
                 eurekaTokenRow(prominent: false)
             }
@@ -1108,9 +1108,9 @@ private struct MCPDetailView: View {
                     .frame(width: 7, height: 7)
                     .padding(.top, 4)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(holding ? "Eureka 令牌：已持有" : "Eureka 令牌：未持有")
+                    Text(holding ? L10n.text("Eureka token: held", zhHans: "Eureka 令牌：已持有") : L10n.text("Eureka token: not held", zhHans: "Eureka 令牌：未持有"))
                         .font(Theme.font.themed(11.5, .medium))
-                    Text("令牌只用于本应用的检测与工具清单；CLI 的连接授权在各 CLI 内完成。")
+                    Text(L10n.text("The token is only for probing and the tool list in this app. Each CLI authorizes its own connection.", zhHans: "令牌只用于本应用的检测与工具清单；CLI 的连接授权在各 CLI 内完成。"))
                         .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                     if let note = entries.compactMap({ service.oauthNotes[$0.id] }).last {
@@ -1121,15 +1121,15 @@ private struct MCPDetailView: View {
                 }
                 Spacer(minLength: 8)
                 if holding {
-                    Button("撤销") { service.revokeToken(for: primary) }
+                    Button(L10n.text("Revoke", zhHans: "撤销")) { service.revokeToken(for: primary) }
                         .controlSize(.small)
                 } else if prominent {
-                    Button("在浏览器中授权") { service.authorizeInBrowser(primary) }
+                    Button(L10n.text("Authorize in browser", zhHans: "在浏览器中授权")) { service.authorizeInBrowser(primary) }
                         .controlSize(.small)
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.brand)
                 } else {
-                    Button("在浏览器中授权") { service.authorizeInBrowser(primary) }
+                    Button(L10n.text("Authorize in browser", zhHans: "在浏览器中授权")) { service.authorizeInBrowser(primary) }
                         .controlSize(.small)
                 }
             }
@@ -1144,25 +1144,25 @@ private struct MCPDetailView: View {
             DisclosureGroup(isExpanded: $clientIDExpanded) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        TextField("授权服务器分发的 client_id", text: $clientIDDraft)
+                        TextField(L10n.text("client_id issued by the authorization server", zhHans: "授权服务器分发的 client_id"), text: $clientIDDraft)
                             .textFieldStyle(.roundedBorder)
                             .font(Theme.font.monoSkillName(10.5, weight: .regular))
-                        Button("保存") {
+                        Button(L10n.text("Save", zhHans: "保存")) {
                             service.setPreRegisteredClientID(clientIDDraft, for: primary)
                         }
                         .controlSize(.small)
                         .disabled(clientIDDraft.trimmingCharacters(in: .whitespaces) == saved)
                     }
-                    Text("授权服务器不支持动态注册（DCR）时使用：在其控制台注册一个公共客户端"
-                        + "（回调地址 http://127.0.0.1/callback，回环地址按 OAuth 2.1 允许任意端口），"
-                        + "把 client_id 填在这里；留空保存即清除。")
+                    Text(L10n.text("Use this when the authorization server does not support dynamic client registration (DCR): register a public client in its console", zhHans: "授权服务器不支持动态注册（DCR）时使用：在其控制台注册一个公共客户端")
+                        + L10n.text(" (callback URL http://127.0.0.1/callback; OAuth 2.1 allows any port on loopback),", zhHans: "（回调地址 http://127.0.0.1/callback，回环地址按 OAuth 2.1 允许任意端口），")
+                        + L10n.text(" paste the client_id here. Saving an empty value clears it.", zhHans: "把 client_id 填在这里；留空保存即清除。"))
                         .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 4)
             } label: {
-                Text("高级：预注册 client_id\(saved.isEmpty ? "" : "（已设置）")")
+                Text(L10n.format("Advanced: pre-registered client_id%@", zhHans: "高级：预注册 client_id%@", String(saved.isEmpty ? "" : L10n.text(" (set)", zhHans: "（已设置）"))))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
             }
@@ -1177,7 +1177,7 @@ private struct MCPDetailView: View {
         if !rows.isEmpty {
             MCPRowDivider()
             VStack(alignment: .leading, spacing: 6) {
-                Text("CLI 侧授权")
+                Text(L10n.text("CLI authorization", zhHans: "CLI 侧授权"))
                     .font(Theme.font.themed(10, .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
@@ -1190,11 +1190,11 @@ private struct MCPDetailView: View {
                             .truncationMode(.middle)
                         Spacer(minLength: 8)
                         if row.1.isDirect {
-                            Button("复制命令") { service.copyToPasteboard(row.1.command) }
+                            Button(L10n.text("Copy command", zhHans: "复制命令")) { service.copyToPasteboard(row.1.command) }
                                 .buttonStyle(.borderless)
                                 .font(Theme.font.themed(10.5))
                         }
-                        Button(row.1.isDirect ? "去终端" : "打开") {
+                        Button(row.1.isDirect ? L10n.text("Open Terminal", zhHans: "去终端") : L10n.text("Open", zhHans: "打开")) {
                             service.openInTerminal(command: row.1.command)
                         }
                         .controlSize(.small)
@@ -1223,8 +1223,8 @@ private struct MCPDetailView: View {
         let stat = usage.mcpServerStats[serverName.lowercased()]
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                sectionTitle("能力")
-                Text("工具 / 提示词 / 资源，来自「重新检测」实测")
+                sectionTitle(L10n.text("Capabilities", zhHans: "能力"))
+                Text(L10n.text("Tools / prompts / resources, from the last “Probe again”", zhHans: "工具 / 提示词 / 资源，来自「重新检测」实测"))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
             }
@@ -1233,14 +1233,14 @@ private struct MCPDetailView: View {
                     capabilityBody(cache: cache, stat: stat)
                 } else {
                     // 从未检测过也常驻本卡：告诉用户能力清单从哪来（可发现性）
-                    Text("尚未检测——点上方「重新检测」获取该 server 的工具、提示词与资源清单。"
+                    Text(L10n.text("Not probed yet — choose “Probe again” above for this server’s tools, prompts, and resources.", zhHans: "尚未检测——点上方「重新检测」获取该 server 的工具、提示词与资源清单。")
                         + (primary?.transport == "stdio"
-                            ? "（stdio server 检测时会短暂启动配置的命令，读完即退出）" : ""))
+                            ? L10n.text(" (a stdio probe briefly starts the configured command and exits after reading)", zhHans: "（stdio server 检测时会短暂启动配置的命令，读完即退出）") : ""))
                         .font(Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if let stat, stat.calls > 0 {
-                        TagChip("累计调用 \(stat.calls) 次", neutral: true)
+                        TagChip(L10n.format("Total calls %@", zhHans: "累计调用 %@ 次", String(stat.calls)), neutral: true)
                     }
                 }
             }
@@ -1263,26 +1263,26 @@ private struct MCPDetailView: View {
         // 概览 chips：开销与元信息（数量放进分组页签，不重复）
         HStack(spacing: 6) {
             if cache.schemaTokens > 0 {
-                TagChip("每轮 ~\(formatTokens(cache.schemaTokens)) tokens")
+                TagChip(L10n.format("~%@ tokens per turn", zhHans: "每轮 ~%@ tokens", String(formatTokens(cache.schemaTokens))))
             }
             if let version = cache.serverVersion {
                 TagChip("v\(version)", neutral: true)
             }
             if let proto = cache.protocolVersion {
-                TagChip("协议 \(proto)", neutral: true)
+                TagChip(L10n.format("Protocol %@", zhHans: "协议 %@", String(proto)), neutral: true)
             }
             if let stat, stat.calls > 0 {
-                TagChip("累计调用 \(stat.calls) 次", neutral: true)
+                TagChip(L10n.format("Total calls %@", zhHans: "累计调用 %@ 次", String(stat.calls)), neutral: true)
             }
         }
         // 分组页签（只显示有数据的组；工具恒在）
         HStack(spacing: 6) {
-            capabilitySegment("tools", "工具", count: cache.toolCount)
+            capabilitySegment("tools", L10n.text("Tools", zhHans: "工具"), count: cache.toolCount)
             if let count = cache.promptCount {
-                capabilitySegment("prompts", "提示词", count: count)
+                capabilitySegment("prompts", L10n.text("Prompts", zhHans: "提示词"), count: count)
             }
             if let count = cache.resourceCount {
-                capabilitySegment("resources", "资源", count: count)
+                capabilitySegment("resources", L10n.text("Resources", zhHans: "资源"), count: count)
             }
             Spacer(minLength: 0)
         }
@@ -1291,7 +1291,7 @@ private struct MCPDetailView: View {
             : capabilityTab == "resources" ? (cache.resources?.count ?? 0) : cache.toolCount
         if activeCount > 10 {
             SearchField(
-                placeholder: "搜索名称或描述…", text: $capabilitySearch,
+                placeholder: L10n.text("Search name or description…", zhHans: "搜索名称或描述…"), text: $capabilitySearch,
                 resultCount: capabilitySearch.trimmingCharacters(in: .whitespaces).isEmpty
                     ? nil : filteredCount(cache: cache),
                 maxWidth: 380)
@@ -1302,7 +1302,7 @@ private struct MCPDetailView: View {
                 Text(hint)
                     .font(Theme.font.themed(10))
                     .foregroundStyle(Theme.goldFg)
-                Button("从所有源移除…") { removeAllConfirm = true }
+                Button(L10n.text("Remove from all sources…", zhHans: "从所有源移除…")) { removeAllConfirm = true }
                     .font(Theme.font.themed(10, .semibold))
                     .foregroundStyle(Theme.failureRed)
                     .buttonStyle(.borderless)
@@ -1311,19 +1311,19 @@ private struct MCPDetailView: View {
                 }
             }
             .confirmationDialog(
-                "从所有配置移除「\(serverName)」？",
+                L10n.format("Remove “%@” from every config?", zhHans: "从所有配置移除「%@」？", String(serverName)),
                 isPresented: $removeAllConfirm,
                 titleVisibility: .visible
             ) {
-                Button("移除（\(entries.count) 处，写前各留备份）", role: .destructive) {
+                Button(L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(entries.count)), role: .destructive) {
                     runRemoveEverywhere()
                 }
-                Button("取消", role: .cancel) {}
+                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
             } message: {
-                Text("将从以下位置移除：\n\(entries.map(\.configPath).joined(separator: "\n"))")
+                Text(L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(entries.map(\.configPath).joined(separator: "\n"))))
             }
         }
-        Text("检测于 \(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))")
+        Text(L10n.format("Probed %@", zhHans: "检测于 %@", String(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))))
             .font(Theme.font.themed(9))
             .foregroundStyle(.tertiary)
     }
@@ -1363,9 +1363,9 @@ private struct MCPDetailView: View {
         let query = capabilitySearch.trimmingCharacters(in: .whitespaces).lowercased()
         switch capabilityTab {
         case "prompts":
-            namedList(cache.prompts ?? [], query: query, empty: "该 server 未提供提示词")
+            namedList(cache.prompts ?? [], query: query, empty: L10n.text("This server provides no prompts", zhHans: "该 server 未提供提示词"))
         case "resources":
-            namedList(cache.resources ?? [], query: query, empty: "该 server 未提供资源")
+            namedList(cache.resources ?? [], query: query, empty: L10n.text("This server provides no resources", zhHans: "该 server 未提供资源"))
         default:
             if let tools = cache.tools, !tools.isEmpty {
                 let filtered = tools.filter { tool in
@@ -1375,7 +1375,7 @@ private struct MCPDetailView: View {
                         || (tool.description ?? "").lowercased().contains(query)
                 }
                 if filtered.isEmpty {
-                    Text("没有匹配「\(capabilitySearch)」的工具")
+                    Text(L10n.format("No tools match “%@”", zhHans: "没有匹配「%@」的工具", String(capabilitySearch)))
                         .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
                 } else {
                     // 表格井：外框 + 实心行线（brutal = 2px 墨），工具逐条成格
@@ -1408,7 +1408,7 @@ private struct MCPDetailView: View {
                     }
                 }
             } else {
-                Text("该 server 未暴露任何工具")
+                Text(L10n.text("This server exposes no tools", zhHans: "该 server 未暴露任何工具"))
                     .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
             }
         }
@@ -1420,7 +1420,7 @@ private struct MCPDetailView: View {
     ) -> some View {
         let filtered = items.filter { matches($0, query) }
         if filtered.isEmpty {
-            Text(items.isEmpty ? empty : "没有匹配「\(capabilitySearch)」的条目")
+            Text(items.isEmpty ? empty : L10n.format("No items match “%@”", zhHans: "没有匹配「%@」的条目", String(capabilitySearch)))
                 .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
         } else {
             MCPListWell {
@@ -1440,17 +1440,17 @@ private struct MCPDetailView: View {
         let thirtyDaysAgo = Date().timeIntervalSince1970 - 30 * 86_400
         let idle = (stat?.calls ?? 0) == 0 || (stat?.lastTs ?? 0) < thirtyDaysAgo
         guard idle else { return nil }
-        return "30 天内没有调用记录，却每轮消耗 ~\(formatTokens(cache.schemaTokens)) tokens —— 建议停用或移除"
+        return L10n.format("No calls in 30 days, but ~%@ tokens are spent every turn — consider disabling or removing it", zhHans: "30 天内没有调用记录，却每轮消耗 ~%@ tokens —— 建议停用或移除", String(formatTokens(cache.schemaTokens)))
     }
 
     private func runRemoveEverywhere() {
-        removeAllNote = "正在移除…"
+        removeAllNote = L10n.text("Removing…", zhHans: "正在移除…")
         service.removeEverywhere(named: serverName) { results in
             let failures = results.sorted(by: { $0.key < $1.key })
-                .compactMap { label, error in error.map { "\(label)：\($0)" } }
+                .compactMap { label, error in error.map { L10n.format("%@: %@", zhHans: "%@：%@", String(label), String($0)) } }
             removeAllNote = failures.isEmpty
-                ? "已从 \(results.count) 处移除"
-                : "部分失败 —— " + failures.joined(separator: "；")
+                ? L10n.format("Removed from %@ places", zhHans: "已从 %@ 处移除", String(results.count))
+                : L10n.text("Partial failure — ", zhHans: "部分失败 —— ") + failures.joined(separator: L10n.text("; ", zhHans: "；"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { removeAllNote = nil }
         }
     }
@@ -1466,13 +1466,13 @@ private struct MCPDetailView: View {
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                sectionTitle("调用活跃")
+                sectionTitle(L10n.text("Call activity", zhHans: "调用活跃"))
                 if let stat = usage.mcpServerStats[serverName.lowercased()], stat.calls > 0 {
-                    Text("近 30 天 \(recentCalls) 次 · 累计 \(stat.calls) 次 · 最近 \(relativeFormatter.localizedString(for: Date(timeIntervalSince1970: stat.lastTs), relativeTo: Date()))")
+                    Text(L10n.format("Last 30 days %@ · total %@ · latest %@", zhHans: "近 30 天 %@ 次 · 累计 %@ 次 · 最近 %@", String(recentCalls), String(stat.calls), String(relativeFormatter.localizedString(for: Date(timeIntervalSince1970: stat.lastTs), relativeTo: Date()))))
                         .font(Theme.font.themed(10))
                         .foregroundStyle(.tertiary)
                 } else {
-                    Text("暂无调用记录（5 个源的扫描器计入 kind='mcp'）")
+                    Text(L10n.text("No calls yet (scanners from 5 sources count kind='mcp')", zhHans: "暂无调用记录（5 个源的扫描器计入 kind='mcp'）"))
                         .font(Theme.font.themed(10))
                         .foregroundStyle(.tertiary)
                 }
@@ -1511,7 +1511,7 @@ private struct MCPDetailView: View {
             }
         }
         .frame(height: 30, alignment: .bottom)
-        .help("近 30 天逐日调用（最高 \(peak) 次/天）")
+        .help(L10n.format("Calls per day over 30 days (peak %@/day)", zhHans: "近 30 天逐日调用（最高 %@ 次/天）", String(peak)))
     }
 
     // MARK: 跨源矩阵（照 SkillDetailView.matrixSection 模板）
@@ -1520,11 +1520,11 @@ private struct MCPDetailView: View {
         let configuredSources = Set(entries.map(\.source))
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                sectionTitle("配置于")
-                Text("\(AgentSource.allCases.count) 个工具中 \(configuredSources.count) 个已配置")
+                sectionTitle(L10n.text("Configured in", zhHans: "配置于"))
+                Text(L10n.format("%@ tools, %@ configured", zhHans: "%@ 个工具中 %@ 个已配置", String(AgentSource.allCases.count), String(configuredSources.count)))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
-                Text("· 点可安装的源一键复制过去")
+                Text(L10n.text("· click an installable source to copy it there", zhHans: "· 点可安装的源一键复制过去"))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
             }
@@ -1540,18 +1540,18 @@ private struct MCPDetailView: View {
         }
         .sheet(isPresented: $projectSheet) { projectInstallSheet }
         .confirmationDialog(
-            "安装到 \(installTarget?.displayName ?? "")？",
+            L10n.format("Install into %@?", zhHans: "安装到 %@？", String(installTarget?.displayName ?? "")),
             isPresented: Binding(
                 get: { installTarget != nil },
                 set: { if !$0 { installTarget = nil } }),
             titleVisibility: .visible
         ) {
-            Button("写入该 agent 的 MCP 配置") { runInstall() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Write this agent’s MCP config", zhHans: "写入该 agent 的 MCP 配置")) { runInstall() }
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         } message: {
             if let target = installTarget,
                let writable = MCPService.writableTarget(for: target) {
-                Text("将把 server 定义（含密钥值，仅本机文件间复制）写入\n\(writable.configURL.path)\n写前会留 .bak.eureka 备份。")
+                Text(L10n.format("The server definition (including secret values, copied only between files on this Mac) will be written to\n%@\nA .bak.eureka backup is kept first.", zhHans: "将把 server 定义（含密钥值，仅本机文件间复制）写入\n%@\n写前会留 .bak.eureka 备份。", String(writable.configURL.path)))
             }
         }
     }
@@ -1569,15 +1569,15 @@ private struct MCPDetailView: View {
                 .font(Theme.font.themed(9))
                 .foregroundStyle(configured ? .secondary : .tertiary)
             if configured {
-                Text("已配置")
+                Text(L10n.text("Configured", zhHans: "已配置"))
                     .font(Theme.font.themed(8, .medium))
                     .foregroundStyle(.green)
             } else if installable {
-                Text("安装")
+                Text(L10n.text("Install", zhHans: "安装"))
                     .font(Theme.font.themed(8, .semibold))
                     .foregroundStyle(Theme.brandFg)
             } else {
-                Text("不可写")
+                Text(L10n.text("Not writable", zhHans: "不可写"))
                     .font(Theme.font.themed(8, .medium))
                     .foregroundStyle(.secondary)
             }
@@ -1598,20 +1598,20 @@ private struct MCPDetailView: View {
             installTarget = source
         }
         .help(configured
-            ? "\(source.displayName) 已配置该 server"
-            : (blockReason ?? "把该 server 写入 \(source.displayName) 的 MCP 配置"))
+            ? L10n.format("%@ already has this server", zhHans: "%@ 已配置该 server", String(source.displayName))
+            : (blockReason ?? L10n.format("Write this server into %@’s MCP config", zhHans: "把该 server 写入 %@ 的 MCP 配置", String(source.displayName))))
     }
 
     private func runInstall() {
         guard let installTo = installTarget, let primary else { return }
         installTarget = nil
         let targetName = installTo.displayName
-        installNote = "正在安装到 \(targetName)…"
+        installNote = L10n.format("Installing into %@…", zhHans: "正在安装到 %@…", String(targetName))
         service.propagate(primary, to: [installTo]) { results in
             if let failure = results[installTo] ?? nil {
-                installNote = "安装到 \(targetName) 失败：\(failure)"
+                installNote = L10n.format("Install into %@ failed: %@", zhHans: "安装到 %@ 失败：%@", String(targetName), String(failure))
             } else {
-                installNote = "已安装到 \(targetName)（写前留有备份）"
+                installNote = L10n.format("Installed into %@ (backup kept before writing)", zhHans: "已安装到 %@（写前留有备份）", String(targetName))
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
         }
@@ -1625,10 +1625,10 @@ private struct MCPDetailView: View {
             Image(systemName: projectConfigured ? "folder.fill.badge.checkmark" : "folder.badge.plus")
                 .font(.system(size: 12))
                 .foregroundStyle(projectConfigured ? .secondary : Theme.brandFg.opacity(0.8))
-            Text("项目级")
+            Text(L10n.text("Project", zhHans: "项目级"))
                 .font(Theme.font.themed(9))
                 .foregroundStyle(.secondary)
-            Text(projectConfigured ? "已配置" : "安装")
+            Text(projectConfigured ? L10n.text("Configured", zhHans: "已配置") : L10n.text("Install", zhHans: "安装"))
                 .font(Theme.font.themed(8, projectConfigured ? .medium : .semibold))
                 .foregroundStyle(projectConfigured ? .green : Theme.brandFg)
         }
@@ -1645,21 +1645,21 @@ private struct MCPDetailView: View {
         .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
         .onTapGesture { projectSheet = true }
         .help(projectConfigured
-            ? "已装到某些 repo；点开可再装到其它项目"
-            : "把该 server 写入所选 repo 的 .mcp.json（随项目共享）")
+            ? L10n.text("Already in some repos; open to install into another project", zhHans: "已装到某些 repo；点开可再装到其它项目")
+            : L10n.text("Write this server into the selected repo’s .mcp.json (shared with the project)", zhHans: "把该 server 写入所选 repo 的 .mcp.json（随项目共享）"))
     }
 
     /// repo 选择 sheet：最近项目（扫描实勘的根）+ 浏览兜底
     private var projectInstallSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("安装「\(serverName)」到项目")
+            Text(L10n.format("Install “%@” into a project", zhHans: "安装「%@」到项目", String(serverName)))
                 .font(Theme.font.themed(13, .semibold))
             HStack(spacing: 6) {
                 Menu {
                     ForEach(service.repoRoots, id: \.root) { candidate in
                         Button(candidate.name.isEmpty
                             ? candidate.root.lastPathComponent
-                            : "\(candidate.name)（\(candidate.root.lastPathComponent)）") {
+                            : L10n.format("%@ (%@)", zhHans: "%@（%@）", String(candidate.name), String(candidate.root.lastPathComponent))) {
                             projectRootPath = candidate.root.path
                         }
                     }
@@ -1667,7 +1667,7 @@ private struct MCPDetailView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "folder").font(.system(size: 9))
                         Text(projectRootPath.isEmpty
-                            ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""))
+                            ? L10n.text("Choose a project", zhHans: "选择项目") : String(projectRootPath.split(separator: "/").last ?? ""))
                             .lineLimit(1)
                     }
                     .font(Theme.font.themed(11))
@@ -1675,7 +1675,7 @@ private struct MCPDetailView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                Button("浏览…") {
+                Button(L10n.text("Browse…", zhHans: "浏览…")) {
                     if let picked = mcpPickProjectRoot() { projectRootPath = picked }
                 }
                 .font(Theme.font.themed(11))
@@ -1687,18 +1687,18 @@ private struct MCPDetailView: View {
                     .foregroundStyle(.tertiary)
             }
             Toggle(isOn: $projectCursorToo) {
-                Text("同时写 cursor 的项目配置（.cursor/mcp.json）")
+                Text(L10n.text("Also write Cursor’s project config (.cursor/mcp.json)", zhHans: "同时写 cursor 的项目配置（.cursor/mcp.json）"))
                     .font(Theme.font.themed(11))
             }
             .toggleStyle(.checkbox)
             HStack {
-                Button("取消") { projectSheet = false }
+                Button(L10n.text("Cancel", zhHans: "取消")) { projectSheet = false }
                     .font(Theme.font.themed(11))
                 Spacer()
                 Button {
                     runProjectInstall()
                 } label: {
-                    Text("写入 .mcp.json")
+                    Text(L10n.text("Write .mcp.json", zhHans: "写入 .mcp.json"))
                         .font(Theme.font.themed(11, .semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
@@ -1718,15 +1718,15 @@ private struct MCPDetailView: View {
         if projectCursorToo { sources.append(.cursor) }
         let root = URL(fileURLWithPath:
             projectRootPath.trimmingCharacters(in: .whitespaces))
-        installNote = "正在安装到项目级…"
+        installNote = L10n.text("Installing at project level…", zhHans: "正在安装到项目级…")
         service.propagateToProject(primary, sources: sources, projectRoot: root) { results in
             let failures = results.sorted(by: { $0.key.rawValue < $1.key.rawValue })
                 .compactMap { source, error in
-                    error.map { "项目级 \(source.displayName)：\($0)" }
+                    error.map { L10n.format("Project %@: %@", zhHans: "项目级 %@：%@", String(source.displayName), String($0)) }
                 }
             installNote = failures.isEmpty
-                ? "已安装到项目（写前留有备份）"
-                : "安装失败 —— " + failures.joined(separator: "；")
+                ? L10n.text("Installed into the project (backup kept before writing)", zhHans: "已安装到项目（写前留有备份）")
+                : L10n.text("Install failed — ", zhHans: "安装失败 —— ") + failures.joined(separator: L10n.text("; ", zhHans: "；"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
         }
     }
@@ -1736,8 +1736,8 @@ private struct MCPDetailView: View {
     private var occurrencesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                sectionTitle("各处配置")
-                Text("· 点击某行可编辑该处定义")
+                sectionTitle(L10n.text("Where it’s configured", zhHans: "各处配置"))
+                Text(L10n.text("· click a row to edit that definition", zhHans: "· 点击某行可编辑该处定义"))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
             }
@@ -1762,10 +1762,10 @@ private struct MCPDetailView: View {
                     HStack(spacing: 6) {
                         Text(entry.source.displayName)
                             .font(Theme.font.themed(12, .medium))
-                        TagChip(entry.projectName ?? "全局",
+                        TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"),
                                 neutral: entry.projectName == nil)
                         if entry.enabled == false {
-                            TagChip("已停用", tint: Theme.failureRed)
+                            TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
                         }
                         probeChip(for: entry)
                     }
@@ -1777,14 +1777,14 @@ private struct MCPDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 8)
-                CardActionButton(icon: "square.and.pencil", help: "编辑该处定义") {
+                CardActionButton(icon: "square.and.pencil", help: L10n.text("Edit this definition", zhHans: "编辑该处定义")) {
                     onEdit(entry)
                 }
-                CardActionButton(icon: "folder", help: "在 Finder 中显示") {
+                CardActionButton(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) {
                     service.reveal(path: entry.configPath)
                 }
                 CardActionButton(icon: "trash", color: Theme.failureRed,
-                                 help: "从该配置移除（写前留备份）") {
+                                 help: L10n.text("Remove from this config (backup before writing)", zhHans: "从该配置移除（写前留备份）")) {
                     onDeleteEntry(entry)
                 }
             }
@@ -1793,7 +1793,7 @@ private struct MCPDetailView: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture { onEdit(entry) }
-        .help("点击编辑该处定义")
+        .help(L10n.text("Click to edit this definition", zhHans: "点击编辑该处定义"))
     }
 
     /// 状态 chip：检测中 → spinner；否则显示**持久化快照**（重启不丢，v2.6 直显）；
@@ -1805,7 +1805,7 @@ private struct MCPDetailView: View {
         } else if let snapshot = service.probeSnapshots[entry.id] {
             TagChip(snapshot.label, tint: mcpToneColor(snapshot.tone))
             Text(relativeFormatter.localizedString(for: snapshot.checkedAt, relativeTo: Date())
-                + (mcpSnapshotStale(snapshot) ? " · 已过期" : ""))
+                + (mcpSnapshotStale(snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""))
                 .font(Theme.font.themed(9))
                 .foregroundStyle(.tertiary)
         }
@@ -1881,12 +1881,12 @@ private struct MCPServerFormView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(isEditing
-                        ? "修改后保存：原位改写该处配置，未建模字段保留，写前留备份。"
+                        ? L10n.text("Saving rewrites this config in place, keeps fields this form doesn’t model, and backs up first.", zhHans: "修改后保存：原位改写该处配置，未建模字段保留，写前留备份。")
                         : (mode == .quick
-                            ? "粘贴命令、URL 或 JSON，自动识别并安装到所选 agent。"
+                            ? L10n.text("Paste a command, URL, or JSON. It’s recognized and installed into the selected agents.", zhHans: "粘贴命令、URL 或 JSON，自动识别并安装到所选 agent。")
                             : (mode == .form
-                                ? "手动配置名称、命令/URL、环境变量与请求头。"
-                                : "粘贴或编辑 mcpServers JSON；多个 server 会全部写入所选目标。")))
+                                ? L10n.text("Set the name, command/URL, environment, and headers yourself.", zhHans: "手动配置名称、命令/URL、环境变量与请求头。")
+                                : L10n.text("Paste or edit mcpServers JSON. Every server in it is written to the selected targets.", zhHans: "粘贴或编辑 mcpServers JSON；多个 server 会全部写入所选目标。"))))
                         .font(Theme.font.themed(11))
                         .foregroundStyle(.secondary)
                     card
@@ -1904,14 +1904,14 @@ private struct MCPServerFormView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(Theme.font.themed(11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
             MCPIconTile(size: 22)
             Text(isEditing
-                ? "编辑 \(target.editing?.name ?? "")"
-                : "新建 MCP Server")
+                ? L10n.format("Edit %@", zhHans: "编辑 %@", String(target.editing?.name ?? ""))
+                : L10n.text("New MCP Server", zhHans: "新建 MCP Server"))
                 .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -1921,12 +1921,12 @@ private struct MCPServerFormView: View {
             CapsuleTabTray {
                 if !isEditing {
                     CapsuleTabButton(
-                        title: "快速安装", fillWidth: false, isSelected: mode == .quick
+                        title: L10n.text("Quick install", zhHans: "快速安装"), fillWidth: false, isSelected: mode == .quick
                     ) {
                         switchMode(.quick)
                     }
                 }
-                CapsuleTabButton(title: "手动配置", fillWidth: false, isSelected: mode == .form) {
+                CapsuleTabButton(title: L10n.text("Manual setup", zhHans: "手动配置"), fillWidth: false, isSelected: mode == .form) {
                     switchMode(.form)
                 }
                 CapsuleTabButton(title: "JSON", fillWidth: false, isSelected: mode == .paste) {
@@ -1944,7 +1944,7 @@ private struct MCPServerFormView: View {
         VStack(alignment: .leading, spacing: 14) {
             // 快速安装无名称输入（名称自动派生，想改名切「手动配置」）
             if mode != .quick {
-                fieldColumn("名称") {
+                fieldColumn(L10n.text("Name", zhHans: "名称")) {
                     TextField("my-mcp-server", text: $name)
                         .textFieldStyle(.roundedBorder)
                         .font(Theme.font.monoSkillName(12, weight: .regular))
@@ -1968,11 +1968,11 @@ private struct MCPServerFormView: View {
                 Text(note).font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
-                Button(isEditing ? "保存修改" : "添加") { submit() }
+                Button(isEditing ? L10n.text("Save changes", zhHans: "保存修改") : L10n.text("Add", zhHans: "添加")) { submit() }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.brand)
                     .disabled(!canSubmit || submitting)
-                Button("取消", action: onBack)
+                Button(L10n.text("Cancel", zhHans: "取消"), action: onBack)
                     .buttonStyle(.borderless)
                 Spacer(minLength: 12)
                 Text(footerHint)
@@ -2007,11 +2007,11 @@ private struct MCPServerFormView: View {
     }
 
     private func lockedLocationRow(_ entry: MCPServerEntry) -> some View {
-        fieldColumn("写入位置（锁定）") {
+        fieldColumn(L10n.text("Write location (locked)", zhHans: "写入位置（锁定）")) {
             HStack(spacing: 8) {
                 SourceLogoTile(source: entry.source, size: 20)
                 Text(entry.source.displayName).font(Theme.font.themed(12, .medium))
-                TagChip(entry.projectName ?? "全局", neutral: entry.projectName == nil)
+                TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"), neutral: entry.projectName == nil)
                 Text(entry.configPath)
                     .font(Theme.font.monoSkillName(9, weight: .regular))
                     .foregroundStyle(.tertiary)
@@ -2023,10 +2023,10 @@ private struct MCPServerFormView: View {
 
     @ViewBuilder
     private var formFields: some View {
-        fieldColumn("类型") {
+        fieldColumn(L10n.text("Type", zhHans: "类型")) {
             Picker("", selection: $isRemote) {
-                Text("stdio（本地命令）").tag(false)
-                Text("远程（HTTP/SSE）").tag(true)
+                Text(L10n.text("stdio (local command)", zhHans: "stdio（本地命令）")).tag(false)
+                Text(L10n.text("Remote (HTTP/SSE)", zhHans: "远程（HTTP/SSE）")).tag(true)
             }
             .labelsHidden()
             .pickerStyle(.menu)
@@ -2038,30 +2038,30 @@ private struct MCPServerFormView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.font.monoSkillName(12, weight: .regular))
             }
-            fieldColumn("超时时间 MS（可选）") {
+            fieldColumn(L10n.text("Timeout ms (optional)", zhHans: "超时时间 MS（可选）")) {
                 TextField("30000", text: $timeoutText)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.font.monoSkillName(12, weight: .regular))
                     .frame(maxWidth: 200)
             }
-            kvDisclosure("请求头（可选）", rows: $headerRows, expanded: $headersExpanded,
+            kvDisclosure(L10n.text("Headers (optional)", zhHans: "请求头（可选）"), rows: $headerRows, expanded: $headersExpanded,
                          keyPlaceholder: "Authorization", valuePlaceholder: "Bearer …",
-                         addLabel: "添加请求头")
+                         addLabel: L10n.text("Add header", zhHans: "添加请求头"))
         } else {
-            fieldColumn("命令") {
+            fieldColumn(L10n.text("Command", zhHans: "命令")) {
                 TextField("npx", text: $command)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.font.monoSkillName(12, weight: .regular))
                     .frame(maxWidth: 320)
             }
-            fieldColumn("参数（空格分隔）") {
+            fieldColumn(L10n.text("Arguments (space-separated)", zhHans: "参数（空格分隔）")) {
                 TextField("-y @modelcontextprotocol/server-memory", text: $argsText)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.font.monoSkillName(12, weight: .regular))
             }
-            kvDisclosure("环境变量（可选）", rows: $envRows, expanded: $envExpanded,
-                         keyPlaceholder: "API_KEY", valuePlaceholder: "值（只写入目标配置，Eureka 不保存）",
-                         addLabel: "添加环境变量")
+            kvDisclosure(L10n.text("Environment (optional)", zhHans: "环境变量（可选）"), rows: $envRows, expanded: $envExpanded,
+                         keyPlaceholder: "API_KEY", valuePlaceholder: L10n.text("Value (written only to the target config; Eureka does not keep it)", zhHans: "值（只写入目标配置，Eureka 不保存）"),
+                         addLabel: L10n.text("Add variable", zhHans: "添加环境变量"))
         }
     }
 
@@ -2086,7 +2086,7 @@ private struct MCPServerFormView: View {
                             Image(systemName: "minus.circle").font(.system(size: 12))
                         }
                         .buttonStyle(.borderless)
-                        .help("删除该行")
+                        .help(L10n.text("Delete this row", zhHans: "删除该行"))
                     }
                 }
                 Button {
@@ -2121,7 +2121,7 @@ private struct MCPServerFormView: View {
 
     @ViewBuilder
     private var quickFields: some View {
-        fieldColumn("命令、URL 或 JSON") {
+        fieldColumn(L10n.text("Command, URL, or JSON", zhHans: "命令、URL 或 JSON")) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $quickText)
                     .font(Theme.font.monoSkillName(12, weight: .regular))
@@ -2131,8 +2131,8 @@ private struct MCPServerFormView: View {
                 if quickText.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(verbatim: "npx -y chrome-devtools-mcp@latest")
-                        Text(verbatim: "或 https://example.com/mcp")
-                        Text(verbatim: "或整段 {\"mcpServers\": …} JSON")
+                        Text(verbatim: L10n.text("or https://example.com/mcp", zhHans: "或 https://example.com/mcp"))
+                        Text(verbatim: L10n.text("or a whole {\"mcpServers\": …} JSON", zhHans: "或整段 {\"mcpServers\": …} JSON"))
                     }
                     .font(Theme.font.monoSkillName(12, weight: .regular))
                     .foregroundStyle(.tertiary)
@@ -2150,19 +2150,19 @@ private struct MCPServerFormView: View {
         }
         let defs = parsedQuick
         Text(quickText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "粘贴命令、URL 或 JSON 即可安装；需要自定义名称、环境变量或请求头时，切到「手动配置」。"
+            ? L10n.text("Paste a command, URL, or JSON to install. For a custom name, environment, or headers, switch to Manual setup.", zhHans: "粘贴命令、URL 或 JSON 即可安装；需要自定义名称、环境变量或请求头时，切到「手动配置」。")
             : (defs.isEmpty
-                ? "没有解析出 server —— 检查输入是否完整"
+                ? L10n.text("No server parsed — check that the input is complete", zhHans: "没有解析出 server —— 检查输入是否完整")
                 : (defs.count == 1
-                    ? "将安装为「\(defs[0].name)」（\(defs[0].transport == .remote ? "远程" : "stdio")）—— 名称自动派生，可切到「手动配置」调整"
-                    : "解析出 \(defs.count) 个 server：\(defs.map(\.name).joined(separator: "、"))")))
+                    ? L10n.format("Will install as “%@” (%@) — the name is derived automatically. Switch to Manual setup to change it.", zhHans: "将安装为「%@」（%@）—— 名称自动派生，可切到「手动配置」调整", String(defs[0].name), String(defs[0].transport == .remote ? L10n.text("remote", zhHans: "远程") : "stdio"))
+                    : L10n.format("Parsed %@ servers: %@", zhHans: "解析出 %@ 个 server：%@", String(defs.count), String(defs.map(\.name).joined(separator: L10n.text(", ", zhHans: "、")))))))
             .font(Theme.font.themed(9.5))
             .foregroundStyle(defs.isEmpty && !quickText.isEmpty
                 ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
         HStack(spacing: 6) {
-            TagChip("自动识别传输方式", neutral: true)
-            TagChip("名称自动派生", neutral: true)
-            TagChip("写前自动备份", neutral: true)
+            TagChip(L10n.text("Transport detected automatically", zhHans: "自动识别传输方式"), neutral: true)
+            TagChip(L10n.text("Name derived automatically", zhHans: "名称自动派生"), neutral: true)
+            TagChip(L10n.text("Backup before writing", zhHans: "写前自动备份"), neutral: true)
         }
     }
 
@@ -2170,7 +2170,7 @@ private struct MCPServerFormView: View {
 
     @ViewBuilder
     private var jsonEditor: some View {
-        fieldColumn("JSON（支持整段 mcpServers 对象；多个 server 会全部写入所选目标）") {
+        fieldColumn(L10n.text("JSON (a whole mcpServers object is fine; every server is written to the selected targets)", zhHans: "JSON（支持整段 mcpServers 对象；多个 server 会全部写入所选目标）")) {
             TextEditor(text: $pasteText)
                 .font(Theme.font.monoSkillName(11.5, weight: .regular))
                 .frame(minHeight: 220)
@@ -2185,10 +2185,10 @@ private struct MCPServerFormView: View {
         }
         let defs = parsedDefinitions
         Text(pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "示例：{\"mcpServers\": {\"context7\": {\"command\": \"npx\", \"args\": [\"-y\", \"@upstash/context7-mcp\"]}}}"
+            ? L10n.text("Example: {\"mcpServers\": {\"context7\": {\"command\": \"npx\", \"args\": [\"-y\", \"@upstash/context7-mcp\"]}}}", zhHans: "示例：{\"mcpServers\": {\"context7\": {\"command\": \"npx\", \"args\": [\"-y\", \"@upstash/context7-mcp\"]}}}")
             : (defs.isEmpty
-                ? "没有解析出任何 server —— 检查 JSON 是否完整"
-                : "解析出 \(defs.count) 个 server：\(defs.map(\.name).joined(separator: "、"))"))
+                ? L10n.text("No servers parsed — check that the JSON is complete", zhHans: "没有解析出任何 server —— 检查 JSON 是否完整")
+                : L10n.format("Parsed %@ servers: %@", zhHans: "解析出 %@ 个 server：%@", String(defs.count), String(defs.map(\.name).joined(separator: L10n.text(", ", zhHans: "、"))))))
             .font(Theme.font.themed(9.5))
             .foregroundStyle(defs.isEmpty && !pasteText.isEmpty
                 ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
@@ -2214,11 +2214,11 @@ private struct MCPServerFormView: View {
             if let first = defs.first {
                 populate(from: first, keepName: isEditing)
                 if defs.count > 1 {
-                    resultNote = "解析出 \(defs.count) 个 server，表单只显示第一个；回原页签提交可全部写入"
+                    resultNote = L10n.format("Parsed %@ servers. The form shows only the first; submit from the original tab to write all of them.", zhHans: "解析出 %@ 个 server，表单只显示第一个；回原页签提交可全部写入", String(defs.count))
                 }
             } else if mode == .paste,
                       !pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                resultNote = "JSON 未解析出 server，保留原表单内容"
+                resultNote = L10n.text("JSON did not parse into a server; the form was left unchanged", zhHans: "JSON 未解析出 server，保留原表单内容")
             }
         case .quick:
             break  // 快速输入框保持用户原文
@@ -2275,7 +2275,7 @@ private struct MCPServerFormView: View {
         // "用默认编辑器打开配置文件"可见整份明文）；值仍不落库、不进日志、不上云。
         service.definition(of: entry) { definition in
             guard let definition else {
-                resultNote = "读取现有定义失败"
+                resultNote = L10n.text("Couldn’t read the existing definition", zhHans: "读取现有定义失败")
                 return
             }
             populate(from: definition, keepName: true)
@@ -2290,7 +2290,7 @@ private struct MCPServerFormView: View {
     private var availableTargets: [AgentSource] { MCPService.writableSources }
 
     private var targetsBlock: some View {
-        fieldColumn("安装到（可多选）") {
+        fieldColumn(L10n.text("Install into (select one or more)", zhHans: "安装到（可多选）")) {
             VStack(alignment: .leading, spacing: 6) {
                 FlowLayout(spacing: 8, lineSpacing: 8) {
                     ForEach(availableTargets, id: \.self) { source in
@@ -2317,7 +2317,7 @@ private struct MCPServerFormView: View {
             HStack(spacing: 5) {
                 Image(systemName: "folder.badge.plus")
                     .font(.system(size: 10))
-                Text("项目级（.mcp.json）")
+                Text(L10n.text("Project (.mcp.json)", zhHans: "项目级（.mcp.json）"))
                     .font(Theme.font.themed(11, projectInstall ? .semibold : .regular))
                 if projectInstall {
                     Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
@@ -2332,7 +2332,7 @@ private struct MCPServerFormView: View {
                 lineWidth: projectInstall ? 1 : 0.5))
         }
         .buttonStyle(.plain)
-        .help("写入仓库根的 .mcp.json，随项目共享（claude 约定）；可一并写 cursor 的项目配置")
+        .help(L10n.text("Writes .mcp.json at the repo root and shares it with the project (the Claude convention). Cursor’s project config can be written too.", zhHans: "写入仓库根的 .mcp.json，随项目共享（claude 约定）；可一并写 cursor 的项目配置"))
     }
 
     /// repo 选择：最近项目（扫描实勘的根）+ 浏览兜底；cursor 项目配置可选
@@ -2343,7 +2343,7 @@ private struct MCPServerFormView: View {
                     ForEach(service.repoRoots, id: \.root) { candidate in
                         Button(candidate.name.isEmpty
                             ? candidate.root.lastPathComponent
-                            : "\(candidate.name)（\(candidate.root.lastPathComponent)）") {
+                            : L10n.format("%@ (%@)", zhHans: "%@（%@）", String(candidate.name), String(candidate.root.lastPathComponent))) {
                             projectRootPath = candidate.root.path
                         }
                     }
@@ -2351,7 +2351,7 @@ private struct MCPServerFormView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "folder").font(.system(size: 9))
                         Text(projectRootPath.isEmpty
-                            ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""))
+                            ? L10n.text("Choose a project", zhHans: "选择项目") : String(projectRootPath.split(separator: "/").last ?? ""))
                             .lineLimit(1)
                     }
                     .font(Theme.font.themed(11))
@@ -2359,7 +2359,7 @@ private struct MCPServerFormView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                Button("浏览…") { browseProjectRoot() }
+                Button(L10n.text("Browse…", zhHans: "浏览…")) { browseProjectRoot() }
                     .font(Theme.font.themed(11))
                 Spacer()
             }
@@ -2372,7 +2372,7 @@ private struct MCPServerFormView: View {
                     .foregroundStyle(.tertiary)
             }
             Toggle(isOn: $projectCursorToo) {
-                Text("同时写 cursor 的项目配置（.cursor/mcp.json）")
+                Text(L10n.text("Also write Cursor’s project config (.cursor/mcp.json)", zhHans: "同时写 cursor 的项目配置（.cursor/mcp.json）"))
                     .font(Theme.font.themed(11))
             }
             .toggleStyle(.checkbox)
@@ -2419,16 +2419,16 @@ private struct MCPServerFormView: View {
 
     private var footerHint: String {
         if let entry = target.editing {
-            return "原位改写 \(entry.configPath)"
+            return L10n.format("Rewrite in place %@", zhHans: "原位改写 %@", String(entry.configPath))
         }
         let globalCount = selectedTargets.count
         if validProjectInstall {
             return globalCount == 0
-                ? "写入项目级 .mcp.json（写前留备份）"
-                : "写入 \(globalCount) 个 agent 的全局配置 + 项目级 .mcp.json（写前各留备份）"
+                ? L10n.text("Write project .mcp.json (backup before writing)", zhHans: "写入项目级 .mcp.json（写前留备份）")
+                : L10n.format("Write global config for %@ agents plus project .mcp.json (backup each before writing)", zhHans: "写入 %@ 个 agent 的全局配置 + 项目级 .mcp.json（写前各留备份）", String(globalCount))
         }
-        if selectedTargets.isEmpty { return "选择至少一个目标 agent" }
-        return "写入 \(globalCount) 个 agent 的全局配置（写前各留备份）"
+        if selectedTargets.isEmpty { return L10n.text("Select at least one target agent", zhHans: "选择至少一个目标 agent") }
+        return L10n.format("Write global config for %@ agents (backup each before writing)", zhHans: "写入 %@ 个 agent 的全局配置（写前各留备份）", String(globalCount))
     }
 
     /// 项目级安装有效 = 开关开 + repo 根路径非空
@@ -2482,7 +2482,7 @@ private struct MCPServerFormView: View {
 
     private func submit() {
         submitting = true
-        resultNote = "正在写入…"
+        resultNote = L10n.text("Writing…", zhHans: "正在写入…")
         // 编辑：原位改写该条目所在配置（JSON 模式也支持——取首个 server、名称强制回原名）
         if let entry = target.editing {
             var definition = mode == .form
@@ -2492,7 +2492,7 @@ private struct MCPServerFormView: View {
             service.update(entry, definition: definition) { failure in
                 submitting = false
                 if let failure {
-                    resultNote = "保存失败：\(failure)"
+                    resultNote = L10n.format("Save failed: %@", zhHans: "保存失败：%@", String(failure))
                 } else {
                     onBack()
                 }
@@ -2534,17 +2534,17 @@ private struct MCPServerFormView: View {
         submitting = false
         var failures: [String] = []
         for (source, error) in global.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            if let error { failures.append("\(source.displayName)：\(error)") }
+            if let error { failures.append(L10n.format("%@: %@", zhHans: "%@：%@", String(source.displayName), String(error))) }
         }
         if let project {
             for (source, error) in project.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-                if let error { failures.append("项目级 \(source.displayName)：\(error)") }
+                if let error { failures.append(L10n.format("Project %@: %@", zhHans: "项目级 %@：%@", String(source.displayName), String(error))) }
             }
         }
         if failures.isEmpty {
             onBack()
         } else {
-            resultNote = "部分失败 —— " + failures.joined(separator: "；")
+            resultNote = L10n.text("Partial failure — ", zhHans: "部分失败 —— ") + failures.joined(separator: L10n.text("; ", zhHans: "；"))
         }
     }
 }

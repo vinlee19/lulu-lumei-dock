@@ -59,7 +59,7 @@ final class NotificationService: NSObject, ObservableObject {
     func postRiskAlert(_ alert: RiskAlert) {
         guard let center else { return }
         let content = UNMutableNotificationContent()
-        content.title = "⚠️ 高危操作：\(alert.ruleTitle)"
+        content.title = L10n.format("⚠️ High-risk operation: %@", zhHans: "⚠️ 高危操作：%@", String(alert.ruleTitle))
         let firstLine = alert.detail.split(separator: "\n", maxSplits: 1).first.map(String.init)
             ?? alert.detail
         content.body = "\(alert.source.displayName) · \(alert.tool)\n\(firstLine)"

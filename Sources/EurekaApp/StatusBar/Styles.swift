@@ -432,7 +432,9 @@ struct StatusDot: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(enabled ? "已启用（点击停用）" : "已停用（点击启用）")
+        .help(enabled
+            ? L10n.text("Enabled (click to disable)", zhHans: "已启用（点击停用）")
+            : L10n.text("Disabled (click to enable)", zhHans: "已停用（点击启用）"))
     }
 }
 
@@ -567,7 +569,7 @@ struct SearchField: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Theme.brandFill(0.14)))
-                    .help("匹配项数量")
+                    .help(L10n.text("Number of matches", zhHans: "匹配项数量"))
             }
             Button { text = "" } label: {
                 Image(systemName: "xmark")
@@ -578,7 +580,7 @@ struct SearchField: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("清空搜索")
+            .help(L10n.text("Clear search", zhHans: "清空搜索"))
         }
     }
 }
@@ -737,7 +739,9 @@ struct MiniSwitch: View {
                 }
         }
         .buttonStyle(.plain)
-        .help(isOn ? "已启用（点击停用）" : "已停用（点击启用）")
+        .help(isOn
+            ? L10n.text("Enabled (click to disable)", zhHans: "已启用（点击停用）")
+            : L10n.text("Disabled (click to enable)", zhHans: "已停用（点击启用）"))
     }
 }
 
@@ -748,7 +752,9 @@ struct EnableToggle: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(enabled ? "已启用" : "已停用")
+            Text(enabled
+                ? L10n.text("Enabled", zhHans: "已启用")
+                : L10n.text("Disabled", zhHans: "已停用"))
                 .font(Theme.font.themed(9.5, .medium))
                 .foregroundStyle(enabled ? Theme.enabledGreen : .secondary)
             MiniSwitch(isOn: enabled, onToggle: onToggle)
@@ -797,6 +803,14 @@ enum KnowledgeLayout: String, CaseIterable {
     /// 技能/计划/agent 之间没有这种关系，给它们这一档只会是个空图）
     case graph = "图谱"
 
+    var title: String {
+        switch self {
+        case .list: return L10n.text("List", zhHans: "列表")
+        case .cards: return L10n.text("Icons", zhHans: "图标")
+        case .graph: return L10n.text("Graph", zhHans: "图谱")
+        }
+    }
+
     var icon: String {
         switch self {
         case .list: return "list.bullet"
@@ -821,10 +835,10 @@ struct LayoutToggle: View {
         CapsuleTabTray {
             ForEach(cases, id: \.self) { item in
                 CapsuleTabButton(
-                    title: iconOnly ? "" : item.rawValue, icon: item.icon, fillWidth: false,
+                    title: iconOnly ? "" : item.title, icon: item.icon, fillWidth: false,
                     isSelected: layout == item
                 ) { layout = item }
-                    .help(item.rawValue)
+                    .help(item.title)
             }
         }
     }
@@ -846,18 +860,21 @@ struct ScanStatusLabel: View {
         if scanning {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)
-                Text(phase ?? "正在扫描…")
+                Text(phase ?? L10n.text("Scanning…", zhHans: "正在扫描…"))
                     .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             .transition(.opacity)
         } else if let lastScanAt {
-            Text("上次扫描 " + relativeFormatter.localizedString(for: lastScanAt, relativeTo: Date()))
+            Text(L10n.format(
+                "Last scan %@",
+                zhHans: "上次扫描 %@",
+                relativeFormatter.localizedString(for: lastScanAt, relativeTo: Date())))
                 .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
-                .help("进页面不再自动重扫；点刷新可强制全量重扫")
+                .help(L10n.text("Opening the page no longer rescans. Click refresh to force a full rescan.", zhHans: "进页面不再自动重扫；点刷新可强制全量重扫"))
         }
     }
 }
@@ -865,7 +882,7 @@ struct ScanStatusLabel: View {
 /// 统一刷新按钮：紫图标 + 淡紫圆底（各管理页顶栏共用）。
 /// 明显但紧凑——作为次级动作，不与「新建」文字胶囊抢戏。
 struct RefreshButton: View {
-    var help = "刷新"
+    var help = L10n.text("Refresh", zhHans: "刷新")
     let action: () -> Void
 
     @State private var hovering = false
@@ -1264,7 +1281,9 @@ struct ScopeBadge: View {
 
     var body: some View {
         let tint = isGlobal ? Theme.brand : Theme.gold
-        Text(isGlobal ? "全局" : "项目")
+        Text(isGlobal
+            ? L10n.text("Global", zhHans: "全局")
+            : L10n.text("Project", zhHans: "项目"))
             .font(Theme.font.themed(9.5, .semibold))
             .foregroundStyle(tint)
             .padding(.horizontal, 7)
@@ -1309,10 +1328,14 @@ struct TerminalBadge: View {
 
     private var helpText: String {
         var lines = [binding.origin == .probe
-            ? "按工作目录匹配运行中的进程推断（精度低于 hook 采集）"
-            : "由 hook 在会话所在终端内采集"]
-        if let tty = binding.tty { lines.append("终端设备 \(tty)") }
-        if !isRunning { lines.append("该终端应用当前未在运行") }
+            ? L10n.text("Inferred by matching a running process to the working directory (less precise than a hook)", zhHans: "按工作目录匹配运行中的进程推断（精度低于 hook 采集）")
+            : L10n.text("Captured by a hook inside the session's terminal", zhHans: "由 hook 在会话所在终端内采集")]
+        if let tty = binding.tty {
+            lines.append(L10n.format("Terminal device %@", zhHans: "终端设备 %@", tty))
+        }
+        if !isRunning {
+            lines.append(L10n.text("That terminal app is not running", zhHans: "该终端应用当前未在运行"))
+        }
         return lines.joined(separator: "\n")
     }
 }

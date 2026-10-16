@@ -39,8 +39,8 @@ final class WellnessMonitor {
                     self?.emit(IslandNotice(
                         id: "demo",
                         emoji: "🧘",
-                        headline: "连续 vibe coding 2 小时了",
-                        body: "站起来伸个懒腰、喝口水吧——任务有我盯着。"))
+                        headline: L10n.text("You've been vibe coding for 2 hours", zhHans: "连续 vibe coding 2 小时了"),
+                        body: L10n.text("Stand up, stretch, and have some water—I'll keep an eye on your tasks.", zhHans: "站起来伸个懒腰、喝口水吧——任务有我盯着。")))
                 }
             }
         }

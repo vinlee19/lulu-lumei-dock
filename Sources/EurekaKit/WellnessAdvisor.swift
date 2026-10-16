@@ -87,12 +87,15 @@ public enum WellnessAdvisor {
                 state.lastDurationRemindAt = input.now
                 let hours = streak / 3600
                 let display = hours >= 1.95
-                    ? "\(Int(hours.rounded())) 小时"
-                    : String(format: "%.1f 小时", hours)
+                    ? L10n.format("%@ hours", zhHans: "%@ 小时", String(Int(hours.rounded())))
+                    : L10n.format("%@ hours", zhHans: "%@ 小时", String(format: "%.1f", hours))
                 let pool = [
-                    ("🧘", "连续 vibe coding \(display) 了", "站起来伸个懒腰、喝口水吧——任务有我盯着。"),
-                    ("🌿", "已经专注 \(display)", "眼睛离开屏幕 20 秒，看看远处，agent 跑得很稳。"),
-                    ("☕️", "\(display)没停了", "去续杯水或咖啡？回来正好收割任务结果。"),
+                    ("🧘", L10n.format("You've been vibe coding for %@", zhHans: "连续 vibe coding %@ 了", display),
+                     L10n.text("Stand up, stretch, and drink some water—I'll keep an eye on your tasks.", zhHans: "站起来伸个懒腰、喝口水吧——任务有我盯着。")),
+                    ("🌿", L10n.format("You've been focused for %@", zhHans: "已经专注 %@", display),
+                     L10n.text("Look away from the screen for 20 seconds and focus on something distant. Your agent is running smoothly.", zhHans: "眼睛离开屏幕 20 秒，看看远处，agent 跑得很稳。")),
+                    ("☕️", L10n.format("You've gone %@ without a break", zhHans: "%@没停了", display),
+                     L10n.text("Time to refill your water or coffee? Your task results may be ready when you're back.", zhHans: "去续杯水或咖啡？回来正好收割任务结果。")),
                 ]
                 let chosen = pool[pick(pool.count) % pool.count]
                 notices.append(IslandNotice(
@@ -114,8 +117,8 @@ public enum WellnessAdvisor {
                 notices.append(IslandNotice(
                     id: "sessions-\(Int(input.now.timeIntervalSince1970))",
                     emoji: "🤹",
-                    headline: "同时开着 \(input.aliveSessionCount) 个会话",
-                    body: "上下文切换也是有成本的——挑一两个收个尾，会更轻松。"))
+                    headline: L10n.format("You have %@ sessions open at once", zhHans: "同时开着 %@ 个会话", String(input.aliveSessionCount)),
+                    body: L10n.text("Context switching takes effort too—wrap up one or two sessions to make things easier.", zhHans: "上下文切换也是有成本的——挑一两个收个尾，会更轻松。")))
             }
         }
 
@@ -132,8 +135,8 @@ public enum WellnessAdvisor {
                 notices.append(IslandNotice(
                     id: "night-\(nightKey)",
                     emoji: "🌙",
-                    headline: "已经 \(formatter.string(from: input.now)) 了",
-                    body: "今天的进度已经很棒。长任务挂着就好，剩下的明天再说？"))
+                    headline: L10n.format("It's already %@", zhHans: "已经 %@ 了", formatter.string(from: input.now)),
+                    body: L10n.text("You've made great progress today. Leave the long tasks running and pick up the rest tomorrow?", zhHans: "今天的进度已经很棒。长任务挂着就好，剩下的明天再说？")))
             }
         }
 

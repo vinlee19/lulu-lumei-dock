@@ -631,7 +631,7 @@ public enum SkillMemoryIndexer {
 
         // Claude 全局 CLAUDE.md
         add(claudeHome.appendingPathComponent("CLAUDE.md"), source: .claude,
-            scope: "全局", kind: .instructions)
+            scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
         // Claude 用户级规则 ~/.claude/rules/**/*.md（官方：无 paths: 的每次会话都加载，
         // 有 paths: frontmatter 的按文件匹配按需加载）→ 指令，scope = rules 内相对路径
         for rule in enumerateRules(claudeHome.appendingPathComponent("rules", isDirectory: true)) {
@@ -657,7 +657,7 @@ public enum SkillMemoryIndexer {
         }
 
         // Codex 全局持久指令：AGENTS.override.md 优先于 AGENTS.md。
-        addEffectiveCodexInstruction(directory: codexHome, scope: "全局")
+        addEffectiveCodexInstruction(directory: codexHome, scope: L10n.text("Global", zhHans: "全局"))
         // Codex 记忆 = `~/.codex/memories/` **顶层**的 md（实勘为三层管道：
         // raw_memories.md → MEMORY.md → memory_summary.md），后台生成、仅供查看。
         //
@@ -677,7 +677,7 @@ public enum SkillMemoryIndexer {
 
         // opencode 全局 AGENTS.md（~/.config/opencode/AGENTS.md，遵循 AGENTS.md 标准）
         add(opencodeHome.appendingPathComponent("AGENTS.md"), source: .opencode,
-            scope: "全局", kind: .instructions)
+            scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
         // opencode memories/**/*.md（createMemory 写这里，索引须对齐避免死路径）
         for file in enumerateMarkdown(opencodeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .opencode, scope: file.deletingPathExtension().lastPathComponent)
@@ -693,13 +693,13 @@ public enum SkillMemoryIndexer {
         // kimi 全局记忆 ~/.kimi-code/AGENTS.md（Kimi 唯一全局记忆文件，AGENTS.md-first）
         if let kimiHome {
             add(kimiHome.appendingPathComponent("AGENTS.md"), source: .kimi,
-                scope: "全局", kind: .instructions)
+                scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
         }
 
         // gemini 全局记忆 ~/.gemini/GEMINI.md（GEMINI.md-first）
         if let geminiHome {
             add(geminiHome.appendingPathComponent("GEMINI.md"), source: .gemini,
-                scope: "全局", kind: .instructions)
+                scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
         }
 
         // qwen：全局 memories/*.md + 项目级 projects/<encoded>/memory/**/*.md（Claude 式布局）
@@ -765,7 +765,7 @@ public enum SkillMemoryIndexer {
         // 不收 `session_memory_<id>.jsonl`：那是逐回合流水且不是 markdown。
         if let traeMemoryRoot {
             add(traeMemoryRoot.appendingPathComponent("user_profile.md"),
-                source: .trae, scope: "全局", kind: .userManaged)
+                source: .trae, scope: L10n.text("Global", zhHans: "全局"), kind: .userManaged)
             let projectsRoot = traeMemoryRoot
                 .appendingPathComponent("projects", isDirectory: true)
             for projectDir in subdirectories(of: projectsRoot) {

@@ -1,5 +1,6 @@
 import AppKit
 import EurekaIngest
+import EurekaKit
 import Foundation
 import Network
 
@@ -24,21 +25,19 @@ enum MCPOAuthFlow {
 
         var errorDescription: String? {
             switch self {
-            case .invalidServerURL: return "server URL 无效"
+            case .invalidServerURL: return L10n.text("Invalid server URL", zhHans: "server URL 无效")
             case .discoveryFailed:
-                return "无法发现授权服务器元数据（OAuth AS / OIDC Discovery 均无响应）"
+                return L10n.text("Unable to discover authorization server metadata (neither OAuth AS nor OIDC Discovery responded)", zhHans: "无法发现授权服务器元数据（OAuth AS / OIDC Discovery 均无响应）")
             case .pkceUnsupported:
-                return "该授权服务器未声明 PKCE 支持（code_challenge_methods_supported "
-                    + "缺 S256），按 MCP 规范拒绝继续"
+                return L10n.text("This authorization server does not declare PKCE support (S256 is missing from code_challenge_methods_supported); cannot continue under the MCP specification", zhHans: "该授权服务器未声明 PKCE 支持（code_challenge_methods_supported 缺 S256），按 MCP 规范拒绝继续")
             case .dcrUnsupported:
-                return "该授权服务器不支持动态注册——"
-                    + "可在「连接与授权」卡内填入预注册 client_id 后重试"
-            case .registrationFailed: return "动态注册失败（RFC 7591）"
-            case .listenerFailed: return "本机回环监听启动失败"
-            case .callbackTimeout: return "等待浏览器授权超时（2 分钟）"
-            case .callbackDenied(let reason): return "授权被拒绝：\(reason)"
-            case .callbackInvalid: return "回调无效（state 不匹配或缺少授权码）"
-            case .tokenExchangeFailed: return "令牌交换失败"
+                return L10n.text("This authorization server does not support dynamic registration—enter a preregistered client_id in the “Connection & Authorization” card and try again", zhHans: "该授权服务器不支持动态注册——可在「连接与授权」卡内填入预注册 client_id 后重试")
+            case .registrationFailed: return L10n.text("Dynamic registration failed (RFC 7591)", zhHans: "动态注册失败（RFC 7591）")
+            case .listenerFailed: return L10n.text("Failed to start the local loopback listener", zhHans: "本机回环监听启动失败")
+            case .callbackTimeout: return L10n.text("Timed out waiting for browser authorization (2 minutes)", zhHans: "等待浏览器授权超时（2 分钟）")
+            case .callbackDenied(let reason): return L10n.format("Authorization denied: %@", zhHans: "授权被拒绝：%@", String(reason))
+            case .callbackInvalid: return L10n.text("Invalid callback (state mismatch or missing authorization code)", zhHans: "回调无效（state 不匹配或缺少授权码）")
+            case .tokenExchangeFailed: return L10n.text("Token exchange failed", zhHans: "令牌交换失败")
             }
         }
     }
@@ -59,7 +58,7 @@ enum MCPOAuthFlow {
         // ① 发现：initialize 探测拿 WWW-Authenticate 质询（resource_metadata + 权威
         //    scope）；无 header 时按规范 MUST 试探 PRM well-known（路径插入式 → 根路径）；
         //    全败才回退 server origin 作为 issuer
-        report("正在发现授权服务器…")
+        report(L10n.text("Discovering authorization server…", zhHans: "正在发现授权服务器…"))
         let challenge = discoverChallenge(serverURL: serverURL, headers: headers)
         var metadataURLs = challenge.resourceMetadata.flatMap(URL.init(string:)).map { [$0] } ?? []
         metadataURLs += MCPOAuth.protectedResourceMetadataURLs(serverURL: serverURL)
@@ -122,7 +121,7 @@ enum MCPOAuthFlow {
             scopes: MCPOAuth.selectScopes(
                 challengeScopes: challenge.scopes, metadata: metadata))
         else { throw FlowError.discoveryFailed }
-        report("已打开浏览器，等待授权…")
+        report(L10n.text("Browser opened; waiting for authorization…", zhHans: "已打开浏览器，等待授权…"))
         DispatchQueue.main.async { NSWorkspace.shared.open(authorizationURL) }
 
         // ⑤ 等回调（2 分钟；favicon 之类的杂请求由监听器自行 404 并继续等）
@@ -132,7 +131,7 @@ enum MCPOAuthFlow {
         switch MCPOAuth.parseCallbackRequest(requestHead, expectedState: state) {
         case .code(let code):
             // ⑥ 换 token
-            report("正在交换令牌…")
+            report(L10n.text("Exchanging token…", zhHans: "正在交换令牌…"))
             guard let tokenURL = URL(string: metadata.tokenEndpoint),
                   let tokenData = httpPost(
                       tokenURL,
@@ -263,8 +262,11 @@ private final class LoopbackListener {
             let isCallback = head.hasPrefix("GET /callback")
             let body = isCallback
                 ? "<html><meta charset=\"utf-8\"><body style=\"font-family:-apple-system;"
-                    + "text-align:center;padding-top:120px\"><h2>授权完成</h2>"
-                    + "<p>请回到 Eureka，重新「检测连接」即可。</p></body></html>"
+                    + "text-align:center;padding-top:120px\"><h2>"
+                    + L10n.text("Authorization Complete", zhHans: "授权完成")
+                    + "</h2><p>"
+                    + L10n.text("Return to Eureka and run “Test Connection” again.", zhHans: "请回到 Eureka，重新「检测连接」即可。")
+                    + "</p></body></html>"
                 : "not found"
             let status = isCallback ? "200 OK" : "404 Not Found"
             let bodyData = Data(body.utf8)

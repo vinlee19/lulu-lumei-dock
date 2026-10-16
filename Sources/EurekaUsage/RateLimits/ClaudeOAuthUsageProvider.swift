@@ -17,7 +17,7 @@ public final class ClaudeOAuthUsageProvider: RateLimitProvider {
 
     public func snapshot() async -> RateLimitSnapshot? {
         guard let token = Self.readAccessToken() else {
-            lastFailure = "未能从钥匙串读取 Claude Code 凭证"
+            lastFailure = L10n.text("Could not read Claude Code credentials from Keychain", zhHans: "未能从钥匙串读取 Claude Code 凭证")
             return staleCache()
         }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
@@ -30,22 +30,22 @@ public final class ClaudeOAuthUsageProvider: RateLimitProvider {
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 401 || status == 403 {
-                lastFailure = "凭证过期（\(status)）：跑一次 claude 让它刷新登录态"
+                lastFailure = L10n.format("Credentials expired (%@): run claude once to refresh the login", zhHans: "凭证过期（%@）：跑一次 claude 让它刷新登录态", String(status))
                 return staleCache()
             }
             guard status == 200 else {
-                lastFailure = "接口返回 \(status)（非官方接口可能已变更）"
+                lastFailure = L10n.format("The API returned %@ (the unofficial API may have changed)", zhHans: "接口返回 %@（非官方接口可能已变更）", String(status))
                 return staleCache()
             }
             guard let snapshot = Self.parseUsageResponse(data) else {
-                lastFailure = "响应格式无法识别（非官方接口可能已变更）"
+                lastFailure = L10n.text("Unrecognized response format (the unofficial API may have changed)", zhHans: "响应格式无法识别（非官方接口可能已变更）")
                 return staleCache()
             }
             lastFailure = nil
             cached = snapshot
             return snapshot
         } catch {
-            lastFailure = "请求失败：\(error.localizedDescription)"
+            lastFailure = L10n.format("Request failed: %@", zhHans: "请求失败：%@", String(error.localizedDescription))
             return staleCache()
         }
     }

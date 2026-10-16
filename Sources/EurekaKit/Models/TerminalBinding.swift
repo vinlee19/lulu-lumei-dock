@@ -58,8 +58,8 @@ public struct TerminalBinding: Equatable, Sendable, Codable {
             let canonical = Self.canonicalBundleId(bundleId)
             return canonical.split(separator: ".").last.map(String.init) ?? canonical
         }
-        if tty != nil { return "终端" }
-        return "未知终端"
+        if tty != nil { return L10n.text("Terminal", zhHans: "终端") }
+        return L10n.text("Unknown terminal", zhHans: "未知终端")
     }
 
     /// tty 的短名：`/dev/ttys004` → `ttys004`

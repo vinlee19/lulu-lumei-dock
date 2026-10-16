@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 会话上下文用量的分类拆解（会话详情页「上下文用量」卡片的数据模型）。
@@ -14,11 +15,11 @@ public struct ContextBreakdown: Equatable, Sendable {
 
         public var label: String {
             switch self {
-            case .systemPrompt: return "系统提示词"
-            case .tools: return "工具及子智能体"
-            case .messages: return "对话消息"
-            case .mcp: return "连接器及MCP"
-            case .skills: return "技能"
+            case .systemPrompt: return L10n.text("System prompt", zhHans: "系统提示词")
+            case .tools: return L10n.text("Tools and subagents", zhHans: "工具及子智能体")
+            case .messages: return L10n.text("Conversation messages", zhHans: "对话消息")
+            case .mcp: return L10n.text("Connectors and MCP", zhHans: "连接器及MCP")
+            case .skills: return L10n.text("Skills", zhHans: "技能")
             }
         }
     }

@@ -162,9 +162,9 @@ final class MCPService: ObservableObject {
         switch source {
         case .claude, .codex, .gemini, .cursor, .kimi, .qwen, .grok, .opencode:
             return nil
-        case .zcode: return "MCP 由插件注册，无用户级配置"
-        case .trae: return "配置与凭证同目录，不读不写"
-        default: return "无已知 MCP 配置约定"
+        case .zcode: return L10n.text("MCP is registered by plugins; no user-level configuration", zhHans: "MCP 由插件注册，无用户级配置")
+        case .trae: return L10n.text("Configuration shares a directory with credentials; reading and writing are disabled", zhHans: "配置与凭证同目录，不读不写")
+        default: return L10n.text("No known MCP configuration convention", zhHans: "无已知 MCP 配置约定")
         }
     }
 
@@ -202,7 +202,7 @@ final class MCPService: ObservableObject {
     static func installBlockReason(transport: String, to source: AgentSource) -> String? {
         if let reason = writeBlockReason(for: source) { return reason }
         if transport != "stdio", source == .grok {
-            return "远程 server 在该目标的格式未验证"
+            return L10n.text("The remote server format has not been verified for this target", zhHans: "远程 server 在该目标的格式未验证")
         }
         return nil
     }
@@ -307,7 +307,7 @@ final class MCPService: ObservableObject {
                     definitions: [definition], sources: sources, projectRoot: projectRoot)
             } else {
                 results = [:]
-                for source in sources { results[source] = "读取来源定义失败" }
+                for source in sources { results[source] = L10n.text("Failed to read source definition", zhHans: "读取来源定义失败") }
             }
             DispatchQueue.main.async {
                 completion?(results)
@@ -322,7 +322,7 @@ final class MCPService: ObservableObject {
         var results: [AgentSource: String?] = [:]
         for source in sources {
             guard let target = projectTarget(for: source, projectRoot: projectRoot) else {
-                results[source] = "该源没有项目级配置约定"
+                results[source] = L10n.text("This source has no project-level configuration convention", zhHans: "该源没有项目级配置约定")
                 continue
             }
             var failure: String?
@@ -351,7 +351,7 @@ final class MCPService: ObservableObject {
                 DispatchQueue.main.async {
                     var results: [AgentSource: String?] = [:]
                     for target in targets {
-                        results.updateValue("读取来源定义失败：\(message)", forKey: target)
+                        results.updateValue(L10n.format("Failed to read source definition: %@", zhHans: "读取来源定义失败：%@", String(message)), forKey: target)
                     }
                     completion?(results)
                 }
@@ -441,7 +441,7 @@ final class MCPService: ObservableObject {
                     updated = try MCPServerEditor.setEnabledJSON(
                         in: original, name: entry.name, container: "mcp", enabled: enabled)
                 default:
-                    throw MCPEditError.unsupportedTarget("该源的配置没有启停语义")
+                    throw MCPEditError.unsupportedTarget(L10n.text("This source does not support enabling or disabling servers in its configuration", zhHans: "该源的配置没有启停语义"))
                 }
                 try ConfigFile.backupThenWrite(path: url, newContent: updated)
                 ok = true
@@ -526,12 +526,12 @@ final class MCPService: ObservableObject {
     func authorizeInBrowser(_ entry: MCPServerEntry) {
         let entryID = entry.id
         let preRegistered = preRegisteredClientID(for: entry)
-        oauthNotes[entryID] = "正在发现授权服务器…"
+        oauthNotes[entryID] = L10n.text("Discovering authorization server…", zhHans: "正在发现授权服务器…")
         queue.async { [weak self] in
             let definition = try? Self.readDefinition(of: entry)
             guard let serverURL = definition?.url else {
                 DispatchQueue.main.async {
-                    self?.oauthNotes[entryID] = "该配置没有远程 URL，无法浏览器授权"
+                    self?.oauthNotes[entryID] = L10n.text("This configuration has no remote URL; browser authorization is unavailable", zhHans: "该配置没有远程 URL，无法浏览器授权")
                 }
                 return
             }
@@ -546,14 +546,13 @@ final class MCPService: ObservableObject {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.mutateTokenNames { $0.insert(entry.name.lowercased()) }
-                    self.oauthNotes[entryID] = "授权成功——重新「检测连接」即可看到工具清单"
-                        + "（令牌仅供 Eureka 检测；CLI 侧仍需各自授权）"
+                    self.oauthNotes[entryID] = L10n.text("Authorization succeeded—run “Test Connection” again to see the tool list (the token is only used for Eureka probes; each CLI still needs its own authorization)", zhHans: "授权成功——重新「检测连接」即可看到工具清单（令牌仅供 Eureka 检测；CLI 侧仍需各自授权）")
                 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
                 DispatchQueue.main.async {
-                    self?.oauthNotes[entryID] = "授权失败：\(message)"
+                    self?.oauthNotes[entryID] = L10n.format("Authorization failed: %@", zhHans: "授权失败：%@", String(message))
                 }
             }
         }
@@ -568,7 +567,7 @@ final class MCPService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.mutateTokenNames { $0.remove(entry.name.lowercased()) }
-                self.oauthNotes[entryID] = "已撤销 Eureka 持有的令牌"
+                self.oauthNotes[entryID] = L10n.text("Revoked the token stored by Eureka", zhHans: "已撤销 Eureka 持有的令牌")
             }
         }
     }
@@ -740,7 +739,7 @@ final class MCPService: ObservableObject {
             case .failure(.commandMissing):
                 return (.commandMissing, nil)
             case .failure(.launchFailed(let reason)):
-                return (.unreachable("启动失败：\(reason)"), nil)
+                return (.unreachable(L10n.format("Failed to start: %@", zhHans: "启动失败：%@", String(reason))), nil)
             case .failure(.handshakeFailed(let reason)):
                 return (.unreachable(reason), nil)
             case .success(let inspection):
@@ -756,7 +755,7 @@ final class MCPService: ObservableObject {
             }
         }
         guard let urlText = definition?.url, let url = URL(string: urlText) else {
-            return (.unreachable("URL 无效"), nil)
+            return (.unreachable(L10n.text("Invalid URL", zhHans: "URL 无效")), nil)
         }
         var headers = definition?.headers ?? [:]
         // v2.5：无显式 Authorization 头时，附上 Eureka 经浏览器 OAuth 持有的令牌
@@ -899,7 +898,7 @@ final class MCPService: ObservableObject {
         _ definition: MCPServerDefinition, to source: AgentSource
     ) -> String? {
         guard let target = writableTarget(for: source) else {
-            return writeBlockReason(for: source) ?? "该目标不支持写入"
+            return writeBlockReason(for: source) ?? L10n.text("This target does not support writing", zhHans: "该目标不支持写入")
         }
         return write(definition, to: target)
     }
@@ -913,7 +912,7 @@ final class MCPService: ObservableObject {
         let fm = FileManager.default
         let exists = fm.fileExists(atPath: target.configURL.path)
         guard exists || target.canCreateFile else {
-            return "未检测到该 agent 的配置文件（\(target.configURL.path)），不凭空创建"
+            return L10n.format("No configuration file found for this agent (%@); a new file will not be created", zhHans: "未检测到该 agent 的配置文件（%@），不凭空创建", String(target.configURL.path))
         }
         do {
             if !exists, target.canCreateFile {
@@ -976,20 +975,20 @@ final class MCPService: ObservableObject {
         switch entry.source {
         case .codex:
             return [AuthAction(
-                label: "在终端授权（codex mcp login \(entry.name)）",
+                label: L10n.format("Authorize in Terminal (codex mcp login %@)", zhHans: "在终端授权（codex mcp login %@）", String(entry.name)),
                 command: "codex mcp login \(shellQuoted(entry.name))",
                 isDirect: true)]
         case .claude:
             return [AuthAction(
-                label: "在终端打开 claude（输入 /mcp 完成授权）",
+                label: L10n.text("Open claude in Terminal (enter /mcp to authorize)", zhHans: "在终端打开 claude（输入 /mcp 完成授权）"),
                 command: "claude", isDirect: false)]
         case .gemini:
             return [AuthAction(
-                label: "在终端打开 gemini（输入 /mcp auth 完成授权）",
+                label: L10n.text("Open gemini in Terminal (enter /mcp auth to authorize)", zhHans: "在终端打开 gemini（输入 /mcp auth 完成授权）"),
                 command: "gemini", isDirect: false)]
         case .qwen:
             return [AuthAction(
-                label: "在终端打开 qwen（输入 /mcp auth 完成授权）",
+                label: L10n.text("Open qwen in Terminal (enter /mcp auth to authorize)", zhHans: "在终端打开 qwen（输入 /mcp auth 完成授权）"),
                 command: "qwen", isDirect: false)]
         default:
             return []

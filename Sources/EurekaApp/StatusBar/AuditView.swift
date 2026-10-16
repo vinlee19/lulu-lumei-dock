@@ -93,18 +93,18 @@ struct AuditView: View {
         .onChange(of: riskOnly) { _, _ in resetAndReload() }
         .onChange(of: keyword) { _, _ in resetAndReload() }
         .confirmationDialog(
-            "导出的 CSV 含完整命令文本（可能包含敏感信息），确认导出到下载目录？",
+            L10n.text("The exported CSV contains full command text (it may include secrets). Export it to Downloads?", zhHans: "导出的 CSV 含完整命令文本（可能包含敏感信息），确认导出到下载目录？"),
             isPresented: $showExportConfirm, titleVisibility: .visible
         ) {
-            Button("导出") { service.exportCSV(query: query) }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Export", zhHans: "导出")) { service.exportCSV(query: query) }
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
         .confirmationDialog(
-            "确认清空全部审计数据？此操作不可撤销。",
+            L10n.text("Clear all audit data? This cannot be undone.", zhHans: "确认清空全部审计数据？此操作不可撤销。"),
             isPresented: $showClearConfirm, titleVisibility: .visible
         ) {
-            Button("清空", role: .destructive) { service.clearAll() }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Clear", zhHans: "清空"), role: .destructive) { service.clearAll() }
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -112,9 +112,9 @@ struct AuditView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("审计").font(.system(size: 15, weight: .bold))
+            Text(L10n.text("Audit", zhHans: "审计")).font(.system(size: 15, weight: .bold))
             SearchField(
-                placeholder: "搜索命令 / 文件路径 / 工具名",
+                placeholder: L10n.text("Search commands / paths / tool names", zhHans: "搜索命令 / 文件路径 / 工具名"),
                 text: $keyword, resultCount: service.total)
             Spacer(minLength: 12)
             if let message = service.exportMessage {
@@ -123,17 +123,17 @@ struct AuditView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
-            CardActionButton(icon: "gearshape", help: "采集与保留策略") {
+            CardActionButton(icon: "gearshape", help: L10n.text("Capture and retention", zhHans: "采集与保留策略")) {
                 showSettings.toggle()
             }
             .popover(isPresented: $showSettings, arrowEdge: .bottom) { settingsPopover }
-            CardActionButton(icon: "square.and.arrow.up", help: "导出当前筛选结果为 CSV") {
+            CardActionButton(icon: "square.and.arrow.up", help: L10n.text("Export the current filter as CSV", zhHans: "导出当前筛选结果为 CSV")) {
                 showExportConfirm = true
             }
-            CardActionButton(icon: "trash", color: Theme.failureRed, help: "清空全部审计数据") {
+            CardActionButton(icon: "trash", color: Theme.failureRed, help: L10n.text("Clear all audit data", zhHans: "清空全部审计数据")) {
                 showClearConfirm = true
             }
-            RefreshButton(help: "重新读取审计流水") { reload() }
+            RefreshButton(help: L10n.text("Reload the audit log", zhHans: "重新读取审计流水")) { reload() }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -146,16 +146,16 @@ struct AuditView: View {
     /// 离屏渲染整页时它不会被光栅化，只能单独渲这个内容视图才能核对排版。
     var settingsPopover: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("记录 agent 操作审计流水", isOn: $settings.auditEnabled)
-            Text("记录 agent 执行的完整命令与读写的文件路径，用于事后回溯；"
-                + "不记录任何执行输出内容。命令文本本就明文存于本地会话记录中。")
+            Toggle(L10n.text("Record an audit log of agent actions", zhHans: "记录 agent 操作审计流水"), isOn: $settings.auditEnabled)
+            Text(L10n.text("Records the full commands agents run and the file paths they read or write, so you can look back later;", zhHans: "记录 agent 执行的完整命令与读写的文件路径，用于事后回溯；")
+                + L10n.text(" it does not record command output. Command text is already stored in plain text in local session logs.", zhHans: "不记录任何执行输出内容。命令文本本就明文存于本地会话记录中。"))
                 .font(Theme.font.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
             if settings.auditEnabled {
                 Divider()
-                Toggle("高危操作岛内红卡告警", isOn: $settings.auditRiskAlertsEnabled)
-                Toggle("高危操作系统通知（锁屏 / 其他桌面可见）", isOn: $settings.auditSystemNotifyEnabled)
+                Toggle(L10n.text("Red card on the island for high-risk actions", zhHans: "高危操作岛内红卡告警"), isOn: $settings.auditRiskAlertsEnabled)
+                Toggle(L10n.text("System notification for high-risk actions (visible on the lock screen and other desktops)", zhHans: "高危操作系统通知（锁屏 / 其他桌面可见）"), isOn: $settings.auditSystemNotifyEnabled)
                 if let hint = notificationHint, settings.auditSystemNotifyEnabled {
                     Text(hint)
                         .font(Theme.font.caption)
@@ -163,14 +163,14 @@ struct AuditView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
-                    Text("保留时长")
+                    Text(L10n.text("Retention", zhHans: "保留时长"))
                     Spacer(minLength: 8)
                     Picker("", selection: $settings.auditRetentionDays) {
-                        Text("30 天").tag(30)
-                        Text("90 天").tag(90)
-                        Text("180 天").tag(180)
-                        Text("365 天").tag(365)
-                        Text("永久").tag(0)
+                        Text(L10n.text("30 days", zhHans: "30 天")).tag(30)
+                        Text(L10n.text("90 days", zhHans: "90 天")).tag(90)
+                        Text(L10n.text("180 days", zhHans: "180 天")).tag(180)
+                        Text(L10n.text("365 days", zhHans: "365 天")).tag(365)
+                        Text(L10n.text("Forever", zhHans: "永久")).tag(0)
                     }
                     .labelsHidden()
                     .frame(maxWidth: 110)
@@ -181,8 +181,8 @@ struct AuditView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("高危规则为启发式提示（sudo / rm -rf 绝对路径 / 管道执行下载脚本 / 读写密钥等），"
-                    + "非沙箱拦截；命中会去重节流。")
+                Text(L10n.text("High-risk rules are hints (sudo, rm -rf of an absolute path, piping a downloaded script into a shell, reading or writing secrets, and similar),", zhHans: "高危规则为启发式提示（sudo / rm -rf 绝对路径 / 管道执行下载脚本 / 读写密钥等），")
+                    + L10n.text(" not a sandbox. Matches are deduped and throttled.", zhHans: "非沙箱拦截；命中会去重节流。"))
                     .font(Theme.font.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -199,22 +199,22 @@ struct AuditView: View {
     /// 审计归档状态一行（开启归档才显示）
     private var archiveLine: String {
         guard settings.cloudBackupEnabled else {
-            return "审计归档已开启，但云端备份未开启：不会上传，清理按原保留时长执行。"
+            return L10n.text("Audit archive is on, but cloud backup is off: nothing is uploaded, and cleanup follows the retention period.", zhHans: "审计归档已开启，但云端备份未开启：不会上传，清理按原保留时长执行。")
         }
-        guard let status = service.archiveStatus else { return "审计归档：等待第一轮备份…" }
-        var text = "审计归档：已上传 \(status.uploadedDays) 天"
-        if let day = status.latestUploadedDay { text += "（最近 \(day)）" }
-        if status.pendingDays > 0 { text += "，\(status.pendingDays) 天待上传" }
-        return text + "。只清理已上传的日期。"
+        guard let status = service.archiveStatus else { return L10n.text("Audit archive: waiting for the first backup…", zhHans: "审计归档：等待第一轮备份…") }
+        var text = L10n.format("Audit archive: %@ days uploaded", zhHans: "审计归档：已上传 %@ 天", String(status.uploadedDays))
+        if let day = status.latestUploadedDay { text += L10n.format(" (latest %@)", zhHans: "（最近 %@）", String(day)) }
+        if status.pendingDays > 0 { text += L10n.format(", %@ days waiting to upload", zhHans: "，%@ 天待上传", String(status.pendingDays)) }
+        return text + L10n.text(". Only days that have been uploaded are pruned.", zhHans: "。只清理已上传的日期。")
     }
 
     /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）
     private var notificationHint: String? {
         switch notificationService.availability {
         case .unavailableNotBundled:
-            return "当前为开发模式（swift run）运行，系统通知不可用，仅岛内红卡告警；安装为 .app 后生效。"
+            return L10n.text("Running in dev mode (swift run): system notifications are unavailable, so only the island red card alerts. They work after you install the .app.", zhHans: "当前为开发模式（swift run）运行，系统通知不可用，仅岛内红卡告警；安装为 .app 后生效。")
         case .denied:
-            return "系统通知权限已被拒绝，仅岛内红卡告警。可在 系统设置 > 通知 > lulu-lumei-dock 中开启。"
+            return L10n.text("System notification permission was denied, so only the island red card alerts. Turn it on in System Settings > Notifications > lulu-lumei-dock.", zhHans: "系统通知权限已被拒绝，仅岛内红卡告警。可在 系统设置 > 通知 > lulu-lumei-dock 中开启。")
         case .authorized, .unknown:
             return nil
         }
@@ -245,10 +245,10 @@ struct AuditView: View {
                 if service.events.isEmpty {
                     EmptyStateView(
                         icon: "checkmark.shield",
-                        title: filtering ? "当前筛选无匹配记录" : "暂无审计记录",
+                        title: filtering ? L10n.text("Nothing matches this filter", zhHans: "当前筛选无匹配记录") : L10n.text("No audit records yet", zhHans: "暂无审计记录"),
                         hint: filtering
-                            ? "换个来源 / 类型，或清空关键词"
-                            : "agent 执行命令、读写文件后会出现在这里；只记录命令全文与文件路径，不含执行输出")
+                            ? L10n.text("Try another source or type, or clear the keyword", zhHans: "换个来源 / 类型，或清空关键词")
+                            : L10n.text("Commands and file reads or writes show up here. Only the full command and the path are recorded, not the output.", zhHans: "agent 执行命令、读写文件后会出现在这里；只记录命令全文与文件路径，不含执行输出"))
                         .padding(.top, 40)
                 } else {
                     KnowledgeListContainer {
@@ -276,20 +276,20 @@ struct AuditView: View {
     private var statsCard: some View {
         StatOverviewCard(
             value: "\(service.total)",
-            unit: "审计事件",
+            unit: L10n.text("audit events", zhHans: "审计事件"),
             subtitle: subtitle,
-            distributionTitle: "类型分布",
+            distributionTitle: L10n.text("By type", zhHans: "类型分布"),
             segments: kindSegments,
-            trailingNote: filtering ? "已筛选" : nil)
+            trailingNote: filtering ? L10n.text("Filtered", zhHans: "已筛选") : nil)
     }
 
     private var subtitle: String {
         let retention = settings.auditRetentionDays == 0
-            ? "永久保留" : "保留 \(settings.auditRetentionDays) 天"
+            ? L10n.text("Kept forever", zhHans: "永久保留") : L10n.format("Keep %@ days", zhHans: "保留 %@ 天", String(settings.auditRetentionDays))
         // `riskTotal` 是**全库**风险数（不跟筛选走），筛选态下与旁边的大数不同基准，
         // 摆在一起会读成「0 条里有 123 条风险」→ 筛选时只留保留策略，风险数交给「仅风险」chip。
         guard service.riskTotal > 0, !filtering else { return retention }
-        return "风险 \(service.riskTotal) · \(retention)"
+        return L10n.format("Risk %@ · %@", zhHans: "风险 %@ · %@", String(service.riskTotal), String(retention))
     }
 
     /// 类型分布：前 4 名 + 「其他」，同 `AgentsView.modelSegments` 的做法与配色阶梯。
@@ -308,7 +308,7 @@ struct AuditView: View {
             }
         }
         if other > 0 {
-            segments.append(.init(label: "其他", count: other, color: Theme.brand.opacity(0.3)))
+            segments.append(.init(label: L10n.text("Other", zhHans: "其他"), count: other, color: Theme.brand.opacity(0.3)))
         }
         return segments
     }
@@ -327,7 +327,7 @@ struct AuditView: View {
     private var sourceBar: some View {
         SourceFilterBar(
             selected: $sourceFilter,
-            allLabel: "全部", allIcon: "checkmark.shield",
+            allLabel: L10n.text("All", zhHans: "全部"), allIcon: "checkmark.shield",
             totalCount: service.sourceCounts.values.reduce(0, +),
             sources: service.sourceCounts.filter { $0.value > 0 }
                 .sorted { ($0.value, $0.key.rawValue) > ($1.value, $1.key.rawValue) }
@@ -338,7 +338,7 @@ struct AuditView: View {
     /// 类型 chips + 仅风险（换行流式，同 `SourceFilterBar` 的视觉语言、小一号）
     private var kindBar: some View {
         FlowLayout(spacing: 8, lineSpacing: 8) {
-            kindChip(nil, label: "全部类型", icon: "square.grid.2x2",
+            kindChip(nil, label: L10n.text("All types", zhHans: "全部类型"), icon: "square.grid.2x2",
                      count: service.kindCounts.values.reduce(0, +))
             ForEach(sortedKinds, id: \.key) { entry in
                 kindChip(entry.key, label: entry.key.label, icon: entry.key.icon,
@@ -365,11 +365,11 @@ struct AuditView: View {
     private var riskChip: some View {
         Button { riskOnly.toggle() } label: {
             chipLabel(
-                icon: "exclamationmark.shield.fill", label: "仅风险",
+                icon: "exclamationmark.shield.fill", label: L10n.text("Risk only", zhHans: "仅风险"),
                 count: service.riskTotal, isSelected: riskOnly, tint: Theme.failureRed)
         }
         .buttonStyle(.plain)
-        .help("只看命中高危 / 提醒规则的操作")
+        .help(L10n.text("Show only actions that hit a high-risk or warning rule", zhHans: "只看命中高危 / 提醒规则的操作"))
     }
 
     private func chipLabel(
@@ -399,9 +399,9 @@ struct AuditView: View {
     private var captureOffHint: some View {
         noticeCard(
             icon: "pause.circle.fill", tint: Theme.gold,
-            text: "审计采集已关闭，不会再记录新操作（下方仍是已入库的历史）。"
+            text: L10n.text("Capture is off, so new actions are not recorded (history already stored is still below).", zhHans: "审计采集已关闭，不会再记录新操作（下方仍是已入库的历史）。")
         ) {
-            Button("开启") { settings.auditEnabled = true }
+            Button(L10n.text("Turn on", zhHans: "开启")) { settings.auditEnabled = true }
                 .controlSize(.small)
         }
     }
@@ -411,15 +411,15 @@ struct AuditView: View {
     private var hooksHint: some View {
         noticeCard(
             icon: "exclamationmark.triangle.fill", tint: Theme.gold,
-            text: "Claude hooks 未安装，Claude 的操作暂未被审计采集"
-                + "（Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen 不受影响；"
-                + "Trae 同样依赖 hooks，见 设置 → 集成）。",
+            text: L10n.text("Claude hooks are not installed, so Claude actions are not being audited yet", zhHans: "Claude hooks 未安装，Claude 的操作暂未被审计采集")
+                + L10n.text(" (Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen are unaffected;", zhHans: "（Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen 不受影响；")
+                + L10n.text(" Trae also depends on hooks — see Settings → Integrations).", zhHans: "Trae 同样依赖 hooks，见 设置 → 集成）。"),
             // 装卸结果必须回显：否则被拒（配置解析不了 / 路径被手改）时毫无反馈
             detail: installer.message
         ) {
             // 只装 Claude hooks。绝不能调 installAll() —— 那会连带写
             // ~/.codex/config.toml，给只用 Claude 的人凭空造出另一个 agent 的配置文件。
-            Button("安装") { installer.install(.claudeHooks) }
+            Button(L10n.text("Install", zhHans: "安装")) { installer.install(.claudeHooks) }
                 .controlSize(.small)
         }
     }
@@ -477,7 +477,7 @@ struct AuditView: View {
                         }
                         if event.isError {
                             TagChip(
-                                event.exitCode.map { "退出码 \($0)" } ?? "失败",
+                                event.exitCode.map { L10n.format("Exit %@", zhHans: "退出码 %@", String($0)) } ?? L10n.text("Failed", zhHans: "失败"),
                                 tint: Theme.failureRed)
                         }
                         // cwd 一直存着却从不展示，白放着
@@ -502,14 +502,14 @@ struct AuditView: View {
                     .fixedSize()
             }
         } menu: {
-            Button(isExpanded ? "收起" : "展开全文") { toggle(event.opId) }
-            Button("复制参数全文") { copy(event.detail) }
+            Button(isExpanded ? L10n.text("Collapse", zhHans: "收起") : L10n.text("Expand", zhHans: "展开全文")) { toggle(event.opId) }
+            Button(L10n.text("Copy full arguments", zhHans: "复制参数全文")) { copy(event.detail) }
             if let cwd = event.cwd, !cwd.isEmpty {
-                Button("复制工作目录") { copy(cwd) }
+                Button(L10n.text("Copy working directory", zhHans: "复制工作目录")) { copy(cwd) }
             }
             Divider()
-            Button("只看 \(event.source.displayName)") { sourceFilter = event.source }
-            Button("只看「\(event.kind.label)」") { kindFilter = event.kind }
+            Button(L10n.format("Only %@", zhHans: "只看 %@", String(event.source.displayName))) { sourceFilter = event.source }
+            Button(L10n.format("Only “%@”", zhHans: "只看「%@」", String(event.kind.label))) { kindFilter = event.kind }
         }
     }
 
@@ -532,12 +532,12 @@ struct AuditView: View {
 
     private var paginationBar: some View {
         HStack(spacing: 8) {
-            Text("共 \(service.total) 条")
+            Text(L10n.format("%@ total", zhHans: "共 %@ 条", String(service.total)))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.tertiary)
             // 同 subtitle：全库风险数与筛选后的「共 N 条」不同基准，不并排显示
             if service.riskTotal > 0, !filtering {
-                Text("· 风险 \(service.riskTotal)")
+                Text(L10n.format("· Risk %@", zhHans: "· 风险 %@", String(service.riskTotal)))
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(Theme.failureRed)
             }
@@ -555,7 +555,7 @@ struct AuditView: View {
             }
             .buttonStyle(.borderless)
             .disabled(page >= totalPages)
-            Text("跳至").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(L10n.text("Go to", zhHans: "跳至")).font(.system(size: 10)).foregroundStyle(.tertiary)
             TextField("", text: $pageInput)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 40)

@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let probeQueue = DispatchQueue(
         label: "com.vinlee.eureka.terminalprobe", qos: .utility)
 
+    @objc private func languageDidChange() {
+        MainActor.assumeIsolated {
+            NSApp.mainMenu = MainMenu.build()
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // brutal 主题字体（Space Grotesk/Mono）须先于任何 UI 渲染注册
         ThemeFonts.register()
@@ -52,8 +58,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ContextWindows.loadOverrides(
             from: SpoolPaths.root().appendingPathComponent("context-windows.json"))
 
-        // 常规应用主菜单（关于/隐藏/退出 + 窗口）
+        // 常规应用主菜单（关于/隐藏/退出 + 窗口）。语言切换后按同一入口重建。
         NSApp.mainMenu = MainMenu.build()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange),
+            name: .eurekaLanguageDidChange,
+            object: nil)
 
         // 仅正式 .app 启用；启动后按 Sparkle 自带偏好立即执行一次后台检查。
         updateService.start()

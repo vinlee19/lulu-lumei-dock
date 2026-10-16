@@ -101,7 +101,7 @@ final class MascotViewModel: ObservableObject {
 
     func showFinished(success: Bool) {
         pushTransient(success ? .success : .error,
-                      bubble: success ? "搞定啦 🎉" : "出错了 😣", seconds: 2.5)
+                      bubble: success ? L10n.text("All done 🎉", zhHans: "搞定啦 🎉") : L10n.text("Something went wrong 😣", zhHans: "出错了 😣"), seconds: 2.5)
     }
 
     /// 关怀提示:复用 WellnessAdvisor 的文案;深夜进困倦态,否则放松态

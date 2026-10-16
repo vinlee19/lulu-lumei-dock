@@ -175,14 +175,14 @@ final class SyncService: ObservableObject {
         queue.async { [weak self] in
             guard let self else { return }
             guard let client = self.makeClient() else {
-                self.publish { $0.connectionTest = .failure("配置不完整：请填写地域、存储桶并保存密钥") }
+                self.publish { $0.connectionTest = .failure(L10n.text("Incomplete configuration: enter the region and bucket, and save your credentials", zhHans: "配置不完整：请填写地域、存储桶并保存密钥")) }
                 return
             }
             do {
                 try client.headBucket()
                 self.publish { $0.connectionTest = .success }
             } catch {
-                self.publish { $0.connectionTest = .failure("连接失败：\(error)") }
+                self.publish { $0.connectionTest = .failure(L10n.format("Connection failed: %@", zhHans: "连接失败：%@", String(describing: error))) }
             }
         }
     }
@@ -196,7 +196,7 @@ final class SyncService: ObservableObject {
             let ok = okId && okKey
             self?.publish {
                 $0.credentialsConfigured = ok
-                if !ok { $0.lastError = "密钥写入钥匙串失败" }
+                if !ok { $0.lastError = L10n.text("Failed to save credentials to Keychain", zhHans: "密钥写入钥匙串失败") }
             }
             DispatchQueue.main.async { completion?(ok) }
         }
@@ -222,12 +222,12 @@ final class SyncService: ObservableObject {
         defer { publish { $0.syncing = false } }
 
         guard let client = makeClient() else {
-            publish { $0.lastError = "备份未运行：请填写地域、存储桶并保存密钥" }
+            publish { $0.lastError = L10n.text("Backup did not run: enter the region and bucket, and save your credentials", zhHans: "备份未运行：请填写地域、存储桶并保存密钥") }
             return
         }
         guard let store = try? EurekaStore(path: EurekaStore.defaultURL()) else {
-            publish { $0.lastError = "备份失败：本地数据库不可用" }
-            HealthRegistry.shared.failure(Self.healthName, note: "sqlite 打开失败")
+            publish { $0.lastError = L10n.text("Backup failed: local database unavailable", zhHans: "备份失败：本地数据库不可用") }
+            HealthRegistry.shared.failure(Self.healthName, note: L10n.text("Failed to open sqlite", zhHans: "sqlite 打开失败"))
             return
         }
 
@@ -262,7 +262,7 @@ final class SyncService: ObservableObject {
                 store: store, outDir: Self.auditArchiveDir(), host: SyncKeyMapper.deviceNamespace(),
                 appVersion: AuditArchiveSettings.appVersion, cutoff: archiveCutoff)
             if let error = outcome.errors.first {
-                HealthRegistry.shared.failure(Self.healthName, note: "审计归档：\(error)")
+                HealthRegistry.shared.failure(Self.healthName, note: L10n.format("Audit archive: %@", zhHans: "审计归档：%@", String(describing: error)))
             }
             roots.auditArchiveDir = Self.auditArchiveDir()
         }
@@ -306,7 +306,7 @@ final class SyncService: ObservableObject {
         }
         publish {
             $0.lastResult = Self.describe(report)
-            $0.lastError = report.firstError.map { "部分失败（\(report.failed) 个）：\($0)" }
+            $0.lastError = report.firstError.map { L10n.format("Partially failed (%@ files): %@", zhHans: "部分失败（%@ 个）：%@", String(report.failed), String($0)) }
         }
         // 只有用户当前就在第 1 页时才刷新列表：否则会把他翻到的页码顶回去
         // （视图自己持有 historyPage，服务这边强刷会让两者对不上）
@@ -413,17 +413,17 @@ final class SyncService: ObservableObject {
 
     static func describe(_ report: SyncReport) -> String {
         if report.uploaded == 0 && report.failed == 0 && report.deferred == 0 {
-            return "已是最新（无变化）"
+            return L10n.text("Already up to date (no changes)", zhHans: "已是最新（无变化）")
         }
-        var parts = ["已上传 \(report.uploaded) 个文件"]
+        var parts = [L10n.format("Uploaded %@ files", zhHans: "已上传 %@ 个文件", String(report.uploaded))]
         if report.uploadedBytes > 0 {
             parts.append(formatSyncBytes(report.uploadedBytes))
         }
         if report.deferred > 0 {
-            parts.append("剩 \(report.deferred) 个下轮继续")
+            parts.append(L10n.format("%@ remaining for the next run", zhHans: "剩 %@ 个下轮继续", String(report.deferred)))
         }
         if report.skippedOversize > 0 {
-            parts.append("跳过超大文件 \(report.skippedOversize) 个")
+            parts.append(L10n.format("Skipped %@ oversized files", zhHans: "跳过超大文件 %@ 个", String(report.skippedOversize)))
         }
         return parts.joined(separator: " · ")
     }

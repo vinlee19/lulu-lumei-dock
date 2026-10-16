@@ -1,4 +1,5 @@
 import AppKit
+import EurekaKit
 import SwiftUI
 
 /// 应用图标：靛紫渐变圆角方 + 金色「Lu」抽象字母组（黄金比例构造），呼应 lulu-lumei-dock 的紫金品牌色（Theme.brand / Theme.gold 同源）。
@@ -14,7 +15,7 @@ enum IconRenderer {
             let bitmap = NSBitmapImageRep(data: tiff),
             let png = bitmap.representation(using: .png, properties: [:])
         else {
-            print("图标渲染失败")
+            print(L10n.text("Icon rendering failed", zhHans: "图标渲染失败"))
             exit(1)
         }
         let url = URL(fileURLWithPath: path)
@@ -22,9 +23,9 @@ enum IconRenderer {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         do {
             try png.write(to: url)
-            print("已渲染 \(path)")
+            print(L10n.format("Rendered %@", zhHans: "已渲染 %@", String(path)))
         } catch {
-            print("写入失败: \(error)")
+            print(L10n.format("Write failed: %@", zhHans: "写入失败: %@", String(describing: error)))
             exit(1)
         }
     }

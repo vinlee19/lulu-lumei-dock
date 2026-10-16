@@ -67,7 +67,7 @@ final class PromptsService: ObservableObject {
         let sessions = Array(sessionBrowser.sessionsById.values)
         guard !sessions.isEmpty else { return }
         scanning = true
-        publishPhase("正在提取用户提问…")
+        publishPhase(L10n.text("Extracting user prompts…", zhHans: "正在提取用户提问…"))
         queue.async { [weak self] in
             guard let self else { return }
             if self.store == nil {
@@ -89,7 +89,7 @@ final class PromptsService: ObservableObject {
             var sessionMeta: [String: AgentSessionInfo] = [:]
             for session in sessions { sessionMeta[session.id] = session }
             if !pending.isEmpty {
-                self.publishPhase("正在解析 \(pending.count) 个会话…")
+                self.publishPhase(L10n.format("Parsing %@ sessions…", zhHans: "正在解析 %@ 个会话…", String(pending.count)))
                 for (index, session) in pending.enumerated() {
                     // 每会话一个池：messages/轮次图等瞬态在会话间及时释放，
                     // 全量重扫（迁移后指纹清空）才不会把上百个会话的解析产物
@@ -109,7 +109,7 @@ final class PromptsService: ObservableObject {
                     }
                     if index % 25 == 0 {
                         self.publishPhase(
-                            "正在解析会话 \(index + 1)/\(pending.count)…")
+                            L10n.format("Parsing session %@/%@…", zhHans: "正在解析会话 %@/%@…", String(index + 1), String(pending.count)))
                     }
                 }
             }

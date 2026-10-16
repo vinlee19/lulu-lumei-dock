@@ -51,7 +51,7 @@ enum EurekaCLI {
             // Debug: decode Parquet files written by the audit archive and print rows / schema per file
             let files = Array(args.dropFirst())
             guard !files.isEmpty else {
-                print("usage: --parquet-inspect <file.parquet>…")
+                print(L10n.text("usage: --parquet-inspect <file.parquet>…", zhHans: "用法：--parquet-inspect <file.parquet>…"))
                 exit(2)
             }
             var failed = false
@@ -74,18 +74,19 @@ enum EurekaCLI {
                 let outcome = AuditArchive.materialize(
                     store: store, outDir: URL(fileURLWithPath: dir, isDirectory: true),
                     host: ProcessInfo.processInfo.hostName, appVersion: Self.appVersion, cutoff: nil)
-                print("写入 \(outcome.writtenDays.count) 天 → \(dir)")
+                print(L10n.format("Wrote %@ days → %@", zhHans: "写入 %@ 天 → %@", String(outcome.writtenDays.count), String(dir)))
                 for error in outcome.errors { print("  \(error)") }
             } catch {
-                print("打开数据库失败：\(error)")
+                print(L10n.format("Failed to open database: %@", zhHans: "打开数据库失败：%@", String(describing: error)))
                 exit(1)
             }
         case "--pricing-refresh":
             let started = Date()
             let outcome = CatalogRefresher.refresh(previous: .empty, fetch: PricingCatalogService.fetch)
-            print("联网拉取价格目录：\(outcome.succeeded ? "成功" : "失败")，耗时 "
-                + String(format: "%.1fs", Date().timeIntervalSince(started))
-                + "；LiteLLM \(outcome.catalog.litellm.count) 条，models.dev \(outcome.catalog.modelsDev.count) 个 provider")
+            print(L10n.format("Remote pricing catalog fetch: %@, took %@; LiteLLM %@ entries, models.dev %@ providers", zhHans: "联网拉取价格目录：%@，耗时 %@；LiteLLM %@ 条，models.dev %@ 个 provider",
+                String(outcome.succeeded ? L10n.text("succeeded", zhHans: "成功") : L10n.text("failed", zhHans: "失败")),
+                String(String(format: "%.1fs", Date().timeIntervalSince(started))),
+                String(outcome.catalog.litellm.count), String(outcome.catalog.modelsDev.count)))
             for error in outcome.errors { print("  \(error)") }
         case "--build-pricing-catalog":
             buildPricingCatalog(args: Array(args.dropFirst()))
@@ -179,13 +180,13 @@ enum EurekaCLI {
             MascotAssetPrep.run(srcDir: src, dstDir: dst)
         case "--pack-mascot-v3":
             guard args.count == 3 else {
-                print("用法：eureka --pack-mascot-v3 <12张分镜目录> <输出PNG>")
+                print(L10n.text("Usage: eureka --pack-mascot-v3 <12-sheet-directory> <output-PNG>", zhHans: "用法：eureka --pack-mascot-v3 <12张分镜目录> <输出PNG>"))
                 exit(2)
             }
             do {
                 try MascotAssetPrep.packV3(srcDir: args[1], outputPath: args[2])
             } catch {
-                print("打包失败：\(error.localizedDescription)")
+                print(L10n.format("Packing failed: %@", zhHans: "打包失败：%@", String(error.localizedDescription)))
                 exit(1)
             }
         case "--render-badges":
@@ -206,7 +207,7 @@ enum EurekaCLI {
 
     private static func installClaudeHooks() {
         guard let relay = RelaySyncer.sync() else {
-            print("错误：找不到 eureka-relay 二进制（应与本程序同目录）")
+            print(L10n.text("Error: eureka-relay binary not found (expected beside this program)", zhHans: "错误：找不到 eureka-relay 二进制（应与本程序同目录）"))
             exit(1)
         }
         let url = claudeSettingsURL
@@ -214,13 +215,13 @@ enum EurekaCLI {
             let original = ConfigFile.read(url)
             let updated = try ClaudeHooksInstaller.install(into: original, relayPath: relay.path)
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
-            print("✓ Claude hooks 已安装到 \(url.path)")
+            print(L10n.format("✓ Claude hooks installed at %@", zhHans: "✓ Claude hooks 已安装到 %@", String(url.path)))
             print("  relay: \(relay.path)")
             if let backup = ConfigFile.backups(for: url).first {
-                print("  备份: \(backup.lastPathComponent)")
+                print(L10n.format("  Backup: %@", zhHans: "  备份: %@", String(backup.lastPathComponent)))
             }
         } catch {
-            print("安装失败: \(error)")
+            print(L10n.format("Installation failed: %@", zhHans: "安装失败: %@", String(describing: error)))
             exit(1)
         }
     }
@@ -230,21 +231,21 @@ enum EurekaCLI {
         do {
             let original = ConfigFile.read(url)
             guard !original.isEmpty else {
-                print("settings.json 不存在，无需卸载")
+                print(L10n.text("settings.json does not exist; nothing to uninstall", zhHans: "settings.json 不存在，无需卸载"))
                 return
             }
             let updated = try ClaudeHooksInstaller.uninstall(from: original)
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
-            print("✓ Claude hooks 已卸载")
+            print(L10n.text("✓ Claude hooks uninstalled", zhHans: "✓ Claude hooks 已卸载"))
         } catch {
-            print("卸载失败: \(error)")
+            print(L10n.format("Uninstall failed: %@", zhHans: "卸载失败: %@", String(describing: error)))
             exit(1)
         }
     }
 
     private static func installCodexNotify() {
         guard let relay = RelaySyncer.sync() else {
-            print("错误：找不到 eureka-relay 二进制（应与本程序同目录）")
+            print(L10n.text("Error: eureka-relay binary not found (expected beside this program)", zhHans: "错误：找不到 eureka-relay 二进制（应与本程序同目录）"))
             exit(1)
         }
         let url = codexConfigURL
@@ -252,9 +253,9 @@ enum EurekaCLI {
             let original = ConfigFile.read(url)
             let updated = try CodexNotifyInstaller.install(into: original, relayPath: relay.path)
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
-            print("✓ Codex notify 已安装到 \(url.path)")
+            print(L10n.format("✓ Codex notify installed at %@", zhHans: "✓ Codex notify 已安装到 %@", String(url.path)))
         } catch {
-            print("安装失败: \(error)")
+            print(L10n.format("Installation failed: %@", zhHans: "安装失败: %@", String(describing: error)))
             exit(1)
         }
     }
@@ -263,15 +264,15 @@ enum EurekaCLI {
         let url = codexConfigURL
         let original = ConfigFile.read(url)
         guard !original.isEmpty else {
-            print("config.toml 不存在，无需卸载")
+            print(L10n.text("config.toml does not exist; nothing to uninstall", zhHans: "config.toml 不存在，无需卸载"))
             return
         }
         do {
             let updated = CodexNotifyInstaller.uninstall(from: original)
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
-            print("✓ Codex notify 已卸载")
+            print(L10n.text("✓ Codex notify uninstalled", zhHans: "✓ Codex notify 已卸载"))
         } catch {
-            print("卸载失败: \(error)")
+            print(L10n.format("Uninstall failed: %@", zhHans: "卸载失败: %@", String(describing: error)))
             exit(1)
         }
     }
@@ -286,7 +287,7 @@ enum EurekaCLI {
         print("Codex notify: \(codexNotify.rawValue)")
         print("Codex hooks: \(codexHooks.rawValue)")
         print("Trae hooks: \(trae.rawValue)  (\(traeHooksURL.path))")
-        print("relay 稳定路径: \(RelaySyncer.stableRelayURL.path)")
+        print(L10n.format("relay stable path: %@", zhHans: "relay 稳定路径: %@", String(RelaySyncer.stableRelayURL.path)))
     }
 
     /// 一次性全量扫描并输出今日/本周聚合（ccusage 对拍脚本用）
@@ -337,10 +338,10 @@ enum EurekaCLI {
                 cwdResolver: { AntigravityPaths.cwd(dbURL: $0) }).scanOnce()
             try? zcode.recordPromptCounts()
             FileHandle.standardError.write(Data(
-                ("扫描完成：claude +\(newClaude) 条，codex +\(newCodex) 条，OpenCode +\(newOpencode) 条，"
-                    + "grok 工具/用量 +\(newGrok)，kimi +\(newKimi) 条，gemini +\(newGemini) 条，"
-                    + "qwen +\(newQwen) 条，hermes +\(newHermes) 条，codebuddy +\(newCodeBuddy) 条，"
-                    + "cursor +\(newCursor) 条，zcode +\(newZcode) 条，antigravity +\(newAntigravity) 条\n").utf8))
+                L10n.format("Scan complete: claude +%@ records, codex +%@ records, OpenCode +%@ records, grok tools/usage +%@, kimi +%@ records, gemini +%@ records, qwen +%@ records, hermes +%@ records, codebuddy +%@ records, cursor +%@ records, zcode +%@ records, antigravity +%@ records\n", zhHans: "扫描完成：claude +%@ 条，codex +%@ 条，OpenCode +%@ 条，grok 工具/用量 +%@，kimi +%@ 条，gemini +%@ 条，qwen +%@ 条，hermes +%@ 条，codebuddy +%@ 条，cursor +%@ 条，zcode +%@ 条，antigravity +%@ 条\n",
+                    String(newClaude), String(newCodex), String(newOpencode), String(newGrok),
+                    String(newKimi), String(newGemini), String(newQwen), String(newHermes),
+                    String(newCodeBuddy), String(newCursor), String(newZcode), String(newAntigravity)).utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(
@@ -379,7 +380,10 @@ enum EurekaCLI {
             let newCount = try scanner.scanOnce()
             let riskTotal = try store.audit.count(.init(riskOnly: true))
             FileHandle.standardError.write(Data(
-                "审计扫描完成：codex +\(newCount) 条，累计风险 \(riskTotal) 条\n".utf8))
+                L10n.format(
+                    "Audit scan complete: codex +%@ records, %@ total risks\n",
+                    zhHans: "审计扫描完成：codex +%@ 条，累计风险 %@ 条\n",
+                    String(newCount), String(riskTotal)).utf8))
 
             let rows = try store.audit.recent(.init(riskOnly: riskOnly), limit: limit)
             let isoFormatter = ISO8601DateFormatter()
@@ -414,22 +418,22 @@ enum EurekaCLI {
         let semaphore = DispatchSemaphore(value: 0)
         Task {
             func describe(_ snapshot: RateLimitSnapshot?) -> String {
-                guard let snapshot else { return "（无数据 → UI 隐藏）" }
+                guard let snapshot else { return L10n.text("(No data → hidden in UI)", zhHans: "（无数据 → UI 隐藏）") }
                 var parts: [String] = []
                 if let plan = snapshot.planType { parts.append("plan=\(plan)") }
                 if let primary = snapshot.primary {
-                    let label = primary.windowMinutes == 10080 ? "周"
-                        : primary.windowMinutes == 43200 ? "月"
+                    let label = primary.windowMinutes == 10080 ? L10n.text("Week", zhHans: "周")
+                        : primary.windowMinutes == 43200 ? L10n.text("Month", zhHans: "月")
                         : "5h"
                     parts.append(String(format: "\(label)=%.1f%%", primary.usedPercent))
                     if let resets = primary.resetsAt {
-                        parts.append("\(label)重置=\(resets)")
+                        parts.append(L10n.format("%@ reset=%@", zhHans: "%@重置=%@", String(label), String(describing: resets)))
                     }
                 }
                 if let secondary = snapshot.secondary {
-                    parts.append(String(format: "周=%.1f%%", secondary.usedPercent))
+                    parts.append(L10n.format("Week=%@%%", zhHans: "周=%@%%", String(String(format: "%.1f", secondary.usedPercent))))
                 }
-                if snapshot.isStale { parts.append("（截至 \(snapshot.asOf)）") }
+                if snapshot.isStale { parts.append(L10n.format("(As of %@)", zhHans: "（截至 %@）", String(describing: snapshot.asOf))) }
                 return parts.joined(separator: " ")
             }
 
@@ -443,7 +447,7 @@ enum EurekaCLI {
                 let claude = await provider.snapshot()
                 print("Claude: \(describe(claude))")
                 if let failure = provider.lastFailure {
-                    print("Claude 提示: \(failure)")
+                    print(L10n.format("Claude note: %@", zhHans: "Claude 提示: %@", String(failure)))
                 }
             }
             semaphore.signal()
@@ -487,7 +491,7 @@ enum EurekaCLI {
                 ($0.source.rawValue, $0.model, $0.provider)
             }
         }
-        print("价格目录来源：\(store.currentOrigin.rawValue)")
+        print(L10n.format("Pricing catalog source: %@", zhHans: "价格目录来源：%@", String(store.currentOrigin.rawValue)))
         for pair in pairs {
             let resolution = table.resolution(for: pair.model, provider: pair.provider)
             let price = resolution.price.map {
@@ -505,7 +509,9 @@ enum EurekaCLI {
     private static func buildPricingCatalog(args: [String]) {
         guard args.count >= 3 else {
             FileHandle.standardError.write(Data(
-                "用法：--build-pricing-catalog <litellm.json> <models.dev.json> <输出>\n".utf8))
+                L10n.text(
+                    "Usage: --build-pricing-catalog <litellm.json> <models.dev.json> <output>\n",
+                    zhHans: "用法：--build-pricing-catalog <litellm.json> <models.dev.json> <输出>\n").utf8))
             exit(2)
         }
         do {
@@ -522,10 +528,12 @@ enum EurekaCLI {
             let data = try PricingCatalogStore.encode(catalog)
             try data.write(to: URL(fileURLWithPath: args[2]), options: .atomic)
             FileHandle.standardError.write(Data(
-                ("已生成 \(args[2])：LiteLLM \(litellm.count) 条，models.dev \(modelsDev.count) 个 provider，"
-                    + "\(data.count / 1024) KB\n").utf8))
+                L10n.format("Generated %@: LiteLLM %@ entries, models.dev %@ providers, %@ KB\n", zhHans: "已生成 %@：LiteLLM %@ 条，models.dev %@ 个 provider，%@ KB\n", String(args[2]), String(litellm.count), String(modelsDev.count), String(data.count / 1024)).utf8))
         } catch {
-            FileHandle.standardError.write(Data("生成失败：\(error)\n".utf8))
+            FileHandle.standardError.write(Data(L10n.format(
+                "Generation failed: %@\n",
+                zhHans: "生成失败：%@\n",
+                String(describing: error)).utf8))
             exit(1)
         }
     }
@@ -535,7 +543,26 @@ enum EurekaCLI {
     }
 
     private static func printUsage() {
-        print("""
+        print(L10n.text("""
+        eureka [options]
+          (no arguments)           Launch the menu-bar app
+          --install-claude-hooks    Install Claude Code hooks (back up before writing)
+          --uninstall-claude-hooks  Uninstall Claude Code hooks
+          --install-codex-notify    Install Codex notify (back up before writing)
+          --uninstall-codex-notify  Uninstall Codex notify
+          --hooks-status            Show installation status
+          --audit-snapshot          Scan and print agent audit events (--risk-only for risks / --limit N)
+          --parquet-inspect <files…> Decode Parquet archives; print rows and columns per file (read-only)
+          --pricing-resolve [models…] Print resolved prices and sources (--provider p; all local ledger models if omitted)
+          --build-pricing-catalog <litellm> <models.dev> <output>  Generate the bundled pricing catalog snapshot
+          --pricing-refresh         Fetch the pricing catalog with the app’s network code (print only, without caching)
+          --mcp-inspect <name>       Inspect an MCP server (remote handshake / deep stdio inspection) and cache results
+          --render-previews [dir]    Offscreen-render Dynamic Island states to PNG
+          --render-mascot [dir]      Offscreen-render all mascot variants and storyboards to PNG
+          --pack-mascot-v3 <dir> <file>  Pack 12 2×2 storyboards into a v3 atlas
+          --render-shell [dir]       Offscreen-render the sidebar (including branding) and audit page in light/dark modes
+          --render-lineage [dir]     Offscreen-render turn lineage graphs (golden baseline + live data)
+        """, zhHans: """
         eureka [选项]
           （无参数）                 启动菜单栏应用
           --install-claude-hooks    安装 Claude Code hooks（写前备份）
@@ -554,7 +581,7 @@ enum EurekaCLI {
           --pack-mascot-v3 <目录> <文件>  将 12 张 2×2 分镜打包为 v3 图集
           --render-shell [目录]      离屏渲染侧栏（含品牌区）与审计页，明/暗两版
           --render-lineage [目录]    离屏渲染轮次血缘图（golden 基准 + 真实数据）
-        """)
+        """))
     }
 
     /// --mcp-inspect：走 MCPService 的真实探测路径（与 UI「重新检测」同一条代码路径、
@@ -562,7 +589,7 @@ enum EurekaCLI {
     @MainActor
     private static func mcpInspect(name: String) {
         guard !name.isEmpty else {
-            print("用法：eureka --mcp-inspect <server名>")
+            print(L10n.text("Usage: eureka --mcp-inspect <server-name>", zhHans: "用法：eureka --mcp-inspect <server名>"))
             return
         }
         let service = MCPService()
@@ -574,10 +601,10 @@ enum EurekaCLI {
         let entries = service.entries(named: name)
         guard !entries.isEmpty else {
             let known = Set(service.allEntries().map(\.name)).sorted()
-            print("未找到 server「\(name)」。已知：\(known.joined(separator: ", "))")
+            print(L10n.format("Server “%@” not found. Known servers: %@", zhHans: "未找到 server「%@」。已知：%@", String(name), String(known.joined(separator: ", "))))
             return
         }
-        print("检测「\(name)」的 \(entries.count) 处配置…")
+        print(L10n.format("Inspecting “%@” across %@ configurations…", zhHans: "检测「%@」的 %@ 处配置…", String(name), String(entries.count)))
         service.probe(entries)
         deadline = Date().addingTimeInterval(90)
         while Date() < deadline {
@@ -591,28 +618,27 @@ enum EurekaCLI {
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))  // 等 toolCache 回主线程
         for entry in entries {
             guard let snapshot = service.probeSnapshots[entry.id] else {
-                print("[\(entry.source.displayName)] 超时未出结果")
+                print(L10n.format("[%@] Timed out without a result", zhHans: "[%@] 超时未出结果", String(entry.source.displayName)))
                 continue
             }
             var line = "[\(entry.source.displayName)] \(snapshot.label)"
             if let detail = snapshot.detail { line += " · \(detail)" }
-            if let scheme = snapshot.authScheme { line += " · 鉴权=\(scheme)" }
+            if let scheme = snapshot.authScheme { line += L10n.format(" · Authentication=%@", zhHans: " · 鉴权=%@", String(scheme)) }
             print(line)
             if let hint = snapshot.hint { print("  ↳ \(hint)") }
         }
         guard let cache = MCPToolCache.load()[name.lowercased()] else { return }
-        print("工具 \(cache.toolCount) 个 · 每轮 ~\(cache.schemaTokens) tokens"
-            + " · 协议 \(cache.protocolVersion ?? "-")")
+        print(L10n.format("%@ tools · ~%@ tokens per turn · Protocol %@", zhHans: "工具 %@ 个 · 每轮 ~%@ tokens · 协议 %@", String(cache.toolCount), String(cache.schemaTokens), String(cache.protocolVersion ?? "-")))
         for tool in cache.tools ?? [] {
             let params = (tool.params?.isEmpty == false)
                 ? "(\(tool.params!.joined(separator: ", ")))" : ""
             print("  - \(tool.name)\(params)  \(tool.description ?? "")")
         }
         if let prompts = cache.prompts, !prompts.isEmpty {
-            print("提示词 \(prompts.count)：\(prompts.map(\.name).joined(separator: ", "))")
+            print(L10n.format("Prompts %@: %@", zhHans: "提示词 %@：%@", String(prompts.count), String(prompts.map(\.name).joined(separator: ", "))))
         }
         if let resources = cache.resources, !resources.isEmpty {
-            print("资源 \(resources.count)：\(resources.map(\.name).joined(separator: ", "))")
+            print(L10n.format("Resources %@: %@", zhHans: "资源 %@：%@", String(resources.count), String(resources.map(\.name).joined(separator: ", "))))
         }
     }
 }

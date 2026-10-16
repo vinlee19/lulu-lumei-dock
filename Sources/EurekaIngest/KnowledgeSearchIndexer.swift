@@ -86,7 +86,7 @@ public final class KnowledgeSearchIndexer {
             try? store.knowledge.prune(keeping: Set(docs.map(\.path)))
             // 降级保持静默（面板退回元数据搜索），但失败要可诊断（磁盘满/库损坏/非 UTF-8）
             if failures > 0 {
-                NSLog("KnowledgeSearchIndexer: %d/%d 篇正文索引失败", failures, docs.count)
+                NSLog("%@", L10n.format("KnowledgeSearchIndexer: failed to index %@/%@ documents", zhHans: "KnowledgeSearchIndexer: %@/%@ 篇正文索引失败", String(failures), String(docs.count)))
             }
         }
     }
