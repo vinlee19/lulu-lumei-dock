@@ -4,6 +4,30 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Custom desktop companion.** Settings → General → Desktop companion now
+  shows a picker with thumbnails instead of a pack drop-down. Upload one
+  image (PNG / JPG / HEIC / WebP, or an animated GIF / APNG, up to 20 MB) and
+  it replaces Lulu & Lumei in every state, with the existing breathing / hop /
+  sway motions telling the states apart. Each uploaded companion can be
+  renamed, can get its own image for working / waiting / done / error /
+  sleeping (states without one reuse the fallback chain), and can be deleted
+  (it is moved to the Trash). An optional toggle removes a solid background
+  on upload. Static images are downscaled to 512 px and stored as PNG; source
+  files are never modified.
+- **Preset companions.** Packs placed under
+  `Sources/EurekaApp/Resources/mascots/presets/<id>/manifest.json` ship with
+  the app and appear under "Presets", after the built-in Lulu & Lumei. They
+  use the same manifest format as user packs and are read-only in the UI.
+
+### Fixed
+
+- Packs without gaze frames (any custom pack) no longer freeze their caption
+  and motion while the pointer is near the companion.
+
 ## [0.35.1] - 2026-10-14
 
 ### Fixed

@@ -225,7 +225,8 @@ enum MascotAssetPrep {
         print("✓ v3 图集 \(atlasWidth)×\(atlasHeight): \(outputURL.path)")
     }
 
-    private static func hasTransparentCorners(_ image: CGImage) -> Bool {
+    /// 四角都近乎透明 → 已是抠好的透明底图（上传形象时据此跳过背景去除）
+    static func hasTransparentCorners(_ image: CGImage) -> Bool {
         let bitmap = NSBitmapImageRep(cgImage: image)
         guard bitmap.hasAlpha else { return false }
         let points = [

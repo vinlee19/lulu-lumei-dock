@@ -170,37 +170,7 @@ struct SettingsView: View {
             }
 
             settingCard("桌面伙伴") {
-                Toggle("显示桌面吉祥物（噜噜 & 噜妹）", isOn: $settings.mascotEnabled)
-                if settings.mascotEnabled {
-                    HStack {
-                        Text("动画包")
-                        Spacer()
-                        Picker("", selection: $settings.mascotPack) {
-                            ForEach(MascotPackLoader.availablePacks(), id: \.id) { pack in
-                                Text(pack.name).tag(pack.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 180)
-                    }
-                    Button("打开动画包文件夹") { MascotPackLoader.revealCustomFolder() }
-                        .controlSize(.small)
-                    if settings.mascotPack == MascotPackLoader.builtInID {
-                        let builtIn = MascotPackLoader.builtIn()
-                        let idleCount = builtIn.variants(for: .idle).count
-                        let workingCount = builtIn.variants(for: .working).count
-                        let waitingCount = builtIn.variants(for: .waiting).count
-                        Text("高频行为共 \(idleCount + workingCount + waitingCount) 种："
-                            + "空闲 \(idleCount) · 工作 \(workingCount) · 等待 \(waitingCount) · "
-                            + "\(builtIn.lookDirections.count) 向视线")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(Theme.brandFg)
-                    }
-                    Text("自定义包放 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）；"
-                        + "拖动可移动位置，空闲时会看向鼠标，右键可隐藏。")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                }
+                MascotSettingsSection(settings: settings)
             }
 
             settingCard("启动") {

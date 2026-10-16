@@ -18,6 +18,7 @@ final class MascotPanelController {
     private var isProgrammaticMove = false
     private var pointerTimer: Timer?
     private var lastPointerLocation: NSPoint?
+    private var currentPackID = MascotPackLoader.builtInID
 
     init() {
         viewModel = MascotViewModel(pack: MascotPackLoader.builtIn())
@@ -54,6 +55,9 @@ final class MascotPanelController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(packFilesChanged(_:)),
+            name: .eurekaMascotPackChanged, object: nil)
         pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.updatePointerBehavior() }
@@ -71,7 +75,16 @@ final class MascotPanelController {
     }
 
     func applyPack(id: String) {
+        currentPackID = id
         viewModel.setPack(MascotPackLoader.load(packID: id))
+    }
+
+    /// 设置页给当前形象换图 / 改名后立即重载（包 id 不变，设置项不会触发）
+    @objc private func packFilesChanged(_ note: Notification) {
+        MainActor.assumeIsolated {
+            guard (note.object as? String) == currentPackID else { return }
+            applyPack(id: currentPackID)
+        }
     }
 
     /// 低频采样鼠标位置：idle 时让双角色自然看向鼠标，睡眠时移动可唤醒。

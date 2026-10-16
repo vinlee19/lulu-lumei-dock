@@ -111,13 +111,28 @@ struct MascotPack {
     }
 }
 
+/// 设置页列出的一个可选形象
+struct MascotPackInfo: Identifiable, Equatable {
+    enum Kind: Equatable { case builtIn, preset, custom }
+
+    var id: String
+    var name: String
+    var kind: Kind
+}
+
 enum MascotPackLoader {
-    static let builtInID = "built-in"
+    static let builtInID = MascotPackRef.builtInID
     static let builtInName = "噜噜 & 噜妹（内置）"
 
     /// 用户自定义包根目录:~/Library/Application Support/Eureka/mascots
     static func customRoot() -> URL {
         SpoolPaths.root().appendingPathComponent("mascots", isDirectory: true)
+    }
+
+    /// 随 App 打包的预设形象根目录：Resources/mascots/presets/<id>/manifest.json
+    static func presetsRoot() -> URL? {
+        AppResources.bundle.url(
+            forResource: "presets", withExtension: nil, subdirectory: "mascots")
     }
 
     /// 确保 mascots/ 存在并放一份说明 + 示例 manifest(首次),再在 Finder 打开
@@ -150,7 +165,8 @@ enum MascotPackLoader {
     5. 可选 variants:给同一个状态配置多个行为,每项支持 id / frames 或 file / fps /
        caption / motion / weight。motion 可选 gentle/focus/curious/nudge/celebrate/
        droop/sleep/sway/still。
-    6. 回 Eureka 设置 → 桌面伙伴 → 动画包,选你的包即可(新建后可能需重开设置面板刷新列表)。
+    6. 回 设置 → 通用 → 桌面伙伴,在「我的形象」里选你的包即可(新建后可能需重开设置面板刷新列表)。
+       只想换一张图的话,不用写 manifest:直接在设置里点「上传图片」。
 
     建议尺寸:正方形,长边 ≤ 512px;透明或纯色背景都行(会放进圆角卡片里)。
     """
@@ -446,50 +462,90 @@ enum MascotPackLoader {
         return pack
     }
 
-    /// 已安装的包(内置 + customRoot 下含 manifest.json 的目录)
-    static func availablePacks() -> [(id: String, name: String)] {
-        var result = [(id: builtInID, name: builtInName)]
-        let dirs = (try? FileManager.default.contentsOfDirectory(
-            at: customRoot(), includingPropertiesForKeys: nil)) ?? []
-        for dir in dirs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            let manifest = dir.appendingPathComponent("manifest.json")
-            guard FileManager.default.fileExists(atPath: manifest.path) else { continue }
-            let name = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifest)))
-                .flatMap { ($0 as? [String: Any])?["name"] as? String }
-            result.append((id: dir.lastPathComponent, name: name ?? dir.lastPathComponent))
+    /// 可选形象：内置噜噜 → 预设（随 App 打包）→ 用户包（customRoot 下含 manifest.json 的目录）
+    static func availablePacks() -> [MascotPackInfo] {
+        var result = [MascotPackInfo(id: builtInID, name: builtInName, kind: .builtIn)]
+        if let root = presetsRoot() {
+            for dir in packDirectories(in: root) {
+                let manifest = readManifest(in: dir)
+                result.append(MascotPackInfo(
+                    id: MascotPackRef.preset(dir.lastPathComponent).id,
+                    name: manifest.flatMap(MascotManifestEditor.name) ?? dir.lastPathComponent,
+                    kind: .preset))
+            }
+        }
+        for dir in packDirectories(in: customRoot()) {
+            let manifest = readManifest(in: dir)
+            result.append(MascotPackInfo(
+                id: MascotPackRef.custom(dir.lastPathComponent).id,
+                name: manifest.flatMap(MascotManifestEditor.name) ?? dir.lastPathComponent,
+                kind: .custom))
         }
         return result
     }
 
-    /// 按 id 加载;非法/缺失回退内置
-    static func load(packID: String) -> MascotPack {
-        guard packID != builtInID, !packID.isEmpty else { return builtIn() }
-        return custom(dirName: packID) ?? builtIn()
+    /// 根目录下直接含 manifest.json 的子目录（按名称排序，跳过隐藏目录与非法名）
+    static func packDirectories(in root: URL) -> [URL] {
+        let dirs = (try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles])) ?? []
+        return dirs
+            .filter { MascotPackRef.isSafeDirectoryName($0.lastPathComponent) }
+            .filter {
+                FileManager.default.fileExists(
+                    atPath: $0.appendingPathComponent("manifest.json").path)
+            }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// 解析自定义包的 manifest.json(state→ 文件名字符串 或 帧数组)
-    static func custom(dirName: String) -> MascotPack? {
-        let dir = customRoot().appendingPathComponent(dirName, isDirectory: true)
+    static func readManifest(in dir: URL) -> Data? {
+        try? Data(contentsOf: dir.appendingPathComponent("manifest.json"))
+    }
+
+    /// 包 id 对应的目录（内置噜噜没有目录）
+    static func directory(for ref: MascotPackRef) -> URL? {
+        switch ref {
+        case .builtIn:
+            return nil
+        case .preset(let name):
+            return presetsRoot()?.appendingPathComponent(name, isDirectory: true)
+        case .custom(let name):
+            return customRoot().appendingPathComponent(name, isDirectory: true)
+        }
+    }
+
+    /// 按 id 加载;非法/缺失回退内置
+    static func load(packID: String) -> MascotPack {
+        let ref = MascotPackRef(id: packID)
+        guard let dir = directory(for: ref) else { return builtIn() }
+        return parse(directory: dir, id: ref.id) ?? builtIn()
+    }
+
+    /// 解析包目录里的 manifest.json(state→ 文件名字符串 或 帧数组)。预设与用户包共用同一格式。
+    static func parse(directory dir: URL, id: String) -> MascotPack? {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return nil }
         let stateMap = root["states"] as? [String: Any] ?? [:]
-        let name = root["name"] as? String ?? dirName
+        let name = root["name"] as? String ?? dir.lastPathComponent
         let fps = (root["fps"] as? NSNumber)?.doubleValue ?? 2
+
+        func resolve(_ file: String) -> URL? {
+            let url = dir.appendingPathComponent(file)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
 
         func parseAnimation(_ value: Any, fps: Double) -> MascotAnimation? {
             if let file = value as? String {
-                let url = dir.appendingPathComponent(file)
-                guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                guard let url = resolve(file) else { return nil }
                 let ext = url.pathExtension.lowercased()
                 return (ext == "gif" || ext == "apng")
                     ? .animatedImage(url)
                     : .frames([url], fps: fps)
             }
             if let list = value as? [String] {
-                let urls = list.map { dir.appendingPathComponent($0) }
-                    .filter { FileManager.default.fileExists(atPath: $0.path) }
+                let urls = list.compactMap(resolve)
                 guard !urls.isEmpty else { return nil }
                 return .frames(urls, fps: fps)
             }
@@ -538,7 +594,7 @@ enum MascotPackLoader {
             }
         }
         return MascotPack(
-            id: dirName, name: name, states: states,
+            id: id, name: name, states: states,
             captions: captions, variants: variants)
     }
 }
