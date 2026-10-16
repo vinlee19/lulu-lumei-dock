@@ -36,12 +36,12 @@ struct SessionDetailView: View {
         case user = "用户"
         case assistant = "助手"
 
-        /// Tray label: the person reading is "我", the other side is the agent's own product
-        /// name (Claude Code, Codex, …) instead of the generic "用户 / 助手".
+        /// Tray label: the user side stays "用户"; the other side is the agent's own product
+        /// name (Claude Code, Codex, …) instead of a generic "助手".
         func label(for source: AgentSource?) -> String {
             switch self {
             case .all: return "全部"
-            case .user: return "我"
+            case .user: return "用户"
             case .assistant: return source?.displayName ?? "助手"
             }
         }
@@ -313,9 +313,12 @@ struct SessionDetailView: View {
     }
 
     /// 每次最多展示的产出条数；header 在 ScrollView 外，几十条产出会把对话区压没
-    private static let artifactsPageSize = 5
+    private static let artifactsPageSize = 6
 
-    /// 本会话产出：记忆（originSessionId/relatedSessions 命中）+ 计划（物化边车 sessionId 命中）
+    /// Artifacts of this session — memories whose origin / related sessions match, plans whose
+    /// materialised sidecar matches — as one wrapping row of chips. Six fit on a line or two;
+    /// the rest collapse into a "+N" chip. Chips, not rows: the header above the transcript is
+    /// already the densest part of the page and a five-row list pushed the messages off-screen.
     @ViewBuilder
     private func artifactsRow(_ session: AgentSessionInfo) -> some View {
         let memories = skillMemory.memories(relatedTo: session.id)
@@ -324,66 +327,50 @@ struct SessionDetailView: View {
         if !items.isEmpty {
             let visible = artifactsExpanded ? items : Array(items.prefix(Self.artifactsPageSize))
             let hiddenCount = items.count - visible.count
-            VStack(alignment: .leading, spacing: 3) {
-                Text("本会话产出")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-                ForEach(visible) { item in
-                    artifactLine(item)
+            HStack(alignment: .top, spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("本会话产出")
+                        .font(Theme.font.themed(10.5, .medium))
+                    Text("\(items.count)")
+                        .font(Theme.font.themedMono(10.5, .medium))
                 }
-                if hiddenCount > 0 {
-                    Text("还有 \(hiddenCount) 条")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                        .contentShape(Rectangle())
-                        .onTapGesture { artifactsExpanded = true }
-                        .help("展开全部本会话产出")
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .padding(.top, 4)
+                FlowLayout(spacing: 6, lineSpacing: 6) {
+                    ForEach(visible) { item in
+                        artifactChip(item)
+                    }
+                    if hiddenCount > 0 {
+                        ArtifactChip(icon: nil, title: "+\(hiddenCount)", help: "展开全部本会话产出") {
+                            artifactsExpanded = true
+                        }
+                    }
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func artifactLine(_ item: Artifact) -> some View {
+    private func artifactChip(_ item: Artifact) -> some View {
         switch item {
         case .memory(let memory):
             let isInstruction = memory.kind == .instructions
-            artifactLine(
-                icon: "brain", title: memory.title,
-                note: isInstruction ? "指令" : "记忆"
+            ArtifactChip(
+                icon: isInstruction ? "doc.plaintext" : "brain", title: memory.title,
+                help: (isInstruction ? "指令 · " : "记忆 · ") + "在对应页面打开"
             ) {
                 NotificationCenter.default.post(
                     name: .eurekaRevealKnowledge, object: memory.path,
                     userInfo: ["kind": isInstruction ? "instruction" : "memory"])
             }
         case .plan(let plan):
-            artifactLine(icon: "list.bullet.clipboard", title: plan.title, note: "计划") {
+            ArtifactChip(
+                icon: "list.bullet.clipboard", title: plan.title, help: "计划 · 在对应页面打开"
+            ) {
                 NotificationCenter.default.post(name: .eurekaRevealPlan, object: plan.path)
             }
         }
-    }
-
-    private func artifactLine(
-        icon: String, title: String, note: String, action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.brandFg)
-            Text(title)
-                .font(Theme.font.themed(11))
-                .lineLimit(1)
-            Text(note)
-                .font(Theme.font.themed(9.5))
-                .foregroundStyle(.tertiary)
-            Spacer(minLength: 0)
-            Image(systemName: "arrow.up.forward")
-                .font(.system(size: 8.5))
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: action)
-        .help("在对应页面打开")
     }
 
     /// 跳转按钮：只把终端**应用**带到前台（不选标签页，因此不需要自动化/辅助功能权限）
@@ -696,10 +683,51 @@ extension Notification.Name {
     static let eurekaJumpToMessage = Notification.Name("eurekaJumpToMessage")
 }
 
+/// Clickable artifact chip: kind glyph + title on a bordered capsule, brand-tinted on hover.
+/// Same metrics as the unselected SourceFilterChip so it sits next to the other chips.
+private struct ArtifactChip: View {
+    let icon: String?
+    let title: String
+    var help: String
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(hovering ? Theme.brandFg : .secondary)
+                }
+                Text(title)
+                    .font(Theme.font.themed(10.5, .medium))
+                    .foregroundStyle(hovering ? Theme.brandFg : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 260)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(hovering ? Theme.brandFill(0.10) : Theme.surface))
+            .overlay(
+                Capsule().strokeBorder(
+                    hovering && !ThemeStyle.current.isHardEdged ? Theme.brand.opacity(0.5) : Theme.cardBorder,
+                    lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.8))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+    }
+}
+
 // MARK: - 消息行
 
 /// One transcript message: a 22pt avatar on the left, then name + time and the body in a card.
-/// The reader is "我" (person tile on the brand colour); the other side is the agent itself —
+/// The user side is "用户" (person tile on the brand colour); the other side is the agent itself —
 /// its product name and official logo tile — rather than a generic "助手". User bodies sit on a
 /// brand tint, agent bodies on the surface colour with a hairline edge, so two agent replies in
 /// a row read as two blocks instead of one run of text. Timestamps stay in the header; the
@@ -742,7 +770,7 @@ private struct MessageRowView: View {
                 .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .user:
             messageBlock(
-                name: "我", avatar: .symbol("person.fill", Theme.brandFg), tint: Theme.brandFg,
+                name: "用户", avatar: .symbol("person.fill", Theme.brandFg), tint: Theme.brandFg,
                 fill: Theme.brandFill(0.07), edge: Theme.brand.opacity(0.22)
             ) {
                 MarkdownRichText(text: message.text)

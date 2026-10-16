@@ -549,7 +549,12 @@ enum PreviewRenderer {
         snap("pages-history-min", history, width: 675, height: 512)
 
         // MARK: Sessions (two-pane + detail)
-        if let first = sessions.flatSessions.first ?? sessions.groups.first?.sessions.first {
+        // Prefer a recent session that produced memories so the 本会话产出 row is in the shot
+        let candidates = sessions.flatSessions + sessions.groups.flatMap(\.sessions)
+        let withArtifacts = candidates.prefix(200).first {
+            !skillMemory.memories(relatedTo: $0.id).isEmpty
+        }
+        if let first = withArtifacts ?? candidates.first {
             sessions.select(first)
             wait("对话记录", upTo: 60) { !sessions.transcriptLoading }
             pump(1)

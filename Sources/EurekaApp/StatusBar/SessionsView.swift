@@ -16,8 +16,6 @@ struct SessionsView: View {
     @State private var multiSelect = false
     @State private var checkedIds: Set<String> = []
     @State private var confirmingBatchDelete = false
-    /// 搜索框聚焦态（驱动紫金渐变描边）
-    @FocusState private var searchFocused: Bool
     /// 来源选择 popover 开关
     @State private var showSourcePicker = false
 
@@ -132,32 +130,31 @@ struct SessionsView: View {
         VStack(spacing: 0) {
             // 账本总览（右端常驻索引状态：扫描中可见，重扫不再"无反应"）
             HStack(spacing: 6) {
-                Text("共 \(service.summary.sessionCount) 个会话")
-                    .font(.system(size: 11, weight: .medium))
+                Text("共 \(service.summary.sessionCount.formatted()) 个会话")
+                    .font(Theme.font.themed(11.5, .semibold))
                     .lineLimit(1)
                     .fixedSize()
                 Text("·").foregroundStyle(.tertiary)
                 Text(formatBytes(service.summary.totalBytes))
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(Theme.font.themedMono(11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
                 if let cost = service.summary.totalCostUSD {
                     Text("·").foregroundStyle(.tertiary)
                     Text("≈\(formatCost(cost))")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .font(Theme.font.themedMono(11, .semibold))
                         .foregroundStyle(Theme.cost)
                         .lineLimit(1)
+                        .fixedSize()
                 }
                 Spacer(minLength: 6)
                 if service.scanning {
                     HStack(spacing: 4) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.55)
+                        ProgressView().controlSize(.mini)
                         Text("索引中")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
+                            .font(Theme.font.themed(10.5))
+                            .foregroundStyle(.secondary)
                             .fixedSize()
                     }
                     .transition(.opacity)
@@ -165,24 +162,23 @@ struct SessionsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 3)
+            .padding(.bottom, 4)
             .animation(.easeOut(duration: 0.15), value: service.scanning)
 
-            // 搜索面板（来源筛选内嵌右端；聚焦时紫金渐变描边）+ 圆形工具按钮
+            // Search + source filter + tools, all from the shared kit: the old gradient-bordered
+            // panel and the coloured round buttons predated the themed controls used elsewhere.
             HStack(spacing: 6) {
-                searchPanel
-                toolButton(
-                    icon: "checkmark",
-                    tint: .green,
-                    active: multiSelect,
-                    help: "多选模式（批量删除）"
+                SearchField(placeholder: "搜索会话 / 项目 / id", text: $service.searchText, maxWidth: nil)
+                sourcePickerButton
+                CardActionButton(
+                    icon: multiSelect ? "checkmark.square.fill" : "checkmark.square",
+                    color: multiSelect ? Theme.brandFg : .secondary, size: 24,
+                    help: multiSelect ? "退出多选" : "多选模式（批量删除）"
                 ) {
                     multiSelect.toggle()
                     if !multiSelect { checkedIds = [] }
                 }
-                toolButton(icon: "arrow.clockwise", tint: .teal, help: "重新索引会话") {
-                    service.refresh()
-                }
+                RefreshButton(help: "重新索引会话") { service.refresh() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
@@ -306,114 +302,50 @@ struct SessionsView: View {
         }
     }
 
-    /// 搜索面板：搜索框与来源筛选融合为一体（筛选内嵌右端，细分隔线隔开）；
-    /// 常驻淡紫金渐变描边区分层次，聚焦时描边点亮 + 品牌色放大镜
-    private var searchPanel: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(searchFocused ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
-            TextField("搜索会话 / 项目 / id", text: $service.searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11))
-                .focused($searchFocused)
-            if !service.searchText.isEmpty {
-                Button {
-                    service.searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+    /// Source filter entry: a bordered capsule (unselected SourceFilterChip metrics) showing the
+    /// chosen CLI's logo + name, brand-tinted while a filter is active. Opens a custom popover
+    /// (not an NSMenu) so the style is ours and it never crosses the pane divider.
+    private var sourcePickerButton: some View {
+        let active = service.sourceFilter != nil
+        return Button {
+            showSourcePicker.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                if let filter = service.sourceFilter {
+                    SourceBadge(source: filter, size: 13)
+                    Text(filter.displayName)
+                        .font(Theme.font.themed(11, .semibold))
+                        .lineLimit(1)
+                        .fixedSize()
+                } else {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("全部来源")
+                        .font(Theme.font.themed(11, .medium))
+                        .fixedSize()
                 }
-                .buttonStyle(.plain)
-                .help("清空搜索")
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Divider().frame(height: 12)
-            sourcePickerButton
+            .foregroundStyle(active ? Theme.brandFg : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(active ? Theme.brandFill(0.10) : Theme.surface))
+            .overlay(
+                Capsule().strokeBorder(
+                    Theme.cardBorder,
+                    lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.8))
+            .contentShape(Capsule())
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4.5)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Theme.surface))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Theme.brand.opacity(searchFocused ? 1 : 0.45),
-                                 Theme.gold.opacity(searchFocused ? 1 : 0.45)],
-                        startPoint: .leading, endPoint: .trailing),
-                    lineWidth: searchFocused ? 1.2 : 0.8))
-        .shadow(color: searchFocused ? Theme.brand.opacity(0.12) : .clear, radius: 4, y: 1)
-        .animation(.easeOut(duration: 0.15), value: searchFocused)
+        .buttonStyle(.plain)
+        .help("按 CLI 来源筛选会话")
         .popover(isPresented: $showSourcePicker, arrowEdge: .bottom) {
             sourcePickerPopover
         }
     }
 
-    /// 彩色工具按钮：侧边栏式彩色圆角图标块；active（多选开启）= 品牌色描边点亮
-    private func toolButton(
-        icon: String, tint: Color, active: Bool = false,
-        help: String, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(tint.gradient)
-                .frame(width: 22, height: 22)
-                .overlay(
-                    Image(systemName: icon)
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(.white))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(
-                            active ? Theme.brand : .clear, lineWidth: 1.5))
-                .shadow(color: active ? Theme.brand.opacity(0.3) : .clear, radius: 3)
-                .opacity(active ? 1 : 0.88)
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .help(help)
-    }
-
-    /// 来源筛选入口（内嵌在搜索面板右端）：彩色筛选图标块 / 选中 CLI 的真实徽标 + 名称。
-    /// 点开的是自定义 popover（非 NSMenu），可控样式且不越过左栏分隔线。
-    private var sourcePickerButton: some View {
-        Button {
-            showSourcePicker.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                if let filter = service.sourceFilter {
-                    SourceBadge(source: filter, size: 12)
-                    Text(filter.displayName)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.brandFg)
-                        .lineLimit(1)
-                        .fixedSize()
-                } else {
-                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(Theme.brand.gradient)
-                        .frame(width: 14, height: 14)
-                        .overlay(
-                            Image(systemName: "line.3.horizontal.decrease")
-                                .font(.system(size: 7, weight: .semibold))
-                                .foregroundStyle(.white))
-                    Text("全部来源")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 7, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("按 CLI 来源筛选会话")
-    }
-
-    /// 来源选择 popover：真实徽标 + 名称 + 计数，选中行品牌底 + 对勾；淡紫金渐变洗底
+    /// Source popover: logo + name + count per row, brand fill and a check on the chosen one
     private var sourcePickerPopover: some View {
         VStack(alignment: .leading, spacing: 2) {
             sourcePickerRow(nil, name: "全部来源", count: service.summary.sessionCount)
@@ -453,10 +385,10 @@ struct SessionsView: View {
                                 .foregroundStyle(.white))
                 }
                 Text(name)
-                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .font(Theme.font.themed(11, selected ? .semibold : .regular))
                 Spacer(minLength: 8)
                 Text("\(count)")
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5))
                     .foregroundStyle(selected ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
                 if selected {
                     Image(systemName: "checkmark")
