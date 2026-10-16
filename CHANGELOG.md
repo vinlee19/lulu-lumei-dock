@@ -4,6 +4,46 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.36.0] - 2026-10-16
+
+### Added
+
+- **Codex notify no longer refuses an occupied slot — it chains.** Codex
+  allows a single top-level `notify`. When another program already holds it
+  and its value is a plain single-line string array, installing rewrites it
+  to `["<relay>", "codex-notify", "--chain", <original argv…>]`: the relay
+  hands the payload to the original program first (without waiting for it),
+  then records the event. Uninstalling restores the original line. A value
+  that cannot be parsed with certainty is still left untouched.
+- **Parquet reader and `eureka --parquet-inspect <file>…`** to decode the
+  audit archive locally and print rows and schema per file; the archive is
+  now verified round-trip in the test suite.
+
+### Changed
+
+- **The relay is installed as `bin/lululumei-relay`.** The stable path that
+  hooks and notify configs reference is now
+  `~/Library/Application Support/Eureka/bin/lululumei-relay`, a
+  product-prefixed name nothing else on the machine is likely to share. The
+  old `bin/eureka-relay` is kept as a symlink to it, so configs written by
+  earlier versions keep working; the Integrations page shows them as
+  "legacy name" and switches them to the new name on update (or on the
+  automatic post-upgrade refresh). Any other path mismatch is still never
+  rewritten without asking.
+- **Audit archive files are named after their day**:
+  `dt=YYYY-MM-DD/audit-events-YYYY-MM-DD.parquet` (chunks past the row cap
+  get `-2`, `-3`, …) instead of `part-NNNN.parquet`, so a file downloaded on
+  its own still says what it holds. Files written by 0.35.0 are renamed in
+  place; a stale legacy duplicate never overwrites a newer file.
+
+### Fixed
+
+- **Usage trend chart fits its data on the "All" period.** The axis domain
+  started at 1970, crushing every bar against the right edge under thousands
+  of overlapping ticks. The domain now starts at the first day with data,
+  ticks are spaced to at most eight labels, and spans longer than a year are
+  labelled by month and year.
+
 ## [0.35.2] - 2026-10-16
 
 ### Fixed
@@ -1848,6 +1888,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.36.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.36.0
 [0.35.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.2
 [0.35.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.1
 [0.35.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.0
