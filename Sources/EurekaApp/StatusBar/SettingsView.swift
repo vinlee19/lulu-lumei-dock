@@ -100,7 +100,6 @@ struct SettingsView: View {
                 }
                 .padding(3)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))
-                .fixedSize()
             }
 
             settingCard("界面风格") {
@@ -122,9 +121,11 @@ struct SettingsView: View {
                         capsuleOption($settings.themeStyle, "kanagawa", "Kanagawa", icon: "swatchpalette")
                     }
                 }
+                // No `.fixedSize()` here: it proposed an unbounded width, so FlowLayout never
+                // wrapped and the nine chips (~900pt) pushed the whole page out of the window
+                // below ~910pt. FlowLayout already hugs its content when it fits on one line.
                 .padding(3)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))
-                .fixedSize()
             }
 
             settingCard("灵动岛通知") {
