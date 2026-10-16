@@ -4,6 +4,40 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [0.35.2] - 2026-10-16
+
+### Fixed
+
+- **Dynamic Island pill never wraps its text again.** A two-digit task count
+  used to render as a vertical "3/0", a cross-day start time such as
+  `10/10 13:49` broke onto a second line, and in the waiting state the count
+  could be pushed out of the pill entirely. Each wing now drops its least
+  important piece (the "claude" word label, then the subagent marker) before
+  anything wraps.
+- **Usage page: the source filter now applies to 项目统计.** Picking a source
+  chip left the project table on all-source numbers while the chip stayed
+  highlighted. The weekly report keeps its own per-source breakdown and says
+  so in its header instead of silently ignoring the chip.
+- **Weekly report weeks start on Monday**, matching the "本周" period above
+  it. On a Sunday-first calendar the report covered a different seven days
+  than the dashboard period on the same page.
+- **Expired rate-limit snapshots are no longer shown as live.** A week-old
+  Codex snapshot drew 9% / 26% bars with past-tense reset labels and pinned
+  the same dead 9% on the sidebar badge and menu bar. Windows whose reset
+  time has passed are dimmed and marked "已重置，快照过期", and the badge
+  skips them.
+- **Backup "test connection" shows running, success and failure as distinct
+  states** (spinner / green / red) instead of one grey line; a keychain write
+  failure is reported inside the configuration sheet.
+- **Clearing the full-text search index asks for confirmation**, like the
+  audit page's clear does.
+- **Disabled Skills / MCP / Agents cards no longer ghost their text** in the
+  Neo-Brutalism style. The hard shadow was cast by the whole card including
+  its text; it is now a plain shape behind the card. The classic style is
+  pixel-identical.
+- **Settings → 通用 no longer shifts off the window** on narrower windows: the
+  interface-style picker wraps instead of forcing a single ~900pt row.
+
 ## [0.35.1] - 2026-10-14
 
 ### Fixed
@@ -1814,6 +1848,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.35.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.2
 [0.35.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.1
 [0.35.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.0
 [0.34.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.1
