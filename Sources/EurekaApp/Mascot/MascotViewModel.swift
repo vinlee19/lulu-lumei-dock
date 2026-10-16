@@ -125,7 +125,8 @@ final class MascotViewModel: ObservableObject {
     /// 面板控制器把鼠标相对方向映射到 16 向视线；近距离或非 idle 时回到普通姿势。
     func setLookDirection(_ direction: Int?) {
         let normalized = direction.map { (($0 % 16) + 16) % 16 }
-        let next = state == .idle ? normalized : nil
+        // 没有视线素材的包（上传的单图等）不进入视线模式，否则鼠标靠近时标语和动作会被冻结。
+        let next = state == .idle && !pack.lookDirections.isEmpty ? normalized : nil
         if lookDirection != next { lookDirection = next }
     }
 
