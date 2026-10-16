@@ -20,19 +20,28 @@ struct ContextUsageCard: View {
             // 标题行：标题 + 估算徽章 + 展开箭头（整行可点）
             HStack(spacing: 6) {
                 Text("上下文用量")
-                    .font(Theme.font.themed(11, .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 if !breakdown.totalIsReal {
-                    Text("估算")
-                        .font(Theme.font.themed(8.5))
-                        .foregroundStyle(Theme.goldFg)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Theme.gold.opacity(0.12)))
+                    TagChip("估算")
                 }
                 Spacer(minLength: 0)
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                // A labelled 22pt toggle instead of a bare 9pt chevron: the old one was easy to
+                // miss and looked like a stray glyph next to the inked card edge
+                HStack(spacing: 5) {
+                    Text(expanded ? "收起明细" : "分类明细")
+                        .font(Theme.font.themed(10.5, .medium))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            RoundedRectangle(cornerRadius: TileSpec.radius(22), style: .continuous)
+                                .fill(Color.primary.opacity(0.05)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: TileSpec.radius(22), style: .continuous)
+                                .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture {

@@ -409,7 +409,7 @@ struct SessionDetailView: View {
     @ViewBuilder
     private func overviewCard(_ session: AgentSessionInfo) -> some View {
         let cost = service.costs[session.id]
-        HStack(spacing: 16) {
+        HStack(spacing: 24) {
             overviewStat("消息", "\(service.transcript.count)")
             overviewStat("提问", "\(userMessages.count)")
             if let cost {
@@ -424,67 +424,69 @@ struct SessionDetailView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.bottom, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
     }
 
+    /// One stat: label above a large mono number. 9.5pt tertiary labels with 11pt values were
+    /// the least legible line on the page; this reads at a glance without a card around it.
     private func overviewStat(_ label: String, _ value: String, color: Color = .primary) -> some View {
-        HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.tertiary)
+                .font(Theme.font.themed(10.5, .medium))
+                .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .font(Theme.font.themedMono(15, .semibold))
                 .foregroundStyle(color)
+                .lineLimit(1)
+                .fixedSize()
         }
     }
 
     // MARK: - 搜索栏
 
+    /// Role filter + in-transcript search. Same capsule tray and SearchField as the rest of the
+    /// window: the mini segmented control and bare text field used here looked like a different
+    /// app next to the themed left pane.
     @ViewBuilder
     private var searchBar: some View {
-        HStack(spacing: 8) {
-            Picker("", selection: $roleFilter) {
-                ForEach(RoleFilter.allCases, id: \.self) { Text($0.rawValue) }
+        HStack(spacing: 10) {
+            CapsuleTabTray {
+                ForEach(RoleFilter.allCases, id: \.self) { item in
+                    CapsuleTabButton(
+                        title: item.rawValue, fillWidth: false, isSelected: roleFilter == item
+                    ) {
+                        roleFilter = item
+                        recomputeMatches(debounce: false)
+                    }
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 150)
-            .controlSize(.mini)
-            .onChange(of: roleFilter) { _, _ in
-                recomputeMatches(debounce: false)
-            }
-
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
-            TextField("在对话中搜索", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11))
+            SearchField(placeholder: "在对话中搜索", text: $searchQuery, maxWidth: 340)
                 .onChange(of: searchQuery) { _, _ in
                     recomputeMatches(debounce: true)
                 }
             if !matches.isEmpty {
-                Text("\(min(matchIndex + 1, matches.count))/\(matches.count)")
-                    .font(.system(size: 9.5).monospacedDigit())
+                Text("\(min(matchIndex + 1, matches.count)) / \(matches.count)")
+                    .font(Theme.font.themedMono(11, .medium))
                     .foregroundStyle(.secondary)
-                Button {
+                    .fixedSize()
+                CardActionButton(icon: "chevron.up", size: 22, help: "上一处命中") {
                     matchIndex = (matchIndex - 1 + matches.count) % matches.count
                     jumpToCurrentMatch()
-                } label: { Image(systemName: "chevron.up").font(.system(size: 9)) }
-                .buttonStyle(.borderless)
-                Button {
+                }
+                CardActionButton(icon: "chevron.down", size: 22, help: "下一处命中") {
                     matchIndex = (matchIndex + 1) % matches.count
                     jumpToCurrentMatch()
-                } label: { Image(systemName: "chevron.down").font(.system(size: 9)) }
-                .buttonStyle(.borderless)
+                }
             } else if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text("无匹配")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.font.themed(11))
+                    .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.bottom, 7)
+        .padding(.bottom, 8)
     }
 
     private func jumpToCurrentMatch() {
@@ -561,8 +563,8 @@ struct SessionDetailView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        // 文档式排列：统一左对齐，角色标签区分消息来源
-                        LazyVStack(alignment: .leading, spacing: 18) {
+                        // One block per message: avatar column + name/time header + body card
+                        LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(displayMessages) { message in
                                 MessageRowView(
                                     message: message,
@@ -681,9 +683,10 @@ extension Notification.Name {
 
 // MARK: - 消息行
 
-/// 对话流式消息行：用户与助手统一左对齐、文档式排列，
-/// 通过角色标签 + 微妙底色区分（不再用聊天气泡框）。
-/// 时间戳常驻角色标签行、复制按钮 hover 浮现，不遮挡正文。
+/// One transcript message: a 22pt role avatar on the left, then name + time and the body in a
+/// card. User bodies sit on a brand tint, assistant bodies on the surface colour with a hairline
+/// edge, so two assistant replies in a row read as two blocks instead of one run of text.
+/// Timestamps stay in the header; the copy button appears on hover without covering the body.
 private struct MessageRowView: View {
     let message: TranscriptMessage
     var isMatch = false
@@ -692,88 +695,111 @@ private struct MessageRowView: View {
     @State private var hovering = false
     @State private var copied = false
 
+    /// Width of the avatar column; secondary rows indent by it to line up with message bodies
+    private static let avatarSize: CGFloat = 22
+    private static let avatarGap: CGFloat = 10
+
     var body: some View {
         switch message.role {
         case .toolNote:
             HStack(spacing: 5) {
                 Text(message.text)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.brandFg.opacity(0.65))
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(Theme.brandFg.opacity(0.7))
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 8)
+            .padding(.leading, Self.avatarSize + Self.avatarGap)
         case .turnTrail:
             TurnTrailRowView(
                 message: message, isMatch: isMatch, expandedTrails: $expandedTrails)
+                .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .thinking:
             ThinkingRowView(message: message, isMatch: isMatch, expanded: $expandedTrails)
+                .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .user:
-            VStack(alignment: .leading, spacing: 4) {
-                roleHeader(label: "用户", icon: "person.fill", color: Theme.brandFg)
+            messageBlock(
+                name: "用户", icon: "person.fill", tint: Theme.brandFg,
+                fill: Theme.brandFill(0.07), edge: Theme.brand.opacity(0.22)
+            ) {
                 MarkdownRichText(text: message.text)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                            .fill(Theme.brandFill(0.05)))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                            .strokeBorder(
-                                isMatch ? Theme.gold.opacity(0.6) : .clear,
-                                lineWidth: 1.5))
             }
-            .onHover { hovering = $0 }
         case .assistant:
-            VStack(alignment: .leading, spacing: 4) {
-                roleHeader(label: "助手", icon: "sparkles", color: .secondary)
+            messageBlock(
+                name: "助手", icon: "sparkles", tint: Color.primary.opacity(0.7),
+                fill: Theme.surface, edge: Theme.hairline
+            ) {
                 MarkdownRichText(text: message.text)
-                    .padding(.horizontal, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                            .fill(isMatch ? Theme.gold.opacity(0.10) : .clear)
-                            .padding(-4))
             }
-            .onHover { hovering = $0 }
         case .error:
-            VStack(alignment: .leading, spacing: 4) {
-                roleHeader(label: "错误", icon: "exclamationmark.triangle.fill", color: .red)
-                HStack(alignment: .top, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.red.opacity(0.8))
-                        .frame(width: 3)
-                    Text(message.text)
-                        .font(.system(size: 12.5))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .fill(Color.red.opacity(0.06)))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                        .strokeBorder(isMatch ? Theme.gold.opacity(0.6) : .clear, lineWidth: 1.5))
+            messageBlock(
+                name: "错误", icon: "exclamationmark.triangle.fill", tint: Theme.failureRed,
+                fill: Theme.failureRed.opacity(0.06), edge: Theme.failureRed.opacity(0.35)
+            ) {
+                Text(message.text)
+                    .font(Theme.font.themed(12.5))
+                    .foregroundStyle(Theme.failureRed)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .onHover { hovering = $0 }
         }
     }
 
-    /// 角色标签行：图标 + 角色名 + 时间戳（常驻、细弱）+ 复制按钮（hover 浮现）
-    @ViewBuilder
-    private func roleHeader(label: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 9))
-                .foregroundStyle(color)
-            Text(label)
-                .font(Theme.font.themed(10, .medium))
-                .foregroundStyle(color)
+    /// Avatar + (header, body card)
+    private func messageBlock<Body: View>(
+        name: String, icon: String, tint: Color, fill: Color, edge: Color,
+        @ViewBuilder body: () -> Body
+    ) -> some View {
+        HStack(alignment: .top, spacing: Self.avatarGap) {
+            avatar(icon: icon, tint: tint)
+            VStack(alignment: .leading, spacing: 5) {
+                header(name: name, tint: tint)
+                body()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                            .fill(fill))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                            .strokeBorder(
+                                isMatch ? Theme.gold.opacity(0.7) : edge,
+                                lineWidth: isMatch ? 1.5 : 1))
+            }
+        }
+        .onHover { hovering = $0 }
+    }
+
+    /// Role avatar: tinted square tile with the role glyph, same tile language as SourceLogoTile
+    private func avatar(icon: String, tint: Color) -> some View {
+        let size = Self.avatarSize
+        return RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+            .fill(TileSpec.fill(tint))
+            .frame(width: size, height: size)
+            .overlay(
+                RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+                    .strokeBorder(
+                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(tint),
+                        lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
+            .overlay(
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint))
+            .padding(.top, 1)
+    }
+
+    /// Name + timestamp, copy button on hover
+    private func header(name: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(name)
+                .font(Theme.font.themed(12, .semibold))
+                .foregroundStyle(tint)
             if let timestamp = message.timestamp {
                 Text(timestamp, format: .dateTime.month(.twoDigits).day(.twoDigits)
                     .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-                    .font(Theme.font.themedMono(9))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.font.themedMono(10))
+                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
             if hovering || copied {
@@ -783,8 +809,8 @@ private struct MessageRowView: View {
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 9))
+                    Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(Theme.font.themed(10, .medium))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
@@ -792,7 +818,7 @@ private struct MessageRowView: View {
                 .transition(.opacity)
             }
         }
-        .padding(.horizontal, 2)
+        .frame(minHeight: Self.avatarSize)
         .animation(.easeInOut(duration: 0.15), value: hovering)
     }
 }
