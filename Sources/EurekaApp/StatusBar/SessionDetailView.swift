@@ -35,6 +35,16 @@ struct SessionDetailView: View {
         case all = "全部"
         case user = "用户"
         case assistant = "助手"
+
+        /// Tray label: the person reading is "我", the other side is the agent's own product
+        /// name (Claude Code, Codex, …) instead of the generic "用户 / 助手".
+        func label(for source: AgentSource?) -> String {
+            switch self {
+            case .all: return "全部"
+            case .user: return "我"
+            case .assistant: return source?.displayName ?? "助手"
+            }
+        }
     }
 
     var body: some View {
@@ -454,7 +464,8 @@ struct SessionDetailView: View {
             CapsuleTabTray {
                 ForEach(RoleFilter.allCases, id: \.self) { item in
                     CapsuleTabButton(
-                        title: item.rawValue, fillWidth: false, isSelected: roleFilter == item
+                        title: item.label(for: service.selected?.source), fillWidth: false,
+                        isSelected: roleFilter == item
                     ) {
                         roleFilter = item
                         recomputeMatches(debounce: false)
@@ -522,42 +533,45 @@ struct SessionDetailView: View {
 
     private func transcriptPane(_ session: AgentSessionInfo) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
+            // Pane header in the same type as every other section header (Theme.font so brutal
+            // gets Space Grotesk / Space Mono here too)
+            HStack(spacing: 7) {
                 Image(systemName: "text.bubble")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Text("对话记录")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("\(service.transcript.count)")
-                    .font(.system(size: 10).monospacedDigit())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Theme.brand.opacity(0.12)))
+                    .font(Theme.font.themed(12, .semibold))
+                Text(service.transcript.count.formatted())
+                    .font(Theme.font.themedMono(10.5, .medium))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Theme.brandFill(0.12)))
                     .foregroundStyle(Theme.brandFg)
                 if service.transcriptTruncated {
                     Text("仅显示前 \(service.transcript.count) 条")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.orange)
+                        .font(Theme.font.themed(10.5))
+                        .foregroundStyle(Theme.goldFg)
                     Button("加载全部") {
                         service.loadFullTranscript()
                     }
                     .buttonStyle(.borderless)
-                    .font(.system(size: 9.5, weight: .medium))
+                    .font(Theme.font.themed(10.5, .medium))
                     .foregroundStyle(Theme.brandFg)
                     .help("超长会话默认按预算截断，点击完整加载（大文件会稍慢）")
                 }
                 Spacer()
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             Divider()
 
             if service.transcriptLoading {
                 ProgressView("正在解析对话记录…")
+                    .font(Theme.font.themed(11))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if service.transcript.isEmpty {
                 Text("没有可显示的消息")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -568,6 +582,7 @@ struct SessionDetailView: View {
                             ForEach(displayMessages) { message in
                                 MessageRowView(
                                     message: message,
+                                    source: session.source,
                                     isMatch: matchSet.contains(message.id),
                                     expandedTrails: $expandedTrails)
                                     .id(message.id)
@@ -594,20 +609,20 @@ struct SessionDetailView: View {
 
     private var tocPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 5) {
+            HStack(spacing: 7) {
                 Image(systemName: "list.number")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Text("对话目录")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 Spacer(minLength: 4)
                 Text("\(userMessages.count) 条")
-                    .font(.system(size: 9.5).monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.font.themedMono(10.5, .medium))
+                    .foregroundStyle(.secondary)
                     .fixedSize()
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
@@ -639,22 +654,22 @@ private struct TOCRow: View {
             HStack(alignment: .top, spacing: 6) {
                 // 胶囊而非定宽圆：三位数以上的序号（长会话到 400+）不能被截成「4…」
                 Text("\(index + 1)")
-                    .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(9.5, .semibold))
                     .foregroundStyle(hovering ? Theme.onBrand : Theme.brandFg)
                     .padding(.horizontal, 4)
-                    .frame(minWidth: 16, minHeight: 16)
+                    .frame(minWidth: 18, minHeight: 18)
                     .background(
-                        Capsule().fill(hovering ? Theme.brand : Theme.brand.opacity(0.1)))
+                        Capsule().fill(hovering ? Theme.brand : Theme.brandFill(0.10)))
                     .fixedSize()
-                VStack(alignment: .leading, spacing: 1.5) {
+                VStack(alignment: .leading, spacing: 2) {
                     if let ts = message.timestamp {
                         Text(ts, format: .dateTime.month(.twoDigits).day(.twoDigits)
                             .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-                            .font(.system(size: 8.5).monospacedDigit())
-                            .foregroundStyle(.tertiary)
+                            .font(Theme.font.themedMono(9.5))
+                            .foregroundStyle(.secondary)
                     }
                     Text(message.text)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(11))
                         .foregroundStyle(hovering ? .primary : .secondary)
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
@@ -683,12 +698,16 @@ extension Notification.Name {
 
 // MARK: - 消息行
 
-/// One transcript message: a 22pt role avatar on the left, then name + time and the body in a
-/// card. User bodies sit on a brand tint, assistant bodies on the surface colour with a hairline
-/// edge, so two assistant replies in a row read as two blocks instead of one run of text.
-/// Timestamps stay in the header; the copy button appears on hover without covering the body.
+/// One transcript message: a 22pt avatar on the left, then name + time and the body in a card.
+/// The reader is "我" (person tile on the brand colour); the other side is the agent itself —
+/// its product name and official logo tile — rather than a generic "助手". User bodies sit on a
+/// brand tint, agent bodies on the surface colour with a hairline edge, so two agent replies in
+/// a row read as two blocks instead of one run of text. Timestamps stay in the header; the
+/// copy button appears on hover without covering the body.
 private struct MessageRowView: View {
     let message: TranscriptMessage
+    /// Which agent produced this transcript; names and draws the assistant side
+    let source: AgentSource
     var isMatch = false
     @Binding var expandedTrails: Set<Int>
 
@@ -698,6 +717,11 @@ private struct MessageRowView: View {
     /// Width of the avatar column; secondary rows indent by it to line up with message bodies
     private static let avatarSize: CGFloat = 22
     private static let avatarGap: CGFloat = 10
+
+    private enum Avatar {
+        case symbol(String, Color)
+        case agent(AgentSource)
+    }
 
     var body: some View {
         switch message.role {
@@ -718,21 +742,22 @@ private struct MessageRowView: View {
                 .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .user:
             messageBlock(
-                name: "用户", icon: "person.fill", tint: Theme.brandFg,
+                name: "我", avatar: .symbol("person.fill", Theme.brandFg), tint: Theme.brandFg,
                 fill: Theme.brandFill(0.07), edge: Theme.brand.opacity(0.22)
             ) {
                 MarkdownRichText(text: message.text)
             }
         case .assistant:
             messageBlock(
-                name: "助手", icon: "sparkles", tint: Color.primary.opacity(0.7),
+                name: source.displayName, avatar: .agent(source), tint: .primary,
                 fill: Theme.surface, edge: Theme.hairline
             ) {
                 MarkdownRichText(text: message.text)
             }
         case .error:
             messageBlock(
-                name: "错误", icon: "exclamationmark.triangle.fill", tint: Theme.failureRed,
+                name: "出错", avatar: .symbol("exclamationmark.triangle.fill", Theme.failureRed),
+                tint: Theme.failureRed,
                 fill: Theme.failureRed.opacity(0.06), edge: Theme.failureRed.opacity(0.35)
             ) {
                 Text(message.text)
@@ -747,11 +772,11 @@ private struct MessageRowView: View {
 
     /// Avatar + (header, body card)
     private func messageBlock<Body: View>(
-        name: String, icon: String, tint: Color, fill: Color, edge: Color,
+        name: String, avatar: Avatar, tint: Color, fill: Color, edge: Color,
         @ViewBuilder body: () -> Body
     ) -> some View {
         HStack(alignment: .top, spacing: Self.avatarGap) {
-            avatar(icon: icon, tint: tint)
+            avatarView(avatar)
             VStack(alignment: .leading, spacing: 5) {
                 header(name: name, tint: tint)
                 body()
@@ -771,22 +796,30 @@ private struct MessageRowView: View {
         .onHover { hovering = $0 }
     }
 
-    /// Role avatar: tinted square tile with the role glyph, same tile language as SourceLogoTile
-    private func avatar(icon: String, tint: Color) -> some View {
+    /// Avatar tile: the agent's official logo tile (shared SourceLogoTile) for the assistant
+    /// side, a tinted square with a glyph for the reader and for errors — same tile language.
+    @ViewBuilder
+    private func avatarView(_ avatar: Avatar) -> some View {
         let size = Self.avatarSize
-        return RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(tint))
-            .frame(width: size, height: size)
-            .overlay(
-                RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-                    .strokeBorder(
-                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(tint),
-                        lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
-            .overlay(
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(tint))
-            .padding(.top, 1)
+        switch avatar {
+        case .agent(let source):
+            SourceLogoTile(source: source, size: size)
+                .padding(.top, 1)
+        case .symbol(let icon, let tint):
+            RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+                .fill(TileSpec.fill(tint))
+                .frame(width: size, height: size)
+                .overlay(
+                    RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
+                        .strokeBorder(
+                            ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(tint),
+                            lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(tint))
+                .padding(.top, 1)
+        }
     }
 
     /// Name + timestamp, copy button on hover
