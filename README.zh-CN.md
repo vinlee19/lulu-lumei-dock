@@ -14,6 +14,10 @@
 > (`~/Library/Application Support/Eureka/`)保留 `Eureka` 名以兼容。改动这些会破坏 relay 稳定路径并让现有
 > 安装 / 数据库失联,故有意保持原样。
 
+<p align="center">
+  <img src="docs/images/eureka-demo-zh.gif" alt="lulu-lumei-dock 功能导览" width="720">
+</p>
+
 |  |  |
 |---|---|
 | ![compact](docs/images/island-compact.png) | ![finished](docs/images/island-finished.png) |

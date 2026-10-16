@@ -17,6 +17,10 @@ gauges, session/skill/agent/memory management, an audit trail and cloud backup â
 > `Eureka` name for compatibility. Renaming those would break the relay stable path and existing installs,
 > so they are intentionally left asâ€‘is.
 
+<p align="center">
+  <img src="docs/images/eureka-demo-en.gif" alt="lulu-lumei-dock feature tour" width="720">
+</p>
+
 |  |  |
 |---|---|
 | ![compact](docs/images/island-compact.png) | ![finished](docs/images/island-finished.png) |
