@@ -14,6 +14,13 @@ public struct RateLimitWindow: Equatable, Sendable {
         self.resetsAt = resetsAt
         self.label = label
     }
+
+    /// The window has rolled over since the snapshot was taken, so `usedPercent` describes a
+    /// window that no longer exists. Unknown `resetsAt` cannot be judged and counts as live.
+    public func hasReset(at now: Date = Date()) -> Bool {
+        guard let resetsAt else { return false }
+        return resetsAt <= now
+    }
 }
 
 /// 某个来源的限额快照。Provider 返回 nil 时 UI 整块隐藏（优雅降级约定）。

@@ -321,6 +321,29 @@ func taskStoreTests(_ t: TestRunner) {
             "▶3")
     }
 
+    t.test("StatusTitleComposer：窗口已过重置时刻的快照不计入徽标") {
+        let now = ts(1_000_000)
+        func snapshot(_ percent: Double, resetsAt: Date?) -> RateLimitSnapshot {
+            RateLimitSnapshot(
+                source: .codex, asOf: now.addingTimeInterval(-7 * 86400),
+                primary: RateLimitWindow(
+                    usedPercent: percent, windowMinutes: 300, resetsAt: resetsAt),
+                isStale: true)
+        }
+        // 7 天前的快照：5h 窗口早已重置，9% 描述的是一个不存在的窗口
+        let expired = snapshot(9, resetsAt: now.addingTimeInterval(-6 * 86400))
+        let live = snapshot(22, resetsAt: now.addingTimeInterval(3600))
+        // 没有重置时间 → 无法判定过期，照常计入
+        let unknown = snapshot(5, resetsAt: nil)
+
+        try expect(expired.primary!.hasReset(at: now))
+        try expect(!live.primary!.hasReset(at: now))
+        try expect(!unknown.primary!.hasReset(at: now))
+        try expectEqual(
+            StatusTitleComposer.maxPrimaryPercent([expired, live, unknown], now: now), 22)
+        try expectEqual(StatusTitleComposer.maxPrimaryPercent([expired], now: now), nil)
+    }
+
     t.test("HealthRegistry：轮询型停摆判红、事件驱动不误报、失败降级") {
         let registry = HealthRegistry()
         registry.register("poller", expectedInterval: 2)
