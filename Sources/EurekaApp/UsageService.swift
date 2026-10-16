@@ -643,11 +643,11 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 项目统计（选中区间，按项目聚合 token + 费用，token 降序）
-    func loadProjectTotals(from: Date, to: Date) {
+    /// 项目统计（选中区间，按项目聚合 token + 费用，token 降序）；`source` nil = 全部来源
+    func loadProjectTotals(from: Date, to: Date, source: AgentSource? = nil) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
-            let rows = (try? store.usage.totalsByProject(from: from, to: to)) ?? []
+            let rows = (try? store.usage.totalsByProject(from: from, to: to, source: source)) ?? []
             var byProject: [String: (tokens: Int, cost: Double?)] = [:]
             for (project, totals) in rows {
                 let name = project ?? "（未知项目）"

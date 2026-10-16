@@ -148,7 +148,7 @@ struct UsageDashboardView: View {
             page: page, pageSize: pageSize, source: sourceFilter,
             from: range.from, to: range.to)
         usageService.loadModelTotals(from: range.from, to: range.to)
-        usageService.loadProjectTotals(from: range.from, to: range.to)
+        usageService.loadProjectTotals(from: range.from, to: range.to, source: sourceFilter)
         usageService.loadToolCalls(source: sourceFilter, from: range.from, to: range.to)
         usageService.loadTrend(from: range.from, to: range.to)
         usageService.loadSessionTotals(from: range.from, to: range.to, source: sourceFilter)
@@ -677,6 +677,13 @@ struct UsageDashboardView: View {
                 } label: { Image(systemName: "chevron.right").font(.system(size: 10)) }
                 .buttonStyle(.borderless)
                 .disabled(weekOffset == 0)
+                // The report is a whole-week digest with its own 按来源 breakdown; say so instead of
+                // letting a highlighted source chip imply the numbers below are filtered.
+                if sourceFilter != nil {
+                    Text("周报按全部来源统计，不受来源筛选影响")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 if let note = weeklyExportNote {
                     Text(note)
