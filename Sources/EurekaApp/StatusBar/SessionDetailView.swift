@@ -240,31 +240,44 @@ struct SessionDetailView: View {
             }
             terminalHistoryRow(session)
             artifactsRow(session)
-            // resume 命令条
-            HStack(spacing: 6) {
-                Text(service.resumeCommand(for: session))
-                    .font(.system(size: 10).monospaced())
+            // Resume command: a labelled code strip in the kit's tertiary surface with the
+            // themed mono face and a CardActionButton, instead of a bare grey pill
+            HStack(spacing: 8) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.brandFg)
+                Text("恢复命令")
+                    .font(Theme.font.themed(10.5, .medium))
                     .foregroundStyle(.secondary)
+                    .fixedSize()
+                Text(service.resumeCommand(for: session))
+                    .font(Theme.font.themedMono(10.5))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
                 Spacer(minLength: 4)
-                Button {
+                CardActionButton(
+                    icon: copiedCommand ? "checkmark" : "doc.on.doc",
+                    color: copiedCommand ? Theme.enabledGreen : .secondary,
+                    size: 22, help: copiedCommand ? "已复制" : "复制恢复命令"
+                ) {
                     service.copyResumeCommand(session)
                     copiedCommand = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         copiedCommand = false
                     }
-                } label: {
-                    Image(systemName: copiedCommand ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10))
                 }
-                .buttonStyle(.borderless)
-                .help("复制恢复命令")
             }
-            .padding(.horizontal, 8)
+            .padding(.leading, 10)
+            .padding(.trailing, 6)
             .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(Theme.surfaceTertiary))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -459,7 +472,7 @@ struct SessionDetailView: View {
                     }
                 }
             }
-            SearchField(placeholder: "在对话中搜索", text: $searchQuery, maxWidth: 340)
+            SearchField(placeholder: "在对话中搜索", text: $searchQuery, maxWidth: nil)
                 .onChange(of: searchQuery) { _, _ in
                     recomputeMatches(debounce: true)
                 }
@@ -747,6 +760,8 @@ private struct MessageRowView: View {
     private static let avatarGap: CGFloat = 10
 
     private enum Avatar {
+        /// Solid brand circle with a white person glyph: the classic "user" avatar
+        case person
         case symbol(String, Color)
         case agent(AgentSource)
     }
@@ -770,7 +785,7 @@ private struct MessageRowView: View {
                 .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .user:
             messageBlock(
-                name: "用户", avatar: .symbol("person.fill", Theme.brandFg), tint: Theme.brandFg,
+                name: "用户", avatar: .person, tint: Theme.brandFg,
                 fill: Theme.brandFill(0.07), edge: Theme.brand.opacity(0.22)
             ) {
                 MarkdownRichText(text: message.text)
@@ -830,6 +845,21 @@ private struct MessageRowView: View {
     private func avatarView(_ avatar: Avatar) -> some View {
         let size = Self.avatarSize
         switch avatar {
+        case .person:
+            Circle()
+                .fill(Theme.brandTileGradient)
+                .frame(width: size, height: size)
+                .overlay(
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.onBrand))
+                .overlay(
+                    Group {
+                        if let outline = Theme.controlOutline {
+                            Circle().strokeBorder(outline.color, lineWidth: max(1, outline.width - 0.5))
+                        }
+                    })
+                .padding(.top, 1)
         case .agent(let source):
             SourceLogoTile(source: source, size: size)
                 .padding(.top, 1)

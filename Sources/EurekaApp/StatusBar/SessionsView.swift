@@ -75,7 +75,11 @@ struct SessionsView: View {
             // maxWidth 决定分隔线的可拖行程：420 时只有 170pt，宽窗下拖起来
             // 几乎无感（被反馈"不能调"）；620 在保住详情区 380 底线的前提下放开
             listPane
-                .frame(minWidth: 250, idealWidth: 300, maxWidth: 620)
+                // The list is navigation; the transcript is what people read. With the detail
+                // pane holding layoutPriority the split opens the list at its minimum, so that
+                // minimum *is* the default width: 300pt (~a quarter of the window, down from the
+                // ~40% it used to open at), still enough for the sort tray and a one-line row.
+                .frame(minWidth: 300, idealWidth: 320, maxWidth: 480)
             SessionDetailView(
                 service: service,
                 skillMemory: skillMemory,
@@ -85,7 +89,9 @@ struct SessionsView: View {
                         lineage = pane == .graph ? .graph(turn: 0) : .list
                     }
                 })
-                .frame(minWidth: 380, maxWidth: .infinity)
+                // 375 + the list's 300 = the 675pt content width of the minimum window
+                .frame(minWidth: 375, maxWidth: .infinity)
+                .layoutPriority(1)
         }
         .onAppear {
             service.rangeAll = settings.sessionRangeAll
@@ -582,6 +588,8 @@ private struct SessionRow: View {
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
+                // Truncate rather than wrap: a squeezed row used to break "1分钟前" across lines
+                .lineLimit(1)
             }
             Spacer(minLength: 4)
             Button {
