@@ -1,6 +1,6 @@
 import Foundation
 
-/// 把 eureka-relay 装进 Trae CN 的 `~/.trae-cn/hooks.json`。
+/// 把 lululumei-relay 装进 Trae CN 的 `~/.trae-cn/hooks.json`。
 ///
 /// **只有 CN 版有 hooks**：国际版（实勘 3.5.35）的 `libai_agent.dylib` 里没有
 /// `src/domain/hooks/…` 那一整套，也没有 `hooks.json` 这个资产类型。
@@ -53,7 +53,7 @@ import Foundation
 /// 写前备份 —— 形状猜错的最坏后果只是 Trae 忽略这份配置，不会弄坏任何东西。
 ///
 /// 安全口径逐条照搬，一条都不能松：
-///  - **绝不整段覆盖 `hooks[event]`**，只增删含 `eureka-relay` marker 的条目；
+///  - **绝不整段覆盖 `hooks[event]`**，只增删含 relay 名（`RelayIdentity.isOurs`）的条目；
 ///  - 认不出的形态（事件值不是条目数组）→ 拒绝改写并报错，宁可什么都不做；
 ///  - **`PreToolUse` 的 stdout 会被 Trae 当作放行/拦截决策**（它认
 ///    `permissionDecision`）→ relay 必须绝对静默、立即 exit 0。我们只报告，从不参与决策。
@@ -69,8 +69,6 @@ public enum TraeHooksInstaller {
     public static let managedEvents = [
         "UserPromptSubmit", "Stop", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact",
     ]
-
-    static let marker = "eureka-relay"
 
     public static func hookCommand(relayPath: String) -> String {
         // 路径含空格（Application Support）必须引号包裹
@@ -167,15 +165,16 @@ public enum TraeHooksInstaller {
         let ourCommands = eurekaCommands(in: hooks)
         guard !ourCommands.isEmpty else { return .notInstalled }
 
-        let drifted = ourCommands.compactMap { command -> String? in
-            guard let path = HookCommandPath.extract(from: command) else { return command }
-            return path == expectedRelayPath ? nil : command
-        }
-        if !drifted.isEmpty { return .driftedPath(found: drifted.sorted()) }
+        // Path drift: our entries point somewhere other than the stable path. The legacy
+        // name in the same directory is our own previous path, so it is split out as migratable.
+        let paths = RelayIdentity.classify(
+            commands: ourCommands, expectedRelayPath: expectedRelayPath)
+        if !paths.drifted.isEmpty { return .driftedPath(found: paths.drifted) }
 
         if !relayIsExecutable(expectedRelayPath) {
             return .relayMissing(path: expectedRelayPath)
         }
+        if !paths.legacy.isEmpty { return .legacyRelayName(found: paths.legacy) }
 
         let missing = managedEvents.filter { event in
             !entriesOf(hooks, event).contains(where: isEurekaEntry)
@@ -209,7 +208,7 @@ public enum TraeHooksInstaller {
         for (event, _) in hooks {
             for entry in entriesOf(hooks, event) {
                 for command in entry["hooks"] as? [[String: Any]] ?? [] {
-                    if let text = command["command"] as? String, text.contains(marker) {
+                    if let text = command["command"] as? String, RelayIdentity.isOurs(text) {
                         result.append(text)
                     }
                 }
@@ -226,7 +225,7 @@ public enum TraeHooksInstaller {
 
     private static func isEurekaEntry(_ entry: [String: Any]) -> Bool {
         let commands = entry["hooks"] as? [[String: Any]] ?? []
-        return commands.contains { ($0["command"] as? String)?.contains(marker) == true }
+        return commands.contains { ($0["command"] as? String).map(RelayIdentity.isOurs) == true }
     }
 
     static func parse(_ json: String) throws -> [String: Any] {

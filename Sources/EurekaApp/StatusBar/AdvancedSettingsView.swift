@@ -113,7 +113,7 @@ struct AdvancedSettingsView: View {
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
         }
-        Text("relay 稳定路径：~/Library/Application Support/Eureka/bin/eureka-relay（升级 app 自动重同步，hooks 不断链）")
+        Text("relay 稳定路径：~/Library/Application Support/Eureka/bin/lululumei-relay（升级 app 自动重同步，hooks 不断链；旧名 eureka-relay 保留为软链）")
             .font(.system(size: 9.5))
             .foregroundStyle(.tertiary)
         Divider()

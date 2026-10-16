@@ -14,7 +14,7 @@ public enum InstallError: Error, CustomStringConvertible {
 
 /// ~/.claude/settings.json 的 hooks 安装器。
 /// 纯字符串进出（文件 IO 由调用方走 ConfigFile），便于黄金用例测试。
-/// 以 command 中包含 "eureka-relay" 识别自有条目 → 幂等安装、干净卸载。
+/// 以 command 中包含 relay 名（`lululumei-relay`，或旧名 `eureka-relay`，见 `RelayIdentity`）识别自有条目 → 幂等安装、干净卸载。
 public enum ClaudeHooksInstaller {
     /// 受管的 hook 事件。
     ///
@@ -27,8 +27,6 @@ public enum ClaudeHooksInstaller {
         "UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd",
         "PreToolUse", "PostToolUse", "PreCompact",
     ]
-
-    static let marker = "eureka-relay"
 
     public static func hookCommand(relayPath: String) -> String {
         // 路径含空格（Application Support）必须引号包裹
@@ -132,17 +130,17 @@ public enum ClaudeHooksInstaller {
         let ourCommands = eurekaCommands(in: hooks)
         guard !ourCommands.isEmpty else { return .notInstalled }
 
-        // 路径漂移：自有条目指向的不是稳定路径
-        let drifted = ourCommands.compactMap { command -> String? in
-            guard let path = HookCommandPath.extract(from: command) else { return command }
-            return path == expectedRelayPath ? nil : command
-        }
-        if !drifted.isEmpty { return .driftedPath(found: drifted.sorted()) }
+        // Path drift: our entries point somewhere other than the stable path. The legacy
+        // name in the same directory is our own previous path, so it is split out as migratable.
+        let paths = RelayIdentity.classify(
+            commands: ourCommands, expectedRelayPath: expectedRelayPath)
+        if !paths.drifted.isEmpty { return .driftedPath(found: paths.drifted) }
 
         // relay 不见了：配置没问题，但转发器不可执行 → 事件全静默丢
         if !relayIsExecutable(expectedRelayPath) {
             return .relayMissing(path: expectedRelayPath)
         }
+        if !paths.legacy.isEmpty { return .legacyRelayName(found: paths.legacy) }
 
         let missing = managedEvents.filter { event in
             !entriesOf(hooks, event).contains(where: isEurekaEntry)
@@ -175,7 +173,7 @@ public enum ClaudeHooksInstaller {
         for (event, _) in hooks {
             for entry in entriesOf(hooks, event) {
                 for command in entry["hooks"] as? [[String: Any]] ?? [] {
-                    if let text = command["command"] as? String, text.contains(marker) {
+                    if let text = command["command"] as? String, RelayIdentity.isOurs(text) {
                         result.append(text)
                     }
                 }
@@ -192,7 +190,7 @@ public enum ClaudeHooksInstaller {
 
     private static func isEurekaEntry(_ entry: [String: Any]) -> Bool {
         let commands = entry["hooks"] as? [[String: Any]] ?? []
-        return commands.contains { ($0["command"] as? String)?.contains(marker) == true }
+        return commands.contains { ($0["command"] as? String).map(RelayIdentity.isOurs) == true }
     }
 
     static func parse(_ json: String) throws -> [String: Any] {

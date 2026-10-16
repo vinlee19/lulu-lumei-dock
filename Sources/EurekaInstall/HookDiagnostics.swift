@@ -15,10 +15,18 @@ public enum HookDiagnosis: Equatable, Sendable {
     /// 自有条目指向的**不是**稳定路径（被手改过，或残留旧 app-bundle 路径）。
     /// app 换位置/升级后这种链接会断，但配置看起来"装着"，属于隐蔽故障。
     case driftedPath(found: [String])
+    /// Our entries still name the relay by its pre-0.36 file name at the stable directory.
+    /// They keep working (the old name is a symlink), and since the path is our own,
+    /// rewriting them is safe to do automatically.
+    case legacyRelayName(found: [String])
     /// 配置引用的 relay 不存在或不可执行 → 所有事件静默丢失，最难自己发现的一种
     case relayMissing(path: String)
     /// 该键已被他人占用且只能有一个（Codex 的顶层 notify）→ 拒绝自动改
     case foreignOccupied(detail: String)
+    /// The single-slot key is taken by another program but its value is understood, so
+    /// installing wraps it: the relay forwards to the original command, which keeps working
+    /// (Codex's top-level notify). `owner` is the short name of that program.
+    case chainable(owner: String)
     /// 配置结构不认识（如 settings.json 不是合法 JSON）→ 拒绝写入
     case unparseable(reason: String)
 
@@ -30,15 +38,16 @@ public enum HookDiagnosis: Equatable, Sendable {
     public var blocksAutomaticWrite: Bool {
         switch self {
         case .driftedPath, .unparseable, .foreignOccupied: return true
-        case .notInstalled, .installed, .stale, .relayMissing: return false
+        case .notInstalled, .installed, .stale, .legacyRelayName, .relayMissing, .chainable:
+            return false
         }
     }
 
     /// 是否算"用户已经同意装过"（决定自动更新要不要管它）
     public var isInstalledInSomeForm: Bool {
         switch self {
-        case .installed, .stale, .driftedPath, .relayMissing: return true
-        case .notInstalled, .unparseable, .foreignOccupied: return false
+        case .installed, .stale, .legacyRelayName, .driftedPath, .relayMissing: return true
+        case .notInstalled, .unparseable, .foreignOccupied, .chainable: return false
         }
     }
 
@@ -48,7 +57,7 @@ public enum HookDiagnosis: Equatable, Sendable {
     public var severity: Severity {
         switch self {
         case .installed: return .ok
-        case .notInstalled: return .info
+        case .notInstalled, .legacyRelayName, .chainable: return .info
         case .stale, .driftedPath: return .warning
         case .relayMissing, .unparseable, .foreignOccupied: return .error
         }
@@ -58,10 +67,11 @@ public enum HookDiagnosis: Equatable, Sendable {
         switch self {
         case .notInstalled: return "未安装"
         case .installed: return "已安装"
-        case .stale: return "需更新"
+        case .stale, .legacyRelayName: return "需更新"
         case .driftedPath: return "路径已失效"
         case .relayMissing: return "relay 缺失"
         case .foreignOccupied: return "已被他人占用"
+        case .chainable: return "可串联安装"
         case .unparseable: return "配置无法解析"
         }
     }
@@ -77,6 +87,13 @@ public enum HookDiagnosis: Equatable, Sendable {
             return "配置指向的不是稳定路径，事件可能收不到：\n"
                 + found.joined(separator: "\n")
                 + "\n为避免覆盖你的手改内容，不会自动修正 —— 点「修复」改为稳定路径。"
+        case .legacyRelayName:
+            return "配置仍引用旧名 \(RelayIdentity.legacyBinaryName)（旧名保留为指向新转发器的链接，"
+                + "事件照常收到）。点「更新」改用 \(RelayIdentity.binaryName)。"
+        case .chainable(let owner):
+            return "notify 只能有一个，现由 \(owner) 使用。打开开关后改为先由 "
+                + "\(RelayIdentity.binaryName) 把通知原样转给 \(owner)、再记录事件，两者同时生效；"
+                + "关闭开关会恢复原来的 notify。"
         case .relayMissing(let path):
             return "配置引用的转发器不存在或不可执行：\n\(path)\n"
                 + "所有事件都会被静默丢弃。重新点「安装/更新」可重建。"
@@ -113,7 +130,7 @@ public struct ForeignHookReport: Equatable, Sendable {
 /// hook 命令行里的可执行路径解析。
 ///
 /// 三种真实形态都要认（本机的 `otty-cli` 用的就是单引号，只认双引号会把尾引号带进短名）：
-/// - `"…/eureka-relay" claude-hook`（我们自己，路径含空格必须双引号）
+/// - `"…/lululumei-relay" claude-hook`（我们自己，路径含空格必须双引号）
 /// - `'/opt/homebrew/bin/otty-cli' hook`（他人，单引号）
 /// - `/usr/local/bin/tool hook`（无引号）
 enum HookCommandPath {
