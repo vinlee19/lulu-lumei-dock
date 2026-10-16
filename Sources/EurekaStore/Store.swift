@@ -209,8 +209,8 @@ public final class UsageRepo {
             [.int(Int64(outputTokens)), .int(recordId)])
     }
 
-    /// 时间区间内按 (project, source, model) 聚合（按项目统计/费用折算用）；
-    /// `source` 与 `totalsBySession` 同义：nil = 全部来源。
+    /// Totals per (project, source, model) inside the range, for the project table and cost
+    /// folding. `source` means the same as in `totalsBySession`: nil = every source.
     public func totalsByProject(
         from: Date, to: Date, source: AgentSource? = nil
     ) throws -> [(project: String?, totals: UsageTotals)] {

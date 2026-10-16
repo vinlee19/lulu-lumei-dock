@@ -493,7 +493,7 @@ func aggregatorTests(_ t: TestRunner) {
     t.test("weekRange：按周一起算，不受日历 firstWeekday 影响；offset 往回翻") {
         var sundayFirst = Calendar.current
         sundayFirst.firstWeekday = 1
-        // 2026-10-16 是周五；周报周区间必须是 [10-12 周一, 10-19 周一)
+        // 2026-10-16 is a Friday; the report week must be [Mon 10-12, Mon 10-19)
         let now = sundayFirst.date(from: DateComponents(
             year: 2026, month: 10, day: 16, hour: 14))!
 

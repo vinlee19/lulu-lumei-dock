@@ -8,7 +8,8 @@ Read this before committing, opening a PR, or cutting a release.
 | Artifact | Language |
 |---|---|
 | Commit messages, PR titles & bodies, release titles & notes, `CHANGELOG.md` | **English only** |
-| UI strings, in-code comments | Chinese (existing convention — keep it) |
+| UI strings, test-case titles | Chinese (existing convention — keep it) |
+| New or edited code comments (`///`, `//`, `// MARK:`, comments inside tests) | **English** — older Chinese comments stay as they are, no bulk translation |
 
 ## Commit messages
 

@@ -330,10 +330,10 @@ func taskStoreTests(_ t: TestRunner) {
                     usedPercent: percent, windowMinutes: 300, resetsAt: resetsAt),
                 isStale: true)
         }
-        // 7 天前的快照：5h 窗口早已重置，9% 描述的是一个不存在的窗口
+        // A week-old snapshot: its 5h window reset long ago, so 9% describes a window that no longer exists
         let expired = snapshot(9, resetsAt: now.addingTimeInterval(-6 * 86400))
         let live = snapshot(22, resetsAt: now.addingTimeInterval(3600))
-        // 没有重置时间 → 无法判定过期，照常计入
+        // No reset time: cannot be judged expired, counts as usual
         let unknown = snapshot(5, resetsAt: nil)
 
         try expect(expired.primary!.hasReset(at: now))

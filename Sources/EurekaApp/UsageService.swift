@@ -643,7 +643,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 项目统计（选中区间，按项目聚合 token + 费用，token 降序）；`source` nil = 全部来源
+    /// Project table for the selected range: tokens + cost folded per project, tokens
+    /// descending. `source` nil = every source.
     func loadProjectTotals(from: Date, to: Date, source: AgentSource? = nil) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }

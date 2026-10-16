@@ -114,7 +114,7 @@ struct CompactPillView: View {
         .padding(.horizontal, 14 * scale)
     }
 
-    /// 左翼：等待标记 + 在场来源 + 数量
+    /// Left wing: waiting marker + sources present + task count
     private func leftWing(showSourceLabel: Bool, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             if hasWaiting {
@@ -133,7 +133,7 @@ struct CompactPillView: View {
         }
     }
 
-    /// 右翼：子 agent 聚合标识 + 最早任务的计时 / 开始时间
+    /// Right wing: aggregate subagent marker + the earliest task's timer / start time
     private func rightWing(showSubagents: Bool) -> some View {
         HStack(spacing: 5 * scale) {
             // 子 agent 聚合标识（有就显示总数，无则不占位）

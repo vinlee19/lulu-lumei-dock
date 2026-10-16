@@ -175,7 +175,7 @@ enum PreviewRenderer {
                     cwd: "/Users/me/work/crowd",
                     startedAt: now.addingTimeInterval(-Double(index) * 600)))
             }
-            crowd[0].startedAt = now.addingTimeInterval(-6 * 86400)  // 两位月份，如 10/10
+            crowd[0].startedAt = now.addingTimeInterval(-6 * 86400)  // two-digit month, e.g. 10/10
             $0.isFloating = true
             $0.showStartTime = true
             $0.updateActiveTasks(crowd)
@@ -461,8 +461,8 @@ enum PreviewRenderer {
         snap("shell-audit-settings", auditView.settingsPopover, width: 340, height: 300)
     }
 
-    /// Offscreen-render the remaining pages: 历史 / 会话 (two-pane + detail) / 用量 (all six
-    /// sub-tabs) / 限额 / Prompts (list + detail) / 设置 (five sections) / ⌘K palette.
+    /// Offscreen-render the remaining pages: history / sessions (two-pane + detail) / usage (all six
+    /// sub-tabs) / limits / prompts (list + detail) / settings (five sections) / ⌘K palette.
     ///
     /// These pages had no automated way to be looked at (knowledge pages and the audit page
     /// each have a renderer; nothing covered the rest). Driven by real local data, same
@@ -539,7 +539,7 @@ enum PreviewRenderer {
             + "codex=\(limits.codex != nil) grok=\(limits.grok != nil) "
             + "antigravity=\(limits.antigravity != nil)")
 
-        // MARK: 历史
+        // MARK: History
         let history = HistoryView(
             tasks: usage.recentHistory, dailyOutcomes: usage.historyDailyOutcomes,
             tokens: usage.historyTokens, runningTasks: usage.runningTasks,
@@ -548,7 +548,7 @@ enum PreviewRenderer {
         snap("pages-history-dark", history, dark: true)
         snap("pages-history-min", history, width: 675, height: 512)
 
-        // MARK: 会话（两栏 + 详情）
+        // MARK: Sessions (two-pane + detail)
         if let first = sessions.flatSessions.first ?? sessions.groups.first?.sessions.first {
             sessions.select(first)
             wait("对话记录", upTo: 60) { !sessions.transcriptLoading }
@@ -568,7 +568,7 @@ enum PreviewRenderer {
                  width: 1270)
         }
 
-        // MARK: 用量：六个子页签（本月区间；onAppear 在离屏下不可靠，手动拉数据）
+        // MARK: Usage: all six sub-tabs (this month; onAppear is unreliable offscreen, so load by hand)
         let month = UsageService.DashboardPeriod.month
         let range = (from: month.startDate, to: Date())
         usage.loadRecords(page: 1, pageSize: 50, source: nil, from: range.from, to: range.to)
@@ -611,7 +611,7 @@ enum PreviewRenderer {
              UsageDashboardView(usageService: usage, sessionBrowser: sessions,
                                 initialPeriod: .month, initialSubTab: .log),
              dark: true, width: 1270, height: 2000)
-        // 侧栏 + 用量页并排（核对分隔线两侧的字号/留白衔接）
+        // Sidebar + usage page side by side (check type size / spacing across the divider)
         snap("pages-full-usage", HStack(spacing: 0) {
             SidebarView(
                 selected: .usage, limitsBadge: ("9%", Theme.enabledGreen),
@@ -622,13 +622,13 @@ enum PreviewRenderer {
                                initialPeriod: .month, initialSubTab: .models)
         }, width: SidebarView.width + 1 + 1270, height: 1400)
 
-        // MARK: 限额
+        // MARK: Limits
         pump(2)
         snap("pages-limits", LimitsPanelView(service: limits, settings: settings), height: 700)
         snap("pages-limits-dark", LimitsPanelView(service: limits, settings: settings),
              dark: true, height: 700)
 
-        // MARK: Prompts（列表 + 详情）
+        // MARK: Prompts (list + detail)
         snap("pages-prompts",
              PromptsView(service: prompts, sessionBrowser: sessions, skillMemory: skillMemory))
         snap("pages-prompts-wide",
@@ -640,7 +640,7 @@ enum PreviewRenderer {
                              skillMemory: skillMemory, initialDetail: entry))
         }
 
-        // MARK: 设置：五个子栏目
+        // MARK: Settings: five sections
         for section in SettingsView.SettingsSection.allCases {
             let view = SettingsView(
                 section: .constant(section), settings: settings, installer: installer,
@@ -655,7 +655,7 @@ enum PreviewRenderer {
                 updateService: update, syncService: sync),
              dark: true, height: 1200)
 
-        // MARK: ⌘K 面板
+        // MARK: ⌘K palette
         palette.query = "metricflow"
         wait("⌘K 命中", upTo: 20) { !palette.hits.isEmpty }
         print("⌘K 命中：\(palette.hits.count)")
