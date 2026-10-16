@@ -34,13 +34,58 @@ func codexNotifyInstallerTests(_ t: TestRunner) {
         try expectEqual(v2.components(separatedBy: "notify =").count, 2, "只能有一行 notify")
     }
 
-    t.test("他人 notify 拒绝覆盖") {
+    t.test("他人 notify → 串联：原 argv 原样排在 --chain 之后") {
         let original = try fixtureString("configs/config-with-foreign-notify.toml")
         try expectEqual(CodexNotifyInstaller.status(of: original), .foreign)
-        do {
-            _ = try CodexNotifyInstaller.install(into: original, relayPath: relay)
-            throw ExpectationError(description: "应抛 foreignConfig")
-        } catch InstallError.foreignConfig {}
+        let installed = try CodexNotifyInstaller.install(into: original, relayPath: relay)
+        try expect(installed.contains(
+            "notify = [\"\(relay)\", \"codex-notify\", \"--chain\", "
+                + "\"terminal-notifier\", \"-title\", \"Codex\"]"), installed)
+        try expectEqual(installed.components(separatedBy: "notify =").count, 2, "只能有一行 notify")
+        try expectEqual(CodexNotifyInstaller.status(of: installed), .installed)
+        try expectEqual(
+            CodexNotifyInstaller.chainedCommand(in: installed),
+            ["terminal-notifier", "-title", "Codex"])
+    }
+
+    t.test("串联后卸载：逐字恢复他人的 notify") {
+        let original = try fixtureString("configs/config-with-foreign-notify.toml")
+        let installed = try CodexNotifyInstaller.install(into: original, relayPath: relay)
+        try expectEqual(CodexNotifyInstaller.uninstall(from: installed), original)
+    }
+
+    t.test("串联后重装（换路径 / 旧名迁移）保留被串联的命令，不重复包裹") {
+        let original = try fixtureString("configs/config-with-foreign-notify.toml")
+        let v1 = try CodexNotifyInstaller.install(into: original, relayPath: "/old/eureka-relay")
+        let v2 = try CodexNotifyInstaller.install(into: v1, relayPath: relay)
+        let v3 = try CodexNotifyInstaller.install(into: v2, relayPath: relay)
+        try expectEqual(v2, v3, "幂等")
+        try expectEqual(v3.components(separatedBy: "--chain").count, 2, "只包一层")
+        try expect(!v3.contains("/old/eureka-relay"))
+        try expectEqual(CodexNotifyInstaller.uninstall(from: v3), original)
+    }
+
+    t.test("真实形态：Computer Use 占用的 notify（路径含空格）可串联并还原") {
+        let client = "/Users/me/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/"
+            + "SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+        let original = "model = \"gpt-5.5\"\nnotify = [\"\(client)\", \"turn-ended\"]\n\n[tui]\n"
+        try expectEqual(
+            CodexNotifyInstaller.diagnose(
+                toml: original, expectedRelayPath: relay, relayIsExecutable: { _ in true }),
+            .chainable(owner: "SkyComputerUseClient"))
+        let installed = try CodexNotifyInstaller.install(into: original, relayPath: relay)
+        try expectEqual(CodexNotifyInstaller.chainedCommand(in: installed), [client, "turn-ended"])
+        try expectEqual(
+            CodexNotifyInstaller.diagnose(
+                toml: installed, expectedRelayPath: relay, relayIsExecutable: { _ in true }),
+            .installed)
+        try expectEqual(CodexNotifyInstaller.uninstall(from: installed), original)
+    }
+
+    t.test("他人 notify 带行尾注释 / 单引号字面量也能串联") {
+        let original = "notify = ['C:\\raw\\tool', \"a\\\"b\"]  # mine\n"
+        let installed = try CodexNotifyInstaller.install(into: original, relayPath: relay)
+        try expectEqual(CodexNotifyInstaller.chainedCommand(in: installed), ["C:\\raw\\tool", "a\"b"])
     }
 
     t.test("安装后卸载恢复原文") {
@@ -59,6 +104,27 @@ func codexNotifyInstallerTests(_ t: TestRunner) {
         try expect(lines[1].hasPrefix("notify = ") || lines[2].hasPrefix("notify = "),
                    "应插入顶层而不是动 table 内的")
         try expect(installed.contains("notify = [\"other\"]"), "table 内的原样保留")
+    }
+
+    t.test("TOMLStringArray：解析与渲染往返") {
+        try expectEqual(TOMLStringArray.parse("[]"), [])
+        try expectEqual(TOMLStringArray.parse(" [\"a\", 'b' ,] "), ["a", "b"])
+        try expectEqual(TOMLStringArray.parse("[\"\\u00e9\\t\\n\"]"), ["é\t\n"])
+        let tricky = ["/path with space/x", "quote\"inside", "back\\slash", "tab\tnl\n", "\u{01}"]
+        try expectEqual(TOMLStringArray.parse(TOMLStringArray.render(tricky)), tricky)
+    }
+
+    t.test("TOMLStringArray：子集之外一律 nil（调用方据此拒绝改写）") {
+        for bad in [
+            "[\"a\",",            // 跨行未闭合
+            "[\"a\", 1]",         // 非字符串元素
+            "[\"\"\"multi\"\"\"]",  // 多行字符串
+            "[\"a\"] trailing",   // 尾部垃圾
+            "\"a\"",              // 不是数组
+            "[\"bad\\q\"]",     // 非法转义
+        ] {
+            try expect(TOMLStringArray.parse(bad) == nil, "应拒绝: \(bad)")
+        }
     }
 }
 

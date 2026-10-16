@@ -3,23 +3,38 @@ import Foundation
 /// ~/.codex/config.toml 的 notify 安装器（行级编辑，不整体重写 TOML）。
 /// 关键不变量：notify 是顶层键，必须插在首个 `[table]` 行之前——
 /// 追加到文件尾会落进最后一个 table 内变成非法配置。
+///
+/// notify is a single slot. When another program already holds it, installing *chains*
+/// instead of refusing: the line becomes
+/// `notify = ["<relay>", "codex-notify", "--chain", <original argv…>]`, and the relay
+/// launches the original command with the payload before recording the event, so both keep
+/// working. Uninstall puts the original argv back. A value we cannot parse with certainty
+/// (multi-line array, non-string items) is still refused untouched.
 public enum CodexNotifyInstaller {
-    static let marker = "eureka-relay"
+    /// Separates the relay's own arguments from the chained command's argv.
+    public static let chainFlag = "--chain"
 
-    public static func notifyLine(relayPath: String) -> String {
-        "notify = [\"\(relayPath)\", \"codex-notify\"]"
+    public static func notifyLine(relayPath: String, chaining previous: [String] = []) -> String {
+        var argv = [relayPath, "codex-notify"]
+        if !previous.isEmpty { argv += [chainFlag] + previous }
+        return "notify = " + TOMLStringArray.render(argv)
     }
 
     public static func install(into toml: String, relayPath: String) throws -> String {
         var lines = toml.isEmpty ? [] : toml.components(separatedBy: "\n")
 
         if let existing = topLevelNotifyIndex(lines) {
-            guard lines[existing].contains(marker) else {
+            let line = lines[existing]
+            guard let argv = notifyArgv(in: line) else {
                 throw InstallError.foreignConfig(
-                    "config.toml 已有他人的 notify 配置：\(lines[existing].trimmingCharacters(in: .whitespaces))\n"
-                        + "请手动改为：\(notifyLine(relayPath: relayPath))")
+                    "config.toml 的 notify 无法安全解析（如跨多行的数组）：\(trimmed(line))\n"
+                        + "请先手动改成单行再安装")
             }
-            lines[existing] = notifyLine(relayPath: relayPath)
+            // Ours: keep whatever we were already chaining (the path may have changed).
+            // Someone else's: wrap it so it keeps receiving every notification
+            // (`notify = []` means "off", so there is nothing to chain).
+            let chained = RelayIdentity.isOurs(line) ? chainedArgv(of: argv) : argv
+            lines[existing] = notifyLine(relayPath: relayPath, chaining: chained)
             return lines.joined(separator: "\n")
         }
 
@@ -38,10 +53,17 @@ public enum CodexNotifyInstaller {
         return result
     }
 
+    /// Removes our notify line, or restores the chained original in its place.
     public static func uninstall(from toml: String) -> String {
         var lines = toml.components(separatedBy: "\n")
-        if let index = topLevelNotifyIndex(lines), lines[index].contains(marker) {
+        guard let index = topLevelNotifyIndex(lines), RelayIdentity.isOurs(lines[index]) else {
+            return toml
+        }
+        let chained = notifyArgv(in: lines[index]).map(chainedArgv(of:)) ?? []
+        if chained.isEmpty {
             lines.remove(at: index)
+        } else {
+            lines[index] = "notify = " + TOMLStringArray.render(chained)
         }
         return lines.joined(separator: "\n")
     }
@@ -49,48 +71,71 @@ public enum CodexNotifyInstaller {
     public static func status(of toml: String) -> InstallStatus {
         let lines = toml.components(separatedBy: "\n")
         guard let index = topLevelNotifyIndex(lines) else { return .none }
-        return lines[index].contains(marker) ? .installed : .foreign
+        return RelayIdentity.isOurs(lines[index]) ? .installed : .foreign
+    }
+
+    /// The command our line forwards to, if any (for display).
+    public static func chainedCommand(in toml: String) -> [String]? {
+        let lines = toml.components(separatedBy: "\n")
+        guard let index = topLevelNotifyIndex(lines), RelayIdentity.isOurs(lines[index]),
+              let argv = notifyArgv(in: lines[index]) else { return nil }
+        let chained = chainedArgv(of: argv)
+        return chained.isEmpty ? nil : chained
     }
 
     // MARK: - 诊断
 
     /// 带异常识别的诊断。纯函数：relay 是否可执行由调用方注入。
-    ///
-    /// notify 是**唯一**的顶层键（不像 Claude 的 hooks 可以并列多条），所以他人占用时
-    /// 我们只能拒绝并让用户自己决定 —— 这一点原 install 已经在做，这里把它变成可展示的状态。
     public static func diagnose(
         toml: String, expectedRelayPath: String,
         relayIsExecutable: (String) -> Bool
     ) -> HookDiagnosis {
         let lines = toml.components(separatedBy: "\n")
         guard let index = topLevelNotifyIndex(lines) else { return .notInstalled }
-        let line = lines[index].trimmingCharacters(in: .whitespaces)
-        guard line.contains(marker) else {
+        let line = trimmed(lines[index])
+        let argv = notifyArgv(in: line)
+
+        guard RelayIdentity.isOurs(line) else {
+            if let argv {
+                guard let program = argv.first else { return .notInstalled }  // `notify = []`
+                return .chainable(owner: URL(fileURLWithPath: program).lastPathComponent)
+            }
             return .foreignOccupied(detail:
-                "config.toml 的顶层 notify 已被他人占用：\n\(line)\n"
-                    + "notify 只能有一个，不会自动覆盖你的配置。"
-                    + "如需接入请手动改为：\(notifyLine(relayPath: expectedRelayPath))")
+                "config.toml 的顶层 notify 已被他人占用，且无法安全解析（如跨多行的数组）：\n\(line)\n"
+                    + "notify 只能有一个，不会自动改写。改成单行后可串联安装，"
+                    + "或手动改为：\(notifyLine(relayPath: expectedRelayPath, chaining: ["<原命令>", "…"]))")
         }
-        // notify = ["<路径>", "codex-notify"]：取第一个字符串字面量当路径
-        let path = firstStringLiteral(in: line)
-        if let path, path != expectedRelayPath {
+        guard let argv, let path = argv.first else {
+            return .unparseable(reason: "config.toml 的 notify 无法解析：\(line)")
+        }
+        if path != expectedRelayPath,
+           !RelayIdentity.isLegacyStablePath(path, expected: expectedRelayPath) {
             return .driftedPath(found: [line])
         }
         if !relayIsExecutable(expectedRelayPath) {
             return .relayMissing(path: expectedRelayPath)
         }
+        if path != expectedRelayPath { return .legacyRelayName(found: [line]) }
         return .installed
     }
 
-    /// 取行内首个双引号字符串字面量
-    private static func firstStringLiteral(in line: String) -> String? {
-        guard let start = line.firstIndex(of: "\"") else { return nil }
-        let rest = line[line.index(after: start)...]
-        guard let end = rest.firstIndex(of: "\"") else { return nil }
-        return String(rest[rest.startIndex..<end])
+    // MARK: - 内部
+
+    /// `notify = [...]` → argv; nil when the value is not a single-line array of strings.
+    private static func notifyArgv(in line: String) -> [String]? {
+        guard let equals = line.firstIndex(of: "=") else { return nil }
+        return TOMLStringArray.parse(line[line.index(after: equals)...])
     }
 
-    // MARK: - 内部
+    /// Our argv is `[relay, "codex-notify", "--chain", original…]`; returns `original…`.
+    private static func chainedArgv(of argv: [String]) -> [String] {
+        guard argv.count > 3, argv[2] == chainFlag else { return [] }
+        return Array(argv[3...])
+    }
+
+    private static func trimmed(_ line: String) -> String {
+        line.trimmingCharacters(in: .whitespaces)
+    }
 
     /// 顶层区域（首个 table 之前）的 notify 赋值行
     private static func topLevelNotifyIndex(_ lines: [String]) -> Int? {
@@ -108,5 +153,105 @@ public enum CodexNotifyInstaller {
         lines.firstIndex {
             $0.trimmingCharacters(in: .whitespaces).hasPrefix("[")
         }
+    }
+}
+
+/// A single-line TOML array of strings — just enough of TOML to wrap and restore a notify
+/// argv without guessing. Anything outside that subset parses as nil, and callers treat nil
+/// as "do not touch".
+public enum TOMLStringArray {
+    /// Parses `["a", 'b'] # comment`. Multi-line strings, non-string items and unterminated
+    /// arrays (i.e. one continuing on the next line) return nil.
+    public static func parse<S: StringProtocol>(_ text: S) -> [String]? {
+        var chars = Array(text.unicodeScalars)[...]
+        func skipSpaces() {
+            while let first = chars.first, first == " " || first == "\t" { chars.removeFirst() }
+        }
+        skipSpaces()
+        guard chars.popFirst() == "[" else { return nil }
+        var items: [String] = []
+        var closed = false
+        while !closed {
+            skipSpaces()
+            guard let head = chars.first else { return nil }
+            if head == "]" {
+                chars.removeFirst()
+                break
+            }
+            guard let item = parseString(&chars) else { return nil }
+            items.append(item)
+            skipSpaces()
+            switch chars.popFirst() {
+            case ",": continue
+            case "]": closed = true
+            default: return nil
+            }
+        }
+        skipSpaces()
+        guard chars.isEmpty || chars.first == "#" else { return nil }
+        return items
+    }
+
+    /// Renders as basic strings, escaping what TOML requires.
+    public static func render(_ items: [String]) -> String {
+        "[" + items.map(quote).joined(separator: ", ") + "]"
+    }
+
+    private static func quote(_ value: String) -> String {
+        var out = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\t": out += "\\t"
+            case "\r": out += "\\r"
+            case "\u{08}": out += "\\b"
+            case "\u{0C}": out += "\\f"
+            case _ where scalar.value < 0x20 || scalar.value == 0x7F:
+                out += String(format: "\\u%04X", scalar.value)
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out + "\""
+    }
+
+    private static func parseString(_ chars: inout ArraySlice<Unicode.Scalar>) -> String? {
+        guard let quoteChar = chars.popFirst(), quoteChar == "\"" || quoteChar == "'" else {
+            return nil
+        }
+        // `""` followed by a third quote opens a multi-line string — out of scope.
+        if chars.count >= 2, chars[chars.startIndex] == quoteChar,
+           chars[chars.startIndex + 1] == quoteChar { return nil }
+        var out = String.UnicodeScalarView()
+        while let scalar = chars.popFirst() {
+            if scalar == quoteChar { return String(out) }
+            if quoteChar == "'" || scalar != "\\" {
+                out.append(scalar)
+                continue
+            }
+            switch chars.popFirst() {
+            case "\"": out.append("\"")
+            case "\\": out.append("\\")
+            case "n": out.append("\n")
+            case "t": out.append("\t")
+            case "r": out.append("\r")
+            case "b": out.append("\u{08}")
+            case "f": out.append("\u{0C}")
+            case "u": guard let s = hexScalar(&chars, digits: 4) else { return nil }; out.append(s)
+            case "U": guard let s = hexScalar(&chars, digits: 8) else { return nil }; out.append(s)
+            default: return nil
+            }
+        }
+        return nil  // unterminated
+    }
+
+    private static func hexScalar(
+        _ chars: inout ArraySlice<Unicode.Scalar>, digits: Int
+    ) -> Unicode.Scalar? {
+        guard chars.count >= digits else { return nil }
+        let hex = String(String.UnicodeScalarView(chars.prefix(digits)))
+        chars.removeFirst(digits)
+        return UInt32(hex, radix: 16).flatMap(Unicode.Scalar.init)
     }
 }
