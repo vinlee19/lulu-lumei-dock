@@ -77,6 +77,21 @@ public enum UsageAggregator {
             ?? cal.startOfDay(for: date)
     }
 
+    /// Report week `[Monday 00:00, next Monday 00:00)`, `offset` weeks back from `now`.
+    /// Pins Monday regardless of the calendar's `firstWeekday` so the weekly report and the
+    /// "本周" dashboard period (both Monday-based) describe the same seven days.
+    public static func weekRange(
+        offset: Int, now: Date = Date(), calendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        var cal = calendar
+        cal.firstWeekday = 2
+        let anchor = cal.date(byAdding: .weekOfYear, value: -offset, to: now) ?? now
+        let start = weekStart(of: anchor, calendar: cal)
+        let end = cal.date(byAdding: .weekOfYear, value: 1, to: start)
+            ?? start.addingTimeInterval(7 * 86400)
+        return (start, end)
+    }
+
     /// 自然月起点（本地时区）
     public static func monthStart(of date: Date, calendar: Calendar = .current) -> Date {
         calendar.dateInterval(of: .month, for: date)?.start

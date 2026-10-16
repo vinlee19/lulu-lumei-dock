@@ -490,6 +490,22 @@ func pricingTests(_ t: TestRunner) {
 func aggregatorTests(_ t: TestRunner) {
     t.suite("UsageAggregator")
 
+    t.test("weekRange：按周一起算，不受日历 firstWeekday 影响；offset 往回翻") {
+        var sundayFirst = Calendar.current
+        sundayFirst.firstWeekday = 1
+        // 2026-10-16 是周五；周报周区间必须是 [10-12 周一, 10-19 周一)
+        let now = sundayFirst.date(from: DateComponents(
+            year: 2026, month: 10, day: 16, hour: 14))!
+
+        let thisWeek = UsageAggregator.weekRange(offset: 0, now: now, calendar: sundayFirst)
+        try expectEqual(sundayFirst.dateComponents([.day], from: thisWeek.start).day, 12)
+        try expectEqual(sundayFirst.dateComponents([.day], from: thisWeek.end).day, 19)
+
+        let lastWeek = UsageAggregator.weekRange(offset: 1, now: now, calendar: sundayFirst)
+        try expectEqual(sundayFirst.dateComponents([.day], from: lastWeek.start).day, 5)
+        try expectEqual(lastWeek.end, thisWeek.start, "相邻两周首尾相接")
+    }
+
     t.test("今日/本周窗口：跨午夜与周一边界") {
         let store = try makeStore()
         var calendar = Calendar.current

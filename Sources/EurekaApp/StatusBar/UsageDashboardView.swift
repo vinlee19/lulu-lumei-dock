@@ -645,20 +645,9 @@ struct UsageDashboardView: View {
 
     // MARK: - 周报
 
-    /// 周区间：[周一零点, 下周一零点)，weekOffset 往回翻
-    private func weekRange(offset: Int) -> (start: Date, end: Date) {
-        let calendar = Calendar.current
-        let interval = calendar.dateInterval(of: .weekOfYear, for: Date())
-            ?? DateInterval(start: Date(), duration: 7 * 86400)
-        let start = calendar.date(
-            byAdding: .weekOfYear, value: -offset, to: interval.start) ?? interval.start
-        let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start)
-            ?? start.addingTimeInterval(7 * 86400)
-        return (start, end)
-    }
-
     private var weeklySection: some View {
-        let range = weekRange(offset: weekOffset)
+        // Monday-based, same seven days as the "本周" period above (UsageAggregator pins Monday)
+        let range = UsageAggregator.weekRange(offset: weekOffset)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Button {
@@ -839,7 +828,7 @@ struct UsageDashboardView: View {
     }
 
     private func loadWeekly() {
-        let range = weekRange(offset: weekOffset)
+        let range = UsageAggregator.weekRange(offset: weekOffset)
         usageService.loadWeeklyReport(weekStart: range.start, weekEnd: range.end)
     }
 
