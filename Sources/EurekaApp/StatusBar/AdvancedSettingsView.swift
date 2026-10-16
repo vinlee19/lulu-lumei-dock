@@ -12,6 +12,8 @@ struct AdvancedSettingsView: View {
     @ObservedObject var usageService: UsageService
     @ObservedObject var settings: AppSettings
 
+    @State private var confirmingClearIndex = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.module) {
             CollapsibleCard(
@@ -122,8 +124,17 @@ struct AdvancedSettingsView: View {
             + "而它们所有会话共用同一个 .db。")
             .font(.system(size: 9.5))
             .foregroundStyle(.tertiary)
-        Button("清空全文索引") { usageService.clearSearchIndex() }
+        // Destructive and slow to rebuild (a full rescan of every transcript): confirm first,
+        // same as the audit page's 清空.
+        Button("清空全文索引") { confirmingClearIndex = true }
             .controlSize(.small)
+            .confirmationDialog(
+                "确认清空跨会话全文索引？下次扫描会重新建索引，大量会话时需要几分钟。",
+                isPresented: $confirmingClearIndex, titleVisibility: .visible
+            ) {
+                Button("清空", role: .destructive) { usageService.clearSearchIndex() }
+                Button("取消", role: .cancel) {}
+            }
     }
 }
 
