@@ -456,9 +456,12 @@ public enum TurnGraphLayout {
                     lane = laneEnds.count - 1
                 }
                 guard let laneIndex = lane else {
-                    let layer = layerOf[edge.to].map { "第 \($0 + 1) 层" } ?? "上游"
+                    let layer = layerOf[edge.to].map {
+                        L10n.format("layer %@", zhHans: "第 %@ 层", String($0 + 1))
+                    } ?? L10n.text("upstream", zhHans: "上游")
                     let times = edge.repeatCount > 1 ? " ×\(edge.repeatCount)" : ""
-                    overflow[edge.to, default: []].append("↩︎ \(edge.role.label)\(layer)\(times)")
+                    overflow[edge.to, default: []].append(L10n.format(
+                        "↩︎ %@ to %@%@", zhHans: "↩︎ %@%@%@", edge.role.label, layer, times))
                     continue
                 }
                 laneEnds[laneIndex] = interval.maxY

@@ -30,7 +30,11 @@ struct HistoryView: View {
     enum SortMode: String, CaseIterable {
         case active
         case start
-        var label: String { self == .active ? "最近活跃" : "开始时间" }
+        var label: String {
+            self == .active
+                ? L10n.text("Recently active", zhHans: "最近活跃")
+                : L10n.text("Start time", zhHans: "开始时间")
+        }
     }
 
     private var sortMode: SortMode {
@@ -85,10 +89,10 @@ struct HistoryView: View {
                 Image(systemName: "tray")
                     .font(.system(size: 28))
                     .foregroundStyle(Theme.brandFg.opacity(0.45))
-                Text("还没有任务记录")
+                Text(L10n.text("No task history yet", zhHans: "还没有任务记录"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Text("跑一次 claude / codex / grok 任务试试")
+                Text(L10n.text("Try a claude / codex / grok task", zhHans: "跑一次 claude / codex / grok 任务试试"))
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -107,7 +111,7 @@ struct HistoryView: View {
 
                         // 运行中分组（置顶；复用 HistoryRow 样式，图标/色/标签换运行中语义）
                         if !runningTasks.isEmpty {
-                            groupHeader(title: "运行中", count: runningTasks.count)
+                            groupHeader(title: L10n.text("Running", zhHans: "运行中"), count: runningTasks.count)
                             ForEach(runningTasks) { task in
                                 RunningRow(
                                     task: task,
@@ -133,11 +137,11 @@ struct HistoryView: View {
                 }
             }
             .confirmationDialog(
-                "导出近 14 天任务历史为 CSV 到下载目录？",
+                L10n.text("Export the last 14 days of task history as CSV to Downloads?", zhHans: "导出近 14 天任务历史为 CSV 到下载目录？"),
                 isPresented: $showExportConfirm, titleVisibility: .visible
             ) {
-                Button("导出") { onExport() }
-                Button("取消", role: .cancel) {}
+                Button(L10n.text("Export", zhHans: "导出")) { onExport() }
+                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
             }
         }
     }
@@ -146,9 +150,13 @@ struct HistoryView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("任务历史")
+            Text(L10n.text("Task history", zhHans: "任务历史"))
                 .font(Theme.font.pageTitle)
-            Text("跨 \(Set(tasks.map(\.source)).count) 个来源 · 共 \(dayGroups.reduce(0) { $0 + $1.tasks.count }) 个会话")
+            Text(L10n.format(
+                "Across %@ sources · %@ sessions",
+                zhHans: "跨 %@ 个来源 · 共 %@ 个会话",
+                String(Set(tasks.map(\.source)).count),
+                String(dayGroups.reduce(0) { $0 + $1.tasks.count })))
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             if let exportMessage {
@@ -167,7 +175,7 @@ struct HistoryView: View {
                     ) { settings.historySortMode = mode.rawValue }
                 }
             }
-            CardActionButton(icon: "square.and.arrow.up", help: "导出近 14 天历史为 CSV") {
+            CardActionButton(icon: "square.and.arrow.up", help: L10n.text("Export the last 14 days as CSV", zhHans: "导出近 14 天历史为 CSV")) {
                 showExportConfirm = true
             }
         }
@@ -213,9 +221,9 @@ struct HistoryView: View {
             SectionCard {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
-                        Text("近 14 天任务量")
+                        Text(L10n.text("Tasks over the last 14 days", zhHans: "近 14 天任务量"))
                             .font(Theme.font.themed(12, .semibold))
-                        Text("按结局堆叠")
+                        Text(L10n.text("Stacked by outcome", zhHans: "按结局堆叠"))
                             .font(Theme.font.caption)
                             .foregroundStyle(.tertiary)
                         Spacer(minLength: 8)
@@ -235,9 +243,9 @@ struct HistoryView: View {
                     }
                     Chart(series.points) { point in
                         BarMark(
-                            x: .value("时间", point.day, unit: .day),
-                            y: .value("任务数", point.count))
-                        .foregroundStyle(by: .value("结局", point.outcome.label))
+                            x: .value(L10n.text("Time", zhHans: "时间"), point.day, unit: .day),
+                            y: .value(L10n.text("Tasks", zhHans: "任务数"), point.count))
+                        .foregroundStyle(by: .value(L10n.text("Outcome", zhHans: "结局"), point.outcome.label))
                     }
                     .chartForegroundStyleScale(
                         domain: TaskOutcome.allCases.map(\.label),
@@ -303,7 +311,7 @@ private struct RunningRow: View {
                     Text(task.title ?? task.projectName ?? task.sessionId)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(2)
-                    Text("运行中")
+                    Text(L10n.text("Running", zhHans: "运行中"))
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(Theme.brandFg)
                 }
@@ -331,7 +339,10 @@ private struct RunningRow: View {
                 Text(formatStartTime(task.startedAt))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text("已运行 \(formatDuration(Date().timeIntervalSince(task.startedAt)))")
+                Text(L10n.format(
+                    "Running for %@",
+                    zhHans: "已运行 %@",
+                    formatDuration(Date().timeIntervalSince(task.startedAt))))
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -374,7 +385,7 @@ private struct HistoryRow: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(iconColor)
                     if task.turnCount > 1 {
-                        Text("\(task.turnCount) 轮")
+                        Text(L10n.format("%@ turns", zhHans: "%@ 轮", String(task.turnCount)))
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
@@ -415,7 +426,7 @@ private struct HistoryRow: View {
                         .foregroundStyle(.primary)
                 }
                 if let duration = task.totalDuration {
-                    Text("时长 \(formatDuration(duration))")
+                    Text(L10n.format("Duration %@", zhHans: "时长 %@", formatDuration(duration)))
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }

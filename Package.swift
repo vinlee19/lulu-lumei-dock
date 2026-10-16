@@ -21,8 +21,8 @@ let package = Package(
         .target(name: "EurekaIngest", dependencies: ["EurekaKit", "EurekaStore"]),
         // 用量统计与限额
         .target(name: "EurekaUsage", dependencies: ["EurekaKit", "EurekaStore"]),
-        // hooks / notify 配置安装器（纯文本进出，独立可测）
-        .target(name: "EurekaInstall"),
+        // hooks / notify 配置安装器（纯文本进出）。只依赖 EurekaKit，为了让安装诊断文案走 L10n。
+        .target(name: "EurekaInstall", dependencies: ["EurekaKit"]),
         // 云端备份：S3/COS 增量上传（SigV4 签名、同步引擎、钥匙串凭证）
         .target(name: "EurekaSync", dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest"]),
         // 菜单栏应用本体

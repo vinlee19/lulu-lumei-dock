@@ -93,11 +93,11 @@ public enum TurnGraph {
 
         public var label: String {
             switch self {
-            case .causal: return "推进"
-            case .dataFlow: return "回读"
-            case .retry: return "重试"
-            case .rework: return "返工"
-            case .spawn: return "派生"
+            case .causal: return L10n.text("Progress", zhHans: "推进")
+            case .dataFlow: return L10n.text("Reread", zhHans: "回读")
+            case .retry: return L10n.text("Retry", zhHans: "重试")
+            case .rework: return L10n.text("Rework", zhHans: "返工")
+            case .spawn: return L10n.text("Spawn", zhHans: "派生")
             }
         }
     }
@@ -212,13 +212,13 @@ public enum TurnGraphBuilder {
 
             if let promptId = turn.promptMessageId {
                 frontier = [add(
-                    kind: .prompt, title: "提问",
+                    kind: .prompt, title: L10n.text("Prompt", zhHans: "提问"),
                     subtitle: summary(turn.promptText), messageId: promptId)]
             }
 
             // 思考在工具之前：模型先想再动手（Qwen/Kimi/Codex 的落盘顺序也如此）
             for text in turn.thinkingTexts {
-                let node = add(kind: .thinking, title: "思考", subtitle: summary(text))
+                let node = add(kind: .thinking, title: L10n.text("Thinking", zhHans: "思考"), subtitle: summary(text))
                 connect(frontier, to: [node])
                 frontier = [node]
             }
@@ -236,13 +236,13 @@ public enum TurnGraphBuilder {
 
             if !turn.answerMessageIds.isEmpty || !turn.answerText.isEmpty {
                 let node = add(
-                    kind: .answer, title: "回答", subtitle: summary(turn.answerText),
+                    kind: .answer, title: L10n.text("Answer", zhHans: "回答"), subtitle: summary(turn.answerText),
                     messageId: turn.answerMessageIds.first)
                 connect(frontier, to: [node])
                 frontier = [node]
             }
             for text in turn.errorTexts {
-                let node = add(kind: .error, title: "错误", subtitle: summary(text), isError: true)
+                let node = add(kind: .error, title: L10n.text("Error", zhHans: "错误"), subtitle: summary(text), isError: true)
                 connect(frontier, to: [node])
             }
 
@@ -288,7 +288,8 @@ public enum TurnGraphBuilder {
                 if step.kind == .agent, !step.subSteps.isEmpty,
                     !options.expandedSubagents.contains(subagentKey(step)) {
                     subtitle = subtitle.isEmpty
-                        ? "\(step.subSteps.count) 步" : "\(subtitle) · \(step.subSteps.count) 步"
+                        ? L10n.format("%@ steps", zhHans: "%@ 步", String(step.subSteps.count))
+                        : L10n.format("%@ · %@ steps", zhHans: "%@ · %@ 步", subtitle, String(step.subSteps.count))
                 }
                 let node = add(
                     kind: kind, title: step.name, subtitle: subtitle,
@@ -430,7 +431,7 @@ public enum TurnGraphBuilder {
             let seqs = members.map(\.seq)
             let folded = TurnGraph.Node(
                 id: id, kind: .folded(kind),
-                title: "\(kind.label) ×\(members.count)",
+                title: L10n.format("%@ ×%@", zhHans: "%@ ×%@", kind.label, String(members.count)),
                 subtitle: members.prefix(3).map(\.subtitle).filter { !$0.isEmpty }
                     .joined(separator: " / "),
                 occurrences: members.reduce(0) { $0 + $1.occurrences },
@@ -470,7 +471,7 @@ public enum TurnGraphBuilder {
             let needsFork = (from.count > 1 && targets.count > 1)
                 || (targets.count > 1 && !sourceIsThinking)
             if needsFork {
-                let fork = add(kind: .fork, title: "分叉", subtitle: "", at: forkSeq)
+                let fork = add(kind: .fork, title: L10n.text("Fork", zhHans: "分叉"), subtitle: "", at: forkSeq)
                 connect(from, to: [fork])
                 connect([fork], to: targets)
             } else {

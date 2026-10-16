@@ -265,7 +265,9 @@ public final class TaskStore {
                 sessionStartedAt: task.sessionStartedAt,
                 finishedAt: event.timestamp,
                 outcome: .interrupted,
-                detail: reason.map { "会话结束（\($0)）" },
+                detail: reason.map {
+                    L10n.format("Session ended (%@)", zhHans: "会话结束（%@）", String($0))
+                },
                 terminal: task.terminal
             )
             return [.taskFinished(finished), .activeTasksChanged]
@@ -296,7 +298,9 @@ public final class TaskStore {
                 sessionStartedAt: task.sessionStartedAt,
                 finishedAt: now,
                 outcome: .interrupted,
-                detail: "长时间无活动，已自动清理",
+                detail: L10n.text(
+                    "Cleared automatically after a long period with no activity",
+                    zhHans: "长时间无活动，已自动清理"),
                 terminal: task.terminal
             )))
         }

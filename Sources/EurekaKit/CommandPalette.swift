@@ -15,12 +15,12 @@ public enum CommandPalette {
 
         public var label: String {
             switch self {
-            case .session: return "会话"
-            case .skill: return "技能"
-            case .memory: return "记忆"
-            case .instruction: return "指令"
-            case .plan: return "计划"
-            case .prompt: return "Prompt"
+            case .session: return L10n.text("Session", zhHans: "会话")
+            case .skill: return L10n.text("Skill", zhHans: "技能")
+            case .memory: return L10n.text("Memory", zhHans: "记忆")
+            case .instruction: return L10n.text("Instruction", zhHans: "指令")
+            case .plan: return L10n.text("Plan", zhHans: "计划")
+            case .prompt: return L10n.text("Prompt", zhHans: "Prompt")
             }
         }
 

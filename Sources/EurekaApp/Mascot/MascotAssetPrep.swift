@@ -1,4 +1,5 @@
 import AppKit
+import EurekaKit
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -33,7 +34,7 @@ enum MascotAssetPrep {
             guard let image = NSImage(contentsOf: file),
                   let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
                   let out = removeBackground(cg)
-            else { print("跳过 \(file.lastPathComponent)"); continue }
+            else { print(L10n.format("Skipped %@", zhHans: "跳过 %@", String(file.lastPathComponent))); continue }
             writePNG(out, to: dst.appendingPathComponent(file.lastPathComponent))
             print("✓ \(file.lastPathComponent)")
         }
@@ -222,7 +223,7 @@ enum MascotAssetPrep {
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
         try png.write(to: outputURL, options: .withoutOverwriting)
-        print("✓ v3 图集 \(atlasWidth)×\(atlasHeight): \(outputURL.path)")
+        print(L10n.format("✓ v3 atlas %@×%@: %@", zhHans: "✓ v3 图集 %@×%@: %@", String(atlasWidth), String(atlasHeight), String(outputURL.path)))
     }
 
     private static func hasTransparentCorners(_ image: CGImage) -> Bool {
@@ -251,17 +252,17 @@ private enum MascotAssetPrepError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidSourceDirectory:
-            "源目录不存在或不是文件夹"
+            L10n.text("Source directory does not exist or is not a folder", zhHans: "源目录不存在或不是文件夹")
         case .invalidOutput:
-            "输出路径必须是 PNG 文件"
+            L10n.text("Output path must be a PNG file", zhHans: "输出路径必须是 PNG 文件")
         case .outputAlreadyExists:
-            "输出文件已存在，为避免误覆盖已停止"
+            L10n.text("Output file already exists; stopped to avoid overwriting it", zhHans: "输出文件已存在，为避免误覆盖已停止")
         case .unsafeSource(let name):
-            "素材路径越界或格式不受支持：\(name)"
+            L10n.format("Asset path is outside the source directory or its format is unsupported: %@", zhHans: "素材路径越界或格式不受支持：%@", String(name))
         case .invalidSheet(let name):
-            "素材必须是 512...4096px、正方形、偶数尺寸、透明四角的普通 PNG：\(name)"
+            L10n.format("Asset must be a regular PNG, 512...4096px square, with even dimensions and transparent corners: %@", zhHans: "素材必须是 512...4096px、正方形、偶数尺寸、透明四角的普通 PNG：%@", String(name))
         case .cannotCreateAtlas:
-            "无法创建 v3 图集"
+            L10n.text("Unable to create v3 atlas", zhHans: "无法创建 v3 图集")
         }
     }
 }

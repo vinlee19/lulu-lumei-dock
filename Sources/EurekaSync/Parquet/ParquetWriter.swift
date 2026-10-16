@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 import zlib
 
@@ -59,10 +60,10 @@ public enum ParquetWriter {
         columns: [Column], compression: Compression = .gzip, createdBy: String
     ) throws -> Data {
         guard let rowCount = columns.first?.values.count else {
-            throw WriteError(description: "没有列")
+            throw WriteError(description: L10n.text("No columns", zhHans: "没有列"))
         }
         guard columns.allSatisfy({ $0.values.count == rowCount }) else {
-            throw WriteError(description: "各列行数不一致")
+            throw WriteError(description: L10n.text("Columns have different row counts", zhHans: "各列行数不一致"))
         }
 
         var file = magic
@@ -178,7 +179,7 @@ public enum ParquetWriter {
         func present<T>(_ values: [T?]) throws -> ([T], [Bool]) {
             let defined = values.map { $0 != nil }
             if column.required, defined.contains(false) {
-                throw WriteError(description: "必填列 \(column.name) 含空值")
+                throw WriteError(description: L10n.format("Required column %@ contains null values", zhHans: "必填列 %@ 含空值", String(column.name)))
             }
             return (values.compactMap { $0 }, defined)
         }
@@ -263,7 +264,7 @@ public enum ParquetWriter {
         var status = deflateInit2_(
             &stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY,
             ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
-        guard status == Z_OK else { throw WriteError(description: "deflateInit2 失败 \(status)") }
+        guard status == Z_OK else { throw WriteError(description: L10n.format("deflateInit2 failed: %@", zhHans: "deflateInit2 失败 %@", String(status))) }
         defer { deflateEnd(&stream) }
 
         var output = Data(count: Int(deflateBound(&stream, UInt(input.count))) + 64)
@@ -278,7 +279,7 @@ public enum ParquetWriter {
                 return outputBuffer.count - Int(stream.avail_out)
             }
         }
-        guard status == Z_STREAM_END else { throw WriteError(description: "deflate 未完成 \(status)") }
+        guard status == Z_STREAM_END else { throw WriteError(description: L10n.format("deflate did not finish: %@", zhHans: "deflate 未完成 %@", String(status))) }
         return output.prefix(produced)
     }
 

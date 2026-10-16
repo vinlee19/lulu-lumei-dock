@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 子代理角色分类（Agents 页角色头像 / 标签 / 模型统计的语义轴）。
@@ -14,26 +15,26 @@ public enum AgentRole: String, CaseIterable, Sendable, Equatable {
 
     public var displayName: String {
         switch self {
-        case .general: return "通用"
-        case .explore: return "探索"
-        case .implement: return "实现"
-        case .review: return "审查"
-        case .plan: return "规划"
-        case .model: return "建模"
-        case .doc: return "文档"
+        case .general: return L10n.text("General", zhHans: "通用")
+        case .explore: return L10n.text("Explore", zhHans: "探索")
+        case .implement: return L10n.text("Implement", zhHans: "实现")
+        case .review: return L10n.text("Review", zhHans: "审查")
+        case .plan: return L10n.text("Plan", zhHans: "规划")
+        case .model: return L10n.text("Model", zhHans: "建模")
+        case .doc: return L10n.text("Document", zhHans: "文档")
         }
     }
 
     /// 角色头像单字（通/探/实/审/规/建/文）
     public var glyph: String {
         switch self {
-        case .general: return "通"
-        case .explore: return "探"
-        case .implement: return "实"
-        case .review: return "审"
-        case .plan: return "规"
-        case .model: return "建"
-        case .doc: return "文"
+        case .general: return L10n.text("G", zhHans: "通")
+        case .explore: return L10n.text("E", zhHans: "探")
+        case .implement: return L10n.text("I", zhHans: "实")
+        case .review: return L10n.text("R", zhHans: "审")
+        case .plan: return L10n.text("P", zhHans: "规")
+        case .model: return L10n.text("M", zhHans: "建")
+        case .doc: return L10n.text("D", zhHans: "文")
         }
     }
 
@@ -80,9 +81,11 @@ public enum AgentRole: String, CaseIterable, Sendable, Equatable {
 /// 模型名规整为展示标签（自由字符串 → Opus / Sonnet / Haiku / GPT-5-Codex / K2 / 继承…）。
 /// nil / 空 / inherit / default → 「继承」。用于 Agents 行/卡的模型芯片与「模型分布」统计。
 public func normalizeModelName(_ raw: String?) -> String {
-    guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return "继承" }
+    // 展示标签，随界面语言现算。测试套件钉在简体中文，所以「继承」仍是中文规格。
+    let inherited = L10n.text("Inherit", zhHans: "继承")
+    guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return inherited }
     let m = raw.lowercased()
-    if m == "inherit" || m == "default" { return "继承" }
+    if m == "inherit" || m == "default" { return inherited }
     if m.contains("opus") { return "Opus" }
     if m.contains("sonnet") { return "Sonnet" }
     if m.contains("haiku") { return "Haiku" }

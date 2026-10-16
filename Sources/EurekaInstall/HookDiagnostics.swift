@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 一个 hook 集成的**诊断**结论。
@@ -65,14 +66,14 @@ public enum HookDiagnosis: Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .notInstalled: return "未安装"
-        case .installed: return "已安装"
-        case .stale, .legacyRelayName: return "需更新"
-        case .driftedPath: return "路径已失效"
-        case .relayMissing: return "relay 缺失"
-        case .foreignOccupied: return "已被他人占用"
-        case .chainable: return "可串联安装"
-        case .unparseable: return "配置无法解析"
+        case .notInstalled: return L10n.text("Not installed", zhHans: "未安装")
+        case .installed: return L10n.text("Installed", zhHans: "已安装")
+        case .stale, .legacyRelayName: return L10n.text("Update required", zhHans: "需更新")
+        case .driftedPath: return L10n.text("Path no longer valid", zhHans: "路径已失效")
+        case .relayMissing: return L10n.text("Relay missing", zhHans: "relay 缺失")
+        case .foreignOccupied: return L10n.text("Used by another program", zhHans: "已被他人占用")
+        case .chainable: return L10n.text("Can chain installation", zhHans: "可串联安装")
+        case .unparseable: return L10n.text("Cannot parse configuration", zhHans: "配置无法解析")
         }
     }
 
@@ -82,25 +83,25 @@ public enum HookDiagnosis: Equatable, Sendable {
         case .notInstalled, .installed:
             return nil
         case .stale(let missing):
-            return "缺少事件：\(missing.joined(separator: "、"))。点「更新」补齐。"
+            return L10n.format("Missing events: %@. Click “Update” to add them.", zhHans: "缺少事件：%@。点「更新」补齐。", String(missing.joined(separator: L10n.text(", ", zhHans: "、"))))
         case .driftedPath(let found):
-            return "配置指向的不是稳定路径，事件可能收不到：\n"
+            return L10n.text("The configuration does not point to the stable path; events may not arrive:\n", zhHans: "配置指向的不是稳定路径，事件可能收不到：\n")
                 + found.joined(separator: "\n")
-                + "\n为避免覆盖你的手改内容，不会自动修正 —— 点「修复」改为稳定路径。"
+                + L10n.text("\nTo preserve your manual changes, this will not be fixed automatically. Click “Repair” to use the stable path.", zhHans: "\n为避免覆盖你的手改内容，不会自动修正 —— 点「修复」改为稳定路径。")
         case .legacyRelayName:
-            return "配置仍引用旧名 \(RelayIdentity.legacyBinaryName)（旧名保留为指向新转发器的链接，"
-                + "事件照常收到）。点「更新」改用 \(RelayIdentity.binaryName)。"
+            return L10n.format("The configuration still references the old name %@ (kept as a link to the new relay;", zhHans: "配置仍引用旧名 %@（旧名保留为指向新转发器的链接，", String(RelayIdentity.legacyBinaryName))
+                + L10n.format(" events still arrive normally). Click “Update” to use %@.", zhHans: "事件照常收到）。点「更新」改用 %@。", String(RelayIdentity.binaryName))
         case .chainable(let owner):
-            return "notify 只能有一个，现由 \(owner) 使用。打开开关后改为先由 "
-                + "\(RelayIdentity.binaryName) 把通知原样转给 \(owner)、再记录事件，两者同时生效；"
-                + "关闭开关会恢复原来的 notify。"
+            return L10n.format("Only one notify is allowed; it is currently used by %@. When enabled,", zhHans: "notify 只能有一个，现由 %@ 使用。打开开关后改为先由 ", String(owner))
+                + L10n.format(" %@ forwards the notification unchanged to %@ before recording the event, so both work;", zhHans: "%@ 把通知原样转给 %@、再记录事件，两者同时生效；", String(RelayIdentity.binaryName), String(owner))
+                + L10n.text(" disabling restores the original notify.", zhHans: "关闭开关会恢复原来的 notify。")
         case .relayMissing(let path):
-            return "配置引用的转发器不存在或不可执行：\n\(path)\n"
-                + "所有事件都会被静默丢弃。重新点「安装/更新」可重建。"
+            return L10n.format("The configured relay does not exist or is not executable:\n%@\n", zhHans: "配置引用的转发器不存在或不可执行：\n%@\n", String(path))
+                + L10n.text("All events will be silently discarded. Click “Install/Update” again to recreate it.", zhHans: "所有事件都会被静默丢弃。重新点「安装/更新」可重建。")
         case .foreignOccupied(let detail):
             return detail
         case .unparseable(let reason):
-            return "\(reason)\n拒绝写入以免破坏文件，请先手动修好再回来安装。"
+            return L10n.format("%@\nWriting is refused to avoid damaging the file. Please fix it manually before installing.", zhHans: "%@\n拒绝写入以免破坏文件，请先手动修好再回来安装。", String(reason))
         }
     }
 }

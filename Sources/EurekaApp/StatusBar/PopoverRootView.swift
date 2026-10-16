@@ -52,6 +52,25 @@ struct PopoverRootView: View {
         case audit = "审计"
         case settings = "设置"
 
+        /// 侧栏与页签上的名字。rawValue 保持原中文，避免把已有的枚举身份换掉。
+        var title: String {
+            switch self {
+            case .history: return L10n.text("History", zhHans: "历史")
+            case .sessions: return L10n.text("Sessions", zhHans: "会话")
+            case .skills: return "Skills"
+            case .memory: return "Memory"
+            case .instructions: return L10n.text("Instructions", zhHans: "指令")
+            case .plans: return "Plans"
+            case .agents: return "Agents"
+            case .mcp: return "MCP"
+            case .prompts: return "Prompts"
+            case .usage: return L10n.text("Usage", zhHans: "用量")
+            case .limits: return L10n.text("Limits", zhHans: "限额")
+            case .audit: return L10n.text("Audit", zhHans: "审计")
+            case .settings: return L10n.text("Settings", zhHans: "设置")
+            }
+        }
+
         /// 页签图标（SF Symbol）
         var icon: String {
             switch self {
@@ -77,13 +96,17 @@ struct PopoverRootView: View {
         /// 侧边栏分组（标签 + 条目）。**每个页签都要属于某一组**：
         /// 以前 `.settings` 不在任何组里、靠 `Spacer` 之后手写一行沉底，样式与组内项完全一样
         /// 却没有任何分隔，读起来是个走失的孤项。现在归入「系统」，底部只留品牌脚注。
-        static let sidebarGroups: [(label: String, tabs: [Tab])] = [
-            ("活动", [.history, .sessions]),
-            ("知识库", [.skills, .memory, .instructions, .plans, .agents, .mcp, .prompts]),
-            ("安全", [.audit]),
-            ("用量", [.usage, .limits]),
-            ("系统", [.settings]),
-        ]
+        /// 计算属性：分组名随当前语言现取，不能收进 static let。
+        static var sidebarGroups: [(label: String, tabs: [Tab])] {
+            [
+                (L10n.text("Activity", zhHans: "活动"), [.history, .sessions]),
+                (L10n.text("Knowledge", zhHans: "知识库"),
+                 [.skills, .memory, .instructions, .plans, .agents, .mcp, .prompts]),
+                (L10n.text("Security", zhHans: "安全"), [.audit]),
+                (L10n.text("Usage", zhHans: "用量"), [.usage, .limits]),
+                (L10n.text("System", zhHans: "系统"), [.settings]),
+            ]
+        }
     }
 
     private var appVersion: String {
@@ -119,7 +142,7 @@ struct PopoverRootView: View {
         // 主题底色（classic = 透明沿用系统窗口底；brutal = 奶油）
         .background(Theme.windowBackground)
         // 切换界面风格时整树重建：Theme.* 是静态派发 token，重建才会重新取值
-        .id(settings.themeStyle)
+        .id("\(settings.themeStyle)|\(settings.appLanguage)")
         // 用量"按会话"排行 → 会话页签并选中（select 幂等，单实例前提；见 AppDelegate 只建一个 PopoverRootView）
         .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealSession)) { note in
             guard let sessionId = note.object as? String else { return }

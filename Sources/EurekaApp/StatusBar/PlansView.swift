@@ -51,18 +51,18 @@ struct PlansView: View {
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
         .confirmationDialog(
-            deleting.map { "删除计划「\($0.title)」？文件会移入废纸篓，可恢复。" } ?? "",
+            deleting.map { L10n.format("Delete plan “%@”? The file moves to the Trash and can be restored.", zhHans: "删除计划「%@」？文件会移入废纸篓，可恢复。", String($0.title)) } ?? "",
             isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 if let entry = deleting {
                     service.delete(entry)
                     if detail?.id == entry.id { detail = nil }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -72,13 +72,13 @@ struct PlansView: View {
         HStack(spacing: 12) {
             Text("Plans").font(.system(size: 15, weight: .bold))
             SearchField(
-                placeholder: "搜索计划", text: $service.searchText,
+                placeholder: L10n.text("Search plans", zhHans: "搜索计划"), text: $service.searchText,
                 scanning: service.scanning, resultCount: service.plans.count)
             Spacer(minLength: 12)
             ScanStatusLabel(
                 scanning: service.scanning, phase: service.scanPhase,
                 lastScanAt: service.lastScanAt)
-            RefreshButton(help: "强制重扫（重新物化并索引计划）") { service.refresh(force: true) }
+            RefreshButton(help: L10n.text("Force rescan (materialize and index plans again)", zhHans: "强制重扫（重新物化并索引计划）")) { service.refresh(force: true) }
             LayoutToggle(layout: $layout)
         }
         .padding(.horizontal, 16)
@@ -98,7 +98,7 @@ struct PlansView: View {
                 statsCard
                 SourceFilterBar(
                     selected: $selectedSource,
-                    allLabel: "全部", allIcon: "list.bullet.clipboard.fill",
+                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: "list.bullet.clipboard.fill",
                     totalCount: service.totalCount,
                     sources: service.availableSources,
                     count: { service.count(for: $0) })
@@ -132,14 +132,14 @@ struct PlansView: View {
         let counts = service.statusCounts
         return StatOverviewCard(
             value: "\(service.totalCount)",
-            unit: "计划",
-            subtitle: "\(service.distinctProjectCount) 项目 · \(formatBytes(service.totalBytes))",
-            distributionTitle: "状态分布",
+            unit: L10n.text("plans", zhHans: "计划"),
+            subtitle: L10n.format("%@ projects · %@", zhHans: "%@ 项目 · %@", String(service.distinctProjectCount), String(formatBytes(service.totalBytes))),
+            distributionTitle: L10n.text("By status", zhHans: "状态分布"),
             segments: [
-                .init(label: "完成", count: counts.complete, color: Theme.enabledGreen),
-                .init(label: "进行", count: counts.inProgress, color: Theme.brand),
-                .init(label: "草稿", count: counts.draft, color: Theme.draftGray),
-                .init(label: "文档", count: counts.document, color: Theme.gold),
+                .init(label: L10n.text("Done", zhHans: "完成"), count: counts.complete, color: Theme.enabledGreen),
+                .init(label: L10n.text("In progress", zhHans: "进行"), count: counts.inProgress, color: Theme.brand),
+                .init(label: L10n.text("Draft", zhHans: "草稿"), count: counts.draft, color: Theme.draftGray),
+                .init(label: L10n.text("Document", zhHans: "文档"), count: counts.document, color: Theme.gold),
             ])
     }
 
@@ -164,11 +164,11 @@ struct PlansView: View {
         if service.scanning {
             VStack(spacing: 10) {
                 ProgressView()
-                Text("正在扫描并提取计划…")
+                Text(L10n.text("Scanning and extracting plans…", zhHans: "正在扫描并提取计划…"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Text("首次扫描需解析全部 Codex 会话记录，可能需要几分钟；"
-                    + "之后为增量扫描，秒级完成。可先切到其他页签，扫描在后台继续。")
+                Text(L10n.text("The first scan parses every Codex session and can take a few minutes;", zhHans: "首次扫描需解析全部 Codex 会话记录，可能需要几分钟；")
+                    + L10n.text(" later scans are incremental and finish in seconds. You can switch tabs — scanning continues in the background.", zhHans: "之后为增量扫描，秒级完成。可先切到其他页签，扫描在后台继续。"))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
@@ -178,11 +178,11 @@ struct PlansView: View {
         } else {
             EmptyStateView(
                 icon: "list.bullet.clipboard",
-                title: service.isSearching || selectedSource != nil ? "没有匹配的计划" : "还没有计划记录",
+                title: service.isSearching || selectedSource != nil ? L10n.text("No matching plans", zhHans: "没有匹配的计划") : L10n.text("No plans yet", zhHans: "还没有计划记录"),
                 hint: service.isSearching || selectedSource != nil
                     ? nil
-                    : "Claude 计划来自 ~/.claude/plans；Codex / OpenCode 计划从会话记录提取生成；"
-                        + "项目计划来自各仓库的 plans/ 与 docs/**/plans/ 目录")
+                    : L10n.text("Claude plans come from ~/.claude/plans; Codex / OpenCode plans are extracted from session logs;", zhHans: "Claude 计划来自 ~/.claude/plans；Codex / OpenCode 计划从会话记录提取生成；")
+                        + L10n.text(" project plans come from each repo’s plans/ and docs/**/plans/ directories", zhHans: "项目计划来自各仓库的 plans/ 与 docs/**/plans/ 目录"))
         }
     }
 }
@@ -201,11 +201,11 @@ private func planActions(
     _ plan: PlanMaterializer.PlanEntry, service: PlansService, onDelete: @escaping () -> Void
 ) -> [CardAction] {
     var acts: [CardAction] = [
-        CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: plan.path) },
-        CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: plan.path) },
+        CardAction(icon: "pencil", help: L10n.text("Open in the default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: plan.path) },
+        CardAction(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: plan.path) },
     ]
     if planIsRealFile(plan) {
-        acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+        acts.append(CardAction(icon: "trash", destructive: true, help: L10n.text("Move to the Trash (can be restored)", zhHans: "移入废纸篓（可恢复）")) { onDelete() })
     }
     return acts
 }
@@ -215,12 +215,12 @@ private func planMenu(
     _ plan: PlanMaterializer.PlanEntry, service: PlansService, onOpen: @escaping () -> Void,
     onDelete: @escaping () -> Void
 ) -> some View {
-    Button(planIsRealFile(plan) ? "查看 / 编辑" : "查看") { onOpen() }
-    Button("用默认编辑器打开") { service.openInEditor(path: plan.path) }
-    Button("在 Finder 中显示") { service.reveal(path: plan.path) }
+    Button(planIsRealFile(plan) ? L10n.text("View / edit", zhHans: "查看 / 编辑") : L10n.text("View", zhHans: "查看")) { onOpen() }
+    Button(L10n.text("Open in the default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: plan.path) }
+    Button(L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: plan.path) }
     if planIsRealFile(plan) {
         Divider()
-        Button("删除", role: .destructive) { onDelete() }
+        Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) { onDelete() }
     }
 }
 
@@ -323,7 +323,7 @@ private struct PlanRow: View {
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
             }
             if plan.stepsTotal > 0 {
-                Text("\(plan.stepsDone) / \(plan.stepsTotal) 步")
+                Text(L10n.format("%@ / %@ steps", zhHans: "%@ / %@ 步", String(plan.stepsDone), String(plan.stepsTotal)))
                     .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
             }
             Text(plan.modifiedAt, formatter: relativeFormatter)
@@ -403,7 +403,7 @@ private struct PlanDetailView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(.system(size: 11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
                 }
             }
             .buttonStyle(.borderless)
@@ -423,11 +423,11 @@ private struct PlanDetailView: View {
                 // 分段「预览 / 编辑」：选中紫底白字
                 CapsuleTabTray {
                     CapsuleTabButton(
-                        title: "预览", fillWidth: false,
+                        title: L10n.text("Preview", zhHans: "预览"), fillWidth: false,
                         isSelected: !editing
                     ) { editing = false }
                     CapsuleTabButton(
-                        title: "编辑", fillWidth: false,
+                        title: L10n.text("Edit", zhHans: "编辑"), fillWidth: false,
                         isSelected: editing
                     ) { editing = true }
                 }
@@ -436,18 +436,18 @@ private struct PlanDetailView: View {
                 Image(systemName: "square.and.pencil").font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("用默认编辑器打开")
+            .help(L10n.text("Open in the default editor", zhHans: "用默认编辑器打开"))
             Button { service.reveal(path: plan.path) } label: {
                 Image(systemName: "folder").font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("在 Finder 中显示")
+            .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
             if editable {
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("移入废纸篓（可恢复）")
+                .help(L10n.text("Move to the Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
             }
         }
         .padding(.horizontal, 12)
@@ -458,8 +458,8 @@ private struct PlanDetailView: View {
         HStack(spacing: 8) {
             Text(editable
                 ? (plan.kind == .projectDocument
-                    ? "项目文档（仓库内真实文件） · \(plan.path)" : plan.path)
-                : "物化副本（只读，每轮扫描自动重建） · \(plan.path)")
+                    ? L10n.format("Project document (real file in the repo) · %@", zhHans: "项目文档（仓库内真实文件） · %@", String(plan.path)) : plan.path)
+                : L10n.format("Materialized copy (read-only, rebuilt each scan) · %@", zhHans: "物化副本（只读，每轮扫描自动重建） · %@", String(plan.path)))
                 .font(.system(size: 9).monospaced())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -471,9 +471,9 @@ private struct PlanDetailView: View {
                     .foregroundStyle(.secondary)
             }
             if editing {
-                Button("保存") {
+                Button(L10n.text("Save", zhHans: "保存")) {
                     service.save(path: plan.path, content: text) { ok in
-                        saveNote = ok ? "已保存（写前留有备份）" : "保存失败"
+                        saveNote = ok ? L10n.text("Saved (backup kept before writing)", zhHans: "已保存（写前留有备份）") : L10n.text("Couldn’t save", zhHans: "保存失败")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
                     }
                 }

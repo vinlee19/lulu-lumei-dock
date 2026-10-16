@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 技能跨源传播：把一个技能目录完整复制到另一个 agent 的技能根。
@@ -18,8 +19,8 @@ public enum SkillPropagator {
 
         public var errorDescription: String? {
             switch self {
-            case .alreadyExists(let path): return "目标已存在同名技能：\(path)"
-            case .missingSkillFile(let path): return "源目录缺少 SKILL.md：\(path)"
+            case .alreadyExists(let path): return L10n.format("A skill with the same name already exists at the destination: %@", zhHans: "目标已存在同名技能：%@", String(path))
+            case .missingSkillFile(let path): return L10n.format("The source directory is missing SKILL.md: %@", zhHans: "源目录缺少 SKILL.md：%@", String(path))
             }
         }
     }

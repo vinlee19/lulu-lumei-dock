@@ -190,7 +190,7 @@ struct CodeBlockView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .help("复制代码")
+                .help(L10n.text("Copy code", zhHans: "复制代码"))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

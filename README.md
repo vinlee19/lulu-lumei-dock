@@ -50,6 +50,12 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 
 > The installed bundle is `lulu-lumei-dock.app` and data lives in `~/Library/Application Support/Eureka/` (the internal name stays `Eureka` for compatibility). Building from source? See [Development](#development).
 
+## Language
+
+The interface is **English by default**. Switch to 简体中文 in **Settings → General → Language**.
+The choice is saved on this Mac and applies immediately, including the menu bar menus and the island.
+Nothing is sent off the machine.
+
 ## What is this?
 
 `lulu-lumei-dock` is a native macOS menu‑bar app that watches the local logs of your AI coding

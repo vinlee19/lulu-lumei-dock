@@ -8,7 +8,8 @@ Read this before committing, opening a PR, or cutting a release.
 | Artifact | Language |
 |---|---|
 | Commit messages, PR titles & bodies, release titles & notes, `CHANGELOG.md` | **English only** |
-| UI strings, in-code comments | Chinese (existing convention — keep it) |
+| UI strings | English source via `L10n.text(_:zhHans:)` / `L10n.format`. Simplified Chinese is the `zhHans` argument and must stay byte-for-byte with the previous copy when a call site is migrated. Default language is English. Do not cache the result in a `static let`. |
+| In-code comments | Chinese (existing convention — keep it) |
 
 ## Commit messages
 

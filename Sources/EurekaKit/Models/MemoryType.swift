@@ -20,11 +20,11 @@ public enum MemoryType: String, Codable, Sendable, CaseIterable {
 
     public var label: String {
         switch self {
-        case .user: return "用户画像"
-        case .feedback: return "工作方式"
-        case .project: return "项目进展"
-        case .reference: return "外部资料"
-        case .other: return "未分类"
+        case .user: return L10n.text("User profile", zhHans: "用户画像")
+        case .feedback: return L10n.text("Working style", zhHans: "工作方式")
+        case .project: return L10n.text("Project progress", zhHans: "项目进展")
+        case .reference: return L10n.text("External references", zhHans: "外部资料")
+        case .other: return L10n.text("Uncategorized", zhHans: "未分类")
         }
     }
 

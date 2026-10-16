@@ -18,6 +18,8 @@ struct IslandRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.38, dampingFraction: 0.8), value: viewModel.display)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isFloating)
+        // 语言切换时整棵岛重建，已投影的文案才会换成新语言
+        .id(viewModel.language)
     }
 
     private func island(size: CGSize) -> some View {
@@ -758,19 +760,19 @@ struct ExpandedCardView: View {
         case .finished(let task):
             let verb: String
             switch task.outcome {
-            case .success: verb = "任务完成"
-            case .error: verb = "任务出错"
-            case .interrupted: verb = "任务中断"
+            case .success: verb = L10n.text("Task completed", zhHans: "任务完成")
+            case .error: verb = L10n.text("Task failed", zhHans: "任务出错")
+            case .interrupted: verb = L10n.text("Task interrupted", zhHans: "任务中断")
             }
             if let duration = task.duration {
-                return "\(verb) · 耗时 \(formatDuration(duration))"
+                return L10n.format("%@ · Duration %@", zhHans: "%@ · 耗时 %@", String(verb), String(formatDuration(duration)))
             }
             return verb
         case .waiting(let task):
             if case .waiting(let reason, _) = task.phase { return reason.displayName }
-            return "等待中"
+            return L10n.text("Waiting", zhHans: "等待中")
         case .alert(let alert):
-            return "高危操作 · \(alert.ruleTitle)"
+            return L10n.format("High-risk operation · %@", zhHans: "高危操作 · %@", String(alert.ruleTitle))
         case .notice(let notice):
             return notice.headline
         }
@@ -784,13 +786,13 @@ struct ExpandedCardView: View {
             // 会话身份交给 subtitle 的项目 + #会话号 —— 与高危操作卡同一口径。
             // 没有对象串（未装 PreToolUse hook / 工具无参数）时退回会话名，不会变空。
             if case .waiting(.permission, _) = task.phase, let tool = task.currentActivity {
-                return task.currentToolDetail.map { "\(tool)：\($0)" } ?? tool
+                return task.currentToolDetail.map { L10n.format("%@: %@", zhHans: "%@：%@", String(tool), String($0)) } ?? tool
             }
             return taskDisplayName(task)
         case .alert(let alert):
             let firstLine = alert.detail.split(separator: "\n", maxSplits: 1).first.map(String.init)
                 ?? alert.detail
-            return "\(alert.tool)：\(firstLine)"
+            return L10n.format("%@: %@", zhHans: "%@：%@", String(alert.tool), String(firstLine))
         case .notice(let notice): return notice.body
         }
     }
@@ -807,26 +809,26 @@ struct ExpandedCardView: View {
             project = task.projectName
             sessionId = task.sessionId
         case .alert(let alert):
-            var parts = ["到「审计」页查看"]
+            var parts = [L10n.text("View on the Audit page", zhHans: "到「审计」页查看")]
             parts.append("#\(alert.sessionId.prefix(6))")
-            if queuedCount > 0 { parts.append("还有 \(queuedCount) 条") }
+            if queuedCount > 0 { parts.append(L10n.format("%@ more", zhHans: "还有 %@ 条", String(queuedCount))) }
             return parts.joined(separator: " · ")
         case .notice:
-            var parts = ["lulu-lumei-dock 健康提示"]
-            if queuedCount > 0 { parts.append("还有 \(queuedCount) 条通知") }
+            var parts = [L10n.text("lulu-lumei-dock wellness tip", zhHans: "lulu-lumei-dock 健康提示")]
+            if queuedCount > 0 { parts.append(L10n.format("%@ more notifications", zhHans: "还有 %@ 条通知", String(queuedCount))) }
             return parts.joined(separator: " · ")
         }
         var parts: [String] = []
         if let project { parts.append(project) }
         parts.append("#\(sessionId.prefix(6))")  // 多会话同项目时靠它区分
-        if queuedCount > 0 { parts.append("还有 \(queuedCount) 条通知") }
+        if queuedCount > 0 { parts.append(L10n.format("%@ more notifications", zhHans: "还有 %@ 条通知", String(queuedCount))) }
         return parts.joined(separator: " · ")
     }
 }
 
 /// 任务标识：标题 → 项目名 → 短会话号，永远能认出是哪个会话
 func taskDisplayName(_ task: AgentTask) -> String {
-    task.title ?? task.projectName ?? "会话 \(task.sessionId.prefix(8))"
+    task.title ?? task.projectName ?? L10n.format("Session %@", zhHans: "会话 %@", String(task.sessionId.prefix(8)))
 }
 
 /// 点击胶囊展开的进行中任务列表（含空闲会话分组）
@@ -843,7 +845,7 @@ struct TaskListCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("进行中 \(tasks.count) 个任务")
+                Text(L10n.format("%@ tasks in progress", zhHans: "进行中 %@ 个任务", String(tasks.count)))
                     .font(.system(size: 11 * scale, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
                 Spacer()
@@ -852,7 +854,7 @@ struct TaskListCardView: View {
                     HStack(spacing: 3 * scale) {
                         Image(systemName: showStartTime ? "calendar.badge.clock" : "stopwatch")
                             .font(.system(size: 9 * scale))
-                        Text(showStartTime ? "开始时间" : "耗时")
+                        Text(showStartTime ? L10n.text("Start time", zhHans: "开始时间") : L10n.text("Duration", zhHans: "耗时"))
                             .font(.system(size: 9.5 * scale))
                     }
                     .foregroundStyle(.white.opacity(0.5))
@@ -886,7 +888,7 @@ struct TaskListCardView: View {
                         }
                         if task.isCompacting {
                             // 压缩期间没有别的事件，不标出来就像卡死了
-                            Text("压缩上下文")
+                            Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
                                 .font(.system(size: 9.5 * scale))
                                 .foregroundStyle(Theme.gold.opacity(0.85))
                                 .lineLimit(1)
@@ -929,14 +931,14 @@ struct TaskListCardView: View {
                 .padding(.horizontal, 18 * scale)
             }
             if tasks.count > 4 {
-                Text("…等 \(tasks.count) 个")
+                Text(L10n.format("…%@ total", zhHans: "…等 %@ 个", String(tasks.count)))
                     .font(.system(size: 11 * scale))
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.horizontal, 18 * scale)
             }
 
             if !idleTasks.isEmpty {
-                Text("空闲会话 \(idleTasks.count)")
+                Text(L10n.format("Idle sessions %@", zhHans: "空闲会话 %@", String(idleTasks.count)))
                     .font(.system(size: 10 * scale, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.45))
                     .padding(.horizontal, 18 * scale)
@@ -994,7 +996,7 @@ struct TaskListCardView: View {
                 .background(Capsule().fill(Color.white.opacity(0.1)))
         }
         .buttonStyle(.plain)
-        .help("切到 \(terminal.displayName)")
+        .help(L10n.format("Switch to %@", zhHans: "切到 %@", String(terminal.displayName)))
     }
 
     /// 行尾子 agent 徽标：chevron + 数量，点击展开/收起（内层按钮消费点击）
@@ -1042,7 +1044,7 @@ struct TaskListCardView: View {
                 .frame(height: 22 * scale)
             }
             if task.subagents.count > 6 {
-                Text("…等 \(task.subagents.count) 个子 agent")
+                Text(L10n.format("…%@ subagents total", zhHans: "…等 %@ 个子 agent", String(task.subagents.count)))
                     .font(.system(size: 9.5 * scale))
                     .foregroundStyle(.white.opacity(0.4))
                     .frame(height: 16 * scale)
@@ -1097,13 +1099,13 @@ func formatStartTime(_ date: Date) -> String {
 
 func formatDuration(_ seconds: TimeInterval) -> String {
     let total = Int(seconds.rounded())
-    if total < 60 { return "\(total) 秒" }
+    if total < 60 { return L10n.format("%@ sec", zhHans: "%@ 秒", String(total)) }
     if total < 3600 {
         let m = total / 60, s = total % 60
-        return s == 0 ? "\(m) 分钟" : "\(m) 分 \(s) 秒"
+        return s == 0 ? L10n.format("%@ min", zhHans: "%@ 分钟", String(m)) : L10n.format("%@ min %@ sec", zhHans: "%@ 分 %@ 秒", String(m), String(s))
     }
     let h = total / 3600, m = (total % 3600) / 60
-    return m == 0 ? "\(h) 小时" : "\(h) 小时 \(m) 分"
+    return m == 0 ? L10n.format("%@ hr", zhHans: "%@ 小时", String(h)) : L10n.format("%@ hr %@ min", zhHans: "%@ 小时 %@ 分", String(h), String(m))
 }
 
 

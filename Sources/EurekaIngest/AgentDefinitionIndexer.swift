@@ -213,12 +213,12 @@ public enum AgentDefinitionIndexer {
     /// Claude Code 内置 agent 静态清单：无磁盘文件、只读展示，随 Claude Code 版本可能变化。
     public static func builtinClaudeAgents() -> [AgentDefinition] {
         let entries: [(name: String, description: String)] = [
-            ("general-purpose", "通用多步骤任务：研究复杂问题、搜索代码、执行多步操作"),
-            ("Explore", "只读代码搜索：大范围定位文件 / 符号 / 命名约定，只返回结论"),
-            ("Plan", "方案设计：产出分步实现计划、识别关键文件与取舍"),
-            ("claude", "通用兜底 agent（未指定类型时的默认）"),
-            ("claude-code-guide", "Claude Code / Agent SDK / Claude API 使用问答"),
-            ("statusline-setup", "配置状态栏（statusline）设置"),
+            ("general-purpose", L10n.text("General multi-step tasks: research complex problems, search code, and perform multiple operations", zhHans: "通用多步骤任务：研究复杂问题、搜索代码、执行多步操作")),
+            ("Explore", L10n.text("Read-only code search: locate files / symbols / naming conventions and return findings", zhHans: "只读代码搜索：大范围定位文件 / 符号 / 命名约定，只返回结论")),
+            ("Plan", L10n.text("Plan design: produce implementation steps, identify key files and tradeoffs", zhHans: "方案设计：产出分步实现计划、识别关键文件与取舍")),
+            ("claude", L10n.text("General-purpose fallback agent (default when no type is specified)", zhHans: "通用兜底 agent（未指定类型时的默认）")),
+            ("claude-code-guide", L10n.text("Help with Claude Code / Agent SDK / Claude API", zhHans: "Claude Code / Agent SDK / Claude API 使用问答")),
+            ("statusline-setup", L10n.text("Configure statusline settings", zhHans: "配置状态栏（statusline）设置")),
         ]
         return entries.map { entry in
             AgentDefinition(
@@ -272,10 +272,10 @@ public enum AgentDefinitionIndexer {
     /// 磁盘上无用户自定义 agent 约定 → 只读展示，随 Kimi Code 版本可能变化。
     public static func builtinKimiAgents() -> [AgentDefinition] {
         let entries: [(name: String, description: String)] = [
-            ("coder", "默认编码子代理（AgentSwarm 缺省类型）：写码 / 改码 / 跑命令"),
-            ("explore", "只读探索：搜索与阅读代码，不做修改"),
-            ("plan", "规划：产出实现计划（plan mode 配套）"),
-            ("agent", "通用 agent profile（其余类型的 extends 基底）"),
+            ("coder", L10n.text("Default coding subagent (AgentSwarm default): write / edit code / run commands", zhHans: "默认编码子代理（AgentSwarm 缺省类型）：写码 / 改码 / 跑命令")),
+            ("explore", L10n.text("Read-only exploration: search and read code without making changes", zhHans: "只读探索：搜索与阅读代码，不做修改")),
+            ("plan", L10n.text("Planning: produce an implementation plan (for plan mode)", zhHans: "规划：产出实现计划（plan mode 配套）")),
+            ("agent", L10n.text("General agent profile (extends base for other types)", zhHans: "通用 agent profile（其余类型的 extends 基底）")),
         ]
         return entries.map { entry in
             AgentDefinition(

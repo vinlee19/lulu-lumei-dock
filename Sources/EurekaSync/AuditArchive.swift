@@ -63,7 +63,7 @@ public enum AuditArchive {
         guard let fingerprints = try? store.audit.dayFingerprints(),
               let ledgerRows = try? store.auditArchive.all()
         else {
-            outcome.errors.append("读取审计库失败")
+            outcome.errors.append(L10n.text("Failed to read the audit database", zhHans: "读取审计库失败"))
             return outcome
         }
         let ledger = Dictionary(uniqueKeysWithValues: ledgerRows.map { ($0.day, $0) })
@@ -87,7 +87,7 @@ public enum AuditArchive {
                     filePath: dir.path, at: now)
                 outcome.writtenDays.append(day.day)
             } catch {
-                outcome.errors.append("\(day.day)：\(error)")
+                outcome.errors.append(L10n.format("%@: %@", zhHans: "%@：%@", String(day.day), String(describing: error)))
             }
         }
         return outcome

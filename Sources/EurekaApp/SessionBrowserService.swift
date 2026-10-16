@@ -34,10 +34,10 @@ final class SessionBrowserService: ObservableObject {
 
         var label: String {
             switch self {
-            case .time: return "活跃"      // 最近活跃时间
-            case .size: return "占用"      // transcript 磁盘占用
-            case .duration: return "耗时"  // 会话首末活动跨度
-            case .project: return "项目"
+            case .time: return L10n.text("Activity", zhHans: "活跃")      // 最近活跃时间
+            case .size: return L10n.text("Size", zhHans: "占用")      // transcript 磁盘占用
+            case .duration: return L10n.text("Duration", zhHans: "耗时")  // 会话首末活动跨度
+            case .project: return L10n.text("Project", zhHans: "项目")
             }
         }
 
@@ -285,7 +285,7 @@ final class SessionBrowserService: ObservableObject {
         visible.sort { $0.lastActiveAt > $1.lastActiveAt }
         var byProject: [String: [AgentSessionInfo]] = [:]
         for session in visible {
-            let name = resolver.projectName(forCwd: session.cwd) ?? "（未知项目）"
+            let name = resolver.projectName(forCwd: session.cwd) ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
             byProject[name, default: []].append(session)
         }
         var result: [ProjectGroup] = byProject.map { name, sessions in

@@ -60,7 +60,7 @@ public enum SubagentTrailLoader {
                 for block in blocks where block["type"] as? String == "tool_use" {
                     guard steps.count < maxStepsPerAgent else { break }
                     var step = ToolStepExtractor.claude(
-                        name: block["name"] as? String ?? "工具",
+                        name: block["name"] as? String ?? L10n.text("Tool", zhHans: "工具"),
                         input: block["input"] as? [String: Any])
                     step.batch = batch
                     step.callId = block["id"] as? String

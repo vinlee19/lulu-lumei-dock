@@ -1,4 +1,5 @@
 import EurekaStore
+import EurekaKit
 import Foundation
 
 /// 一轮同步的结果汇总（UI 文案与 health 上报用）
@@ -151,7 +152,7 @@ public final class SyncEngine {
             } catch let error as URLError {
                 report.failed += 1
                 if report.firstError == nil {
-                    report.firstError = "网络错误：\(error.localizedDescription)"
+                    report.firstError = L10n.format("Network error: %@", zhHans: "网络错误：%@", String(error.localizedDescription))
                 }
                 consecutiveNetworkFailures += 1
                 if consecutiveNetworkFailures >= limits.abortAfterConsecutiveNetworkFailures {

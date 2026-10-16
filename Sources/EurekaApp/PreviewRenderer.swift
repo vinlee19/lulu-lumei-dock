@@ -20,22 +20,22 @@ enum PreviewRenderer {
 
         let now = Date()
         let running1 = AgentTask(
-            source: .claude, sessionId: "p1", title: "重构用户认证模块",
+            source: .claude, sessionId: "p1", title: L10n.text("Refactor the user authentication module", zhHans: "重构用户认证模块"),
             cwd: "/Users/me/work/auth-service", startedAt: now.addingTimeInterval(-754))
         let running2 = AgentTask(
-            source: .codex, sessionId: "p2", title: "修复 CI 失败用例",
+            source: .codex, sessionId: "p2", title: L10n.text("Fix failing CI tests", zhHans: "修复 CI 失败用例"),
             cwd: "/Users/me/work/ci", startedAt: now.addingTimeInterval(-135))
         let running3 = AgentTask(
-            source: .grok, sessionId: "p5", title: "补全语义层缓存标签",
+            source: .grok, sessionId: "p5", title: L10n.text("Complete semantic layer cache tags", zhHans: "补全语义层缓存标签"),
             cwd: "/Users/me/work/semantic-layer", startedAt: now.addingTimeInterval(-48))
         let running4 = AgentTask(
             source: .antigravity, sessionId: "p6", title: nil,
             cwd: "/Users/me/work/agy-app", startedAt: now.addingTimeInterval(-20))
         let running5 = AgentTask(
-            source: .kimi, sessionId: "p7", title: "梳理会员配额文档",
+            source: .kimi, sessionId: "p7", title: L10n.text("Organize membership quota documentation", zhHans: "梳理会员配额文档"),
             cwd: "/Users/me/work/kimi-docs", startedAt: now.addingTimeInterval(-66))
         var waitingTask = AgentTask(
-            source: .claude, sessionId: "p3", title: "批量更新依赖版本",
+            source: .claude, sessionId: "p3", title: L10n.text("Batch update dependency versions", zhHans: "批量更新依赖版本"),
             cwd: "/Users/me/work/deps", startedAt: now.addingTimeInterval(-301),
             phase: .waiting(.permission, since: now.addingTimeInterval(-20)))
         // 等待授权卡的重点是"在请求什么"（PreToolUse 带来的工具 + 对象），
@@ -43,14 +43,14 @@ enum PreviewRenderer {
         waitingTask.currentActivity = "Bash"
         waitingTask.currentToolDetail = "rm -rf node_modules/"
         let finished = FinishedTask(
-            source: .claude, sessionId: "p1", title: "重构用户认证模块",
+            source: .claude, sessionId: "p1", title: L10n.text("Refactor the user authentication module", zhHans: "重构用户认证模块"),
             cwd: "/Users/me/work/auth-service",
             startedAt: now.addingTimeInterval(-754), finishedAt: now, outcome: .success)
         let errored = FinishedTask(
-            source: .codex, sessionId: "p4", title: "迁移旧数据管道",
+            source: .codex, sessionId: "p4", title: L10n.text("Migrate the legacy data pipeline", zhHans: "迁移旧数据管道"),
             cwd: "/Users/me/work/pipeline",
             startedAt: now.addingTimeInterval(-95), finishedAt: now, outcome: .error,
-            detail: "API Error: 403 Request not allowed")
+            detail: L10n.text("API Error: 403 Request not allowed", zhHans: "API 错误：403 请求不被允许"))
 
         func snapshot(_ name: String, screen: IslandGeometry.ScreenInfo, configure: (IslandViewModel) -> Void) {
             let vm = IslandViewModel()
@@ -103,19 +103,19 @@ enum PreviewRenderer {
             $0.enqueueNotice(IslandNotice(
                 id: "preview",
                 emoji: "🧘",
-                headline: "连续 vibe coding 2 小时了",
-                body: "站起来伸个懒腰、喝口水吧——任务有我盯着。"))
+                headline: L10n.text("You've been vibe coding for 2 hours", zhHans: "连续 vibe coding 2 小时了"),
+                body: L10n.text("Stand up, stretch, and have some water—I'll keep an eye on your tasks.", zhHans: "站起来伸个懒腰、喝口水吧——任务有我盯着。")))
         }
         snapshot("10-card-alert", screen: notched) {
             $0.enqueueAlert(RiskAlert(
                 opId: "preview-alert", source: .claude, sessionId: "p1",
-                ruleId: "rm-rf", ruleTitle: "递归删除绝对/家目录路径",
+                ruleId: "rm-rf", ruleTitle: L10n.text("Recursively delete absolute/home directory paths", zhHans: "递归删除绝对/家目录路径"),
                 tool: "Bash", detail: "sudo rm -rf ~/Library/Caches",
                 timestamp: now))
         }
         snapshot("8-tasklist", screen: notched) {
             var idle1 = AgentTask(
-                source: .claude, sessionId: "0a1b2c3d-idle", title: "Calcite 优化器调研",
+                source: .claude, sessionId: "0a1b2c3d-idle", title: L10n.text("Research the Calcite optimizer", zhHans: "Calcite 优化器调研"),
                 cwd: "/Users/me/work/calcite",
                 startedAt: now.addingTimeInterval(-7200), phase: .idle)
             idle1.lastActivityAt = now.addingTimeInterval(-1800)
@@ -140,12 +140,12 @@ enum PreviewRenderer {
         // 子 agent：收起徽标 / 展开三态 / 胶囊聚合标识
         let subagents = [
             SubagentInfo(agentId: "a1", agentType: "Explore",
-                         description: "定位 transcript 解析入口", status: .running,
+                         description: L10n.text("Locate the transcript parsing entry point", zhHans: "定位 transcript 解析入口"), status: .running,
                          currentActivity: "Grep"),
             SubagentInfo(agentId: "a2", agentType: "Plan",
-                         description: "设计灵动岛子代理渲染方案", status: .completed),
+                         description: L10n.text("Design subagent rendering for the Dynamic Island", zhHans: "设计灵动岛子代理渲染方案"), status: .completed),
             SubagentInfo(agentId: "a3", agentType: "claude-code-guide",
-                         description: "核实子代理目录格式", status: .failed),
+                         description: L10n.text("Verify the subagent directory format", zhHans: "核实子代理目录格式"), status: .failed),
         ]
         var withSubs = running1
         withSubs.currentActivity = "Task"
@@ -171,7 +171,7 @@ enum PreviewRenderer {
             var crowd: [AgentTask] = [waitingTask, withSubs]
             for index in 0..<28 {
                 crowd.append(AgentTask(
-                    source: .claude, sessionId: "crowd-\(index)", title: "会话 \(index)",
+                    source: .claude, sessionId: "crowd-\(index)", title: L10n.format("Session %@", zhHans: "会话 %@", String(index)),
                     cwd: "/Users/me/work/crowd",
                     startedAt: now.addingTimeInterval(-Double(index) * 600)))
             }
@@ -563,7 +563,7 @@ enum PreviewRenderer {
         if sessions.selected != nil {
             snap("pages-session-lineage-list",
                  TurnLineageView(
-                    sessionName: sessions.selected?.displayName ?? "会话",
+                    sessionName: sessions.selected?.displayName ?? L10n.text("Session", zhHans: "会话"),
                     turns: TurnSlicer.slice(sessions.transcript), onBack: {}),
                  width: 1270)
         }
@@ -731,8 +731,8 @@ enum PreviewRenderer {
 
         // 验收形态（用户选中的那张预览）
         let accepted = TurnInput(
-            turnIndex: 7, promptMessageId: 0, promptText: "修一下审计页的分页",
-            thinkingTexts: ["先定位分页代码在哪，再决定改哪一层"],
+            turnIndex: 7, promptMessageId: 0, promptText: L10n.text("Fix pagination on the audit page", zhHans: "修一下审计页的分页"),
+            thinkingTexts: [L10n.text("Locate the pagination code first, then decide which layer to change", zhHans: "先定位分页代码在哪，再决定改哪一层")],
             steps: [
                 step(.search, "Grep", "paginationBar", batch: 1, index: 0),
                 step(.agent, "Explore", "定位分页实现", batch: 1, index: 1),
@@ -743,7 +743,7 @@ enum PreviewRenderer {
                 step(.edit, "Edit", "/w/AuditView.swift", batch: 6, index: 6),
                 step(.command, "Bash", "swift build", batch: 7, index: 7),
             ],
-            answerMessageIds: [9], answerText: "改好了，分页条现在有跳页输入框")
+            answerMessageIds: [9], answerText: L10n.text("Fixed; the pagination bar now has a page jump input", zhHans: "改好了，分页条现在有跳页输入框"))
         snap("lineage-golden-accepted", board(accepted, width: 780))
         snap("lineage-golden-accepted-dark", board(accepted, width: 780), dark: true)
         snap("lineage-golden-min-width", board(accepted, width: 674), height: 512)
@@ -777,8 +777,8 @@ enum PreviewRenderer {
                 .read, "Read", "/w/File\(index).swift", batch: index + 1, index: index))
         }
         snap("lineage-golden-chain", board(TurnInput(
-            turnIndex: 1, promptMessageId: 0, promptText: "逐个看一遍",
-            steps: chainSteps, answerMessageIds: [1], answerText: "看完了"), width: 780))
+            turnIndex: 1, promptMessageId: 0, promptText: L10n.text("Review each one", zhHans: "逐个看一遍"),
+            steps: chainSteps, answerMessageIds: [1], answerText: L10n.text("Review complete", zhHans: "看完了")), width: 780))
 
         // 一层 9 个同类：验折叠
         var wideSteps: [TurnInput.Step] = []
@@ -786,8 +786,8 @@ enum PreviewRenderer {
             wideSteps.append(step(.search, "Grep", "pattern-\(index)", batch: 1, index: index))
         }
         snap("lineage-golden-fold", board(TurnInput(
-            turnIndex: 2, promptMessageId: 0, promptText: "全库找一遍",
-            steps: wideSteps, answerMessageIds: [1], answerText: "找到了"), width: 780))
+            turnIndex: 2, promptMessageId: 0, promptText: L10n.text("Search the entire codebase", zhHans: "全库找一遍"),
+            steps: wideSteps, answerMessageIds: [1], answerText: L10n.text("Found it", zhHans: "找到了")), width: 780))
 
         // 60 节点最坏可读态
         var bigSteps: [TurnInput.Step] = []
@@ -801,8 +801,8 @@ enum PreviewRenderer {
             }
         }
         snap("lineage-golden-60", board(TurnInput(
-            turnIndex: 4, promptMessageId: 0, promptText: "通读整个模块",
-            steps: bigSteps, answerMessageIds: [1], answerText: "读完了"),
+            turnIndex: 4, promptMessageId: 0, promptText: L10n.text("Read through the entire module", zhHans: "通读整个模块"),
+            steps: bigSteps, answerMessageIds: [1], answerText: L10n.text("Finished reading", zhHans: "读完了")),
             width: 780), height: 1100)
 
         // 多条回读 + 多条重试：验左右分道与角标降级
@@ -824,8 +824,8 @@ enum PreviewRenderer {
             cursor += 1
         }
         snap("lineage-golden-lanes", board(TurnInput(
-            turnIndex: 5, promptMessageId: 0, promptText: "把这几个文件都改了",
-            steps: laneSteps, answerMessageIds: [1], answerText: "都改完了"),
+            turnIndex: 5, promptMessageId: 0, promptText: L10n.text("Update all of these files", zhHans: "把这几个文件都改了"),
+            steps: laneSteps, answerMessageIds: [1], answerText: L10n.text("All files updated", zhHans: "都改完了")),
             width: 780), height: 900)
 
         // 超上限：验降级不排版
@@ -835,8 +835,8 @@ enum PreviewRenderer {
                 .command, "Bash", "echo \(index)", batch: index + 1, index: index))
         }
         snap("lineage-golden-degraded", board(TurnInput(
-            turnIndex: 6, promptMessageId: 0, promptText: "跑一堆命令",
-            steps: hugeSteps, answerMessageIds: [1], answerText: "跑完了"),
+            turnIndex: 6, promptMessageId: 0, promptText: L10n.text("Run a batch of commands", zhHans: "跑一堆命令"),
+            steps: hugeSteps, answerMessageIds: [1], answerText: L10n.text("All commands finished", zhHans: "跑完了")),
             width: 780), height: 320)
 
         // MARK: 真实数据（golden 是形态基准，live 是「真数据下会不会崩/难看」）
@@ -888,13 +888,13 @@ enum PreviewRenderer {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let pack = MascotPackLoader.builtIn()
         let bubbles: [MascotState: String] = [
-            .waiting: "等你确认一下 🙌",
-            .success: "搞定啦 🎉",
-            .error: "出错了 😣",
-            .relax: "连续 2 小时了，起来伸个懒腰～",
-            .night: "夜深了，早点歇 🌙",
-            .poke: "戳到啦",
-            .wake: "早上好",
+            .waiting: L10n.text("Waiting for your confirmation 🙌", zhHans: "等你确认一下 🙌"),
+            .success: L10n.text("All done 🎉", zhHans: "搞定啦 🎉"),
+            .error: L10n.text("Something went wrong 😣", zhHans: "出错了 😣"),
+            .relax: L10n.text("It's been 2 hours; stand up and stretch～", zhHans: "连续 2 小时了，起来伸个懒腰～"),
+            .night: L10n.text("It's late; get some rest 🌙", zhHans: "夜深了，早点歇 🌙"),
+            .poke: L10n.text("You poked me", zhHans: "戳到啦"),
+            .wake: L10n.text("Good morning", zhHans: "早上好"),
         ]
 
         for state in MascotState.allCases {
@@ -991,7 +991,7 @@ private struct MascotVariantPreviewSheet: View {
                 Text("\(state.rawValue) · \(variantID)")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                 Spacer()
-                Text("\(images.count) 帧 · \(playback == .loop ? "循环" : "单次")")
+                Text(L10n.format("%@ frames · %@", zhHans: "%@ 帧 · %@", String(images.count), String(playback == .loop ? L10n.text("Loop", zhHans: "循环") : L10n.text("Once", zhHans: "单次"))))
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(.secondary)
             }

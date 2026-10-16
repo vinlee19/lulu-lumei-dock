@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// S3 兼容存储配置。endpointHost 由调用方给定 —— 预设服务商用
@@ -88,7 +89,7 @@ public final class S3Client {
             credentials: credentials, region: config.region)
 
         guard let url = URL(string: "https://\(host)\(path)") else {
-            throw S3Error(status: 0, body: Data("无效 URL：\(host)\(path)".utf8))
+            throw S3Error(status: 0, body: Data(L10n.format("Invalid URL: %@%@", zhHans: "无效 URL：%@%@", String(host), String(path)).utf8))
         }
         var request = URLRequest(url: url)
         request.httpMethod = method

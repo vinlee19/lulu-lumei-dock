@@ -57,7 +57,7 @@ struct SessionsView: View {
         case .graph(let index): (pane, turn) = (.graph, index)
         }
         return TurnLineageView(
-            sessionName: service.selected?.displayName ?? "会话",
+            sessionName: service.selected?.displayName ?? L10n.text("Session", zhHans: "会话"),
             turns: TurnSlicer.slice(service.transcript),
             onBack: { withAnimation(.easeOut(duration: 0.15)) { lineage = nil } },
             onJumpToMessage: { messageId in
@@ -103,15 +103,18 @@ struct SessionsView: View {
             settings.sessionSortMode = newValue.rawValue
         }
         .confirmationDialog(
-            "删除选中的 \(deletableChecked.count) 个会话？transcript 文件会移入废纸篓，可恢复。",
+            L10n.format(
+                "Delete the %@ selected sessions? Transcript files move to the Trash and can be restored.",
+                zhHans: "删除选中的 %@ 个会话？transcript 文件会移入废纸篓，可恢复。",
+                String(deletableChecked.count)),
             isPresented: $confirmingBatchDelete, titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 service.deleteSessions(deletableChecked)
                 checkedIds = []
                 multiSelect = false
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -132,7 +135,7 @@ struct SessionsView: View {
         VStack(spacing: 0) {
             // 账本总览（右端常驻索引状态：扫描中可见，重扫不再"无反应"）
             HStack(spacing: 6) {
-                Text("共 \(service.summary.sessionCount) 个会话")
+                Text(L10n.format("%@ sessions", zhHans: "共 %@ 个会话", String(service.summary.sessionCount)))
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                     .fixedSize()
@@ -155,7 +158,7 @@ struct SessionsView: View {
                         ProgressView()
                             .controlSize(.small)
                             .scaleEffect(0.55)
-                        Text("索引中")
+                        Text(L10n.text("Indexing", zhHans: "索引中"))
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .fixedSize()
@@ -175,12 +178,12 @@ struct SessionsView: View {
                     icon: "checkmark",
                     tint: .green,
                     active: multiSelect,
-                    help: "多选模式（批量删除）"
+                    help: L10n.text("Multi-select (batch delete)", zhHans: "多选模式（批量删除）")
                 ) {
                     multiSelect.toggle()
                     if !multiSelect { checkedIds = [] }
                 }
-                toolButton(icon: "arrow.clockwise", tint: .teal, help: "重新索引会话") {
+                toolButton(icon: "arrow.clockwise", tint: .teal, help: L10n.text("Reindex sessions", zhHans: "重新索引会话")) {
                     service.refresh()
                 }
             }
@@ -190,7 +193,7 @@ struct SessionsView: View {
             // 时间范围（近 30 天 / 全部时间）；胶囊页签，与下方排序档同风格，选中紫底白字
             CapsuleTabTray {
                 CapsuleTabButton(
-                    title: "近 30 天", icon: "clock",
+                    title: L10n.text("Last 30 days", zhHans: "近 30 天"), icon: "clock",
                     isSelected: !settings.sessionRangeAll
                 ) {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -198,7 +201,7 @@ struct SessionsView: View {
                     }
                 }
                 CapsuleTabButton(
-                    title: "全部时间", icon: "infinity",
+                    title: L10n.text("All time", zhHans: "全部时间"), icon: "infinity",
                     isSelected: settings.sessionRangeAll
                 ) {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -208,7 +211,7 @@ struct SessionsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
-            .accessibilityLabel("会话时间范围")
+            .accessibilityLabel(L10n.text("Session time range", zhHans: "会话时间范围"))
 
             // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签，选中紫底白字
             CapsuleTabTray {
@@ -233,8 +236,8 @@ struct SessionsView: View {
                 && service.fullTextHits.isEmpty {
                 VStack(spacing: 8) {
                     if service.scanning {
-                        ProgressView("正在索引会话…")
-                        Text("14 个来源逐个扫描，稍等片刻")
+                        ProgressView(L10n.text("Indexing sessions…", zhHans: "正在索引会话…"))
+                        Text(L10n.text("Scanning 14 sources one by one. This takes a moment.", zhHans: "14 个来源逐个扫描，稍等片刻"))
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     } else {
@@ -242,12 +245,14 @@ struct SessionsView: View {
                             .font(.system(size: 26))
                             .foregroundStyle(Theme.brandFg.opacity(0.4))
                         Text(service.isSearching
-                            ? "没有匹配的会话"
-                            : (settings.sessionRangeAll ? "没有会话" : "近 30 天没有会话"))
+                            ? L10n.text("No matching sessions", zhHans: "没有匹配的会话")
+                            : (settings.sessionRangeAll
+                                ? L10n.text("No sessions", zhHans: "没有会话")
+                                : L10n.text("No sessions in the last 30 days", zhHans: "近 30 天没有会话")))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                         if !service.isSearching && !settings.sessionRangeAll {
-                            Text("更早的记录在「全部时间」里")
+                            Text(L10n.text("Older records are under All time", zhHans: "更早的记录在「全部时间」里"))
                                 .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                         }
@@ -289,11 +294,11 @@ struct SessionsView: View {
                 if multiSelect {
                     Divider()
                     HStack {
-                        Text("已选 \(checkedIds.count) 个")
+                        Text(L10n.format("%@ selected", zhHans: "已选 %@ 个", String(checkedIds.count)))
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("批量删除") { confirmingBatchDelete = true }
+                        Button(L10n.text("Delete Selected", zhHans: "批量删除")) { confirmingBatchDelete = true }
                             .controlSize(.small)
                             .tint(.red)
                             .disabled(deletableChecked.isEmpty)
@@ -313,7 +318,7 @@ struct SessionsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(searchFocused ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
-            TextField("搜索会话 / 项目 / id", text: $service.searchText)
+            TextField(L10n.text("Search sessions / projects / id", zhHans: "搜索会话 / 项目 / id"), text: $service.searchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
                 .focused($searchFocused)
@@ -326,7 +331,7 @@ struct SessionsView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("清空搜索")
+                .help(L10n.text("Clear search", zhHans: "清空搜索"))
             }
             Divider().frame(height: 12)
             sourcePickerButton
@@ -398,7 +403,7 @@ struct SessionsView: View {
                             Image(systemName: "line.3.horizontal.decrease")
                                 .font(.system(size: 7, weight: .semibold))
                                 .foregroundStyle(.white))
-                    Text("全部来源")
+                    Text(L10n.text("All sources", zhHans: "全部来源"))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
@@ -410,13 +415,13 @@ struct SessionsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("按 CLI 来源筛选会话")
+        .help(L10n.text("Filter sessions by CLI source", zhHans: "按 CLI 来源筛选会话"))
     }
 
     /// 来源选择 popover：真实徽标 + 名称 + 计数，选中行品牌底 + 对勾；淡紫金渐变洗底
     private var sourcePickerPopover: some View {
         VStack(alignment: .leading, spacing: 2) {
-            sourcePickerRow(nil, name: "全部来源", count: service.summary.sessionCount)
+            sourcePickerRow(nil, name: L10n.text("All sources", zhHans: "全部来源"), count: service.summary.sessionCount)
             Divider().padding(.vertical, 2)
             ForEach(AgentSource.allCases, id: \.self) { source in
                 if let count = service.sourceCounts[source], count > 0 {
@@ -502,7 +507,7 @@ struct SessionsView: View {
                 Image(systemName: "text.magnifyingglass")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.goldFg)
-                Text("对话内容命中")
+                Text(L10n.text("Matches in conversations", zhHans: "对话内容命中"))
                     .font(.system(size: 11, weight: .semibold))
                 Text("\(service.fullTextHits.count)")
                     .font(.system(size: 10).monospacedDigit())
@@ -519,11 +524,11 @@ struct SessionsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
                             SourceBadge(source: hit.source, size: 10)
-                            Text(hit.sessionName ?? "会话 \(hit.sessionId.prefix(8))")
+                            Text(hit.sessionName ?? L10n.format("Session %@", zhHans: "会话 %@", String(hit.sessionId.prefix(8))))
                                 .font(.system(size: 11, weight: .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 4)
-                            Text(hit.role == "user" ? "用户" : "助手")
+                            Text(hit.role == "user" ? L10n.text("User", zhHans: "用户") : L10n.text("Assistant", zhHans: "助手"))
                                 .font(.system(size: 9))
                                 .foregroundStyle(.tertiary)
                             if let ts = hit.ts {
@@ -575,7 +580,7 @@ private struct ProjectHeaderRow: View {
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                         .foregroundStyle(Theme.cost)
                 }
-                Text("\(group.sessions.count) 个")
+                Text(L10n.format("%@ sessions", zhHans: "%@ 个", String(group.sessions.count)))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Text(formatBytes(group.totalBytes))
@@ -618,7 +623,7 @@ private struct SessionRow: View {
                 .buttonStyle(.borderless)
                 .disabled(!session.source.supportsSessionDeletion)
                 .help(session.source.supportsSessionDeletion
-                    ? "" : "\(session.source.displayName) 会话不支持删除")
+                    ? "" : L10n.format("%@ sessions can't be deleted", zhHans: "%@ 会话不支持删除", session.source.displayName))
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -635,7 +640,7 @@ private struct SessionRow: View {
                     Text(formatBytes(session.sizeBytes))
                     if let promptCount, promptCount > 0 {
                         Text("·")
-                        Text("\(promptCount) 段")
+                        Text(L10n.format("%@ prompts", zhHans: "%@ 段", String(promptCount)))
                     }
                     if let cost, let usd = cost.costUSD {
                         Text("·")
@@ -661,7 +666,7 @@ private struct SessionRow: View {
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("拷贝恢复命令")
+            .help(L10n.text("Copy resume command", zhHans: "拷贝恢复命令"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

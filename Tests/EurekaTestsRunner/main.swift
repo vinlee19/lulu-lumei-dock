@@ -1,8 +1,14 @@
 import Foundation
+import EurekaKit
+
+// 应用默认是英文。既有断言锁的是中文文案，所以套件钉在简体中文，
+// 这些断言继续充当中文目录的规格。英文输出由 localizationTests 单独覆盖。
+L10n.current = .simplifiedChinese
 
 let t = TestRunner()
 print("eureka-tests")
 
+localizationTests(t)
 smokeTests(t)
 taskStoreTests(t)
 decoderTests(t)

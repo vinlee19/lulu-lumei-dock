@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// MCP server 的**完整定义**（含 env / headers 的值）。
@@ -47,9 +48,9 @@ public enum MCPEditError: Error, LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .alreadyExists(let name): return "已存在同名 server「\(name)」，不覆盖"
-        case .notFound(let name): return "没有找到 server「\(name)」"
-        case .invalidDefinition(let detail): return "定义不完整：\(detail)"
+        case .alreadyExists(let name): return L10n.format("A server named “%@” already exists; it will not be overwritten", zhHans: "已存在同名 server「%@」，不覆盖", String(name))
+        case .notFound(let name): return L10n.format("No server named “%@” was found", zhHans: "没有找到 server「%@」", String(name))
+        case .invalidDefinition(let detail): return L10n.format("Incomplete definition: %@", zhHans: "定义不完整：%@", String(detail))
         case .unsupportedTarget(let detail): return detail
         }
     }
@@ -329,7 +330,7 @@ public enum MCPServerEditor {
         try validate(definition)
         try guardRemoteHeadersForTOML(definition)
         if definition.transport == .stdio, definition.command == nil {
-            throw MCPEditError.invalidDefinition("stdio server 缺少 command")
+            throw MCPEditError.invalidDefinition(L10n.text("The stdio server is missing a command", zhHans: "stdio server 缺少 command"))
         }
         let existing = sectionRanges(in: toml.components(separatedBy: "\n"))
         if existing.keys.contains(definition.name) {
@@ -339,7 +340,7 @@ public enum MCPServerEditor {
         for value in [definition.command ?? "", definition.url ?? ""] + definition.args
             + definition.env.keys + definition.env.values + definition.headers.values {
             if value.contains("\n") || value.contains("\r") {
-                throw MCPEditError.invalidDefinition("值包含换行，无法安全写入 TOML")
+                throw MCPEditError.invalidDefinition(L10n.text("The value contains a newline and cannot be safely written to TOML", zhHans: "值包含换行，无法安全写入 TOML"))
             }
         }
 
@@ -383,7 +384,7 @@ public enum MCPServerEditor {
         if let extra = definition.headers.keys
             .first(where: { $0.lowercased() != "authorization" }) {
             throw MCPEditError.unsupportedTarget(
-                "该目标对自定义请求头（\(extra)）的写法未验证，暂只支持 Authorization（bearer_token）")
+                L10n.format("Custom headers (%@) have not been verified for this target; only Authorization (bearer_token) is supported for now", zhHans: "该目标对自定义请求头（%@）的写法未验证，暂只支持 Authorization（bearer_token）", String(extra)))
         }
     }
 
@@ -411,7 +412,7 @@ public enum MCPServerEditor {
         for value in [definition.command ?? "", definition.url ?? ""] + definition.args
             + definition.env.keys + definition.env.values {
             if value.contains("\n") || value.contains("\r") {
-                throw MCPEditError.invalidDefinition("值包含换行，无法安全写入 TOML")
+                throw MCPEditError.invalidDefinition(L10n.text("The value contains a newline and cannot be safely written to TOML", zhHans: "值包含换行，无法安全写入 TOML"))
             }
         }
         var lines = toml.components(separatedBy: "\n")
@@ -624,24 +625,24 @@ public enum MCPServerEditor {
         guard let value = root[container] else { return [:] }
         guard let servers = value as? [String: Any] else {
             throw InstallError.foreignConfig(
-                "配置里的 \(container) 字段不是对象，无法识别。为避免覆盖看不懂的内容，不做任何改动。")
+                L10n.format("The %@ field in the configuration is not an object and cannot be recognized. No changes were made to avoid overwriting unrecognized content.", zhHans: "配置里的 %@ 字段不是对象，无法识别。为避免覆盖看不懂的内容，不做任何改动。", String(container)))
         }
         return servers
     }
 
     private static func validate(_ definition: MCPServerDefinition) throws {
         let name = definition.name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { throw MCPEditError.invalidDefinition("名称不能为空") }
+        guard !name.isEmpty else { throw MCPEditError.invalidDefinition(L10n.text("The name cannot be empty", zhHans: "名称不能为空")) }
         switch definition.transport {
         case .stdio:
             guard let command = definition.command,
                   !command.trimmingCharacters(in: .whitespaces).isEmpty else {
-                throw MCPEditError.invalidDefinition("stdio server 缺少 command")
+                throw MCPEditError.invalidDefinition(L10n.text("The stdio server is missing a command", zhHans: "stdio server 缺少 command"))
             }
         case .remote:
             guard let url = definition.url,
                   !url.trimmingCharacters(in: .whitespaces).isEmpty else {
-                throw MCPEditError.invalidDefinition("远程 server 缺少 URL")
+                throw MCPEditError.invalidDefinition(L10n.text("The remote server is missing a URL", zhHans: "远程 server 缺少 URL"))
             }
         }
     }

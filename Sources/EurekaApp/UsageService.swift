@@ -246,7 +246,7 @@ final class UsageService: ObservableObject {
                 PricingCatalogStore.shared.loadIfNeeded(paths: .app)
                 self.scanAndPublish()
             } catch {
-                self.publish { $0.lastError = "数据库打开失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to open database: %@", zhHans: "数据库打开失败: %@", String(describing: error)) }
             }
         }
 
@@ -359,7 +359,7 @@ final class UsageService: ObservableObject {
                     $0.recordTotal = total
                 }
             } catch {
-                self.publish { $0.lastError = "读取请求日志失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to read request log: %@", zhHans: "读取请求日志失败: %@", String(describing: error)) }
             }
         }
     }
@@ -650,7 +650,7 @@ final class UsageService: ObservableObject {
             let rows = (try? store.usage.totalsByProject(from: from, to: to, source: source)) ?? []
             var byProject: [String: (tokens: Int, cost: Double?)] = [:]
             for (project, totals) in rows {
-                let name = project ?? "（未知项目）"
+                let name = project ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
                 let tokens = totals.inputTokens + totals.outputTokens
                     + totals.cacheCreationTokens + totals.cacheReadTokens
                 let cost = self.pricing.cost(of: totals)
@@ -701,12 +701,12 @@ final class UsageService: ObservableObject {
                     .appendingPathComponent(
                         "Downloads/eureka-usage-\(formatter.string(from: now)).csv")
                 try Data(csv.utf8).write(to: url)
-                self.publish { $0.exportMessage = "已导出 \(url.lastPathComponent)" }
+                self.publish { $0.exportMessage = L10n.format("Exported %@", zhHans: "已导出 %@", String(url.lastPathComponent)) }
                 DispatchQueue.main.async {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             } catch {
-                self.publish { $0.exportMessage = "导出失败: \(error)" }
+                self.publish { $0.exportMessage = L10n.format("Export failed: %@", zhHans: "导出失败: %@", String(describing: error)) }
             }
         }
     }
@@ -779,7 +779,7 @@ final class UsageService: ObservableObject {
             publishHistory(store: store)
         } catch {
             HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
-            publish { $0.lastError = "扫描失败: \(error)" }
+            publish { $0.lastError = L10n.format("Scan failed: %@", zhHans: "扫描失败: %@", String(describing: error)) }
         }
     }
 
@@ -839,7 +839,9 @@ final class UsageService: ObservableObject {
                 let totals = (try? store.usage.totalsForSessions(
                     tasks.map(\.sessionId))) ?? [:]
                 let isoFormatter = ISO8601DateFormatter()
-                var csv = "结局,标题,来源,项目,开始时间,结束时间,耗时秒,Tokens\n"
+                var csv = L10n.text(
+                    "Outcome,Title,Source,Project,Started,Finished,Duration seconds,Tokens\n",
+                    zhHans: "结局,标题,来源,项目,开始时间,结束时间,耗时秒,Tokens\n")
                 for task in tasks {
                     let tokens = totals[task.sessionId]?.reduce(0) {
                         $0 + $1.inputTokens + $1.outputTokens
@@ -864,13 +866,13 @@ final class UsageService: ObservableObject {
                         "Downloads/eureka-history-\(formatter.string(from: Date())).csv")
                 try Data(csv.utf8).write(to: url)
                 self.publish {
-                    $0.exportMessage = "已导出 \(url.lastPathComponent)（\(tasks.count) 条）"
+                    $0.exportMessage = L10n.format("Exported %@ (%@ records)", zhHans: "已导出 %@（%@ 条）", String(url.lastPathComponent), String(tasks.count))
                 }
                 DispatchQueue.main.async {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             } catch {
-                self.publish { $0.exportMessage = "导出失败: \(error)" }
+                self.publish { $0.exportMessage = L10n.format("Export failed: %@", zhHans: "导出失败: %@", String(describing: error)) }
             }
         }
     }

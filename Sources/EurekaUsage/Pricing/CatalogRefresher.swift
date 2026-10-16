@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 一次 HTTP 请求的结果（传输层由 app 注入，测试用假实现）
@@ -134,6 +135,6 @@ public enum CatalogRefresher {
                 failures.append("\(url.host ?? "?") \(error)")
             }
         }
-        return .failed("\(name) 更新失败：" + failures.joined(separator: "；"))
+        return .failed(L10n.format("%@ update failed: ", zhHans: "%@ 更新失败：", String(name)) + failures.joined(separator: L10n.text("; ", zhHans: "；")))
     }
 }

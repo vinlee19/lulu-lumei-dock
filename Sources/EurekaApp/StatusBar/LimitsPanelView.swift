@@ -34,14 +34,14 @@ struct LimitsPanelView: View {
                 }
 
                 if service.codex == nil && service.grok == nil && !service.claudeEnabled {
-                    Text("还没有 Codex/Grok 限额快照（跑一次 codex 或 grok 后出现）")
+                    Text(L10n.text("No Codex/Grok limit snapshot yet (appears after you run codex or grok once)", zhHans: "还没有 Codex/Grok 限额快照（跑一次 codex 或 grok 后出现）"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
 
                 AntigravityOptInRow(settings: settings, service: service)
 
-                Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。OpenCode / Antigravity / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。")
+                Text(L10n.text("Codex/Grok limits come from a local log snapshot (no network). Claude limits use an unofficial API and hide themselves when it fails. OpenCode / Antigravity / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae have no local limit source (Kimi quota is only on its membership page; Hermes bills through each provider subscription; Cursor quota is only on the website and in the IDE, with no local snapshot; Trae's session database is SQLCipher-encrypted, so no usage can be read locally), so they are not shown.", zhHans: "Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。OpenCode / Antigravity / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。"))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -58,12 +58,12 @@ private struct AntigravityOptInRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Antigravity 用量统计（实验）", isOn: $settings.antigravityExperimentalEnabled)
+            Toggle(L10n.text("Antigravity usage (experimental)", zhHans: "Antigravity 用量统计（实验）"), isOn: $settings.antigravityExperimentalEnabled)
                 .font(.system(size: 11))
                 .onChange(of: settings.antigravityExperimentalEnabled) { _, _ in service.refresh() }
-            Text("解析 Antigravity 会话库里未公开的逐次调用 token（按公开价格折算 API 等价费用），结果在用量页。"
-                + "格式随版本可能变化，解析不了时自动隐藏。Antigravity 的每周 / 5 小时额度只由 agy 在线获取、"
-                + "不落本地，暂不显示。")
+            Text(L10n.text(
+                "Reads unpublished per-call tokens from the Antigravity session database (priced as API-equivalent from public rates) and shows them on the Usage page. The format can change between versions and hides itself when it cannot be parsed. Antigravity weekly / 5-hour quotas are fetched live by agy and are not stored locally, so they are not shown yet.",
+                zhHans: "解析 Antigravity 会话库里未公开的逐次调用 token（按公开价格折算 API 等价费用），结果在用量页。格式随版本可能变化，解析不了时自动隐藏。Antigravity 的每周 / 5 小时额度只由 agy 在线获取、不落本地，暂不显示。"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
         }
@@ -93,21 +93,27 @@ private struct LimitCard: View {
                 Spacer()
                 if snapshot.isStale {
                     Text(Calendar.current.isDateInToday(snapshot.asOf)
-                        ? "截至 \(snapshot.asOf.formatted(.dateTime.hour().minute()))"
-                        : "截至 \(snapshot.asOf.formatted(.dateTime.month().day().hour().minute()))")
+                        ? L10n.format(
+                            "As of %@",
+                            zhHans: "截至 %@",
+                            snapshot.asOf.formatted(.dateTime.hour().minute()))
+                        : L10n.format(
+                            "As of %@",
+                            zhHans: "截至 %@",
+                            snapshot.asOf.formatted(.dateTime.month().day().hour().minute())))
                         .font(.system(size: 10))
                         .foregroundStyle(.orange)
                 }
             }
             if let primary = snapshot.primary {
                 WindowGauge(
-                    label: primary.label ?? Self.windowLabel(primary.windowMinutes, fallback: "5 小时窗口"),
+                    label: primary.label ?? Self.windowLabel(primary.windowMinutes, fallback: L10n.text("5-hour window", zhHans: "5 小时窗口")),
                     window: primary,
                     fullAt: forecasts["\(snapshot.source.rawValue)#primary"])
             }
             if let secondary = snapshot.secondary {
                 WindowGauge(
-                    label: secondary.label ?? Self.windowLabel(secondary.windowMinutes, fallback: "每周窗口"),
+                    label: secondary.label ?? Self.windowLabel(secondary.windowMinutes, fallback: L10n.text("Weekly window", zhHans: "每周窗口")),
                     window: secondary,
                     fullAt: forecasts["\(snapshot.source.rawValue)#secondary"])
             }
@@ -119,9 +125,9 @@ private struct LimitCard: View {
     /// 窗口时长 → 中文标签（Codex 5h/周；Grok 周/月单窗）
     static func windowLabel(_ minutes: Int, fallback: String) -> String {
         switch minutes {
-        case 300: return "5 小时窗口"
-        case 10080: return "每周窗口"
-        case 43200: return "每月窗口"
+        case 300: return L10n.text("5-hour window", zhHans: "5 小时窗口")
+        case 10080: return L10n.text("Weekly window", zhHans: "每周窗口")
+        case 43200: return L10n.text("Monthly window", zhHans: "每月窗口")
         default: return fallback
         }
     }
@@ -144,7 +150,10 @@ private struct WindowGauge: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                 if let fullAt, !hasReset {
-                    Text("⏳ 预计 \(fullAt, format: .dateTime.hour().minute()) 打满")
+                    Text(L10n.format(
+                        "⏳ Full around %@",
+                        zhHans: "⏳ 预计 %@ 打满",
+                        fullAt.formatted(.dateTime.hour().minute())))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.orange)
                 }
@@ -153,12 +162,15 @@ private struct WindowGauge: View {
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
                     .foregroundStyle(hasReset ? Color.secondary : barColor)
                 if hasReset {
-                    Text("· 已重置，快照过期")
+                    Text(L10n.text("· Reset, snapshot is stale", zhHans: "· 已重置，快照过期"))
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                        .help("快照晚于这个窗口的重置时刻，百分比已不代表当前用量；跑一次该 CLI 会刷新")
+                        .help(L10n.text("The snapshot is older than this window's reset, so the percentage is not current usage. Run that CLI once to refresh it.", zhHans: "快照晚于这个窗口的重置时刻，百分比已不代表当前用量；跑一次该 CLI 会刷新"))
                 } else if let resets = window.resetsAt {
-                    Text("· \(resets, format: .relative(presentation: .named)) 重置")
+                    Text(L10n.format(
+                        "· %@ reset",
+                        zhHans: "· %@ 重置",
+                        resets.formatted(.relative(presentation: .named))))
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -189,12 +201,12 @@ private struct ClaudeOptInCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Claude Code 限额")
+            Text(L10n.text("Claude Code limits", zhHans: "Claude Code 限额"))
                 .font(.system(size: 12, weight: .medium))
-            Text("显示订阅 5 小时 / 每周窗口用量。需要读取钥匙串中的 Claude Code 凭证并调用非官方接口（官方变更后会自动隐藏，不影响其他功能）。首次启用会弹一次钥匙串授权，选「始终允许」即可。")
+            Text(L10n.text("Shows subscription usage for the 5-hour and weekly windows. This reads the Claude Code credential from the Keychain and calls an unofficial API (it hides itself if the API changes, and nothing else is affected). The first time you turn it on, macOS asks for Keychain access — choose Always Allow.", zhHans: "显示订阅 5 小时 / 每周窗口用量。需要读取钥匙串中的 Claude Code 凭证并调用非官方接口（官方变更后会自动隐藏，不影响其他功能）。首次启用会弹一次钥匙串授权，选「始终允许」即可。"))
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
-            Toggle("启用（非官方接口）", isOn: $service.claudeEnabled)
+            Toggle(L10n.text("Enable (unofficial API)", zhHans: "启用（非官方接口）"), isOn: $service.claudeEnabled)
                 .font(.system(size: 11))
                 .toggleStyle(.switch)
                 .controlSize(.small)

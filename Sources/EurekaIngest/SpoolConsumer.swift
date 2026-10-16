@@ -96,7 +96,7 @@ public final class SpoolConsumer {
         else {
             undecodableCount += 1
             HealthRegistry.shared.failure(
-                Self.healthName, note: "事件文件无法解析: \(fileURL.lastPathComponent)")
+                Self.healthName, note: L10n.format("Cannot parse event file: %@", zhHans: "事件文件无法解析: %@", String(fileURL.lastPathComponent)))
             return
         }
         HealthRegistry.shared.beat(Self.healthName)

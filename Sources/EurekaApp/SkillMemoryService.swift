@@ -61,7 +61,7 @@ final class SkillMemoryService: ObservableObject {
         // 用户点刷新就是要最新的：丢掉 cwd 发现缓存，否则 60s 内拿到的还是上次那份
         if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
-        scanPhase = "正在扫描技能与记忆…"
+        scanPhase = L10n.text("Scanning skills and memories…", zhHans: "正在扫描技能与记忆…")
         queue.async { [weak self] in
             guard let self else { return }
             // 各项目仓库根（技能与记忆共用同一份发现）
@@ -525,7 +525,7 @@ final class SkillMemoryService: ObservableObject {
             if let entry = skillEntry(named: name) {
                 entries.append(entry)
             } else {
-                failures.append("\(name)：找不到可作为来源的技能目录")
+                failures.append(L10n.format("%@: no source skill directory found", zhHans: "%@：找不到可作为来源的技能目录", String(name)))
             }
         }
         queue.async { [weak self] in
@@ -539,7 +539,7 @@ final class SkillMemoryService: ObservableObject {
                         slug: URL(fileURLWithPath: entry.directory).lastPathComponent)
                     succeeded += 1
                 } catch {
-                    failures.append("\(entry.name)：\(error.localizedDescription)")
+                    failures.append(L10n.format("%@: %@", zhHans: "%@：%@", String(entry.name), String(error.localizedDescription)))
                 }
             }
             DispatchQueue.main.async {
@@ -789,7 +789,7 @@ final class SkillMemoryService: ObservableObject {
             // 凭空造出一份只有 skills.disabled 的配置，而 Hermes 会把它当"已配置"读。
             guard FileManager.default.fileExists(atPath: configURL.path) else {
                 DispatchQueue.main.async {
-                    self?.lastError = "未找到 \(configURL.path)，无法改写 Hermes 技能启停名单"
+                    self?.lastError = L10n.format("%@ not found; cannot update the Hermes skill enable/disable list", zhHans: "未找到 %@，无法改写 Hermes 技能启停名单", String(configURL.path))
                     completion?(false)
                 }
                 return

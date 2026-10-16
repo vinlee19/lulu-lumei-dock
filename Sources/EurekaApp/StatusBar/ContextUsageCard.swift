@@ -1,4 +1,5 @@
 import EurekaIngest
+import EurekaKit
 import SwiftUI
 
 /// 会话详情页「上下文用量」卡片：大字号百分比 + 已用/窗口 + 五段堆叠条 + 分类图例。
@@ -19,10 +20,10 @@ struct ContextUsageCard: View {
         VStack(alignment: .leading, spacing: 8) {
             // 标题行：标题 + 估算徽章 + 展开箭头（整行可点）
             HStack(spacing: 6) {
-                Text("上下文用量")
+                Text(L10n.text("Context usage", zhHans: "上下文用量"))
                     .font(Theme.font.themed(11, .semibold))
                 if !breakdown.totalIsReal {
-                    Text("估算")
+                    Text(L10n.text("Estimated", zhHans: "估算"))
                         .font(Theme.font.themed(8.5))
                         .foregroundStyle(Theme.goldFg)
                         .padding(.horizontal, 5)
@@ -38,14 +39,20 @@ struct ContextUsageCard: View {
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
             }
-            .help(expanded ? "收起分类明细" : "展开分类明细")
+            .help(expanded
+                ? L10n.text("Hide the breakdown", zhHans: "收起分类明细")
+                : L10n.text("Show the breakdown", zhHans: "展开分类明细"))
 
             // 摘要：大字号百分比 + 已使用 X/Y
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(String(format: "%.1f%%", percent))
                     .font(Theme.font.statNumber(20))
                     .foregroundStyle(Theme.percentColor(percent))
-                Text("已使用 \(formatTokens(breakdown.totalTokens)) / \(formatTokens(breakdown.windowTokens))")
+                Text(L10n.format(
+                    "Used %@ / %@",
+                    zhHans: "已使用 %@ / %@",
+                    formatTokens(breakdown.totalTokens),
+                    formatTokens(breakdown.windowTokens)))
                     .font(Theme.font.themedMono(10))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)

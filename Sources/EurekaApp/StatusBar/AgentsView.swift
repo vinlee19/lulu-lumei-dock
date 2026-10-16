@@ -59,8 +59,8 @@ struct AgentsView: View {
             usageService.loadAgentStats()
         }
         .alert(createAlertTitle, isPresented: $creatingAgent) {
-            TextField("名称", text: $newAgentName)
-            Button("创建") {
+            TextField(L10n.text("Name", zhHans: "名称"), text: $newAgentName)
+            Button(L10n.text("Create", zhHans: "创建")) {
                 let name = newAgentName.trimmingCharacters(in: .whitespaces)
                 if !name.isEmpty {
                     switch creatingKind {
@@ -72,27 +72,37 @@ struct AgentsView: View {
                 }
                 newAgentName = ""
             }
-            Button("取消", role: .cancel) { newAgentName = "" }
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { newAgentName = "" }
         }
         .confirmationDialog(
-            deletingAgent.map { "删除 agent「\($0.name)」？文件会移入废纸篓，可恢复。" } ?? "",
+            deletingAgent.map {
+                L10n.format(
+                    "Delete agent “%@”? The file moves to the Trash and can be restored.",
+                    zhHans: "删除 agent「%@」？文件会移入废纸篓，可恢复。",
+                    $0.name)
+            } ?? "",
             isPresented: deletingAgentBinding, titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 if let a = deletingAgent { service.deleteAgent(a) }
                 detail = nil
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
         .confirmationDialog(
-            deletingProfile.map { "删除 Codex profile「\($0.name)」？会从 config.toml 移除该段。" } ?? "",
+            deletingProfile.map {
+                L10n.format(
+                    "Delete Codex profile “%@”? This removes that table from config.toml.",
+                    zhHans: "删除 Codex profile「%@」？会从 config.toml 移除该段。",
+                    $0.name)
+            } ?? "",
             isPresented: deletingProfileBinding, titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 if let p = deletingProfile { service.deleteProfile(name: p.name) }
                 profileDetail = nil
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -102,14 +112,14 @@ struct AgentsView: View {
         HStack(spacing: 12) {
             Text("Agents").font(.system(size: 15, weight: .bold))
             SearchField(
-                placeholder: "搜索子代理", text: $service.searchText,
+                placeholder: L10n.text("Search subagents", zhHans: "搜索子代理"), text: $service.searchText,
                 scanning: service.scanning, resultCount: totalCount)
             Spacer(minLength: 12)
             createMenu
             ScanStatusLabel(
                 scanning: service.scanning, phase: service.scanPhase,
                 lastScanAt: service.lastScanAt)
-            RefreshButton(help: "强制重扫 agent / profile") { service.refresh(force: true) }
+            RefreshButton(help: L10n.text("Force rescan agents / profiles", zhHans: "强制重扫 agent / profile")) { service.refresh(force: true) }
             LayoutToggle(layout: $layout)
         }
         .padding(.horizontal, 16)
@@ -136,15 +146,15 @@ struct AgentsView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("新建子代理 / Codex profile")
+        .help(L10n.text("New subagent / Codex profile", zhHans: "新建子代理 / Codex profile"))
     }
 
     private var createAlertTitle: String {
         switch creatingKind {
-        case .claude: return "新建 Claude Agent"
-        case .opencode: return "新建 OpenCode Agent"
-        case .grok: return "新建 Grok Agent"
-        case .cursor: return "新建 Cursor Agent"
+        case .claude: return L10n.text("New Claude Agent", zhHans: "新建 Claude Agent")
+        case .opencode: return L10n.text("New OpenCode Agent", zhHans: "新建 OpenCode Agent")
+        case .grok: return L10n.text("New Grok Agent", zhHans: "新建 Grok Agent")
+        case .cursor: return L10n.text("New Cursor Agent", zhHans: "新建 Cursor Agent")
         }
     }
 
@@ -241,7 +251,7 @@ struct AgentsView: View {
             }
         }
         if other > 0 {
-            segments.append(.init(label: "其他", count: other, color: Theme.brand.opacity(0.3)))
+            segments.append(.init(label: L10n.text("Other", zhHans: "其他"), count: other, color: Theme.brand.opacity(0.3)))
         }
         return segments
     }
@@ -258,7 +268,7 @@ struct AgentsView: View {
                 statsCard
                 SourceFilterBar(
                     selected: $selectedSource,
-                    allLabel: "全部", allIcon: "person.2.fill",
+                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: "person.2.fill",
                     totalCount: totalCount,
                     sources: availableSources,
                     count: { count(for: $0) })
@@ -298,9 +308,12 @@ struct AgentsView: View {
     private var statsCard: some View {
         let enabled = allItems.filter(\.enabled).count
         return StatOverviewCard(
-            value: "\(totalCount)", unit: "子代理",
-            subtitle: "启用 \(enabled) / 停用 \(totalCount - enabled)",
-            distributionTitle: "模型分布",
+            value: "\(totalCount)", unit: L10n.text("subagents", zhHans: "子代理"),
+            subtitle: L10n.format(
+                "%1$@ enabled / %2$@ disabled",
+                zhHans: "启用 %1$@ / 停用 %2$@",
+                String(enabled), String(totalCount - enabled)),
+            distributionTitle: L10n.text("Models", zhHans: "模型分布"),
             segments: modelSegments,
             showBar: false)
     }
@@ -310,15 +323,20 @@ struct AgentsView: View {
         if service.scanning {
             VStack(spacing: 8) {
                 ProgressView()
-                Text("正在扫描…").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L10n.text("Scanning…", zhHans: "正在扫描…")).font(.system(size: 12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         } else {
             EmptyStateView(
                 icon: "person.2.fill",
-                title: service.isSearching || selectedSource != nil ? "没有匹配的子代理" : "还没有子代理",
+                title: service.isSearching || selectedSource != nil
+                    ? L10n.text("No matching subagents", zhHans: "没有匹配的子代理")
+                    : L10n.text("No subagents yet", zhHans: "还没有子代理"),
                 hint: service.isSearching || selectedSource != nil
-                    ? nil : "点右上角「＋」新建各 CLI 的子代理或 Codex profile")
+                    ? nil
+                    : L10n.text(
+                        "Use + at the top right to create a subagent for each CLI, or a Codex profile",
+                        zhHans: "点右上角「＋」新建各 CLI 的子代理或 Codex profile"))
         }
     }
 
@@ -389,7 +407,7 @@ private struct AgentItem: Identifiable {
 
     var toolLabel: String? {
         guard let toolCount else { return nil }
-        return toolCount == 0 ? "全部工具" : "\(toolCount) 工具"
+        return toolCount == 0 ? L10n.text("All tools", zhHans: "全部工具") : L10n.format("%@ tools", zhHans: "%@ 工具", String(toolCount))
     }
 }
 
@@ -397,15 +415,15 @@ private func agentItemActions(
     _ item: AgentItem, service: AgentConfigService, onDelete: @escaping () -> Void
 ) -> [CardAction] {
     if item.profile != nil {
-        return [CardAction(icon: "trash", destructive: true, help: "从 config.toml 移除该段") { onDelete() }]
+        return [CardAction(icon: "trash", destructive: true, help: L10n.text("Remove this table from config.toml", zhHans: "从 config.toml 移除该段")) { onDelete() }]
     }
     var acts: [CardAction] = []
     if !item.path.isEmpty {
-        acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: item.path) })
-        acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: item.path) })
+        acts.append(CardAction(icon: "pencil", help: L10n.text("Open in default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: item.path) })
+        acts.append(CardAction(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: item.path) })
     }
     if item.deletable {
-        acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+        acts.append(CardAction(icon: "trash", destructive: true, help: L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）")) { onDelete() })
     }
     return acts
 }
@@ -416,19 +434,19 @@ private func agentItemMenu(
     onOpen: @escaping () -> Void, onToggle: @escaping () -> Void, onDelete: @escaping () -> Void
 ) -> some View {
     if item.profile != nil {
-        Button("编辑") { onOpen() }
+        Button(L10n.text("Edit", zhHans: "编辑")) { onOpen() }
         Divider()
-        Button("删除", role: .destructive) { onDelete() }
+        Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) { onDelete() }
     } else {
-        Button(item.deletable ? "查看 / 编辑" : "查看") { onOpen() }
-        if item.canToggle { Button(item.enabled ? "停用" : "启用") { onToggle() } }
+        Button(item.deletable ? L10n.text("View / Edit", zhHans: "查看 / 编辑") : L10n.text("View", zhHans: "查看")) { onOpen() }
+        if item.canToggle { Button(item.enabled ? L10n.text("Disable", zhHans: "停用") : L10n.text("Enable", zhHans: "启用")) { onToggle() } }
         if !item.path.isEmpty {
-            Button("用默认编辑器打开") { service.openInEditor(path: item.path) }
-            Button("在 Finder 中显示") { service.reveal(path: item.path) }
+            Button(L10n.text("Open in default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: item.path) }
+            Button(L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: item.path) }
         }
         if item.deletable {
             Divider()
-            Button("删除", role: .destructive) { onDelete() }
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) { onDelete() }
         }
     }
 }
@@ -457,7 +475,7 @@ private struct AgentCard: View {
                         HStack(spacing: 5) {
                             RoleTag(role: item.role)
                             SourceBadge(source: item.source, size: 12)
-                            if item.builtin { TagChip("内置", neutral: true) }
+                            if item.builtin { TagChip(L10n.text("Built-in", zhHans: "内置"), neutral: true) }
                         }
                     }
                     Spacer(minLength: 4)
@@ -476,7 +494,7 @@ private struct AgentCard: View {
                     }
                     Spacer(minLength: 0)
                     if let calls = item.calls {
-                        Text("调用 \(calls) 次")
+                        Text(L10n.format("Called %@ times", zhHans: "调用 %@ 次", String(calls)))
                             .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
                     }
                 }
@@ -509,7 +527,7 @@ private struct AgentRow: View {
                             .foregroundStyle(item.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.middle)
                         RoleTag(role: item.role)
-                        if item.builtin { TagChip("内置", neutral: true) }
+                        if item.builtin { TagChip(L10n.text("Built-in", zhHans: "内置"), neutral: true) }
                     }
                     if let desc = item.description, !desc.isEmpty {
                         Text(desc).font(.system(size: 10.5)).foregroundStyle(.tertiary).lineLimit(1)
@@ -528,7 +546,7 @@ private struct AgentRow: View {
         HStack(spacing: 12) {
             Text(item.model).font(.system(size: 11)).foregroundStyle(.secondary)
             if let calls = item.calls {
-                Text("调用 \(calls) 次")
+                Text(L10n.format("Called %@ times", zhHans: "调用 %@ 次", String(calls)))
                     .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
             }
             MiniSwitch(isOn: item.enabled) { onToggle() }
@@ -597,8 +615,8 @@ private struct AgentDetailView: View {
                 }
                 HStack(spacing: 6) {
                     if let model = agent.model { infoBadge("model: \(model)") }
-                    infoBadge(agent.tools.isEmpty ? "全部工具" : "\(agent.tools.count) 个工具")
-                    infoBadge("内置（随版本可能变化）")
+                    infoBadge(agent.tools.isEmpty ? L10n.text("All tools", zhHans: "全部工具") : L10n.format("%@ tools", zhHans: "%@ 个工具", String(agent.tools.count)))
+                    infoBadge(L10n.text("Built-in (may change across versions)", zhHans: "内置（随版本可能变化）"))
                 }
             }
             .padding(Theme.spacing.page)
@@ -620,7 +638,7 @@ private struct AgentDetailView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(.system(size: 11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
                 }
             }
             .buttonStyle(.borderless)
@@ -634,8 +652,8 @@ private struct AgentDetailView: View {
             Spacer(minLength: 8)
             if editable {
                 CapsuleTabTray {
-                    CapsuleTabButton(title: "预览", fillWidth: false, isSelected: !editing) { editing = false }
-                    CapsuleTabButton(title: "编辑", fillWidth: false, isSelected: editing) { editing = true }
+                    CapsuleTabButton(title: L10n.text("Preview", zhHans: "预览"), fillWidth: false, isSelected: !editing) { editing = false }
+                    CapsuleTabButton(title: L10n.text("Edit", zhHans: "编辑"), fillWidth: false, isSelected: editing) { editing = true }
                 }
             }
             if hasFile {
@@ -643,19 +661,19 @@ private struct AgentDetailView: View {
                     Image(systemName: "square.and.pencil").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("用默认编辑器打开")
+                .help(L10n.text("Open in default editor", zhHans: "用默认编辑器打开"))
                 Button { service.reveal(path: agent.path) } label: {
                     Image(systemName: "folder").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("在 Finder 中显示")
+                .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
             }
             if editable {
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("移入废纸篓（可恢复）")
+                .help(L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
             }
         }
         .padding(.horizontal, 12)
@@ -664,7 +682,7 @@ private struct AgentDetailView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text(editable ? agent.path : "由 Claude Code 管理（只读） · \(agent.path)")
+            Text(editable ? agent.path : L10n.format("Managed by Claude Code (read-only) · %@", zhHans: "由 Claude Code 管理（只读） · %@", agent.path))
                 .font(.system(size: 9).monospaced())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -676,9 +694,9 @@ private struct AgentDetailView: View {
                     .foregroundStyle(.secondary)
             }
             if editing {
-                Button("保存") {
+                Button(L10n.text("Save", zhHans: "保存")) {
                     service.save(path: agent.path, content: text) { ok in
-                        saveNote = ok ? "已保存（写前留有备份）" : "保存失败"
+                        saveNote = ok ? L10n.text("Saved (a backup was kept before writing)", zhHans: "已保存（写前留有备份）") : L10n.text("Couldn't save", zhHans: "保存失败")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
                     }
                 }
@@ -717,28 +735,28 @@ private struct CodexProfileDetailView: View {
             Divider()
 
             Form {
-                TextField("名称", text: $name)
+                TextField(L10n.text("Name", zhHans: "名称"), text: $name)
                     .disabled(!target.isNew)  // 名称即段名，改名等于新建，避免歧义
-                TextField("model（如 gpt-5.5）", text: $model)
+                TextField(L10n.text("model (e.g. gpt-5.5)", zhHans: "model（如 gpt-5.5）"), text: $model)
                 Picker("reasoning effort", selection: $reasoning) {
-                    ForEach(reasoningOptions, id: \.self) { Text($0.isEmpty ? "（不设置）" : $0) }
+                    ForEach(reasoningOptions, id: \.self) { Text($0.isEmpty ? L10n.text("(Not set)", zhHans: "（不设置）") : $0) }
                 }
-                TextField("personality（如 pragmatic）", text: $personality)
+                TextField(L10n.text("personality (e.g. pragmatic)", zhHans: "personality（如 pragmatic）"), text: $personality)
                 Picker("approval policy", selection: $approval) {
-                    ForEach(approvalOptions, id: \.self) { Text($0.isEmpty ? "（不设置）" : $0) }
+                    ForEach(approvalOptions, id: \.self) { Text($0.isEmpty ? L10n.text("(Not set)", zhHans: "（不设置）") : $0) }
                 }
             }
             .formStyle(.grouped)
 
             Divider()
             HStack {
-                Text("写入 ~/.codex/config.toml 的 [profiles.\(name.isEmpty ? "…" : name)] 段")
+                Text(L10n.format("Writes the [profiles.%@] table in ~/.codex/config.toml", zhHans: "写入 ~/.codex/config.toml 的 [profiles.%@] 段", name.isEmpty ? "…" : name))
                     .font(.system(size: 9).monospaced())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
-                Button("保存") {
+                Button(L10n.text("Save", zhHans: "保存")) {
                     service.saveProfile(CodexProfile(
                         name: name.trimmingCharacters(in: .whitespaces),
                         model: nilIfEmpty(model),
@@ -771,12 +789,12 @@ private struct CodexProfileDetailView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(.system(size: 11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
                 }
             }
             .buttonStyle(.borderless)
             SourceBadge(source: .codex, size: 12)
-            Text(target.isNew ? "新建 Codex Profile" : target.profile.name)
+            Text(target.isNew ? L10n.text("New Codex Profile", zhHans: "新建 Codex Profile") : target.profile.name)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
@@ -785,7 +803,7 @@ private struct CodexProfileDetailView: View {
                     Image(systemName: "trash").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("从 config.toml 移除该段")
+                .help(L10n.text("Remove this table from config.toml", zhHans: "从 config.toml 移除该段"))
             }
         }
         .padding(.horizontal, 12)

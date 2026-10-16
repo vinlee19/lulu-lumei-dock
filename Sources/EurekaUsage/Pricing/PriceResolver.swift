@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 一次价格解析的结果：价格 + 出处（供悬停提示与“未定价/估算”清单）
@@ -26,19 +27,19 @@ public struct PriceResolution: Equatable, Sendable {
 
     /// 一行人话的出处说明（看板悬停用）
     public var summary: String {
-        guard price != nil, let source else { return "未定价" }
+        guard price != nil, let source else { return L10n.text("Unpriced", zhHans: "未定价") }
         var parts: [String] = []
         switch source {
-        case .override: parts.append("自定义价格")
+        case .override: parts.append(L10n.text("Custom price", zhHans: "自定义价格"))
         case .litellm: parts.append("LiteLLM")
         case .modelsDev(let provider): parts.append("models.dev/\(provider)")
-        case .bundled: parts.append(estimated ? "内置价格（估算）" : "内置价格")
-        case .reported: parts.append("agent 自报费用")
+        case .bundled: parts.append(estimated ? L10n.text("Bundled price (estimated)", zhHans: "内置价格（估算）") : L10n.text("Bundled price", zhHans: "内置价格"))
+        case .reported: parts.append(L10n.text("Agent-reported cost", zhHans: "agent 自报费用"))
         }
         if let matchedKey { parts.append(matchedKey) }
         var text = parts.joined(separator: " · ")
-        if subscription { text += "（订阅 · API 等价价）" }
-        if vendorInferred { text += "（按模型名推断厂商）" }
+        if subscription { text += L10n.text(" (subscription · API-equivalent price)", zhHans: "（订阅 · API 等价价）") }
+        if vendorInferred { text += L10n.text(" (vendor inferred from model name)", zhHans: "（按模型名推断厂商）") }
         return text
     }
 }

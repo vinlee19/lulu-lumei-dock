@@ -10,10 +10,10 @@ public enum HistoryDayGroup: String, CaseIterable, Sendable {
 
     public var label: String {
         switch self {
-        case .today: return "今天"
-        case .yesterday: return "昨天"
-        case .earlierThisWeek: return "本周更早"
-        case .earlier: return "更早"
+        case .today: return L10n.text("Today", zhHans: "今天")
+        case .yesterday: return L10n.text("Yesterday", zhHans: "昨天")
+        case .earlierThisWeek: return L10n.text("Earlier this week", zhHans: "本周更早")
+        case .earlier: return L10n.text("Earlier", zhHans: "更早")
         }
     }
 }

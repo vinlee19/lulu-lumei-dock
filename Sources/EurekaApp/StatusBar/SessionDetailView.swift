@@ -35,6 +35,14 @@ struct SessionDetailView: View {
         case all = "全部"
         case user = "用户"
         case assistant = "助手"
+
+        var title: String {
+            switch self {
+            case .all: return L10n.text("All", zhHans: "全部")
+            case .user: return L10n.text("User", zhHans: "用户")
+            case .assistant: return L10n.text("Assistant", zhHans: "助手")
+            }
+        }
     }
 
     var body: some View {
@@ -63,20 +71,23 @@ struct SessionDetailView: View {
                     }
                 }
                 .confirmationDialog(
-                    "删除会话「\(session.name ?? String(session.id.prefix(8)))」？transcript 文件会移入废纸篓，可恢复。",
+                    L10n.format(
+                        "Delete session “%@”? The transcript file moves to the Trash and can be restored.",
+                        zhHans: "删除会话「%@」？transcript 文件会移入废纸篓，可恢复。",
+                        session.name ?? String(session.id.prefix(8))),
                     isPresented: $confirmingDelete, titleVisibility: .visible
                 ) {
-                    Button("删除", role: .destructive) {
+                    Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                         service.deleteSessions([session])
                     }
-                    Button("取消", role: .cancel) {}
+                    Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
                 }
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
                         .font(.system(size: 32))
                         .foregroundStyle(Theme.brandFg.opacity(0.4))
-                    Text("选择左侧会话查看对话记录")
+                    Text(L10n.text("Select a session on the left to read the conversation", zhHans: "选择左侧会话查看对话记录"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -157,17 +168,17 @@ struct SessionDetailView: View {
                 Button {
                     service.resumeInTerminal(session)
                 } label: {
-                    Label("恢复会话", systemImage: "play.fill")
+                    Label(L10n.text("Resume Session", zhHans: "恢复会话"), systemImage: "play.fill")
                         .font(.system(size: 11))
                 }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.brand)
-                .help("在 Terminal 中执行恢复命令")
+                .help(L10n.text("Run the resume command in Terminal", zhHans: "在 Terminal 中执行恢复命令"))
                 Button {
                     confirmingDelete = true
                 } label: {
-                    Label("删除会话", systemImage: "trash")
+                    Label(L10n.text("Delete Session", zhHans: "删除会话"), systemImage: "trash")
                         .font(.system(size: 11))
                 }
                 .controlSize(.small)
@@ -175,29 +186,32 @@ struct SessionDetailView: View {
                 .tint(.red)
                 .disabled(!session.source.supportsSessionDeletion)
                 .help(session.source.supportsSessionDeletion
-                    ? "移入废纸篓，可恢复"
-                    : "\(session.source.displayName) 会话存于共享数据库，暂不支持删除")
+                    ? L10n.text("Moves to the Trash and can be restored", zhHans: "移入废纸篓，可恢复")
+                    : L10n.format(
+                        "%@ sessions live in a shared database and can't be deleted yet",
+                        zhHans: "%@ 会话存于共享数据库，暂不支持删除",
+                        session.source.displayName))
                 Menu {
-                    Button("复制为 Markdown") { copyMarkdown(session) }
-                    Button("导出为 .md 文件…") { exportMarkdown(session) }
+                    Button(L10n.text("Copy as Markdown", zhHans: "复制为 Markdown")) { copyMarkdown(session) }
+                    Button(L10n.text("Export as .md File…", zhHans: "导出为 .md 文件…")) { exportMarkdown(session) }
                 } label: {
-                    Label("导出", systemImage: "square.and.arrow.up")
+                    Label(L10n.text("Export", zhHans: "导出"), systemImage: "square.and.arrow.up")
                         .font(.system(size: 11))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("导出对话记录")
+                .help(L10n.text("Export the conversation", zhHans: "导出对话记录"))
                 if let onOpenLineage {
                     Button {
                         onOpenLineage(.list)
                     } label: {
-                        Label("轮次血缘", systemImage:
+                        Label(L10n.text("Turn lineage", zhHans: "轮次血缘"), systemImage:
                             "point.3.filled.connected.trianglepath.dotted")
                             .font(.system(size: 11))
                     }
                     .controlSize(.small)
                     .buttonStyle(.bordered)
-                    .help("按轮次看它做了什么、哪一轮的提示词该改")
+                    .help(L10n.text("See what it did each turn, and which prompt to change", zhHans: "按轮次看它做了什么、哪一轮的提示词该改"))
                 }
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { showTOC.toggle() }
@@ -207,7 +221,9 @@ struct SessionDetailView: View {
                 }
                 .controlSize(.small)
                 .buttonStyle(.bordered)
-                .help(showTOC ? "隐藏对话目录" : "显示对话目录")
+                .help(showTOC
+                    ? L10n.text("Hide the conversation outline", zhHans: "隐藏对话目录")
+                    : L10n.text("Show the conversation outline", zhHans: "显示对话目录"))
             }
             if let note = exportNote {
                 Text(note)
@@ -250,7 +266,7 @@ struct SessionDetailView: View {
                         .font(.system(size: 10))
                 }
                 .buttonStyle(.borderless)
-                .help("复制恢复命令")
+                .help(L10n.text("Copy resume command", zhHans: "复制恢复命令"))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
@@ -268,7 +284,7 @@ struct SessionDetailView: View {
         if !history.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 if history.count > 1 {
-                    Text("曾在 \(history.count) 个终端运行")
+                    Text(L10n.format("Ran in %@ terminals", zhHans: "曾在 %@ 个终端运行", String(history.count)))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
@@ -315,19 +331,19 @@ struct SessionDetailView: View {
             let visible = artifactsExpanded ? items : Array(items.prefix(Self.artifactsPageSize))
             let hiddenCount = items.count - visible.count
             VStack(alignment: .leading, spacing: 3) {
-                Text("本会话产出")
+                Text(L10n.text("Produced by this session", zhHans: "本会话产出"))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
                 ForEach(visible) { item in
                     artifactLine(item)
                 }
                 if hiddenCount > 0 {
-                    Text("还有 \(hiddenCount) 条")
+                    Text(L10n.format("%@ more", zhHans: "还有 %@ 条", String(hiddenCount)))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                         .contentShape(Rectangle())
                         .onTapGesture { artifactsExpanded = true }
-                        .help("展开全部本会话产出")
+                        .help(L10n.text("Show everything this session produced", zhHans: "展开全部本会话产出"))
                 }
             }
         }
@@ -340,14 +356,14 @@ struct SessionDetailView: View {
             let isInstruction = memory.kind == .instructions
             artifactLine(
                 icon: "brain", title: memory.title,
-                note: isInstruction ? "指令" : "记忆"
+                note: isInstruction ? L10n.text("Instruction", zhHans: "指令") : L10n.text("Memory", zhHans: "记忆")
             ) {
                 NotificationCenter.default.post(
                     name: .eurekaRevealKnowledge, object: memory.path,
                     userInfo: ["kind": isInstruction ? "instruction" : "memory"])
             }
         case .plan(let plan):
-            artifactLine(icon: "list.bullet.clipboard", title: plan.title, note: "计划") {
+            artifactLine(icon: "list.bullet.clipboard", title: plan.title, note: L10n.text("Plan", zhHans: "计划")) {
                 NotificationCenter.default.post(name: .eurekaRevealPlan, object: plan.path)
             }
         }
@@ -373,7 +389,7 @@ struct SessionDetailView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
-        .help("在对应页面打开")
+        .help(L10n.text("Open on the matching page", zhHans: "在对应页面打开"))
     }
 
     /// 跳转按钮：只把终端**应用**带到前台（不选标签页，因此不需要自动化/辅助功能权限）
@@ -388,8 +404,11 @@ struct SessionDetailView: View {
         .buttonStyle(.borderless)
         .disabled(!running)
         .help(running
-            ? "切到 \(binding.terminalName)（只激活应用，多标签时需自行找到该标签）"
-            : "\(binding.terminalName) 当前未在运行")
+            ? L10n.format(
+                "Switch to %@ (only the app is activated; with several tabs, find the right one yourself)",
+                zhHans: "切到 %@（只激活应用，多标签时需自行找到该标签）",
+                binding.terminalName)
+            : L10n.format("%@ is not running", zhHans: "%@ 当前未在运行", binding.terminalName))
     }
 
     private func metaItem(_ icon: String, _ text: String) -> some View {
@@ -410,16 +429,16 @@ struct SessionDetailView: View {
     private func overviewCard(_ session: AgentSessionInfo) -> some View {
         let cost = service.costs[session.id]
         HStack(spacing: 16) {
-            overviewStat("消息", "\(service.transcript.count)")
-            overviewStat("提问", "\(userMessages.count)")
+            overviewStat(L10n.text("Messages", zhHans: "消息"), "\(service.transcript.count)")
+            overviewStat(L10n.text("Prompts", zhHans: "提问"), "\(userMessages.count)")
             if let cost {
                 overviewStat("Tokens", formatTokens(cost.totalTokens))
                 if let usd = cost.costUSD {
-                    overviewStat("费用", formatCost(usd), color: Theme.cost)
+                    overviewStat(L10n.text("Cost", zhHans: "费用"), formatCost(usd), color: Theme.cost)
                 }
             }
             if let span = session.duration, span >= 60 {
-                overviewStat("时长", formatDuration(span))
+                overviewStat(L10n.text("Duration", zhHans: "时长"), formatDuration(span))
             }
             Spacer(minLength: 0)
         }
@@ -444,7 +463,7 @@ struct SessionDetailView: View {
     private var searchBar: some View {
         HStack(spacing: 8) {
             Picker("", selection: $roleFilter) {
-                ForEach(RoleFilter.allCases, id: \.self) { Text($0.rawValue) }
+                ForEach(RoleFilter.allCases, id: \.self) { Text($0.title) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -457,7 +476,7 @@ struct SessionDetailView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
-            TextField("在对话中搜索", text: $searchQuery)
+            TextField(L10n.text("Search the conversation", zhHans: "在对话中搜索"), text: $searchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
                 .onChange(of: searchQuery) { _, _ in
@@ -478,7 +497,7 @@ struct SessionDetailView: View {
                 } label: { Image(systemName: "chevron.down").font(.system(size: 9)) }
                 .buttonStyle(.borderless)
             } else if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text("无匹配")
+                Text(L10n.text("No matches", zhHans: "无匹配"))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             }
@@ -498,7 +517,7 @@ struct SessionDetailView: View {
         let md = TranscriptMarkdown.render(session: session, messages: service.transcript)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(md, forType: .string)
-        exportNote = "已复制 Markdown 到剪贴板"
+        exportNote = L10n.text("Copied Markdown to the clipboard", zhHans: "已复制 Markdown 到剪贴板")
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exportNote = nil }
     }
 
@@ -511,7 +530,7 @@ struct SessionDetailView: View {
         panel.allowedContentTypes = [.plainText]
         if panel.runModal() == .OK, let url = panel.url {
             try? Data(md.utf8).write(to: url)
-            exportNote = "已导出 \(url.lastPathComponent)"
+            exportNote = L10n.format("Exported %@", zhHans: "已导出 %@", url.lastPathComponent)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exportNote = nil }
         }
     }
@@ -524,7 +543,7 @@ struct SessionDetailView: View {
                 Image(systemName: "text.bubble")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                Text("对话记录")
+                Text(L10n.text("Conversation", zhHans: "对话记录"))
                     .font(.system(size: 11, weight: .semibold))
                 Text("\(service.transcript.count)")
                     .font(.system(size: 10).monospacedDigit())
@@ -533,16 +552,16 @@ struct SessionDetailView: View {
                     .background(Capsule().fill(Theme.brand.opacity(0.12)))
                     .foregroundStyle(Theme.brandFg)
                 if service.transcriptTruncated {
-                    Text("仅显示前 \(service.transcript.count) 条")
+                    Text(L10n.format("Showing the first %@ only", zhHans: "仅显示前 %@ 条", String(service.transcript.count)))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.orange)
-                    Button("加载全部") {
+                    Button(L10n.text("Load All", zhHans: "加载全部")) {
                         service.loadFullTranscript()
                     }
                     .buttonStyle(.borderless)
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(Theme.brandFg)
-                    .help("超长会话默认按预算截断，点击完整加载（大文件会稍慢）")
+                    .help(L10n.text("Very long sessions are truncated by default. Click to load the rest (large files are slower).", zhHans: "超长会话默认按预算截断，点击完整加载（大文件会稍慢）"))
                 }
                 Spacer()
             }
@@ -551,10 +570,10 @@ struct SessionDetailView: View {
             Divider()
 
             if service.transcriptLoading {
-                ProgressView("正在解析对话记录…")
+                ProgressView(L10n.text("Reading the conversation…", zhHans: "正在解析对话记录…"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if service.transcript.isEmpty {
-                Text("没有可显示的消息")
+                Text(L10n.text("No messages to show", zhHans: "没有可显示的消息"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -596,10 +615,10 @@ struct SessionDetailView: View {
                 Image(systemName: "list.number")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                Text("对话目录")
+                Text(L10n.text("Outline", zhHans: "对话目录"))
                     .font(.system(size: 11, weight: .semibold))
                 Spacer(minLength: 4)
-                Text("\(userMessages.count) 条")
+                Text(L10n.format("%@ messages", zhHans: "%@ 条", String(userMessages.count)))
                     .font(.system(size: 9.5).monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .fixedSize()
@@ -709,7 +728,7 @@ private struct MessageRowView: View {
             ThinkingRowView(message: message, isMatch: isMatch, expanded: $expandedTrails)
         case .user:
             VStack(alignment: .leading, spacing: 4) {
-                roleHeader(label: "用户", icon: "person.fill", color: Theme.brandFg)
+                roleHeader(label: L10n.text("User", zhHans: "用户"), icon: "person.fill", color: Theme.brandFg)
                 MarkdownRichText(text: message.text)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
@@ -725,7 +744,7 @@ private struct MessageRowView: View {
             .onHover { hovering = $0 }
         case .assistant:
             VStack(alignment: .leading, spacing: 4) {
-                roleHeader(label: "助手", icon: "sparkles", color: .secondary)
+                roleHeader(label: L10n.text("Assistant", zhHans: "助手"), icon: "sparkles", color: .secondary)
                 MarkdownRichText(text: message.text)
                     .padding(.horizontal, 2)
                     .background(
@@ -736,7 +755,7 @@ private struct MessageRowView: View {
             .onHover { hovering = $0 }
         case .error:
             VStack(alignment: .leading, spacing: 4) {
-                roleHeader(label: "错误", icon: "exclamationmark.triangle.fill", color: .red)
+                roleHeader(label: L10n.text("Error", zhHans: "错误"), icon: "exclamationmark.triangle.fill", color: .red)
                 HStack(alignment: .top, spacing: 8) {
                     RoundedRectangle(cornerRadius: 1.5)
                         .fill(Color.red.opacity(0.8))
@@ -788,7 +807,7 @@ private struct MessageRowView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .help("复制消息原文")
+                .help(L10n.text("Copy the message text", zhHans: "复制消息原文"))
                 .transition(.opacity)
             }
         }

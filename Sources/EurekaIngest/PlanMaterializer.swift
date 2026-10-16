@@ -19,10 +19,10 @@ public enum PlanMaterializer {
 
         public var displayName: String {
             switch self {
-            case .finalPlan: return "最终方案"
-            case .workingChecklist: return "工作清单"
-            case .document: return "计划文档"
-            case .projectDocument: return "项目文档"
+            case .finalPlan: return L10n.text("Final plan", zhHans: "最终方案")
+            case .workingChecklist: return L10n.text("Working checklist", zhHans: "工作清单")
+            case .document: return L10n.text("Plan document", zhHans: "计划文档")
+            case .projectDocument: return L10n.text("Project document", zhHans: "项目文档")
             }
         }
     }
@@ -36,10 +36,10 @@ public enum PlanMaterializer {
 
         public var displayName: String {
             switch self {
-            case .complete: return "已完成"
-            case .inProgress: return "进行中"
-            case .draft: return "草稿"
-            case .document: return "文档"
+            case .complete: return L10n.text("Completed", zhHans: "已完成")
+            case .inProgress: return L10n.text("In progress", zhHans: "进行中")
+            case .draft: return L10n.text("Draft", zhHans: "草稿")
+            case .document: return L10n.text("Document", zhHans: "文档")
             }
         }
     }

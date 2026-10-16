@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// stdio MCP server 的**深度检测**（v2.8）：短暂启动配置的命令，走规范的
@@ -67,17 +68,17 @@ public enum MCPStdioProbe {
 
         // ① initialize 真握手（报最新定稿版本，协商回落照记）
         guard send(MCPProbe.initializeRequestBody()) else {
-            return .failure(.launchFailed("进程未能接收输入"))
+            return .failure(.launchFailed(L10n.text("The process could not receive input", zhHans: "进程未能接收输入")))
         }
         guard let initLine = channel.nextResponse(id: 1, deadline: deadline, process: process)
         else {
             return .failure(.handshakeFailed(
-                process.isRunning ? "等待 initialize 响应超时" : "进程提前退出"))
+                process.isRunning ? L10n.text("Timed out waiting for the initialize response", zhHans: "等待 initialize 响应超时") : L10n.text("The process exited early", zhHans: "进程提前退出")))
         }
         guard let info = MCPProbe.parseInitializeResponse(
             initLine, contentType: "application/json")
         else {
-            return .failure(.handshakeFailed("initialize 响应不是合法 MCP 握手"))
+            return .failure(.handshakeFailed(L10n.text("The initialize response is not a valid MCP handshake", zhHans: "initialize 响应不是合法 MCP 握手")))
         }
         _ = send(MCPProbe.initializedNotificationBody())
 

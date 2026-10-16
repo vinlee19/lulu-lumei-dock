@@ -307,19 +307,19 @@ struct MemoryGraphNodeView: View {
         var lines: [String] = []
         switch node.kind {
         case .index:
-            lines.append("记忆库索引 MEMORY.md（点击查看）")
+            lines.append(L10n.text("Memory library index MEMORY.md (click to view)", zhHans: "记忆库索引 MEMORY.md（点击查看）"))
         case .category(let type):
-            lines.append("\(type.label) · \(node.memberCount) 条")
+            lines.append(L10n.format("%1$@ · %2$@ entries", zhHans: "%1$@ · %2$@ 条", type.label, String(node.memberCount)))
         case .entry:
             lines.append(node.title)
             if !node.subtitle.isEmpty { lines.append(node.subtitle) }
             if node.isUnindexed {
-                lines.append("⚠️ MEMORY.md 没收录这条 —— agent 读索引时看不到它")
+                lines.append(L10n.text("⚠️ MEMORY.md does not list this one — the agent will not see it when it reads the index", zhHans: "⚠️ MEMORY.md 没收录这条 —— agent 读索引时看不到它"))
             }
-            if node.degree > 0 { lines.append("关联 \(node.degree) 处（引用 / 来源会话）") }
-            lines.append("点击查看这条记忆")
+            if node.degree > 0 { lines.append(L10n.format("%@ links (references / source sessions)", zhHans: "关联 %@ 处（引用 / 来源会话）", String(node.degree))) }
+            lines.append(L10n.text("Click to view this memory", zhHans: "点击查看这条记忆"))
         case .session(let exists):
-            lines.append(exists ? "来源会话（点击跳到会话页）" : "来源会话的记录文件已不在，无法跳转")
+            lines.append(exists ? L10n.text("Source session (click to open the Sessions page)", zhHans: "来源会话（点击跳到会话页）") : L10n.text("The source session transcript is gone, so this cannot be opened", zhHans: "来源会话的记录文件已不在，无法跳转"))
             if let sessionId = node.sessionId { lines.append(sessionId) }
         }
         return lines.joined(separator: "\n")

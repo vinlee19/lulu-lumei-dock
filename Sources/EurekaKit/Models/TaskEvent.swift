@@ -9,9 +9,9 @@ public enum TaskOutcome: String, Codable, Sendable, CaseIterable {
     /// 界面文案（历史行结局标签 / 图表图例 / 导出 CSV 共用）
     public var label: String {
         switch self {
-        case .success: return "成功"
-        case .error: return "失败"
-        case .interrupted: return "中断"
+        case .success: return L10n.text("Success", zhHans: "成功")
+        case .error: return L10n.text("Failed", zhHans: "失败")
+        case .interrupted: return L10n.text("Interrupted", zhHans: "中断")
         }
     }
 }
@@ -23,8 +23,8 @@ public enum WaitReason: String, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .permission: return "等待权限确认"
-        case .idle: return "等待输入"
+        case .permission: return L10n.text("Waiting for permission", zhHans: "等待权限确认")
+        case .idle: return L10n.text("Waiting for input", zhHans: "等待输入")
         }
     }
 }

@@ -42,27 +42,28 @@ struct TurnLineageBoardView: View {
     private var diagnosticsStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("第 \(diagnostics.turnIndex + 1) 轮")
+                Text(L10n.format("Turn %@", zhHans: "第 %@ 轮", String(diagnostics.turnIndex + 1)))
                     .font(.system(size: 12, weight: .semibold))
-                statChip("\(diagnostics.stepCount) 步")
-                statChip("\(result.nodes.count) 节点")
+                statChip(L10n.format("%@ steps", zhHans: "%@ 步", String(diagnostics.stepCount)))
+                statChip(L10n.format("%@ nodes", zhHans: "%@ 节点", String(result.nodes.count)))
                 if diagnostics.rereadCount > 0 {
-                    statChip("回读 \(diagnostics.rereadCount)", tint: Theme.brandFg)
+                    statChip(L10n.format("Reread %@", zhHans: "回读 %@", String(diagnostics.rereadCount)), tint: Theme.brandFg)
                 }
                 if diagnostics.retryMax > 0 {
-                    statChip("重试 \(diagnostics.retryMax)", tint: Theme.failureRed)
+                    statChip(L10n.format("Retry %@", zhHans: "重试 %@", String(diagnostics.retryMax)), tint: Theme.failureRed)
                 }
                 if diagnostics.reworkCount > 0 {
-                    statChip("返工 \(diagnostics.reworkCount)", tint: Theme.goldFg)
+                    statChip(L10n.format("Rework %@", zhHans: "返工 %@", String(diagnostics.reworkCount)), tint: Theme.goldFg)
                 }
                 Spacer(minLength: 0)
                 if !hasThinking {
                     // 说清「为什么没有思考」，否则用户会以为是我们没抓到
-                    Text("思考明文被该 CLI 剥离")
+                    Text(L10n.text("Thinking text was stripped by this CLI", zhHans: "思考明文被该 CLI 剥离"))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
-                        .help("Claude 落盘时会把 thinking 正文剥掉、只留加密签名；"
-                            + "Codex / Kimi / Qwen 有明文，会直接显示为思考节点。")
+                        .help(L10n.text(
+                            "Claude strips the thinking text when it writes the transcript and keeps only an encrypted signature. Codex / Kimi / Qwen keep the text, and it shows up here as a thinking node.",
+                            zhHans: "Claude 落盘时会把 thinking 正文剥掉、只留加密签名；Codex / Kimi / Qwen 有明文，会直接显示为思考节点。"))
                 }
             }
             ForEach(diagnostics.signals) { signal in
@@ -109,11 +110,11 @@ struct TurnLineageBoardView: View {
 
     private var legend: some View {
         FlowLayout(spacing: 12, lineSpacing: 5) {
-            legendItem("推进", color: Theme.brandFg.opacity(0.45), dashed: false)
-            legendItem("回读同一处", color: Theme.brandFg.opacity(0.7), dashed: true)
-            legendItem("失败重试", color: Theme.failureRed.opacity(0.85), dashed: true)
-            legendItem("改完回看", color: Theme.goldFg, dashed: true)
-            legendItem("派生子代理", color: Theme.brandFg.opacity(0.6), dashed: false)
+            legendItem(L10n.text("Progress", zhHans: "推进"), color: Theme.brandFg.opacity(0.45), dashed: false)
+            legendItem(L10n.text("Reread the same place", zhHans: "回读同一处"), color: Theme.brandFg.opacity(0.7), dashed: true)
+            legendItem(L10n.text("Failed retry", zhHans: "失败重试"), color: Theme.failureRed.opacity(0.85), dashed: true)
+            legendItem(L10n.text("Read again after an edit", zhHans: "改完回看"), color: Theme.goldFg, dashed: true)
+            legendItem(L10n.text("Spawn a subagent", zhHans: "派生子代理"), color: Theme.brandFg.opacity(0.6), dashed: false)
         }
     }
 
@@ -149,12 +150,12 @@ struct TurnLineageBoardView: View {
                 HStack(spacing: 6) {
                     Text(node.title).font(Theme.font.monoSkillName(11.5, weight: .semibold))
                     if node.occurrences > 1 {
-                        TagChip("出现 \(node.occurrences) 次", tint: Theme.goldFg)
+                        TagChip(L10n.format("Seen %@ times", zhHans: "出现 %@ 次", String(node.occurrences)), tint: Theme.goldFg)
                     }
-                    if node.isError { TagChip("有失败", tint: Theme.failureRed) }
+                    if node.isError { TagChip(L10n.text("Has failures", zhHans: "有失败"), tint: Theme.failureRed) }
                     Spacer(minLength: 0)
                     if let messageId = node.messageId, let onJumpToMessage {
-                        Button("跳到消息") { onJumpToMessage(messageId) }
+                        Button(L10n.text("Jump to message", zhHans: "跳到消息")) { onJumpToMessage(messageId) }
                             .font(.system(size: 10))
                             .buttonStyle(.borderless)
                     }
@@ -168,7 +169,10 @@ struct TurnLineageBoardView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if node.stepIndices.count > 1 {
-                    Text("对应第 \(node.stepIndices.map { String($0 + 1) }.joined(separator: "、")) 步")
+                    Text(L10n.format(
+                        "Steps %@",
+                        zhHans: "对应第 %@ 步",
+                        node.stepIndices.map { String($0 + 1) }.joined(separator: L10n.text(", ", zhHans: "、"))))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                 }
@@ -187,11 +191,15 @@ struct TurnLineageBoardView: View {
         let text: String
         switch degraded {
         case .tooManyNodes(let count, let limit):
-            text = "这一轮有 \(count) 个不同操作（上限 \(limit)），画成图反而看不清。"
-                + "上面的诊断数字仍然有效；逐步明细见会话页的「本轮轨迹」。"
+            text = L10n.format(
+                "This turn has %@ different actions (limit %@), too many to draw clearly. The diagnostics above still apply; step-by-step detail is in This turn's trail on the session page.",
+                zhHans: "这一轮有 %@ 个不同操作（上限 %@），画成图反而看不清。上面的诊断数字仍然有效；逐步明细见会话页的「本轮轨迹」。",
+                String(count), String(limit))
         case .tooWide(let width, let columns):
-            text = "某一层有 \(width) 个并行操作，超过当前窗口能放下的 \(columns) 列。"
-                + "把窗口拉宽，或用「紧凑」密度。"
+            text = L10n.format(
+                "One layer has %@ parallel actions, more than the %@ columns this window can fit. Widen the window, or switch to Compact density.",
+                zhHans: "某一层有 %@ 个并行操作，超过当前窗口能放下的 %@ 列。把窗口拉宽，或用「紧凑」密度。",
+                String(width), String(columns))
         }
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "rectangle.compress.vertical")

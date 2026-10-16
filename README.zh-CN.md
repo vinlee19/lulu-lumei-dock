@@ -25,6 +25,11 @@
 | ![tasklist](docs/images/island-tasklist.png) | ![wellness](docs/images/island-wellness.png) |
 | **任务列表** —— 当前工具 / 上下文占用 / 空闲会话 | **健康提示** —— 熬夜编码时的温柔提醒 |
 
+## 语言
+
+界面**默认是英文**。在**设置 → 通用 → 语言**里可以改成简体中文，立即生效，菜单栏和灵动岛一起换。
+选择保存在这台 Mac 上，不会离开本机。
+
 ## 安装
 
 **Homebrew(推荐)**

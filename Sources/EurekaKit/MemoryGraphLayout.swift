@@ -416,7 +416,7 @@ public enum MemoryGraphLayout {
                             y: min(top, rowY(headerRow)) - 5,
                             width: columnWidth + 10,
                             height: bottom - min(top, rowY(headerRow)) + 10),
-                        title: "来源会话", type: nil, count: members.count))
+                        title: L10n.text("Source sessions", zhHans: "来源会话"), type: nil, count: members.count))
                 }
             }
             return rails

@@ -18,7 +18,7 @@ struct CommandPaletteView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
-                TextField("搜索会话 / 技能 / 记忆 / 指令 / 计划…", text: $service.query)
+                TextField(L10n.text("Search sessions / Skills / Memory / instructions / Plans…", zhHans: "搜索会话 / 技能 / 记忆 / 指令 / 计划…"), text: $service.query)
                     .textFieldStyle(.plain)
                     .font(Theme.font.themed(14))
                     .focused($inputFocused)
@@ -48,7 +48,7 @@ struct CommandPaletteView: View {
             } else if service.query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2,
                 !service.searching {
                 Divider()
-                Text("没有匹配结果")
+                Text(L10n.text("No matches", zhHans: "没有匹配结果"))
                     .font(Theme.font.themed(12))
                     .foregroundStyle(.tertiary)
                     .padding(.vertical, 18)

@@ -130,65 +130,67 @@ public struct TurnDiagnostics: Equatable, Sendable {
         if nodeCount >= Threshold.exploreMinNodes {
             if exploreRatio >= Threshold.exploreRatioBad {
                 signals.append(Signal(
-                    rule: "explore-heavy", title: "大半轮在找文件",
-                    advice: "提示词里直接点名文件/目录，或先贴关键片段，能省掉这段定位",
+                    rule: "explore-heavy", title: L10n.text("Most of the turn spent finding files", zhHans: "大半轮在找文件"),
+                    advice: L10n.text("Name the files or directories in your prompt, or paste the key snippets to save this lookup time", zhHans: "提示词里直接点名文件/目录，或先贴关键片段，能省掉这段定位"),
                     severity: .bad, count: exploreNodes))
             } else if exploreRatio >= Threshold.exploreRatioNotice {
                 signals.append(Signal(
-                    rule: "explore-heavy", title: "定位开销偏高",
-                    advice: "如果你已经知道改哪个文件，写进提示词会更快",
+                    rule: "explore-heavy", title: L10n.text("High lookup overhead", zhHans: "定位开销偏高"),
+                    advice: L10n.text("If you know which file to change, name it in the prompt to save time", zhHans: "如果你已经知道改哪个文件，写进提示词会更快"),
                     severity: .notice, count: exploreNodes))
             }
         }
 
         if rereadCount >= Threshold.rereadBad {
             signals.append(Signal(
-                rule: "reread", title: "反复回读同一处",
-                advice: "上下文没一次给够：把相关文件/约束一次性给全，别让它来回翻",
+                rule: "reread", title: L10n.text("Repeatedly rereading the same place", zhHans: "反复回读同一处"),
+                advice: L10n.text("Provide the relevant files and constraints up front so the agent doesn't have to keep looking back", zhHans: "上下文没一次给够：把相关文件/约束一次性给全，别让它来回翻"),
                 severity: .bad, count: rereadCount))
         } else if rereadCount >= Threshold.rereadNotice {
             signals.append(Signal(
-                rule: "reread", title: "有回读",
-                advice: "同一处被读了不止一次，考虑一开始就把它放进上下文",
+                rule: "reread", title: L10n.text("Rereading detected", zhHans: "有回读"),
+                advice: L10n.text("The same place was read more than once; consider including it in the context from the start", zhHans: "同一处被读了不止一次，考虑一开始就把它放进上下文"),
                 severity: .notice, count: rereadCount))
         }
 
         if reworkCount >= Threshold.reworkNotice {
             signals.append(Signal(
-                rule: "rework", title: "改完又回头看",
-                advice: "改之前没看清：让它先读后改，或在提示词里给出确切的改动位置",
+                rule: "rework", title: L10n.text("Looking back after editing", zhHans: "改完又回头看"),
+                advice: L10n.text("Ask the agent to read before editing, or specify the exact location to change in your prompt", zhHans: "改之前没看清：让它先读后改，或在提示词里给出确切的改动位置"),
                 severity: .notice, count: reworkCount))
         }
 
         if retryMax >= Threshold.retryBad {
             signals.append(Signal(
-                rule: "retry", title: "反复重试",
-                advice: "验收标准不清：把「怎样算成功」（命令、期望输出）写进提示词",
+                rule: "retry", title: L10n.text("Repeated retries", zhHans: "反复重试"),
+                advice: L10n.text("Make acceptance criteria clear: include the commands and expected output that define success in your prompt", zhHans: "验收标准不清：把「怎样算成功」（命令、期望输出）写进提示词"),
                 severity: .bad, count: retryMax))
         } else if retryMax >= Threshold.retryNotice {
             signals.append(Signal(
-                rule: "retry", title: "有失败重试",
-                advice: "给出明确的验证命令，能让它一次做对",
+                rule: "retry", title: L10n.text("Retry after failure", zhHans: "有失败重试"),
+                advice: L10n.text("Provide an explicit verification command to help the agent get it right the first time", zhHans: "给出明确的验证命令，能让它一次做对"),
                 severity: .notice, count: retryMax))
         }
 
         if maxEditChurn >= Threshold.churnBad {
             signals.append(Signal(
-                rule: "churn", title: "同一文件反复改",
-                advice: "\(churnTarget) 被改了 \(maxEditChurn) 次：多半是没想清就动手，"
-                    + "下次先让它给出改动方案再落笔",
+                rule: "churn", title: L10n.text("Repeated edits to the same file", zhHans: "同一文件反复改"),
+                advice: L10n.format("%@ was edited %@ times: the agent likely started before thinking it through; next time, ask for a change plan before editing",
+                    zhHans: "%@ 被改了 %@ 次：多半是没想清就动手，下次先让它给出改动方案再落笔",
+                    churnTarget, String(maxEditChurn)),
                 severity: .bad, count: maxEditChurn))
         } else if maxEditChurn >= Threshold.churnNotice {
             signals.append(Signal(
-                rule: "churn", title: "改了好几遍",
-                advice: "\(churnTarget) 被改了 \(maxEditChurn) 次，可以先要一份改动清单",
+                rule: "churn", title: L10n.text("Several rounds of edits", zhHans: "改了好几遍"),
+                advice: L10n.format("%@ was edited %@ times; consider asking for a change list first",
+                    zhHans: "%@ 被改了 %@ 次，可以先要一份改动清单", churnTarget, String(maxEditChurn)),
                 severity: .notice, count: maxEditChurn))
         }
 
         if askedUser {
             signals.append(Signal(
-                rule: "clarify", title: "反问了你",
-                advice: "提问有歧义：把选择项与约束提前写清，可省掉一次往返",
+                rule: "clarify", title: L10n.text("Asked you for clarification", zhHans: "反问了你"),
+                advice: L10n.text("Clarify the choices and constraints up front to avoid an extra round trip", zhHans: "提问有歧义：把选择项与约束提前写清，可省掉一次往返"),
                 severity: .notice, count: 1))
         }
 
