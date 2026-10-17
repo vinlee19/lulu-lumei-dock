@@ -719,12 +719,20 @@ private struct MessageRowView: View {
     @State private var hovering = false
     @State private var copied = false
 
+    /// First character of the account's full name (falls back to the short user name, then "U")
+    private static let userInitial: String = {
+        let name = NSFullUserName().trimmingCharacters(in: .whitespaces)
+        let source = name.isEmpty ? NSUserName() : name
+        return source.first.map { String($0).uppercased() } ?? "U"
+    }()
+
     /// Width of the avatar column; secondary rows indent by it to line up with message bodies
     private static let avatarSize: CGFloat = 22
     private static let avatarGap: CGFloat = 10
 
     private enum Avatar {
-        /// Solid brand circle with a white person glyph: the classic "user" avatar
+        /// Letter avatar: the first character of the macOS account's full name on a solid brand
+        /// circle (Slack / Gmail style), so the user side reads as "me" rather than a generic glyph
         case person
         case symbol(String, Color)
         case agent(AgentSource)
@@ -812,10 +820,11 @@ private struct MessageRowView: View {
         case .person:
             Circle()
                 .fill(Theme.brandTileGradient)
+                .themeControlShadow()
                 .frame(width: size, height: size)
                 .overlay(
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 11, weight: .semibold))
+                    Text(Self.userInitial)
+                        .font(Theme.font.themed(11.5, .heavy))
                         .foregroundStyle(Theme.onBrand))
                 .overlay(
                     Group {
