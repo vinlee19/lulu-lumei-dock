@@ -884,7 +884,7 @@ struct ScanStatusLabel: View {
             }
             .transition(.opacity)
         } else if let lastScanAt {
-            Text("上次扫描 " + relativeFormatter.localizedString(for: lastScanAt, relativeTo: Date()))
+            Text("上次扫描 " + relativeLabel(lastScanAt))
                 .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

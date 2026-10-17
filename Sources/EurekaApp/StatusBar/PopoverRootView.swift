@@ -292,3 +292,10 @@ let relativeFormatter: RelativeDateTimeFormatter = {
     formatter.unitsStyle = .abbreviated
     return formatter
 }()
+
+/// Relative time. Anything under 5 seconds either way (including the "in 0 sec" a clock
+/// step-back produces) reads 「刚刚」.
+func relativeLabel(_ date: Date, relativeTo now: Date = Date()) -> String {
+    if abs(now.timeIntervalSince(date)) < 5 { return "刚刚" }
+    return relativeFormatter.localizedString(for: date, relativeTo: now)
+}
