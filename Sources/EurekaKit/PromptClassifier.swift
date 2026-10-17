@@ -63,10 +63,20 @@ public enum PromptClassifier {
         return false
     }
 
+    /// A harness background call (OpenViking memory compaction, branch-name generation…).
+    /// Its title is that prompt, not a session the user started, so history, the session list
+    /// and the prompt library fold these instead of listing each one as a normal session.
+    public static func isHarnessUtility(_ text: String) -> Bool {
+        let lowered = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered.hasPrefix("you are a "), lowered.contains(" utility") { return true }
+        if lowered.hasPrefix("generate a short git branch name") { return true }
+        return false
+    }
+
     public static func classify(
         _ text: String, thresholds: Thresholds = Thresholds()
     ) -> PromptKind {
-        if isInjectedArtifact(text) { return .noise }
+        if isInjectedArtifact(text) || isHarnessUtility(text) { return .noise }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = trimmed.lowercased()
         if trimmed.count <= thresholds.trivialMaxLength || trivialPhrases.contains(lowered) {

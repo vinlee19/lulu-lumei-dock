@@ -39,6 +39,13 @@ func promptClassifierTests(_ t: TestRunner) {
         try expectEqual(PromptClassifier.classify("<bash-input>ls</bash-input>"), .noise)
         try expectEqual(PromptClassifier.classify("<environment_context>cwd=/x</environment_context>"), .noise)
         try expectEqual(PromptClassifier.classify("/compact"), .noise)
+        try expectEqual(
+            PromptClassifier.classify("You are a memory relevance compressor utility. Do not use any tools."),
+            .noise)
+        try expectEqual(
+            PromptClassifier.classify("Generate a short git branch name for this change."),
+            .noise)
+        try expect(PromptClassifier.classify("You are a helpful assistant，请帮我看这段 SQL") != .noise)
         try expectEqual(PromptClassifier.classify("/effort high"), .noise)
         // 第二个 / = 路径，不是斜杠命令
         try expect(PromptClassifier.classify("/usr/bin/env 有什么用，请展开讲讲细节") != .noise)
