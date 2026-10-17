@@ -275,15 +275,22 @@ struct SkillMemoryView: View {
                     }
                 }
             } else {
+                let groups = groupSkills(ctx.items)
                 KnowledgeListContainer {
                     VStack(spacing: 0) {
-                        ForEach(Array(ctx.items.enumerated()), id: \.element.id) { index, skill in
-                            SkillListRow(
-                                skill: skill, service: service,
-                                stat: ctx.stats[skill.id], maxHit: ctx.maxHit,
-                                onOpen: { openSkillDetail(skill) },
-                                onDelete: { deleting = .skill(skill) })
-                            if index < ctx.items.count - 1 {
+                        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                            if group.skills.count == 1, let skill = group.skills.first {
+                                SkillListRow(
+                                    skill: skill, service: service,
+                                    stat: ctx.stats[skill.id], maxHit: ctx.maxHit,
+                                    onOpen: { openSkillDetail(skill) },
+                                    onDelete: { deleting = .skill(skill) })
+                            } else {
+                                SkillGroupRow(
+                                    group: group,
+                                    onOpen: { if let skill = group.skills.first { openSkillDetail(skill) } })
+                            }
+                            if index < groups.count - 1 {
                                 Divider().opacity(0.4).padding(.leading, 50)
                             }
                         }
@@ -510,6 +517,23 @@ struct SkillMemoryView: View {
         return (sorted, stats, maxHit)
     }
 
+    /// List mode folds skills by name: one skill installed for several CLIs takes one row,
+    /// with its sources at the trailing edge. Order follows the first copy of each name.
+    private func groupSkills(_ items: [SkillEntry]) -> [SkillInstallGroup] {
+        var groups: [SkillInstallGroup] = []
+        var index: [String: Int] = [:]
+        for skill in items {
+            let key = skill.name.lowercased()
+            if let at = index[key] {
+                groups[at].skills.append(skill)
+            } else {
+                index[key] = groups.count
+                groups.append(SkillInstallGroup(name: skill.name, skills: [skill]))
+            }
+        }
+        return groups
+    }
+
     /// 记忆：来源筛选 + 全局优先、再按修改时间降序
     private var memoryItems: [MemoryEntry] {
         service.memories
@@ -725,6 +749,52 @@ private struct SkillCard: View {
             }
         } menu: {
             skillContextMenu(skill, service: service, onOpen: onOpen, onDelete: onDelete)
+        }
+    }
+}
+
+private struct SkillInstallGroup: Identifiable {
+    var id: String { name.lowercased() }
+    var name: String
+    var skills: [SkillEntry]
+}
+
+/// Same-name skills folded into one row; the trailing source logos show where it is installed.
+private struct SkillGroupRow: View {
+    let group: SkillInstallGroup
+    let onOpen: () -> Void
+
+    var body: some View {
+        KnowledgeRow(enabled: true, onOpen: onOpen) {
+            HStack(spacing: 10) {
+                if let first = group.skills.first {
+                    SourceLogoTile(source: first.source, size: 28)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.name)
+                        .font(Theme.font.monoSkillName(13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(group.skills.first?.description ?? "")
+                        .font(Theme.font.themed(10.5))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
+                    ForEach(group.skills.prefix(6)) { skill in
+                        SourceLogoTile(source: skill.source, size: 16)
+                    }
+                    if group.skills.count > 6 {
+                        Text("+\(group.skills.count - 6)")
+                            .font(Theme.font.themed(10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help("装在 \(group.skills.count) 处，点开第一份")
+            }
+        } menu: {
+            EmptyView()
         }
     }
 }
