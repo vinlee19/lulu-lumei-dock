@@ -64,7 +64,10 @@ struct SettingsView: View {
         }
         .toggleStyle(.themedSwitch)
         .controlSize(.small)
-        .font(.system(size: 11.5))
+        // Classic keeps the system accent (nil = no override) so it stays pixel-identical;
+        // the other styles tint sliders and system controls with their brand color.
+        .tint(ThemeStyle.current == .classic ? nil : Theme.brand)
+        .font(Theme.font.themed(11.5))
         .onAppear { notificationService.refresh() }
     }
 
