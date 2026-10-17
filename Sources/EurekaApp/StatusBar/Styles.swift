@@ -913,6 +913,212 @@ struct RoundGlyphButton: View {
     }
 }
 
+// MARK: - Action buttons / count chip / pane header (the brutal vocabulary system controls lack)
+//
+// Pages used to reach for SwiftUI's own buttons, menus and chips, which have no hard-edged
+// branch: under brutal they stayed classic (thin bezels, soft fills, SF type). These wrappers
+// keep the exact system styling in classic — so classic stays pixel-identical — and draw the
+// brutal form themselves: capsule, 2px ink outline, flat fill, 2/2 hard shadow on the shape.
+
+/// Capsule label shared by the brutal branches of the buttons below
+private struct BrutalCapsuleLabel: View {
+    let title: String
+    var icon: String?
+    var trailingIcon: String?
+    let fill: Color
+    let foreground: Color
+    var shadow = true
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let icon {
+                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            }
+            Text(title).font(Theme.font.themed(11, .semibold)).lineLimit(1)
+            if let trailingIcon {
+                Image(systemName: trailingIcon).font(.system(size: 8, weight: .bold)).opacity(0.7)
+            }
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 10)
+        .frame(height: 26)
+        .background(Capsule().fill(fill).themeControlShadow(active: shadow))
+        .overlay(Capsule().strokeBorder(Theme.ink, lineWidth: Theme.cardBorderWidth))
+        .contentShape(Capsule())
+    }
+}
+
+/// Primary action (one per toolbar): classic = `.borderedProminent` tinted brand, small; brutal =
+/// solid brand capsule with ink text, ink outline and hard shadow.
+struct PrimaryButton: View {
+    let title: String
+    var icon: String?
+    var help: String?
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        if ThemeStyle.current.isHardEdged {
+            Button(action: action) {
+                BrutalCapsuleLabel(
+                    title: title, icon: icon, fill: Theme.brand, foreground: Theme.onBrand)
+                    .opacity(isEnabled ? 1 : 0.45)
+            }
+            .buttonStyle(.plain)
+            .help(help ?? "")
+        } else {
+            Button(action: action) {
+                systemLabel(title: title, icon: icon)
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.brand)
+            .help(help ?? "")
+        }
+    }
+}
+
+/// Secondary action: classic = `.bordered` small (red-tinted when destructive); brutal = flat
+/// surface capsule with ink outline and hard shadow, red text when destructive.
+struct SecondaryButton: View {
+    let title: String
+    var icon: String?
+    var destructive = false
+    var help: String?
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    var body: some View {
+        if ThemeStyle.current.isHardEdged {
+            Button(action: action) {
+                BrutalCapsuleLabel(
+                    title: title, icon: icon,
+                    fill: hovering ? Theme.surfaceSecondary : Theme.surface,
+                    foreground: destructive ? Theme.failureRed : Theme.ink)
+                    .opacity(isEnabled ? 1 : 0.45)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(help ?? "")
+        } else {
+            Button(action: action) {
+                systemLabel(title: title, icon: icon)
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+            .tint(destructive ? .red : nil)
+            .help(help ?? "")
+        }
+    }
+}
+
+/// Dropdown of actions: classic = the borderless system menu button the pages had; brutal = a
+/// SecondaryButton-shaped capsule with a ▾. The capsule is drawn on the Menu view itself, not
+/// inside its label, because the borderless menu style does not paint label backgrounds.
+struct MenuButton<Items: View>: View {
+    let title: String
+    var icon: String?
+    var help: String?
+    @ViewBuilder var items: () -> Items
+
+    var body: some View {
+        if ThemeStyle.current.isHardEdged {
+            Menu(content: items) {
+                HStack(spacing: 5) {
+                    if let icon {
+                        Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                    }
+                    Text(title).font(Theme.font.themed(11, .semibold)).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).opacity(0.7)
+                }
+                .foregroundStyle(Theme.ink)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(Capsule().fill(Theme.surface).themeControlShadow())
+            .overlay(Capsule().strokeBorder(Theme.ink, lineWidth: Theme.cardBorderWidth))
+            .help(help ?? "")
+        } else {
+            Menu(content: items) {
+                systemLabel(title: title, icon: icon)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(help ?? "")
+        }
+    }
+}
+
+/// The 11pt system `Label` the session page's toolbar buttons were built from (classic branch)
+@ViewBuilder
+private func systemLabel(title: String, icon: String?) -> some View {
+    if let icon {
+        Label(title, systemImage: icon).font(.system(size: 11))
+    } else {
+        Text(title).font(.system(size: 11))
+    }
+}
+
+/// Small count next to a pane title ("对话记录 19"): classic = brand-tinted pill; brutal =
+/// ink-outlined capsule with a Space Mono number.
+struct CountChip: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+    init(_ count: Int) { self.text = count.formatted() }
+
+    var body: some View {
+        let hard = ThemeStyle.current.isHardEdged
+        Text(text)
+            .font(Theme.font.themedMono(10.5, .medium))
+            .foregroundStyle(hard ? Theme.ink : Theme.brandFg)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(hard ? Theme.surface : Theme.brandFill(0.12)))
+            .overlay(
+                Group {
+                    if hard { Capsule().strokeBorder(Theme.ink, lineWidth: 1.5) }
+                })
+    }
+}
+
+/// Pane / section header: glyph + title in the themed face, then whatever the caller puts
+/// after it (count chip, hints); the caller owns padding and the trailing Spacer.
+struct PaneHeader<Trailing: View>: View {
+    let icon: String
+    let title: String
+    @ViewBuilder var trailing: () -> Trailing
+
+    init(icon: String, title: String, @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.icon = icon
+        self.title = title
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ThemeStyle.current.isHardEdged ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(.secondary))
+            Text(title)
+                .font(Theme.font.themed(12, .semibold))
+            trailing()
+        }
+    }
+}
+
+extension PaneHeader where Trailing == EmptyView {
+    init(icon: String, title: String) {
+        self.init(icon: icon, title: title) { EmptyView() }
+    }
+}
+
 /// lulu-lumei-dock 品牌标：紫金渐变圆角块 + 金色「Lu」描边（与 Dock 图标同源的 LuluMark）。
 /// 侧栏底部品牌区 / 设置→关于 卡片共用，按 size 等比缩放。
 ///

@@ -164,60 +164,38 @@ struct SessionDetailView: View {
                     .lineLimit(2)
                     .help(session.displayName)
                 Spacer(minLength: 8)
-                Button {
+                // One primary, the rest secondary, all from the shared kit so brutal gets its
+                // ink capsules here instead of five system bezels
+                PrimaryButton(title: "恢复会话", icon: "play.fill", help: "在 Terminal 中执行恢复命令") {
                     service.resumeInTerminal(session)
-                } label: {
-                    Label("恢复会话", systemImage: "play.fill")
-                        .font(.system(size: 11))
                 }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand)
-                .help("在 Terminal 中执行恢复命令")
-                Button {
+                SecondaryButton(
+                    title: "删除会话", icon: "trash", destructive: true,
+                    help: session.source.supportsSessionDeletion
+                        ? "移入废纸篓，可恢复"
+                        : "\(session.source.displayName) 会话存于共享数据库，暂不支持删除"
+                ) {
                     confirmingDelete = true
-                } label: {
-                    Label("删除会话", systemImage: "trash")
-                        .font(.system(size: 11))
                 }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .tint(.red)
                 .disabled(!session.source.supportsSessionDeletion)
-                .help(session.source.supportsSessionDeletion
-                    ? "移入废纸篓，可恢复"
-                    : "\(session.source.displayName) 会话存于共享数据库，暂不支持删除")
-                Menu {
+                MenuButton(title: "导出", icon: "square.and.arrow.up", help: "导出对话记录") {
                     Button("复制为 Markdown") { copyMarkdown(session) }
                     Button("导出为 .md 文件…") { exportMarkdown(session) }
-                } label: {
-                    Label("导出", systemImage: "square.and.arrow.up")
-                        .font(.system(size: 11))
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("导出对话记录")
                 if let onOpenLineage {
-                    Button {
+                    SecondaryButton(
+                        title: "轮次血缘", icon: "point.3.filled.connected.trianglepath.dotted",
+                        help: "按轮次看它做了什么、哪一轮的提示词该改"
+                    ) {
                         onOpenLineage(.list)
-                    } label: {
-                        Label("轮次血缘", systemImage:
-                            "point.3.filled.connected.trianglepath.dotted")
-                            .font(.system(size: 11))
                     }
-                    .controlSize(.small)
-                    .buttonStyle(.bordered)
-                    .help("按轮次看它做了什么、哪一轮的提示词该改")
                 }
-                Button {
+                CardActionButton(
+                    icon: "list.bullet.rectangle", size: 26,
+                    help: showTOC ? "隐藏对话目录" : "显示对话目录"
+                ) {
                     withAnimation(.easeInOut(duration: 0.15)) { showTOC.toggle() }
-                } label: {
-                    Image(systemName: "list.bullet.rectangle")
-                        .font(.system(size: 11))
                 }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .help(showTOC ? "隐藏对话目录" : "显示对话目录")
             }
             if let note = exportNote {
                 Text(note)
@@ -536,17 +514,9 @@ struct SessionDetailView: View {
             // Pane header in the same type as every other section header (Theme.font so brutal
             // gets Space Grotesk / Space Mono here too)
             HStack(spacing: 7) {
-                Image(systemName: "text.bubble")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text("对话记录")
-                    .font(Theme.font.themed(12, .semibold))
-                Text(service.transcript.count.formatted())
-                    .font(Theme.font.themedMono(10.5, .medium))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Theme.brandFill(0.12)))
-                    .foregroundStyle(Theme.brandFg)
+                PaneHeader(icon: "text.bubble", title: "对话记录") {
+                    CountChip(service.transcript.count)
+                }
                 if service.transcriptTruncated {
                     Text("仅显示前 \(service.transcript.count) 条")
                         .font(Theme.font.themed(10.5))
@@ -610,15 +580,9 @@ struct SessionDetailView: View {
     private var tocPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
-                Image(systemName: "list.number")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text("对话目录")
-                    .font(Theme.font.themed(12, .semibold))
+                PaneHeader(icon: "list.number", title: "对话目录")
                 Spacer(minLength: 4)
-                Text("\(userMessages.count) 条")
-                    .font(Theme.font.themedMono(10.5, .medium))
-                    .foregroundStyle(.secondary)
+                CountChip("\(userMessages.count) 条")
                     .fixedSize()
             }
             .padding(.horizontal, 10)
