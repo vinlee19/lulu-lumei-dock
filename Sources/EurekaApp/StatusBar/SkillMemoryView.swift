@@ -721,7 +721,7 @@ private struct SkillCard: View {
                     Text(skill.name)
                         .font(Theme.font.monoSkillName(13))
                         .foregroundStyle(skill.enabled ? .primary : .secondary)
-                        .lineLimit(1).truncationMode(.middle)
+                        .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
                     MiniSwitch(isOn: skill.enabled) { service.setSkillEnabled(skill, !skill.enabled) }
                 }
@@ -821,7 +821,7 @@ private struct SkillListRow: View {
                         Text(skill.name)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .foregroundStyle(skill.enabled ? .primary : .secondary)
-                            .lineLimit(1).truncationMode(.middle)
+                            .lineLimit(1).truncationMode(.tail)
                         if let project = skill.scope.projectName { TagChip(project) }
                     }
                     if let desc = skill.description, !desc.isEmpty {

@@ -496,7 +496,8 @@ private struct AgentRow: View {
                         Text(item.name)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
-                            .lineLimit(1).truncationMode(.middle)
+                            .lineLimit(1).truncationMode(.tail)
+                        SourceBadge(source: item.source, size: 12)
                         RoleTag(role: item.role)
                         if item.builtin { TagChip("内置", neutral: true) }
                     }
