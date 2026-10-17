@@ -159,8 +159,12 @@ enum Theme {
     }
 
     static var goldFg: Color {
+        // Light mode no longer uses #C2185B: it sits right next to the failure red #C92A2A,
+        // so neutral counts and the "文档" status read as errors. A dark gold-brown is about
+        // 7:1 on the cream background and stays apart from both the red and the brand cyan.
+        // Classic still equals `gold`.
         ThemeStyle.current == .brutal
-            ? dynamic(light: hexRGB("C2185B"), dark: hexRGB("FE7DA8"))
+            ? dynamic(light: hexRGB("6F4E16"), dark: hexRGB("E8B84A"))
             : gold
     }
 
