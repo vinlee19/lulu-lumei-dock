@@ -204,7 +204,7 @@ struct SessionDetailView: View {
             }
             HStack(spacing: 8) {
                 if let started = session.startedAt {
-                    metaItem("clock", started.formatted(.dateTime.year().month().day().hour().minute().second()))
+                    metaItem("clock", started.formatted(.dateTime.month().day().hour().minute()))
                 }
                 if let cwd = session.cwd {
                     metaItem("folder", URL(fileURLWithPath: cwd).lastPathComponent)
