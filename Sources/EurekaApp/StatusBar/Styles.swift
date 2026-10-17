@@ -886,30 +886,67 @@ struct RoundGlyphButton: View {
     @State private var hovering = false
 
     var body: some View {
-        // Hard-edged styles speak in 2px ink outlines, flat fills and offset hard shadows; the
-        // classic branch keeps the light brand tint it always had. The shadow is painted on
-        // the circle only, never on the glyph.
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(RoundGlyphChrome.glyph(active: active))
+                .modifier(RoundGlyphChrome(active: active, hovering: hovering))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+    }
+}
+
+/// Round glyph that opens a menu ("+" new-item menus). The circle is drawn on the Menu view
+/// itself: the borderless menu style does not paint backgrounds placed inside its label, which
+/// is why the old "+" menus showed a bare glyph next to a fully drawn refresh button.
+struct RoundGlyphMenu<Items: View>: View {
+    let icon: String
+    var help = ""
+    @ViewBuilder var items: () -> Items
+
+    @State private var hovering = false
+
+    var body: some View {
+        Menu(content: items) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(RoundGlyphChrome.glyph(active: false))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .modifier(RoundGlyphChrome(active: false, hovering: hovering))
+        .onHover { hovering = $0 }
+        .help(help)
+    }
+}
+
+/// 26pt circle shared by RoundGlyphButton / RoundGlyphMenu. Hard-edged styles speak in 2px ink
+/// outlines, flat fills and offset hard shadows; the classic branch keeps the light brand tint
+/// it always had. The shadow is painted on the circle only, never on the glyph.
+private struct RoundGlyphChrome: ViewModifier {
+    let active: Bool
+    let hovering: Bool
+
+    static func glyph(active: Bool) -> Color {
+        active ? Theme.onBrand : (ThemeStyle.current.isHardEdged ? Theme.ink : Theme.brandFg)
+    }
+
+    func body(content: Content) -> some View {
         let hard = ThemeStyle.current.isHardEdged
-        let glyph: Color = active ? Theme.onBrand : (hard ? Theme.ink : Theme.brandFg)
         let fill: AnyShapeStyle = active
             ? AnyShapeStyle(Theme.brand)
             : (hard
                 ? AnyShapeStyle(hovering ? Theme.surfaceSecondary : Theme.surface)
                 : AnyShapeStyle(Theme.brandFill(hovering ? 0.18 : 0.10)))
         let stroke: Color = hard ? Theme.ink : (active ? Theme.brand : Theme.brand.opacity(0.35))
-        let strokeWidth: CGFloat = hard ? Theme.cardBorderWidth : 0.8
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(glyph)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(fill).themeControlShadow(active: hard))
-                .overlay(Circle().strokeBorder(stroke, lineWidth: strokeWidth))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(help)
+        content
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(fill).themeControlShadow(active: hard))
+            .overlay(Circle().strokeBorder(stroke, lineWidth: hard ? Theme.cardBorderWidth : 0.8))
+            .contentShape(Circle())
     }
 }
 
@@ -954,6 +991,8 @@ struct PrimaryButton: View {
     let title: String
     var icon: String?
     var help: String?
+    /// Attached to the inner Button so it works in both branches (e.g. ⌘S on 保存)
+    var shortcut: KeyboardShortcut?
     let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
@@ -966,11 +1005,13 @@ struct PrimaryButton: View {
                     .opacity(isEnabled ? 1 : 0.45)
             }
             .buttonStyle(.plain)
+            .keyboardShortcut(shortcut)
             .help(help ?? "")
         } else {
             Button(action: action) {
                 systemLabel(title: title, icon: icon)
             }
+            .keyboardShortcut(shortcut)
             .controlSize(.small)
             .buttonStyle(.borderedProminent)
             .tint(Theme.brand)
@@ -982,9 +1023,14 @@ struct PrimaryButton: View {
 /// Secondary action: classic = `.bordered` small (red-tinted when destructive); brutal = flat
 /// surface capsule with ink outline and hard shadow, red text when destructive.
 struct SecondaryButton: View {
+    /// What the classic branch reproduces: `.bordered` (toolbars) or the default push button
+    /// (inline actions in forms and rows), so swapping a call site never changes classic
+    enum ClassicLook { case bordered, push }
+
     let title: String
     var icon: String?
     var destructive = false
+    var classic: ClassicLook = .bordered
     var help: String?
     let action: () -> Void
 
@@ -1002,6 +1048,16 @@ struct SecondaryButton: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
+            .help(help ?? "")
+        } else if classic == .push {
+            Button(action: action) {
+                if let icon {
+                    Label(title, systemImage: icon)
+                } else {
+                    Text(title)
+                }
+            }
+            .controlSize(.small)
             .help(help ?? "")
         } else {
             Button(action: action) {

@@ -471,16 +471,12 @@ private struct PlanDetailView: View {
                     .foregroundStyle(.secondary)
             }
             if editing {
-                Button("保存") {
+                PrimaryButton(title: "保存", shortcut: KeyboardShortcut("s", modifiers: .command)) {
                     service.save(path: plan.path, content: text) { ok in
                         saveNote = ok ? "已保存（写前留有备份）" : "保存失败"
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
                     }
                 }
-                .keyboardShortcut("s", modifiers: .command)
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand)
             }
         }
         .padding(.horizontal, 12)

@@ -121,20 +121,11 @@ struct MCPView: View {
     /// 家族标准的裸 ＋ 圆钮：点击**直达**添加页（页内再分 快速安装/手动配置/JSON 三页签），
     /// 不再弹二级菜单 —— 少一跳，风格也与其它知识页签一致。
     private var createButton: some View {
-        Button {
+        RoundGlyphButton(icon: "plus", help: "添加 MCP server") {
             withAnimation(.easeOut(duration: 0.15)) {
                 formTarget = MCPFormTarget(id: "new", mode: .quick)
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.brandFg)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Theme.brandFill(0.10)))
-                .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
         }
-        .buttonStyle(.plain)
-        .help("添加 MCP server")
     }
 
     // MARK: - 数据口径
@@ -262,15 +253,11 @@ struct MCPView: View {
                 Button("取消") { service.cancelProbe() }
                     .font(Theme.font.themed(10))
             } else {
-                Button {
+                SecondaryButton(
+                    title: selectedSource == nil ? "检测全部" : "检测当前源",
+                    icon: "antenna.radiowaves.left.and.right", classic: .push
+                ) {
                     service.probe(filteredEntries)
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 9))
-                        Text(selectedSource == nil ? "检测全部" : "检测当前源")
-                            .font(Theme.font.themed(10))
-                    }
                 }
                 .disabled(filteredEntries.isEmpty)
                 .help("逐处发起连接检测（\(filteredEntries.count) 处）：remote 走 MCP 握手；stdio 会短暂启动配置的命令，读完即退出")
@@ -924,16 +911,9 @@ private struct MCPDetailView: View {
             HStack(spacing: 6) {
                 sectionTitle("连接与授权")
                 Spacer(minLength: 8)
-                Button {
+                SecondaryButton(title: "重新检测", icon: "waveform.path.ecg") {
                     service.probe(entries)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "waveform.path.ecg").font(.system(size: 10))
-                        Text("重新检测").font(Theme.font.themed(11))
-                    }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
             VStack(alignment: .leading, spacing: 10) {
                 // ① 上次检测（逐处配置直显持久快照；从未检测过 = "尚未检测"）
@@ -1085,12 +1065,9 @@ private struct MCPDetailView: View {
             Spacer(minLength: 8)
             if let buttonTitle, let action {
                 if prominent {
-                    Button(buttonTitle, action: action)
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.brand)
+                    PrimaryButton(title: buttonTitle, action: action)
                 } else {
-                    Button(buttonTitle, action: action).controlSize(.small)
+                    SecondaryButton(title: buttonTitle, classic: .push, action: action)
                 }
             }
         }
@@ -1124,13 +1101,11 @@ private struct MCPDetailView: View {
                     Button("撤销") { service.revokeToken(for: primary) }
                         .controlSize(.small)
                 } else if prominent {
-                    Button("在浏览器中授权") { service.authorizeInBrowser(primary) }
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.brand)
+                    PrimaryButton(title: "在浏览器中授权") { service.authorizeInBrowser(primary) }
                 } else {
-                    Button("在浏览器中授权") { service.authorizeInBrowser(primary) }
-                        .controlSize(.small)
+                    SecondaryButton(title: "在浏览器中授权", classic: .push) {
+                        service.authorizeInBrowser(primary)
+                    }
                 }
             }
         }
@@ -1655,7 +1630,11 @@ private struct MCPDetailView: View {
             Text("安装「\(serverName)」到项目")
                 .font(Theme.font.themed(13, .semibold))
             HStack(spacing: 6) {
-                Menu {
+                MenuButton(
+                    title: projectRootPath.isEmpty
+                        ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""),
+                    icon: "folder"
+                ) {
                     ForEach(service.repoRoots, id: \.root) { candidate in
                         Button(candidate.name.isEmpty
                             ? candidate.root.lastPathComponent
@@ -1663,18 +1642,7 @@ private struct MCPDetailView: View {
                             projectRootPath = candidate.root.path
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder").font(.system(size: 9))
-                        Text(projectRootPath.isEmpty
-                            ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""))
-                            .lineLimit(1)
-                    }
-                    .font(Theme.font.themed(11))
-                    .frame(maxWidth: 200)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
                 Button("浏览…") {
                     if let picked = mcpPickProjectRoot() { projectRootPath = picked }
                 }
@@ -1695,15 +1663,9 @@ private struct MCPDetailView: View {
                 Button("取消") { projectSheet = false }
                     .font(Theme.font.themed(11))
                 Spacer()
-                Button {
+                PrimaryButton(title: "写入 .mcp.json") {
                     runProjectInstall()
-                } label: {
-                    Text("写入 .mcp.json")
-                        .font(Theme.font.themed(11, .semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
                 }
-                .buttonStyle(.borderedProminent)
                 .disabled(projectRootPath.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -1968,9 +1930,7 @@ private struct MCPServerFormView: View {
                 Text(note).font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
-                Button(isEditing ? "保存修改" : "添加") { submit() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.brand)
+                PrimaryButton(title: isEditing ? "保存修改" : "添加") { submit() }
                     .disabled(!canSubmit || submitting)
                 Button("取消", action: onBack)
                     .buttonStyle(.borderless)
@@ -2339,7 +2299,11 @@ private struct MCPServerFormView: View {
     private var projectPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Menu {
+                MenuButton(
+                    title: projectRootPath.isEmpty
+                        ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""),
+                    icon: "folder"
+                ) {
                     ForEach(service.repoRoots, id: \.root) { candidate in
                         Button(candidate.name.isEmpty
                             ? candidate.root.lastPathComponent
@@ -2347,18 +2311,7 @@ private struct MCPServerFormView: View {
                             projectRootPath = candidate.root.path
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder").font(.system(size: 9))
-                        Text(projectRootPath.isEmpty
-                            ? "选择项目" : String(projectRootPath.split(separator: "/").last ?? ""))
-                            .lineLimit(1)
-                    }
-                    .font(Theme.font.themed(11))
-                    .frame(maxWidth: 180)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
                 Button("浏览…") { browseProjectRoot() }
                     .font(Theme.font.themed(11))
                 Spacer()

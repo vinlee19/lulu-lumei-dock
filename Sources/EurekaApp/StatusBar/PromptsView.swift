@@ -812,56 +812,38 @@ private struct PromptDetailView: View {
     private var actionsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Button {
+                PrimaryButton(
+                    title: copied ? "已复制" : "复制提问", icon: copied ? "checkmark" : "doc.on.doc"
+                ) {
                     service.copyToPasteboard(entry.id)
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
-                } label: {
-                    Label(copied ? "已复制" : "复制提问",
-                          systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 11))
                 }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand)
                 if service.launchCommand(for: entry.id) != nil {
-                    Button {
+                    SecondaryButton(
+                        title: "在终端启动新会话", icon: "play.fill",
+                        help: "Terminal 中以此提问开一个新的 \(entry.source.displayName) 会话"
+                            + (entry.cwd.map { "（\($0)）" } ?? "")
+                    ) {
                         service.launchInTerminal(entry.id)
                         note("已在 Terminal 中启动新会话")
-                    } label: {
-                        Label("在终端启动新会话", systemImage: "play.fill")
-                            .font(.system(size: 11))
                     }
-                    .controlSize(.small)
-                    .buttonStyle(.bordered)
-                    .help("Terminal 中以此提问开一个新的 \(entry.source.displayName) 会话"
-                        + (entry.cwd.map { "（\($0)）" } ?? ""))
                 }
-                Button {
+                SecondaryButton(
+                    title: "升级为技能", icon: "graduationcap",
+                    help: "把这条提问沉淀为技能（SKILL.md）——以后 agent 自动加载，不用再重复输入"
+                ) {
                     graduation = .skill
-                } label: {
-                    Label("升级为技能", systemImage: "graduationcap")
-                        .font(.system(size: 11))
                 }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .help("把这条提问沉淀为技能（SKILL.md）——以后 agent 自动加载，不用再重复输入")
-                Button {
+                SecondaryButton(
+                    title: "升级为指令", icon: "text.book.closed",
+                    help: "沉淀为持久指令，之后每次会话自动加载（Claude 追加到 ~/.claude/CLAUDE.md；Codex 追加到 AGENTS.md）"
+                ) {
                     graduation = .instruction
-                } label: {
-                    Label("升级为指令", systemImage: "text.book.closed")
-                        .font(.system(size: 11))
                 }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .help("沉淀为持久指令，之后每次会话自动加载（Claude 追加到 ~/.claude/CLAUDE.md；Codex 追加到 AGENTS.md）")
-                Button(action: onJumpToSession) {
-                    Label("在会话中查看", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11))
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .help("切到会话页签并定位到这条提问")
+                SecondaryButton(
+                    title: "在会话中查看", icon: "arrow.up.left.and.arrow.down.right",
+                    help: "切到会话页签并定位到这条提问", action: onJumpToSession)
                 Spacer(minLength: 0)
                 if entry.useCount > 0 {
                     Text("已使用 \(entry.useCount) 次"
@@ -869,13 +851,9 @@ private struct PromptDetailView: View {
                         .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
-                Button(role: .destructive, action: onDelete) {
-                    Label("移除", systemImage: "trash").font(.system(size: 11))
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .tint(.red)
-                .help("从 Prompt 库移除（源会话不受影响）")
+                SecondaryButton(
+                    title: "移除", icon: "trash", destructive: true,
+                    help: "从 Prompt 库移除（源会话不受影响）", action: onDelete)
             }
             if let actionNote {
                 Text(actionNote)

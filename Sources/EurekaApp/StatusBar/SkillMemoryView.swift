@@ -184,7 +184,10 @@ struct SkillMemoryView: View {
 
     /// 「新建」：紧凑紫色图标菜单（与刷新按钮同款圆底），各 CLI 分列菜单项。
     private var createMenu: some View {
-        Menu {
+        RoundGlyphMenu(
+            icon: "plus",
+            help: mode == .skills ? "新建技能" : (mode == .memory ? "新建记忆" : "新建指令文件")
+        ) {
             if mode == .skills {
                 Button("Claude 技能") { startCreate(.claude, isSkill: true, "Claude 技能") }
                 Button("Codex 技能") { startCreate(.codex, isSkill: true, "Codex 技能") }
@@ -223,18 +226,7 @@ struct SkillMemoryView: View {
                     service.createMemory(source: .trae, name: "user_rules")
                 }
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.brandFg)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Theme.brandFill(0.10)))
-                .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(mode == .skills ? "新建技能" : "新建记忆")
     }
 
     // MARK: - 主体（统计概览卡 + 来源 chips + 扁平列表/网格）
@@ -1330,16 +1322,12 @@ private struct MemoryDetailView: View {
                     .foregroundStyle(.secondary)
             }
             if editing {
-                Button("保存") {
+                PrimaryButton(title: "保存", shortcut: KeyboardShortcut("s", modifiers: .command)) {
                     service.save(path: memory.path, content: text) { ok in
                         saveNote = ok ? "已保存（写前留有备份）" : "保存失败"
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
                     }
                 }
-                .keyboardShortcut("s", modifiers: .command)
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand)
             }
         }
         .padding(.horizontal, 12)

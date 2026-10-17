@@ -117,7 +117,7 @@ struct AgentsView: View {
     }
 
     private var createMenu: some View {
-        Menu {
+        RoundGlyphMenu(icon: "plus", help: "新建子代理 / Codex profile") {
             Button("Claude Agent") { startCreate(.claude) }
             Button("OpenCode Agent") { startCreate(.opencode) }
             Button("Grok Agent") { startCreate(.grok) }
@@ -125,18 +125,7 @@ struct AgentsView: View {
             Button("Codex Profile") {
                 profileDetail = ProfileEditTarget(id: "new", profile: CodexProfile(name: ""), isNew: true)
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.brandFg)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Theme.brandFill(0.10)))
-                .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("新建子代理 / Codex profile")
     }
 
     private var createAlertTitle: String {
@@ -676,16 +665,12 @@ private struct AgentDetailView: View {
                     .foregroundStyle(.secondary)
             }
             if editing {
-                Button("保存") {
+                PrimaryButton(title: "保存", shortcut: KeyboardShortcut("s", modifiers: .command)) {
                     service.save(path: agent.path, content: text) { ok in
                         saveNote = ok ? "已保存（写前留有备份）" : "保存失败"
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
                     }
                 }
-                .keyboardShortcut("s", modifiers: .command)
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand)
             }
         }
         .padding(.horizontal, 12)
@@ -738,7 +723,7 @@ private struct CodexProfileDetailView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
-                Button("保存") {
+                PrimaryButton(title: "保存") {
                     service.saveProfile(CodexProfile(
                         name: name.trimmingCharacters(in: .whitespaces),
                         model: nilIfEmpty(model),
@@ -747,9 +732,6 @@ private struct CodexProfileDetailView: View {
                         approvalPolicy: nilIfEmpty(approval)))
                     onBack()
                 }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.brand)
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.horizontal, 12)
