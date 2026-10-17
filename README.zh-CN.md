@@ -263,12 +263,16 @@ make demo       # 注入伪造事件,演示灵动岛全场景
 make app        # 打包 dist/lulu-lumei-dock.app(ad‑hoc 签名)
 make package-release # 生成已验证 ZIP + 内含 ZIP EdDSA 签名的 appcast
 make install    # 打包并安装到 /Applications/lulu-lumei-dock.app
+make lint-comments # 代码注释含中日韩文字时失败(注释一律英文)
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # 用量与 ccusage 对拍(期望 0.00%)
 ```
 
 没有测试过滤器——runner(`Tests/EurekaTestsRunner/main.swift`)顺序调用每个 suite;要只跑子集,
 在 `main.swift` 里注释掉对应调用即可。
+
+参与贡献:提 PR 前请先阅读 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)(issue、提案、草稿与正式 PR、
+PR 模板)和 [docs/DEVELOPMENT_WORKFLOW.zh-CN.md](docs/DEVELOPMENT_WORKFLOW.zh-CN.md)(分支、验证关卡、完成定义)。
 
 ## 架构
 

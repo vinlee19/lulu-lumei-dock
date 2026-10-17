@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI**（以及 OpenCode/Grok/Antigravity/Kimi/Gemini/Qwen/Hermes/CodeBuddy/Qoder/Cursor/Trae）task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. Code comments stay Chinese. User-visible strings go through `L10n` (`Sources/EurekaKit/L10n.swift`): English is the source and the default language, `zhHans` is Simplified Chinese. A missing preference is English. Do not cache `L10n.text` in a `static let`. Health-registry names are stable keys — display them with `L10n.healthTitle`, never translate the key used to `register` / `beat`. `eureka-relay` stays dependency-free and is not localized.
+Eureka is a macOS menu-bar app that surfaces local **Claude Code** and **Codex CLI** (plus OpenCode/Grok/Antigravity/Kimi/Gemini/Qwen/Hermes/CodeBuddy/Qoder/Cursor/Trae) task activity as a "Dynamic Island" overlay, plus a ccusage-accurate usage ledger, subscription rate-limit gauges, and session browsing. Swift 5.10 + SwiftPM; Sparkle 2.9.2 is the only third-party runtime dependency. Code comments are English only (`make lint-comments` enforces it; string literals are exempt). User-visible strings go through `L10n` (`Sources/EurekaKit/L10n.swift`): English is the source and the default language, `zhHans` is Simplified Chinese. A missing preference is English. Do not cache `L10n.text` in a `static let`. Health-registry names are stable keys — display them with `L10n.healthTitle`, never translate the key used to `register` / `beat`. `eureka-relay` stays dependency-free and is not localized.
 
 ## Commands
 
@@ -16,6 +16,7 @@ make demo       # Scripts/demo-island.sh — injects fake events to show every i
 make release    # swift build -c release
 make app        # release + Scripts/build-app.sh → dist/lulu-lumei-dock.app (ad-hoc signed)
 make install    # app + copy to /Applications/lulu-lumei-dock.app
+make lint-comments  # fail on CJK text in code comments (Scripts/check-comment-language.py)
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # diff usage totals against ccusage (expect 0.00%)
 ```
@@ -116,4 +117,4 @@ App data lives in `~/Library/Application Support/Eureka/`: `eureka.sqlite` (hist
 
 ## Further reading
 
-`AGENTS.md` — commit message / PR title / release conventions (all English; read before committing or releasing). `docs/design.md` — full design doc (verified data-source formats for Claude transcript / Codex rollout / hooks, key decisions, milestones). `README.md` — feature tour, interaction cheatsheet, known boundaries.
+`AGENTS.md` — commit message / PR title / release conventions (all English; read before committing or releasing). `CONTRIBUTING.md` — issue / proposal / draft-PR / PR rules and the PR template. `docs/DEVELOPMENT_WORKFLOW.md` — branch → verify → review → release loop and the definition of done. `docs/design.md` — full design doc (verified data-source formats for Claude transcript / Codex rollout / hooks, key decisions, milestones). `README.md` — feature tour, interaction cheatsheet, known boundaries.

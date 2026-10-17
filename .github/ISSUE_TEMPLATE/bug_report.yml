@@ -1,0 +1,101 @@
+name: Bug report · 问题反馈
+description: Something is broken or behaves unexpectedly. · 功能异常或行为不符合预期。
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. English or Chinese are both fine. **Redact personal data** (emails, prompts, file paths you don't want public) from logs and screenshots.
+        感谢反馈，中英文均可。请在日志和截图中**去除个人信息**。安全漏洞请走私密渠道，不要在这里公开。
+  - type: input
+    id: version
+    attributes:
+      label: App version · 应用版本
+      description: Settings → About, or the `VERSION` file for source builds. · 设置 → 关于，源码构建看 `VERSION`。
+      placeholder: "0.36.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version · macOS 版本
+      placeholder: "macOS 15.5 (Apple Silicon)"
+    validations:
+      required: true
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Agent(s) involved · 涉及的 Agent
+      multiple: true
+      options:
+        - Claude Code
+        - Codex CLI
+        - OpenCode
+        - Grok
+        - Antigravity
+        - Kimi
+        - Gemini
+        - Qwen
+        - Hermes
+        - CodeBuddy
+        - Qoder
+        - Cursor
+        - Trae
+        - ZCode
+        - Not agent-specific · 与 Agent 无关
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area · 模块
+      options:
+        - Dynamic Island · 灵动岛
+        - Usage ledger / cost · 用量与费用
+        - Rate limits · 限额
+        - Sessions / history · 会话与历史
+        - Knowledge (skills, memory, instructions) · 知识面
+        - Hooks / installer · Hooks 与安装
+        - Backup / sync · 备份与同步
+        - Settings / themes · 设置与主题
+        - Updates / packaging · 更新与打包
+        - Other · 其他
+    validations:
+      required: true
+  - type: textarea
+    id: hooks
+    attributes:
+      label: Hook status · Hook 安装状态
+      description: Output of `swift run eureka --hooks-status`, or "not installed". · 粘贴命令输出，或写"未安装"。
+      render: text
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce · 复现步骤
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour · 期望结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour · 实际结果
+      description: Include screenshots or logs (redacted). Usage bugs - attach `Scripts/check-usage-against-ccusage.sh` output if possible. · 用量问题请尽量附上 ccusage 对账输出。
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks · 确认
+      options:
+        - label: I searched existing issues and this is not a duplicate. · 已搜索，非重复问题。
+          required: true
+        - label: I removed secrets and personal data from everything above. · 已去除密钥与个人信息。
+          required: true

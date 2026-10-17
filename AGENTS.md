@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Conventions for AI agents (and humans) contributing to this repository.
-Read this before committing, opening a PR, or cutting a release.
+Read this before committing, opening a PR, or cutting a release. Issue, proposal,
+and pull-request rules live in [CONTRIBUTING.md](CONTRIBUTING.md); the end-to-end
+engineering loop lives in [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md).
 
 ## Language rules
 
@@ -9,7 +11,7 @@ Read this before committing, opening a PR, or cutting a release.
 |---|---|
 | Commit messages, PR titles & bodies, release titles & notes, `CHANGELOG.md` | **English only** |
 | UI strings | English source via `L10n.text(_:zhHans:)` / `L10n.format`. Simplified Chinese is the `zhHans` argument and must stay byte-for-byte with the previous copy when a call site is migrated. Default language is English. Do not cache the result in a `static let`. |
-| In-code comments | Chinese (existing convention — keep it) |
+| In-code comments | **English only** (doc comments, inline comments, `MARK`s, tests, scripts). Enforced by `make lint-comments`; string literals are exempt. |
 
 ## Commit messages
 
@@ -41,7 +43,8 @@ fix(packaging): load app resources from signed bundle layout
 - Same format as commit messages: `<type>(<scope>): <summary>`, English.
 - PRs are squash-merged, so **the PR title becomes the commit message** — it must
   be valid on its own. One PR = one logical change.
-- PR body: what changed, why, and how it was verified (build/tests/manual checks).
+- PR body: fill in `.github/pull_request_template.md` — summary, motivation,
+  changes, verification (real command output), risk & rollback, checklist.
 
 ## Versioning
 

@@ -1,0 +1,38 @@
+name: Feature request · 功能建议
+description: A small, self-contained improvement. · 小而独立的改进。
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Changes to architecture, data flow, persisted data, critical invariants, new agents, or new dependencies need a **Proposal** instead (see CONTRIBUTING.md).
+        涉及架构、数据流、持久化数据、关键不变量、新增 Agent 或新依赖的改动，请改用 **Proposal** 模板（见 CONTRIBUTING.zh-CN.md）。
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem · 要解决的问题
+      description: Who hits this, when, and why it hurts. · 谁、在什么场景下、遇到什么痛点。
+      placeholder: As a user of …, I can't … because …
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution · 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered · 考虑过的替代方案
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context · 补充信息
+      description: Mockups, screenshots, links to similar tools. · 草图、截图、同类工具链接。
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution · 参与意愿
+      options:
+        - label: I'd like to implement this myself. · 我愿意自己实现。

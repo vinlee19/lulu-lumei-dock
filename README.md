@@ -408,12 +408,17 @@ make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
 make package-release # verified ZIP + appcast containing its EdDSA signature
 make install    # app + install to /Applications/lulu-lumei-dock.app
+make lint-comments # fail on CJK text in code comments
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # diff usage totals vs. ccusage (expect 0.00%)
 ```
 
 There is no test filter — the runner (`Tests/EurekaTestsRunner/main.swift`) calls each suite
 sequentially. To run a subset, comment out suite calls in `main.swift`.
+
+Contributing: read [CONTRIBUTING.md](CONTRIBUTING.md) (issues, proposals, draft and ready PRs,
+the PR template) and [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) (branching,
+verification gates, definition of done) before opening a pull request.
 
 ## Architecture
 
