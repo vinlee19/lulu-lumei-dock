@@ -35,14 +35,14 @@ func mcpOAuthTests(_ t: TestRunner) {
         try expectEqual(metadata?.tokenEndpoint, "https://auth.example/token")
         try expectEqual(metadata?.registrationEndpoint, "https://auth.example/register")
         try expectEqual(metadata?.scopesSupported ?? [], ["read", "write"])
-        // 缺 token_endpoint → nil
+        // Missing token_endpoint → nil
         try expect(MCPOAuth.parseASMetadata(
             Data(#"{"authorization_endpoint":"https://x/a"}"#.utf8)) == nil)
 
         try expectEqual(
             MCPOAuth.wellKnownASMetadataURL(issuer: "https://auth.example")?.absoluteString,
             "https://auth.example/.well-known/oauth-authorization-server")
-        // issuer 带路径：well-known 插在路径前（RFC 8414）
+        // Issuer with a path: well-known is inserted before the path (RFC 8414)
         try expectEqual(
             MCPOAuth.wellKnownASMetadataURL(issuer: "https://auth.example/tenant1")?.absoluteString,
             "https://auth.example/.well-known/oauth-authorization-server/tenant1")
@@ -51,14 +51,15 @@ func mcpOAuthTests(_ t: TestRunner) {
     }
 
     t.test("AS 发现候选（2025-11-25 MUST 双机制按序）：OAuth → OIDC 插入 → OIDC 追加") {
-        // 带路径 issuer：三候选
+        // Issuer with a path: three candidates
         try expectEqual(
             MCPOAuth.asMetadataCandidates(issuer: "https://auth.example/tenant1")
                 .map(\.absoluteString),
             ["https://auth.example/.well-known/oauth-authorization-server/tenant1",
              "https://auth.example/.well-known/openid-configuration/tenant1",
              "https://auth.example/tenant1/.well-known/openid-configuration"])
-        // 无路径 issuer：两候选（追加式与插入式同址，去重）
+        // Issuer without a path: two candidates (appended and inserted forms are the same URL,
+        // deduped)
         try expectEqual(
             MCPOAuth.asMetadataCandidates(issuer: "https://auth.example")
                 .map(\.absoluteString),
@@ -79,7 +80,7 @@ func mcpOAuthTests(_ t: TestRunner) {
     }
 
     t.test("OIDC 文档同套解析 + PKCE 能力字段 + scope 选择策略") {
-        // OIDC Discovery 文档字段名与 RFC 8414 相同，一套解析通吃
+        // OIDC Discovery documents use the same field names as RFC 8414, so one parser handles both
         let oidc = """
         {"issuer":"https://auth.example","authorization_endpoint":"https://auth.example/authorize",
          "token_endpoint":"https://auth.example/token",
@@ -88,12 +89,14 @@ func mcpOAuthTests(_ t: TestRunner) {
         """
         let metadata = MCPOAuth.parseASMetadata(Data(oidc.utf8))
         try expectEqual(metadata?.codeChallengeMethodsSupported ?? [], ["S256", "plain"])
-        // 缺 code_challenge_methods_supported → 空数组（Flow 层据此拒绝，防 PKCE 降级）
+        // Missing code_challenge_methods_supported → empty array (the Flow layer refuses on that,
+        // preventing a PKCE downgrade)
         let noPKCE = MCPOAuth.parseASMetadata(Data(
             #"{"authorization_endpoint":"https://x/a","token_endpoint":"https://x/t"}"#.utf8))
         try expectEqual(noPKCE?.codeChallengeMethodsSupported ?? ["解析失败"], [])
 
-        // scope 三优先级：质询权威 → scopes_supported → 全无省略
+        // scope has three priorities: challenge is authoritative → scopes_supported → omit when
+        // neither exists
         try expectEqual(
             MCPOAuth.selectScopes(challengeScopes: ["files:read"], metadata: metadata),
             ["files:read"], "质询 scope 是权威来源")
@@ -188,7 +191,7 @@ func mcpOAuthTests(_ t: TestRunner) {
     }
 }
 
-/// 简易 unwrap（本 harness 无 XCTUnwrap）
+/// Simple unwrap (this harness has no XCTUnwrap)
 private func requireValue<T>(_ value: T?) throws -> T {
     guard let value else { throw ExpectationError(description: "unexpected nil") }
     return value

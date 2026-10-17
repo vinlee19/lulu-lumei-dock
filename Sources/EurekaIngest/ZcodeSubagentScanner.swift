@@ -1,18 +1,22 @@
 import Foundation
 import EurekaKit
 
-/// 扫描一个 ZCode 会话的子 agent 现场（纯函数，便于单测）。
-/// 轻量快照：只读 `~/.zcode/cli/agents/<sess>/agent_*/metadata.json`，
-/// 不做增量 tail（子代理 rollout/transcript 逐行入岛会造成幻影任务）。
+/// Scans the live subagent state of one ZCode session (pure function, for unit tests).
+/// Lightweight snapshot: reads only `~/.zcode/cli/agents/<sess>/agent_*/metadata.json`,
+/// no incremental tail (feeding subagent rollout/transcript lines into the island would
+/// create phantom tasks).
 ///
-/// 磁盘约定（实勘 2026-08，~/.zcode/cli/agents）：
-/// - `<sess>/agent_<id>/metadata.json` = 一个子 agent：`profileSnapshot.name` 给类型
-///   （如 "Explore"），`description` 给任务描述，`status`（running/completed/failed），
-///   `createdAt/updatedAt/completedAt` ISO8601，`usage` 为 token 汇总（扫描器另收）。
-/// - 当前活动工具：子目录 transcript.jsonl 尾窗最后一个 tool_call_scheduled/toolName。
+/// On-disk layout (observed 2026-08, ~/.zcode/cli/agents):
+/// - `<sess>/agent_<id>/metadata.json` = one subagent: `profileSnapshot.name` gives the type
+///   (e.g. "Explore"), `description` the task description, `status` (running/completed/failed),
+///   `createdAt/updatedAt/completedAt` ISO8601, `usage` the token totals (collected separately
+///   by the scanner).
+/// - current tool: the last tool_call_scheduled/toolName in the tail window of the subdir's
+///   transcript.jsonl.
 public enum ZcodeSubagentScanner {
-    /// `sessionDir` = `agents/<sess_<uuid>>/`（含各 agent_<id>/ 的目录）。
-    /// `turnStartedAt` = 主会话当前 turn 起点：创建早于它的子 agent 是旧 turn 遗留，过滤。
+    /// `sessionDir` = `agents/<sess_<uuid>>/` (the dir holding each agent_<id>/).
+    /// `turnStartedAt` = start of the main session's current turn: subagents created before it
+    /// are leftovers from an old turn and are filtered out.
     public static func scan(
         sessionDir: URL,
         turnStartedAt: Date? = nil,
@@ -36,7 +40,7 @@ public enum ZcodeSubagentScanner {
                   let root = object as? [String: Any]
             else { continue }
             let createdAt = ZcodeRolloutDecoder.parseISO(root["createdAt"] as? String)
-            // 只保留本 turn 派生的子 agent
+            // Keep only subagents spawned in this turn
             if let turnStartedAt, let createdAt, createdAt < turnStartedAt { continue }
 
             let status: SubagentInfo.Status
@@ -45,7 +49,8 @@ public enum ZcodeSubagentScanner {
             case "failed", "error", "cancelled": status = .failed
             case "running": status = .running
             default:
-                // 缺 status 字段：按完成时间兜底，仍无则视作进行中
+                // No status field: fall back to the completion time; without one, treat as
+                // running
                 status = (root["completedAt"] as? String).flatMap(ZcodeRolloutDecoder.parseISO) != nil
                     ? .completed : .running
             }
@@ -59,10 +64,10 @@ public enum ZcodeSubagentScanner {
                 currentActivity: status == .running
                     ? lastToolName(dir: dir, tailBytes: tailBytes) : nil,
                 startedAt: createdAt,
-                finishedAt: nil))  // 快照可去重：finishedAt 统一留 nil（与 kimi/claude 扫描器同例）
+                finishedAt: nil))  // keeps snapshots dedupable: finishedAt always nil (same as the kimi/claude scanners)
         }
 
-        // 稳定排序：开始时间在前，缺时间者按 agentId 兜底
+        // Stable sort: earlier start time first; without a time, fall back to agentId
         return infos.sorted {
             switch ($0.startedAt, $1.startedAt) {
             case let (l?, r?) where l != r: return l < r
@@ -71,7 +76,8 @@ public enum ZcodeSubagentScanner {
         }
     }
 
-    /// 子代理 transcript.jsonl 尾窗最后一个工具名（tool_call_scheduled.toolName）
+    /// Last tool name in the tail window of a subagent's transcript.jsonl
+    /// (tool_call_scheduled.toolName)
     private static func lastToolName(dir: URL, tailBytes: Int) -> String? {
         let transcript = dir.appendingPathComponent("transcript.jsonl")
         guard

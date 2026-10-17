@@ -5,16 +5,16 @@ func hookDiagnosticsTests(_ t: TestRunner) {
     t.suite("hook 诊断 · 异常识别与他人配置共存")
 
     let stable = "/Users/demo/Library/Application Support/Eureka/bin/eureka-relay"
-    /// 默认认为 relay 可执行；要测 relayMissing 时传 { _ in false }
+    /// Relay is assumed executable by default; pass { _ in false } to test relayMissing
     let present: (String) -> Bool = { _ in true }
 
-    /// 造一份装好的 settings.json（可注入他人 hook）
+    /// Builds an installed settings.json (others' hooks can be injected)
     func installedJSON(relayPath: String = stable, withForeign: Bool = false) throws -> String {
         var json = try ClaudeHooksInstaller.install(into: "{}", relayPath: relayPath)
         guard withForeign else { return json }
         var root = try ClaudeHooksInstaller.parseForTest(json)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        // 模拟本机真实形态：otty-cli 的 hook 与我们并存在同一事件上
+        // Mirror the real local setup: otty-cli's hooks sit alongside ours on the same event
         for event in ["PreToolUse", "Stop"] {
             var entries = hooks[event] as? [[String: Any]] ?? []
             entries.append([
@@ -67,7 +67,8 @@ func hookDiagnosticsTests(_ t: TestRunner) {
             relayIsExecutable: { _ in false })
         try expectEqual(diagnosis, .relayMissing(path: stable))
         try expectEqual(diagnosis.severity, .error)
-        // 这个是我们自己能修好的（重建转发器），所以不该阻止自动写入
+        // We can fix this one ourselves (rebuild the forwarder), so it must not block automatic
+        // writes
         try expect(!diagnosis.blocksAutomaticWrite)
     }
 
@@ -92,13 +93,14 @@ func hookDiagnosticsTests(_ t: TestRunner) {
         let report = ClaudeHooksInstaller.foreignHooks(in: json)
         try expectEqual(report.tools, ["otty-cli"], "应只报出他人的工具短名")
         try expectEqual(report.events, ["PreToolUse", "Stop"])
-        // 自己的条目不该被算成"他人"
+        // Our own entries must not be counted as "others"
         try expect(!report.tools.contains { $0.contains("eureka") })
     }
 
     t.test("装卸他人 hook 逐字不动（共存回归，仿本机真实形态）") {
         let json = try installedJSON(withForeign: true)
-        // 卸载后：我们的条目全没了，otty-cli 的两条必须原样都在
+        // After uninstall: all our entries are gone, and both otty-cli entries must remain
+        // untouched
         let uninstalled = try ClaudeHooksInstaller.uninstall(from: json)
         try expect(!uninstalled.contains("eureka-relay"), "自有条目应清干净")
         let root = try ClaudeHooksInstaller.parseForTest(uninstalled)
@@ -111,7 +113,7 @@ func hookDiagnosticsTests(_ t: TestRunner) {
                 commands.contains { $0.contains("otty-cli") },
                 "\(event) 上他人的 hook 被误删了")
         }
-        // 再装回来：他人条目仍在（幂等 + 不误伤）
+        // Reinstall: others' entries are still there (idempotent + no collateral damage)
         let reinstalled = try ClaudeHooksInstaller.install(
             into: uninstalled, relayPath: stable)
         try expect(reinstalled.contains("otty-cli"))
@@ -122,14 +124,14 @@ func hookDiagnosticsTests(_ t: TestRunner) {
     }
 
     t.test("认不出的 hooks 形态：拒绝改写而不是把它当空数组覆盖掉") {
-        // 真实风险：事件值不是条目数组时 entriesOf 返回 []，install 随后
-        // hooks[event] = [我们的条目] 会把原内容整个删掉。必须拒绝。
+        // Real risk: when an event value isn't an entry array, entriesOf returns [], and install
+        // then sets hooks[event] = [our entry], wiping the original content. This must be refused.
         let shapes = [
-            // 数组里混了 null / 字符串
+            // Array mixed with null / strings
             "{\"hooks\":{\"PreToolUse\":[{\"hooks\":[{\"command\":\"x\"}]},null]}}",
-            // 事件值是对象而不是数组
+            // Event value is an object, not an array
             "{\"hooks\":{\"Stop\":{\"hooks\":[{\"command\":\"x\"}]}}}",
-            // 事件值是字符串
+            // Event value is a string
             "{\"hooks\":{\"Stop\":\"some-command\"}}",
         ]
         for json in shapes {
@@ -160,7 +162,7 @@ func hookDiagnosticsTests(_ t: TestRunner) {
             .installed)
         _ = try ClaudeHooksInstaller.install(into: json, relayPath: stable)
         _ = try ClaudeHooksInstaller.uninstall(from: json)
-        // 空 hooks / 无 hooks 键也要照常工作
+        // Empty hooks / no hooks key must work as usual
         _ = try ClaudeHooksInstaller.install(into: "{}", relayPath: stable)
         _ = try ClaudeHooksInstaller.install(into: "{\"hooks\":{}}", relayPath: stable)
     }
@@ -233,12 +235,12 @@ func hookDiagnosticsTests(_ t: TestRunner) {
             try expect(!diagnosis.label.isEmpty, "\(diagnosis) 缺标签")
             try expect(diagnosis.detail?.isEmpty == false, "\(diagnosis) 缺给用户的解释")
         }
-        // 正常态不该有噪音说明
+        // A healthy state must carry no noisy explanation
         try expect(HookDiagnosis.installed.detail == nil)
         try expect(HookDiagnosis.notInstalled.detail == nil)
     }
 
-    // MARK: - relay 改名（eureka-relay → lululumei-relay）
+    // MARK: - relay rename (eureka-relay → lululumei-relay)
 
     let renamedStable = "/Users/demo/Library/Application Support/Eureka/bin/lululumei-relay"
     let legacyStable = "/Users/demo/Library/Application Support/Eureka/bin/eureka-relay"
@@ -306,7 +308,7 @@ func hookDiagnosticsTests(_ t: TestRunner) {
     }
 }
 
-/// 小工具：Optional 解包失败即报错
+/// Helper: fail when an Optional can't be unwrapped
 private func require<T>(
     _ value: T?, file: StaticString = #filePath, line: UInt = #line
 ) throws -> T {

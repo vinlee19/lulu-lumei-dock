@@ -2,10 +2,13 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 模型定价（USD / 百万 token）。
-/// `unknown: true` 是显式"未定价"哨兵：阻断更短前缀的家族回退，避免静默算错钱。
-/// 手写表里的 unknown 默认是“软”的——远程价格目录查得到就用目录价；
-/// `authoritative: true` 的（如 `cursor/`）才是硬性不算钱。用户覆盖文件里的 unknown 一律权威。
+/// Model pricing (USD per million tokens).
+/// `unknown: true` is an explicit "unpriced" sentinel: it blocks family fallback to shorter
+/// prefixes so cost is never silently wrong.
+/// An unknown in the handwritten table is "soft" by default - if the remote price catalog has the
+/// model, the catalog price is used;
+/// only `authoritative: true` entries (e.g. `cursor/`) are hard no-cost. An unknown in the user
+/// override file is always authoritative.
 public struct ModelPrice: Codable, Equatable, Sendable {
     public var match: String
     public var unknown: Bool?
@@ -36,13 +39,14 @@ public struct ModelPrice: Codable, Equatable, Sendable {
         self.authoritative = authoritative
     }
 
-    /// 有输入/输出价且非 unknown 哨兵
+    /// Has input/output prices and is not the unknown sentinel
     public var isPriced: Bool {
         unknown != true && inputPerM != nil && outputPerM != nil
     }
 }
 
-/// 价格表文件（随包 pricing.json 与用户覆盖文件同结构）：`models` 前缀表 + 可选 `providers` 别名表
+/// Price table file (bundled pricing.json and the user override file share the shape): a `models`
+/// prefix table + an optional `providers` alias table
 public struct PricingFile: Codable, Sendable {
     public var models: [ModelPrice]
     public var providers: [String: ProviderAlias]?
@@ -57,8 +61,9 @@ public struct PricingFile: Codable, Sendable {
     }
 }
 
-/// 价格表：PriceResolver 外包一层按 (model, provider) 的解析缓存。
-/// 值语义、可跨线程共享；换一份价格目录就是换一个新 PricingTable，缓存随之失效。
+/// Price table: PriceResolver wrapped with a resolution cache keyed by (model, provider).
+/// Value semantics, safe to share across threads; swapping the price catalog means a new
+/// PricingTable, and the cache goes with it.
 public struct PricingTable: Sendable {
     public let resolver: PriceResolver
     private let memo = ResolutionMemo()
@@ -67,7 +72,8 @@ public struct PricingTable: Sendable {
         self.resolver = resolver
     }
 
-    /// 仅手写表（无远程目录、无覆盖）：测试与兜底用，语义同旧版
+    /// Handwritten table only (no remote catalog, no overrides): for tests and fallback, same
+    /// semantics as the old version
     public init(models: [ModelPrice]) {
         self.init(resolver: PriceResolver(bundled: models))
     }
@@ -77,7 +83,9 @@ public struct PricingTable: Sendable {
         self.init(resolver: PriceResolver(bundled: file.models, aliases: file.providers ?? [:]))
     }
 
-    /// 随包手写表 + 用户覆盖文件（最上层，不再整表替换）+ 远程价格目录
+    /// Bundled handwritten table + user override file (top layer, no longer replaces the whole
+    /// table)
+    /// + remote price catalog
     public static func load(
         bundledURL: URL?, overrideURL: URL?, catalog: PriceCatalog = .empty
     ) -> PricingTable {
@@ -94,12 +102,12 @@ public struct PricingTable: Sendable {
             aliases: aliases, catalog: catalog))
     }
 
-    /// 只按模型名解析（无 provider 信息时）；nil = 未定价
+    /// Resolves by model name only (when there is no provider info); nil = unpriced
     public func price(for model: String) -> ModelPrice? {
         resolution(for: model, provider: nil).price
     }
 
-    /// 一组聚合的价格出处（有自报费用时为 .reported）
+    /// Price provenance for one aggregate (.reported when there is a self-reported cost)
     public func resolution(of totals: UsageTotals) -> PriceResolution {
         if totals.reportedCostUSD != nil {
             return PriceResolution(
@@ -117,7 +125,8 @@ public struct PricingTable: Sendable {
         return result
     }
 
-    /// 一组聚合的费用；nil = 该模型未定价。agent 自报费用（Grok）优先于价格表
+    /// Cost of one aggregate; nil = the model is unpriced. An agent's self-reported cost (Grok)
+    /// wins over the price table
     public func cost(of totals: UsageTotals) -> Double? {
         if let reported = totals.reportedCostUSD { return reported }
         guard let price = resolution(for: totals.model, provider: totals.provider).price else {
@@ -129,7 +138,8 @@ public struct PricingTable: Sendable {
     static func cost(of totals: UsageTotals, price: ModelPrice) -> Double? {
         guard let inputPerM = price.inputPerM, let outputPerM = price.outputPerM else { return nil }
 
-        // 缓存价缺省时按 Anthropic 惯例从输入价推导：读 0.1x、5m 写 1.25x、1h 写 2x（显式 0 就是 0）
+        // Missing cache prices are derived from the input price per Anthropic convention: read
+        // 0.1x, 5m write 1.25x, 1h write 2x (an explicit 0 stays 0)
         let cacheRead = price.cacheReadPerM ?? inputPerM * 0.1
         let cacheWrite5m = price.cacheWrite5mPerM ?? inputPerM * 1.25
         let cacheWrite1h = price.cacheWrite1hPerM ?? inputPerM * 2.0
@@ -146,7 +156,8 @@ public struct PricingTable: Sendable {
     }
 }
 
-/// 解析结果缓存：看板每次渲染都会逐行算钱（主线程），扫描在后台队列，故加锁
+/// Resolution cache: the dashboard prices every row on each render (main thread) while scans run
+/// on a background queue, hence the lock
 final class ResolutionMemo: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [String: PriceResolution] = [:]

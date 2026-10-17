@@ -1,21 +1,30 @@
 import EurekaStore
 import Foundation
 
-/// eureka.sqlite 的**分析快照**：把三张分析事实表（usage_records / task_history /
-/// tool_calls）抽取成一个独立的小 SQLite 文件，随云备份上传，服务器侧可直接用
-/// DuckDB（sqlite_scanner ATTACH）或 sqlite3 做分析（脚本见 Scripts/analytics/）。
+/// **Analytics snapshot** of eureka.sqlite: extracts the three analytics fact tables
+/// (usage_records / task_history /
+/// tool_calls) into a small standalone SQLite file that rides along with the cloud backup, so the
+/// server side can analyze it directly with
+/// DuckDB (sqlite_scanner ATTACH) or sqlite3 (scripts in Scripts/analytics/).
 ///
-/// 为什么不能像 opencode 那样整库 VACUUM 上传：
-/// 1. eureka.sqlite 里就存着 sync_state / sync_runs 记账表 —— 上传后引擎落状态会改动
-///    库文件本身，下一轮又判定"变了"再传，形成每轮必传的永动噪音；
-/// 2. 整库还带全文索引（fts_docs / knowledge_docs），体积可达数百 MB，分析用不上。
-/// 所以：指纹只看三张事实表（行数 + 最大 rowid），变了才重建快照；快照文件本身
-/// 走常规单文件枚举 → size/mtime diff，与其它备份文件同一条路。
+/// Why the whole database can't be VACUUM-uploaded the way opencode's is:
+/// 1. eureka.sqlite itself holds the sync_state / sync_runs bookkeeping tables: persisting state
+///    after an upload modifies
+///    the database file, so the next round sees it as "changed" and uploads again, an endless
+///    upload-every-round noise loop;
+/// 2. the whole database also carries full-text indexes (fts_docs / knowledge_docs), which can
+///    reach hundreds of MB and are useless for analytics.
+/// So: the fingerprint covers only the three fact tables (row count + max rowid), and the
+/// snapshot is rebuilt only when it changes; the snapshot file itself
+/// goes through the regular single-file enumeration → size/mtime diff, the same path as every
+/// other backed-up file.
 public enum EurekaDBSnapshot {
-    /// 抽取进快照的分析事实表（服务器侧 bootstrap.sql 按这个清单写查询）
+    /// Analytics fact tables extracted into the snapshot (the server-side bootstrap.sql writes its
+    /// queries against this list)
     public static let tables = ["usage_records", "task_history", "tool_calls"]
 
-    /// 事实表指纹：`表=行数:最大rowid` 逐表拼接。库不存在/查询失败返回 nil。
+    /// Fact-table fingerprint: `table=rows:maxRowid` concatenated per table. Returns nil if the
+    /// database is missing or a query fails.
     public static func fingerprint(dbPath: URL) -> String? {
         guard FileManager.default.fileExists(atPath: dbPath.path),
               let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return nil }
@@ -30,8 +39,9 @@ public enum EurekaDBSnapshot {
         return parts.joined(separator: ",")
     }
 
-    /// 指纹变化时才重建快照（临时文件 + 原子替换 + 指纹侧车），返回是否重建。
-    /// best-effort：任何失败安静返回 false，本轮照常同步旧快照（若有）。
+    /// Rebuilds the snapshot only when the fingerprint changed (temp file + atomic replace +
+    /// fingerprint sidecar); returns whether it rebuilt. Best-effort: any failure quietly returns
+    /// false, and this round syncs the old snapshot (if any) as usual.
     @discardableResult
     public static func materializeIfChanged(dbPath: URL, snapshotPath: URL) -> Bool {
         guard let fingerprint = fingerprint(dbPath: dbPath) else { return false }
@@ -46,8 +56,10 @@ public enum EurekaDBSnapshot {
             try fm.createDirectory(
                 at: snapshotPath.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? fm.removeItem(at: temp)
-            // 快照连接以自身为主库、ATTACH 源库只做 SELECT；事务内整批复制保证三表一致。
-            // 作用域块保证连接在 rename 前关闭（避免半开文件被替换）。
+            // The snapshot connection uses itself as main and ATTACHes the source only for SELECT;
+            // copying the whole batch inside one transaction keeps the three tables consistent. The
+            // scoped block guarantees the connection closes before the rename (so no half-open file
+            // gets replaced).
             do {
                 let out = try SQLiteDB(path: temp.path)
                 let escaped = dbPath.path.replacingOccurrences(of: "'", with: "''")
@@ -58,9 +70,11 @@ public enum EurekaDBSnapshot {
                     }
                 }
                 try out.execute("DETACH src")
-                // SQLiteDB 建库默认 WAL，但 WAL 标头的文件没有 -shm 就**无法只读打开**
-                // （服务器侧下载单文件后 sqlite3/DuckDB 只读 ATTACH 会 CANTOPEN）。
-                // 快照必须是自包含单文件 → 转回 DELETE journal 再关连接。
+                // SQLiteDB creates databases in WAL mode by default, but a file with a WAL header
+                // **can't be opened read-only** without its -shm (after the server downloads the
+                // single file, a read-only ATTACH from sqlite3/DuckDB fails with CANTOPEN). The
+                // snapshot must be a self-contained single file → switch back to the DELETE journal
+                // before closing the connection.
                 try out.execute("PRAGMA journal_mode=DELETE")
             }
             try? fm.removeItem(at: snapshotPath)

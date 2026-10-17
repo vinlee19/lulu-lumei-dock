@@ -1,22 +1,23 @@
 import EurekaKit
 import Foundation
 
-/// 解析 Qoder CLI 会话 JSONL 单行（`~/.qoder-cn/projects/<slug>/<sessionId>.jsonl`，
-/// Claude 式信封）。schema 已对着本机真实会话核验（v1.1.5，2026-07）：
-/// - `workspace-directories`（恒为首行，directories=[cwd]，无时间戳）
-/// - `runtime-config`（model 等，timestamp 是 epoch-ms 数字）→ 忽略
-/// - `custom-title` / `ai-title` / `last-prompt`（标题/末轮 prompt，无时间戳）
-/// - `user`：origin.kind=="human" 且非 isMeta 才是真实输入；命令行（/plan 等）无 origin；
-///   content 为字符串，或 [{type:"tool_result"}]（工具回灌，非 prompt）
-/// - `assistant`：message.content=[{type:"thinking"|"text"|"tool_use"}]，
-///   text 收尾一轮；tool_use 是中间步；thinking 仅心跳
-/// - `system` / `file-history-snapshot` / 未知类型 → 忽略
-/// 时间戳是 ISO-8601 字符串（带小数秒），与 kimi 的 epoch-ms 不同。
-/// 未知字段一律容缺不抛错。session id / cwd 由调用方从路径与行字段带入。
+/// Decodes one line of a Qoder CLI session JSONL (`~/.qoder-cn/projects/<slug>/<sessionId>.jsonl`,
+/// Claude-style envelope). Schema verified against real local sessions (v1.1.5, 2026-07):
+/// - `workspace-directories` (always the first line, directories=[cwd], no timestamp)
+/// - `runtime-config` (model etc., timestamp is an epoch-ms number) → ignored
+/// - `custom-title` / `ai-title` / `last-prompt` (title / last-turn prompt, no timestamp)
+/// - `user`: real input only when origin.kind=="human" and not isMeta; commands (/plan etc.) have
+///   no origin; content is a string, or [{type:"tool_result"}] (tool output fed back, not a prompt)
+/// - `assistant`: message.content=[{type:"thinking"|"text"|"tool_use"}],
+///   text ends a turn; tool_use is an intermediate step; thinking is only a heartbeat
+/// - `system` / `file-history-snapshot` / unknown types → ignored
+/// Timestamps are ISO-8601 strings (with fractional seconds), unlike kimi's epoch-ms. Unknown or
+/// missing fields are tolerated, never thrown. The caller supplies session id / cwd from the path
+/// and line fields.
 public enum QoderTranscriptDecoder {
-    // MARK: - 生命周期解码
+    // MARK: - Lifecycle decoding
 
-    /// 单行解码 → 领域事件（0 或 1 个）
+    /// Decode one line → domain events (0 or 1)
     public static func decode(
         line: Data, sessionId: String, cwd: String?
     ) -> TaskEvent? {
@@ -27,7 +28,8 @@ public enum QoderTranscriptDecoder {
         return decode(root: root, sessionId: sessionId, cwd: cwd)
     }
 
-    /// 已解析行的解码（tailer 单次 JSON 解析后与旁路提取共用）
+    /// Decode an already-parsed line (the tailer parses JSON once and shares it with side-channel
+    /// extraction)
     public static func decode(
         root: [String: Any], sessionId: String, cwd: String?
     ) -> TaskEvent? {
@@ -40,8 +42,8 @@ public enum QoderTranscriptDecoder {
 
         switch type {
         case "user":
-            // origin.kind=="human" 且非 isMeta 且有正文 = 真实新一轮；
-            // 命令注入（无 origin）/ 本地命令 caveat（isMeta）/ tool_result 回灌都不算
+            // origin.kind=="human", not isMeta, with a body = a real new turn; command injection
+            // (no origin) / local-command caveats (isMeta) / tool_result feedback don't count
             guard let text = userPromptText(root) else { return nil }
             return event(.taskStarted(title: summarizeTitle(text)))
 
@@ -49,13 +51,13 @@ public enum QoderTranscriptDecoder {
             guard let message = root["message"] as? [String: Any] else { return nil }
             let (text, tool) = assistantPayload(message)
             if text != nil {
-                // 可见正文 = 一轮收尾
+                // Visible body = end of turn
                 return event(.taskFinished(outcome: .success, title: nil, detail: nil))
             }
             if let tool {
                 return event(.activity(tool: tool))
             }
-            // 纯 thinking：轮内心跳（刷新活跃，不改状态语义）
+            // Thinking only: in-turn heartbeat (refreshes activity, doesn't change state semantics)
             return event(.activity(tool: nil))
 
         case "custom-title":
@@ -71,15 +73,15 @@ public enum QoderTranscriptDecoder {
             return event(.titleUpdate(title: title))
 
         // runtime-config / workspace-directories / last-prompt / system /
-        // file-history-snapshot / 未知类型：不产出任务状态事件
+        // file-history-snapshot / unknown types: emit no task-state events
         default:
             return nil
         }
     }
 
-    // MARK: - 旁路提取（tailer/indexer 复用；全部容缺）
+    // MARK: - Side-channel extraction (shared by tailer/indexer; all tolerate missing fields)
 
-    /// 真实用户输入正文（origin.kind=="human"、非 isMeta、text 非空）；否则 nil
+    /// Real user input body (origin.kind=="human", not isMeta, non-empty text); otherwise nil
     public static func userPromptText(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "user",
               (root["origin"] as? [String: Any])?["kind"] as? String == "human",
@@ -100,7 +102,8 @@ public enum QoderTranscriptDecoder {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// assistant message 的 (可见正文, 首个工具名)：text 段拼接；tool_use 取 name
+    /// (visible body, first tool name) of an assistant message: text parts joined; tool_use
+    /// contributes its name
     static func assistantPayload(_ message: [String: Any]) -> (text: String?, tool: String?) {
         if let string = message["content"] as? String {
             let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -120,14 +123,14 @@ public enum QoderTranscriptDecoder {
                 if tool == nil, let name = block["name"] as? String, !name.isEmpty {
                     tool = name
                 }
-            default:  // thinking 等：不进正文
+            default:  // thinking etc.: not part of the body
                 continue
             }
         }
         return (texts.isEmpty ? nil : texts.joined(separator: "\n"), tool)
     }
 
-    /// 标题行（custom-title / ai-title）的 (是否用户自定义, 标题)；其它类型返回 nil
+    /// (is user-defined, title) of a title line (custom-title / ai-title); nil for other types
     public static func titleLine(_ root: [String: Any]) -> (isCustom: Bool, title: String)? {
         let type = root["type"] as? String
         let key = type == "custom-title" ? "customTitle" : type == "ai-title" ? "aiTitle" : nil
@@ -138,7 +141,7 @@ public enum QoderTranscriptDecoder {
         return (key == "customTitle", title)
     }
 
-    /// last-prompt 行的正文；其它类型返回 nil
+    /// Body of a last-prompt line; nil for other types
     public static func lastPrompt(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "last-prompt",
               let prompt = (root["lastPrompt"] as? String)?
@@ -147,7 +150,7 @@ public enum QoderTranscriptDecoder {
         return prompt
     }
 
-    /// 行 cwd：workspace-directories 的 directories[0]，或普通行的 cwd 字段
+    /// Line cwd: directories[0] of workspace-directories, or the cwd field of an ordinary line
     public static func cwd(_ root: [String: Any]) -> String? {
         if root["type"] as? String == "workspace-directories",
            let directories = root["directories"] as? [String],
@@ -157,7 +160,8 @@ public enum QoderTranscriptDecoder {
         return root["cwd"] as? String
     }
 
-    /// 事件时间：`timestamp` 为 ISO-8601 字符串（带/不带小数秒），epoch 毫秒数字兜底
+    /// Event time: `timestamp` is an ISO-8601 string (with/without fractional seconds); an epoch-ms
+    /// number is the fallback
     public static func timestamp(_ root: [String: Any]) -> Date? {
         if let string = root["timestamp"] as? String {
             return KimiWireDecoder.parseISO(string)

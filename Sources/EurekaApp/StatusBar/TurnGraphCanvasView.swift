@@ -1,31 +1,33 @@
 import EurekaKit
 import SwiftUI
 
-/// 血缘图画布：把 `TurnGraphLayout.Result` 画出来。
+/// Lineage graph canvas: draws a `TurnGraphLayout.Result`.
 ///
-/// **用 `ZStack` 绝对定位 + 每种边角色一个 `Shape`，不用 `Canvas`。**
-/// 决定性理由是离屏渲染 —— 本项目的验收手段是 `NSHostingView + cacheDisplay`（见
-/// `PreviewRenderer.snap`），而 `Canvas` 内部等价隐式 `drawingGroup()`（Metal 离屏合成），
-/// 这个组合全仓零先例；渲成空白就没有 fallback。`ZStack`+`Shape` 则是双重已证：
-/// `renderShell` 渲过含 `GeometryReader` 的 `AuditView`，`IconRenderer` 用 `Shape` 渲过图标。
-/// 附带收益：节点是真 View，`.onHover` / `onTapGesture` / `.help()` 全部免费 ——
-/// 而主窗口侧没有任何手势基础设施。
+/// **Uses `ZStack` absolute positioning + one `Shape` per edge role, not `Canvas`.** The deciding
+/// reason is offscreen rendering -- this project verifies UI via `NSHostingView + cacheDisplay`
+/// (see `PreviewRenderer.snap`), while `Canvas` is internally equivalent to an implicit
+/// `drawingGroup()` (Metal offscreen compositing); that combination has zero precedent in the repo,
+/// and if it renders blank there's no fallback. `ZStack`+`Shape` is doubly proven: `renderShell`
+/// has rendered `AuditView` containing a `GeometryReader`, and `IconRenderer` has rendered icons
+/// with `Shape`. Side benefit: nodes are real Views, so `.onHover` / `onTapGesture` / `.help()` all
+/// come for free -- and the main window has no gesture infrastructure of its own.
 ///
-/// 边层按角色聚合成 4+4 个 Shape（线 + 箭头），**与边数无关**：60 条边也还是 8 个 View。
+/// Edge layers are aggregated by role into 4+4 Shapes (lines + arrows), **independent of edge count**: 60 edges are still 8 Views.
 struct TurnGraphCanvasView: View {
     let result: TurnGraphLayout.Result
-    /// 当前选中的节点（详情条由外层展示）
+    /// Currently selected node (the detail strip is shown by the outer view)
     @Binding var selected: TurnGraph.NodeID?
-    /// 点节点上的「跳到消息」；nil = 不提供
+    /// "Jump to message" on a node; nil = not offered
     var onJumpToMessage: ((Int) -> Void)?
-    /// 点折叠节点展开
+    /// Click a fold node to expand it
     var onToggleFold: ((TurnGraph.NodeID) -> Void)?
-    /// 点子代理节点展开/收起它的内部步骤（并进同一张图）
+    /// Click a subagent node to expand/collapse its internal steps (merged into the same graph)
     var onToggleSubagent: ((TurnGraph.Node) -> Void)?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // 边在下、节点在上：边贴着节点边缘起止，压在下面才不会盖住圆角
+            // Edges below, nodes on top: edges start and end at node borders, and only underneath
+            // do they not cover the rounded corners
             ForEach(TurnGraph.EdgeRole.allCases, id: \.self) { role in
                 let edges = result.edges.filter { $0.role == role }
                 if !edges.isEmpty {
@@ -52,7 +54,8 @@ struct TurnGraphCanvasView: View {
                         }
                     })
                     .frame(width: placed.frame.width, height: placed.frame.height)
-                    // 用 offset 而不是 position：position 是中心坐标语义，会和 frame 打架
+                    // offset rather than position: position has center-coordinate semantics and
+                    // would fight the frame
                     .offset(x: placed.frame.minX, y: placed.frame.minY)
             }
         }
@@ -70,7 +73,7 @@ struct TurnGraphCanvasView: View {
         }
     }
 
-    /// 实线 = 推进；虚线 = 出了问题的回环（回读/重试/返工），一眼能分出来
+    /// Solid = progress; dashed = problem loops (re-read/retry/rework), distinguishable at a glance
     private func strokeStyle(_ role: TurnGraph.EdgeRole) -> StrokeStyle {
         switch role {
         case .causal, .spawn:
@@ -82,9 +85,10 @@ struct TurnGraphCanvasView: View {
     }
 }
 
-// MARK: - 边（按角色聚合成一个 Shape，与边数无关）
+// MARK: - Edges (aggregated by role into one Shape, independent of edge count)
 
-/// 折线段。引擎保证每段严格水平或竖直、且不穿节点，这里只负责描出来。
+/// Polyline segments. The engine guarantees each segment is strictly horizontal or vertical and
+/// never crosses a node; this only strokes them.
 struct TurnEdgeShape: Shape {
     let edges: [TurnGraphLayout.RoutedEdge]
 
@@ -99,7 +103,8 @@ struct TurnEdgeShape: Shape {
     }
 }
 
-/// 箭头单独一层：`fill` 出实心三角，不跟着虚线样式走（虚线箭头认不出方向）
+/// Arrows get their own layer: `fill` draws solid triangles that don't follow the dash style (a
+/// dashed arrow has no recognizable direction)
 struct TurnArrowShape: Shape {
     let edges: [TurnGraphLayout.RoutedEdge]
     var size: CGFloat = 5
@@ -109,7 +114,7 @@ struct TurnArrowShape: Shape {
         for edge in edges {
             let tip = edge.arrowTip
             let direction = edge.arrowDirection
-            // 法线方向张开三角
+            // Open the triangle along the normal
             let normal = CGVector(dx: -direction.dy, dy: direction.dx)
             let base = CGPoint(
                 x: tip.x - direction.dx * size, y: tip.y - direction.dy * size)
@@ -124,10 +129,11 @@ struct TurnArrowShape: Shape {
     }
 }
 
-// MARK: - 节点
+// MARK: - Nodes
 
-/// 一个节点。hover / 选中的视觉逐字照抄 `KnowledgeCard`（换描边 + 0.12 easeOut），
-/// 悬停详情走 `.help()` 而**不用 popover** —— popover 依赖真实窗口，离屏渲染时不被光栅化。
+/// One node. Hover / selection visuals are copied verbatim from `KnowledgeCard` (stroke swap + 0.12
+/// easeOut); hover detail uses `.help()` and **not a popover** -- popovers depend on a real window
+/// and aren't rasterized in offscreen renders.
 struct TurnGraphNodeView: View {
     let placed: TurnGraphLayout.PlacedNode
     var isSelected = false
@@ -147,7 +153,8 @@ struct TurnGraphNodeView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(node.title)
                     .font(.system(size: 10.5, weight: .semibold))
-                    // 契约：标签必须放进引擎给的固定 frame，绝不能让文字反向影响布局
+                    // Contract: the label must fit the fixed frame the engine gives; text must
+                    // never feed back into layout
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if !node.subtitle.isEmpty {
@@ -184,7 +191,8 @@ struct TurnGraphNodeView: View {
                         lineWidth: isSelected ? 1.5 : (hovering ? 1 : 0.6),
                         dash: isDashed ? [3, 2.5] : [])))
         .overlay(alignment: .topTrailing) {
-            // 边道用尽时降级成角标，而不是画一条看不清的线
+            // When edge lanes run out, degrade to corner badges instead of drawing an illegible
+            // line
             if !overflowBadges.isEmpty {
                 Text("↩︎\(overflowBadges.count)")
                     .font(.system(size: 8, weight: .semibold))
@@ -202,7 +210,7 @@ struct TurnGraphNodeView: View {
         .help(helpText)
     }
 
-    // MARK: 视觉
+    // MARK: Visuals
 
     private var icon: String {
         switch node.kind {
@@ -243,7 +251,7 @@ struct TurnGraphNodeView: View {
         return Theme.cardBorder
     }
 
-    /// 思考与分叉用虚线描边：它们是「过程」不是「动作」
+    /// Thinking and forks get a dashed stroke: they're "process", not "action"
     private var isDashed: Bool {
         node.kind == .thinking || node.kind == .fork
     }

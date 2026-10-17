@@ -1,13 +1,13 @@
 import AppKit
 import EurekaKit
 
-/// 程序化构建主菜单（SwiftPM 无 XIB）。常规应用需要它来提供
-/// 关于/隐藏/退出 与 窗口（最小化/缩放/全屏/关闭）等标准动作。
+/// Builds the main menu programmatically (SwiftPM has no XIB). A regular app needs it to provide
+/// standard actions such as About / Hide / Quit and Window (Minimize / Zoom / Full Screen / Close).
 enum MainMenu {
     static func build() -> NSMenu {
         let mainMenu = NSMenu()
 
-        // App 菜单
+        // App menu
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
@@ -37,7 +37,8 @@ enum MainMenu {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q")
 
-        // 查找菜单：⌘K 全局搜索（动作经通知转发给 SwiftUI 层——菜单无法直接触达视图状态）
+        // Find menu: ⌘K global search (the action is forwarded to the SwiftUI layer via a
+        // notification; a menu can't reach view state directly)
         let findItem = NSMenuItem()
         mainMenu.addItem(findItem)
         let findMenu = NSMenu(title: L10n.text("Find", zhHans: "查找"))
@@ -49,7 +50,7 @@ enum MainMenu {
         paletteItem.target = MenuActions.shared
         findMenu.addItem(paletteItem)
 
-        // 窗口菜单
+        // Window menu
         let windowItem = NSMenuItem()
         mainMenu.addItem(windowItem)
         let windowMenu = NSMenu(title: L10n.text("Window", zhHans: "窗口"))
@@ -79,15 +80,17 @@ enum MainMenu {
     }
 }
 
-/// 菜单动作的 NSObject 落点（菜单项必须有 target/selector）。
+/// NSObject landing point for menu actions (menu items need a target/selector).
 final class MenuActions: NSObject {
     static let shared = MenuActions()
 
-    /// 不直接 post 通知：主窗口不可见时，PopoverRootView 的 onReceive 仍会收到通知并
-    /// 悄悄翻转 paletteVisible——用户看不见窗口，也就看不见这次翻转，等下次窗口露面时
-    /// 面板开关状态会跟用户预期对不上。经 AppDelegate 先把主窗口前置显示，再发通知，
-    /// 保证这次翻转发生在用户看得见的地方。菜单动作只能是同步 @objc 方法（不能 await），
-    /// AppKit 保证在主线程调用，用 assumeIsolated 越过 AppDelegate 的 @MainActor 隔离。
+    /// Don't post the notification directly: while the main window is hidden, PopoverRootView's
+    /// onReceive still gets it and silently flips paletteVisible. The user can't see the window, so
+    /// they can't see the flip either, and the next time the window shows the palette's open state
+    /// won't match what they expect. Going through AppDelegate brings the main window forward
+    /// first, then posts, so the flip happens where the user can see it. Menu actions must be
+    /// synchronous @objc methods (no await); AppKit guarantees they run on the main thread, so
+    /// assumeIsolated steps past AppDelegate's @MainActor isolation.
     @objc func togglePalette(_ sender: Any?) {
         MainActor.assumeIsolated {
             (NSApp.delegate as? AppDelegate)?.showPalette()

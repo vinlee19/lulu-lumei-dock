@@ -5,51 +5,63 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// Prompt 库服务：从会话 transcript 增量提取用户提问，统一浏览/搜索/复用。
+/// Prompt library service: incrementally extracts user prompts from session transcripts for
+/// one place to browse, search and reuse them.
 ///
-/// 增量策略与 transcript_fts 同思路（指纹跳过）：`prompt_sessions` 记录每会话上次
-/// 提取时间，`lastActiveAt` 未变的会话直接跳过（TranscriptReader 全量重解析是
-/// 主要成本，一次全扫可达秒级）。提取 upsert 只刷新正文列，收藏/标签/使用计数
-/// 是用户写入的事实，永不被提取覆盖（见 PromptsRepo.upsertExtracted）。
+/// Incremental strategy mirrors transcript_fts (fingerprint skip): `prompt_sessions` records
+/// each session's last extraction time, and sessions whose `lastActiveAt` hasn't changed are
+/// skipped (a full TranscriptReader re-parse is the main cost; one full scan can take seconds).
+/// The extraction upsert refreshes only the body columns; favorites / tags / use counts are
+/// user-written facts and are never overwritten by extraction (see PromptsRepo.upsertExtracted).
 ///
-/// 会话列表来自 SessionBrowserService（注入，不重复发现）；扫描时机由 AppDelegate
-/// 订阅 sessionBrowser 扫描完成事件后调 refresh()。
+/// The session list comes from SessionBrowserService (injected, no duplicate discovery);
+/// AppDelegate subscribes to sessionBrowser's scan-completed event and calls refresh().
 final class PromptsService: ObservableObject {
     @Published private(set) var prompts: [PromptEntry] = []
-    /// 高频重复组（除噪除琐碎后按指纹聚类，refresh 队列算好缓存 —— 不在 body 里逐次算）
+    /// Frequently repeated groups (clustered by fingerprint after dropping noise and trivia;
+    /// computed and cached on the refresh queue, never recomputed in body)
     @Published private(set) var groups: [PromptGroup] = []
     @Published private(set) var scanning = false
     @Published private(set) var scanPhase: String?
     @Published private(set) var lastScanAt: Date?
     @Published private(set) var totalCount = 0
     @Published private(set) var favoriteCount = 0
-    /// 默认被折叠的条数（噪音/琐碎/长粘贴且未收藏），统计卡提示用
+    /// Count of entries folded by default (noise / trivial / long paste, not favorited), for the
+    /// stats card hint
     @Published private(set) var foldedCount = 0
-    /// 评价缓存（prompt_id → 四层信号聚合结果；提取管线算好落库，这里只读回）。
-    /// 缺行 = 该源不可评价或库尚未重扫 —— UI 必须静默无点，不显示"clean"
+    /// Evaluation cache (prompt_id → aggregated four-layer signals; the extraction pipeline
+    /// computes and persists them, this only reads them back).
+    /// A missing row = the source isn't evaluable or the library hasn't been rescanned yet —
+    /// the UI must stay silent with no dot, never show "clean"
     @Published private(set) var evalById: [String: PromptEval] = [:]
-    /// 跨页直达目标（命令面板 / 会话详情跳入）
+    /// Cross-page jump target (from the command palette / session detail)
     var focusId: String?
     var searchText: String = "" { didSet { scheduleRebuild(debounce: true) } }
     var favoritesOnly = false { didSet { scheduleRebuild(debounce: false) } }
-    /// 显示全部（含琐碎/长粘贴/存量噪音）；搜索时无视此开关不隐藏（搜索意图明确）
+    /// Show everything (including trivial / long paste / legacy noise); ignored while searching,
+    /// which hides nothing (the search intent is explicit)
     var showAll = false { didSet { scheduleRebuild(debounce: false) } }
 
-    /// 提取是后台增能（用户没在等它），utility 避免和 UI 关键路径抢核 ——
-    /// 首次全量提取要重解析全部会话，userInitiated 会在启动预热时压住主界面
+    /// Extraction is background enrichment (the user isn't waiting on it); utility avoids
+    /// competing for cores with the UI critical path — the first full extraction re-parses every
+    /// session, and userInitiated would starve the main UI during launch warm-up
     private let queue = DispatchQueue(label: "com.vinlee.eureka.prompts", qos: .utility)
-    /// 过滤代际：慢结果回主线程时已被更新的输入超越则丢弃
+    /// Filter generation: a slow result arriving on the main thread is dropped if newer input
+    /// has superseded it
     private var rebuildGeneration = 0
     private let sessionBrowser: SessionBrowserService
     private var store: EurekaStore?
     private var all: [PromptEntry] = []
-    /// id → 条目索引（与 all 同步维护）：详情直达、组成员展开、标注写回都按 id 找，
-    /// 线性扫 all 在万级库上每展开一个组就要扫全库 N 遍
+    /// id → entry index (kept in sync with all): detail jumps, group member expansion and
+    /// annotation write-back all look up by id; a linear scan of all on a 10k-entry library
+    /// would scan the whole library N times for every expanded group
     private var byId: [String: PromptEntry] = [:]
-    /// 复用价值分类缓存（refresh 队列算好；主线程读写）。
-    /// 内存派生不入库：阈值迭代不需要刷库或迁移 schema
+    /// Reuse-value classification cache (computed on the refresh queue; read/written on main).
+    /// Derived in memory, not persisted: iterating on thresholds needs no DB refresh or schema
+    /// migration
     private var kindById: [String: PromptKind] = [:]
-    /// 会话元数据快照（提取时在队列上取好，避免行渲染回主线程再读 service）
+    /// Session metadata snapshot (taken on the queue during extraction so row rendering doesn't
+    /// go back to the main thread to read the service)
     private var sessionsById: [String: AgentSessionInfo] = [:]
 
     init(sessionBrowser: SessionBrowserService) {
@@ -60,8 +72,10 @@ final class PromptsService: ObservableObject {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// 增量提取：只重解析 `lastActiveAt` 晚于上次提取指纹的会话。
-    /// 无会话数据时静默跳过（sessionBrowser 尚未扫描完，下一次扫描完成会再触发）。
+    /// Incremental extraction: re-parse only sessions whose `lastActiveAt` is later than the last
+    /// extraction fingerprint.
+    /// Silently skips when there is no session data (sessionBrowser hasn't finished scanning; the
+    /// next scan completion triggers it again).
     func refresh() {
         guard !scanning else { return }
         let sessions = Array(sessionBrowser.sessionsById.values)
@@ -91,11 +105,13 @@ final class PromptsService: ObservableObject {
             if !pending.isEmpty {
                 self.publishPhase(L10n.format("Parsing %@ sessions…", zhHans: "正在解析 %@ 个会话…", String(pending.count)))
                 for (index, session) in pending.enumerated() {
-                    // 每会话一个池：messages/轮次图等瞬态在会话间及时释放，
-                    // 全量重扫（迁移后指纹清空）才不会把上百个会话的解析产物
-                    // 一路积累到队列块结束（实测峰值 5.5GB 的主因之一）
+                    // One pool per session: transient messages / turn graphs are released
+                    // between sessions, so a full rescan (fingerprints cleared after a migration)
+                    // doesn't accumulate hundreds of sessions' parse output until the queue block
+                    // ends (one of the main causes of a measured 5.5GB peak)
                     autoreleasepool {
-                        // load 一次共享给提取与评价（全量重解析是主要成本，绝不双调）
+                        // Load once and share between extraction and evaluation (a full
+                        // re-parse is the main cost; never call it twice)
                         let messages = TranscriptReader.load(session: session).messages
                         let entries = PromptExtractor.extract(
                             messages: messages, session: session, at: now)
@@ -116,7 +132,8 @@ final class PromptsService: ObservableObject {
             let entries = (try? store.prompts.all()) ?? []
             let favorites = (try? store.prompts.favoriteCount()) ?? 0
             let evals = (try? store.prompts.evalMap()) ?? [:]
-            // 分类 + 聚类都在这条队列上一次算完缓存（几千条 O(n)，不进 UI 渲染路径）
+            // Classification + clustering are computed and cached once on this queue (a few
+            // thousand entries, O(n), kept off the UI render path)
             var kinds: [String: PromptKind] = [:]
             kinds.reserveCapacity(entries.count)
             var folded = 0
@@ -154,9 +171,11 @@ final class PromptsService: ObservableObject {
         DispatchQueue.main.async { self.scanPhase = phase }
     }
 
-    /// 一个会话的全部 prompt 评价：切轮 → （仅 full 档）建图跑轮内诊断 → 聚合四层信号。
-    /// 只评价真的入库的 prompt（被 extract 滤掉的噪音不评）；excluded 源返回空。
-    /// 纯计算，跑在提取队列上。
+    /// Evaluates every prompt in one session: slice turns → (full tier only) build the graph and
+    /// run in-turn diagnostics → aggregate four-layer signals.
+    /// Only evaluates prompts that were actually stored (noise filtered out by extract is not
+    /// evaluated); excluded sources return empty.
+    /// Pure computation, runs on the extraction queue.
     static func evaluate(
         messages: [TranscriptMessage], session: AgentSessionInfo,
         extractedIds: Set<String>
@@ -170,12 +189,13 @@ final class PromptsService: ObservableObject {
             let promptId = PromptEntry.makeId(
                 source: session.source, sessionId: session.id, messageIdx: messageId)
             guard extractedIds.contains(promptId) else { continue }
-            // 构图只对 full 档做（toolNote 源的图退化到全 0，白付构图成本）
+            // Build the graph only for the full tier (toolNote sources' graphs degrade to all
+            // zeros, so building them would be wasted cost)
             let diagnostics = capability == .full
                 ? TurnDiagnostics.evaluate(
                     TurnGraphBuilder.build(turn), promptChars: turn.promptText.count)
                 : nil
-            // 下一条真实提问（跳过无提问的续跑轮）
+            // Next real prompt (skips continuation turns with no prompt)
             let next = turns[(index + 1)...]
                 .first { $0.promptMessageId != nil }?.promptText
             if let eval = PromptEvaluator.evaluate(
@@ -187,10 +207,12 @@ final class PromptsService: ObservableObject {
         return evals
     }
 
-    /// 列表过滤：搜索（正文/标签，标题是正文首行故已被覆盖）+ 收藏开关；
-    /// first_seen 倒序（最新提问在前）。全文 lowercased 扫描随库增长可达几十 MB/次，
-    /// 放全局后台队列做（不进提取队列——utility 的提取全量跑时会把搜索排到最后）；
-    /// 搜索输入 250ms 防抖（与 ⌘K 同参），收藏开关/刷新即时执行。
+    /// List filtering: search (body / tags; the title is the body's first line, so it's already
+    /// covered) + favorites toggle; first_seen descending (newest prompt first). A full-text
+    /// lowercased scan can reach tens of MB per pass as the library grows, so it runs on a global
+    /// background queue (not the extraction queue — a full utility extraction run would push
+    /// searches to the back); search input is debounced 250ms (same as ⌘K), the favorites toggle
+    /// and refresh run immediately.
     private func scheduleRebuild(debounce: Bool) {
         rebuildGeneration += 1
         let generation = rebuildGeneration
@@ -201,8 +223,9 @@ final class PromptsService: ObservableObject {
             let onlyFavorites = self.favoritesOnly
             let snapshot = self.all
             let kinds = self.kindById
-            // 默认折叠低价值分类（噪音/琐碎/长粘贴）；收藏的永远保留；
-            // 搜索时不隐藏 —— 用户明确在找，就该什么都能找到
+            // Fold low-value kinds (noise / trivial / long paste) by default; favorites are
+            // always kept; nothing is hidden while searching — the user is explicitly looking,
+            // so everything should be findable
             let hideFolded = !self.showAll && lowered.isEmpty
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 var result = snapshot
@@ -230,12 +253,12 @@ final class PromptsService: ObservableObject {
         }
     }
 
-    /// 供命令面板消费的全量快照（未过滤）
+    /// Full unfiltered snapshot for the command palette
     func knowledgeSnapshot() -> [PromptEntry] {
         all
     }
 
-    /// 会话显示名（列表行副标题；找不到时回退短 id）
+    /// Session display name (list row subtitle; falls back to a short id when not found)
     func sessionName(for entry: PromptEntry) -> String? {
         sessionsById[entry.sessionId]?.displayName
     }
@@ -244,12 +267,13 @@ final class PromptsService: ObservableObject {
         byId[id]
     }
 
-    /// 默认折叠的低复用价值分类（噪音/琐碎/长粘贴）；收藏的条目不折叠
+    /// Low reuse-value kinds folded by default (noise / trivial / long paste); favorited entries
+    /// are never folded
     private static func isFoldable(_ kind: PromptKind?) -> Bool {
         kind == .noise || kind == .trivial || kind == .paste
     }
 
-    // MARK: - 用户操作（写库 + 同步内存态）
+    // MARK: - User actions (write DB + sync in-memory state)
 
     func toggleFavorite(_ id: String) {
         guard var entry = mutableEntry(id) else { return }
@@ -257,7 +281,8 @@ final class PromptsService: ObservableObject {
         applyMutation(entry)
         try? store?.prompts.setFavorite(id, favorite: entry.favorite)
         favoriteCount = max(0, favoriteCount + (entry.favorite ? 1 : -1))
-        // 折叠数只算未收藏的低价值条目：收藏即从折叠里拿出来，取消收藏再放回去
+        // The folded count only covers non-favorited low-value entries: favoriting takes an
+        // entry out of the fold, unfavoriting puts it back
         if Self.isFoldable(kindById[id]) {
             foldedCount = max(0, foldedCount + (entry.favorite ? -1 : 1))
         }
@@ -270,17 +295,19 @@ final class PromptsService: ObservableObject {
         try? store?.prompts.setTags(id, tags: entry.tags)
     }
 
-    /// 条目的复用价值分类（refresh 缓存；未知按 instruction 保守处理）
+    /// Entry's reuse-value kind (refresh cache; unknown is treated conservatively as instruction)
     func kind(of id: String) -> PromptKind {
         kindById[id] ?? .instruction
     }
 
-    /// 条目的评价结果；nil = 该源不可评价或尚未重扫（UI 静默，不显示"clean"）
+    /// Entry's evaluation; nil = the source isn't evaluable or hasn't been rescanned (the UI stays
+    /// silent, never shows "clean")
     func eval(of id: String) -> PromptEval? {
         evalById[id]
     }
 
-    /// 「以此提问在终端启动新会话」的完整命令；源不在白名单（claude/codex）时 nil
+    /// Full command for "start a new session in the terminal with this prompt"; nil when the
+    /// source isn't on the allowlist (claude/codex)
     func launchCommand(for id: String) -> String? {
         guard let entry = entry(id: id),
               let cli = PromptLaunchCommand.cliExecutable(for: entry.source)
@@ -288,14 +315,14 @@ final class PromptsService: ObservableObject {
         return PromptLaunchCommand.build(cli: cli, cwd: entry.cwd, prompt: entry.text)
     }
 
-    /// 在 Terminal 新窗口以此提问启动新会话，并计一次复用
+    /// Starts a new session with this prompt in a new Terminal window and counts one reuse
     func launchInTerminal(_ id: String) {
         guard let command = launchCommand(for: id) else { return }
         TerminalRunner.run(command: command)
         recordUse(id)
     }
 
-    /// 复制到剪贴板并计一次使用
+    /// Copies to the pasteboard and counts one use
     func copyToPasteboard(_ id: String) {
         guard let entry = entry(id: id) else { return }
         NSPasteboard.general.clearContents()
@@ -311,9 +338,11 @@ final class PromptsService: ObservableObject {
         try? store?.prompts.recordUse(id)
     }
 
-    /// 从库中移除：库里是软删除（行留着挡住重提取的复活，见 PromptsRepo.hide），
-    /// 内存态全部同步更新 —— 列表、索引、统计数、分类/评价缓存、高频组 —— 不走异步
-    /// rebuild（删除要即时反馈），也不等下次 refresh（组的 ×N 与收藏数不能错到那时候）。
+    /// Removes from the library: the DB does a soft delete (the row stays to block resurrection
+    /// by re-extraction, see PromptsRepo.hide), and all in-memory state updates synchronously —
+    /// list, index, counts, kind / eval caches, frequent groups — without the async rebuild
+    /// (deletion needs immediate feedback) and without waiting for the next refresh (a group's ×N
+    /// and the favorite count can't stay wrong until then).
     func delete(_ id: String) {
         guard let entry = byId[id] else { return }
         all.removeAll { $0.id == id }
@@ -332,7 +361,8 @@ final class PromptsService: ObservableObject {
         try? store?.prompts.hide(id)
     }
 
-    /// 跨页直达落点：找到条目则置 focus（由 PromptsView onAppear/onChange 消费）
+    /// Cross-page jump landing: if the entry is found, set focus (consumed by PromptsView
+    /// onAppear/onChange)
     func revealPrompt(_ id: String) {
         focusId = id
     }
@@ -341,7 +371,8 @@ final class PromptsService: ObservableObject {
         byId[id]
     }
 
-    /// 把单条变更写回 all + byId + prompts（三处都持有同一条目时保持一致）
+    /// Writes a single change back to all + byId + prompts (keeps them consistent when all three
+    /// hold the same entry)
     private func applyMutation(_ entry: PromptEntry) {
         byId[entry.id] = entry
         if let index = all.firstIndex(where: { $0.id == entry.id }) {

@@ -2,9 +2,10 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 主题阴影辅助：brutal = 零模糊偏移墨影（brutalist）；classic / 配色主题 = 不投影（原样）。
+/// Theme shadow helpers: brutal = zero-blur offset ink shadow (brutalist); classic / palette themes
+/// = no shadow (unchanged).
 extension View {
-    /// 卡片级阴影（4/4）
+    /// Card-level shadow (4/4)
     @ViewBuilder
     func themeCardShadow() -> some View {
         if let shadow = Theme.cardShadow {
@@ -14,7 +15,7 @@ extension View {
         }
     }
 
-    /// 小控件级阴影（2/2）；active = false 时不投（如未选中胶囊）
+    /// Small-control shadow (2/2); not drawn when active = false (e.g. an unselected capsule)
     @ViewBuilder
     func themeControlShadow(active: Bool = true) -> some View {
         if active, let shadow = Theme.controlShadow {
@@ -25,8 +26,9 @@ extension View {
     }
 }
 
-/// 统一区块卡片：可选标题 + 中性底圆角容器（主窗口各页签共用）。
-/// 替代改版前各页签自带的彩色 cardFill / settingCard / card helper。
+/// Unified section card: optional title + neutral rounded container (shared by every main-window
+/// tab). Replaces the colored cardFill / settingCard / card helpers each tab had before the
+/// redesign.
 struct SectionCard<Content: View>: View {
     let title: String?
     @ViewBuilder var content: Content
@@ -60,14 +62,15 @@ struct SectionCard<Content: View>: View {
     }
 }
 
-/// 灰底胶囊子页签：选中 = 品牌色底白字；未选中 = 灰字、悬停微高亮。
-/// 主窗口页签条 / 设置子栏目 / 仪表盘子页签共用。
+/// Capsule sub-tab on a grey tray: selected = brand fill + white text; unselected = grey text with
+/// a slight hover highlight. Shared by the main-window tab bar / Settings sub-sections / dashboard
+/// sub-tabs.
 struct CapsuleTabButton: View {
     let title: String
     var icon: String?
-    /// 图标块底色（侧边栏式彩色小方块；nil = 图标随文字色）
+    /// Icon tile background (sidebar-style small colored square; nil = icon follows the text color)
     var tileColor: Color?
-    /// true = 均分填满父容器（主窗口页签条）；false = 自适应内容宽度（子页签条）
+    /// true = split the parent evenly (main-window tab bar); false = size to content (sub-tab bars)
     var fillWidth = true
     let isSelected: Bool
     let onTap: () -> Void
@@ -91,8 +94,8 @@ struct CapsuleTabButton: View {
                             .font(.system(size: 10, weight: .semibold))
                     }
                 }
-                // 空标题 = 纯图标档（`LayoutToggle` 三档时如此）：连 Text 一起省掉，
-                // 否则 HStack 的 spacing 会给图标留出一段不对称的空白
+                // Empty title = icon-only mode (as with three-mode `LayoutToggle`): drop the Text
+                // too, otherwise the HStack spacing leaves asymmetric blank space next to the icon
                 if !title.isEmpty {
                     Text(title)
                         .font(Theme.font.themed(11, isSelected ? .semibold : .medium))
@@ -124,7 +127,7 @@ struct CapsuleTabButton: View {
     }
 }
 
-/// 胶囊标签条容器：灰底圆角托盘（仿系统设置的分段控件）。
+/// Capsule tab bar container: grey rounded tray (modeled on System Settings' segmented control).
 struct CapsuleTabTray<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -135,14 +138,16 @@ struct CapsuleTabTray<Content: View>: View {
     }
 }
 
-/// 侧边栏导航条目：默认单色中性灰图标（「紫金」方案去彩虹色块）+ 中性文字；
-/// 选中 = 品牌紫圆角胶囊白字白图标；未选中 = 灰字、悬停微高亮。
+/// Sidebar nav item: monochrome neutral grey icon by default (the "purple-gold" scheme dropped
+/// rainbow tiles) + neutral text; selected = brand-purple rounded capsule with white text and icon;
+/// unselected = grey text with a slight hover highlight.
 struct SidebarNavButton: View {
     let title: String
     let icon: String
-    /// 图标块底色（传值则显示彩色圆角小方块；nil = 单色灰图标）
+    /// Icon tile background (a value shows a small colored rounded square; nil = monochrome grey
+    /// icon)
     var tileColor: Color?
-    /// 尾部小徽标（如限额百分比），nil 不显示
+    /// Small trailing badge (e.g. rate-limit percentage); nil hides it
     var badge: String?
     var badgeColor: Color = .secondary
     let isSelected: Bool
@@ -180,8 +185,9 @@ struct SidebarNavButton: View {
             }
             .foregroundStyle(isSelected ? Theme.onBrand : (hovering ? .primary : .secondary))
             .padding(.horizontal, 8)
-            // 4 而不是 5：12 个页签 + 5 个组标签 + 品牌脚注要挤进最小窗高的 ~512pt 内容区，
-            // 每行省 2pt 就是 24pt。行高 28pt 仍高于 macOS 侧栏的最小可点尺寸。
+            // 4 rather than 5: 12 tabs + 5 group labels + brand footer must fit in the ~512pt
+            // content area at minimum window height; saving 2pt per row is 24pt. A 28pt row is
+            // still above macOS's minimum clickable sidebar size.
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: Theme.radius.sidebar).fill(
@@ -205,10 +211,10 @@ struct SidebarNavButton: View {
     }
 }
 
-// MARK: - 统计瓦片（Skills / Memory / Plans / Agents 页共用，点击即筛选）
+// MARK: - Stat tiles (shared by the Skills / Memory / Plans / Agents pages, click to filter)
 
-/// 顶部统计瓦片：大数字 + 来源徽标/图标 + 标签。放在 HStack 中等宽均分，
-/// 保证各 CLI 的瓦片在 UI 上一样大小；选中态品牌描边 + 品牌浅底。
+/// Top stat tile: big number + source logo/icon + label. Split evenly within an HStack so every
+/// CLI's tile is the same size in the UI; selected state gets a brand stroke + light brand fill.
 struct StatTile: View {
     let value: String
     var sub: String?
@@ -252,12 +258,14 @@ struct StatTile: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            // 等宽均分：内容撑满分配宽度，HStack 中每片一样大
+            // Even split: content fills its allotted width, so every tile in the HStack is the same
+            // size
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: Theme.radius.container)
                     .fill(isSelected ? Theme.brandFill(0.10) : Theme.surface)
-                    // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                    // Hard shadows go on pure shape layers only: on a composite view containing
+                    // text, the text leaves a ghost at the offset
                     .themeControlShadow(active: isSelected))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.container)
@@ -276,9 +284,10 @@ struct StatTile: View {
     }
 }
 
-// MARK: - 知识库统一卡片壳 & 悬停动作（Skills / Memory / Plans / Agents 卡片网格共用）
+// MARK: - Unified knowledge card shell & hover actions (shared by the Skills / Memory / Plans / Agents card grids)
 
-/// 卡片动作：悬停浮现的图标按钮（编辑 / Finder / 删除）。destructive 悬停自身时转红。
+/// Card action: icon button that appears on hover (Edit / Finder / Delete). destructive turns red
+/// when hovered itself.
 struct CardAction: Identifiable {
     let id = UUID()
     let icon: String
@@ -287,7 +296,8 @@ struct CardAction: Identifiable {
     let action: () -> Void
 }
 
-/// 悬停动作簇里的单个字形按钮：默认中性灰，悬停自身时高亮（删除 → 失败红）。
+/// A single glyph button in the hover action cluster: neutral grey by default, highlighted when
+/// hovered itself (delete → failure red).
 private struct CardGlyphButton: View {
     let action: CardAction
     @State private var hovering = false
@@ -314,7 +324,8 @@ private struct CardGlyphButton: View {
     }
 }
 
-/// 悬停时浮现的动作簇（毛玻璃胶囊托底，浮于卡片右下角 meta 之上）。
+/// Action cluster that appears on hover (frosted-glass capsule backing, floating above the card's
+/// bottom-right meta).
 private struct KnowledgeCardActions: View {
     let actions: [CardAction]
 
@@ -328,12 +339,15 @@ private struct KnowledgeCardActions: View {
     }
 }
 
-/// 知识库统一卡片壳：中性底 + 卡片圆角 + 柔和投影 + 悬停描边；停用态整卡变淡；**无色脊**；
-/// 整卡点击进详情；操作按钮默认隐藏、悬停时右下角淡入；右键菜单由调用方按各页语义传入。
-/// content 内推荐布局：`标题行(图标+名+尾附件) → 描述/副标题 → Spacer → meta 行`。
+/// Unified knowledge card shell: neutral fill + card radius + soft shadow + hover stroke; disabled
+/// state fades the whole card; **no color spine**; clicking the card opens detail; action buttons
+/// are hidden by default and fade in at the bottom-right on hover; the context menu is passed in by
+/// callers per page. Recommended content layout: `title row (icon + name + trailing accessory) →
+/// description/subtitle → Spacer → meta row`.
 struct KnowledgeCard<Content: View, Menu: View>: View {
     var enabled = true
-    /// 最小高度：0 = 随内容自适应（网格同行自动等高），避免固定高度造成中部空洞
+    /// Minimum height: 0 = size to content (grid rows equalize automatically), avoiding hollow
+    /// middles from a fixed height
     var minHeight: CGFloat = 0
     var actions: [CardAction] = []
     let onOpen: () -> Void
@@ -391,9 +405,10 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
     }
 }
 
-// MARK: - 统一小标签 / 状态点 / 空状态 / 搜索框 / 分区头 / 文档卡
+// MARK: - Unified small tag / status dot / empty state / search field / section header / document card
 
-/// 统一小标签（项目名 = 金；中性 = 灰）。替换各页复制的项目 chip / 「只读」/「内置」pill。
+/// Unified small tag (project name = gold; neutral = grey). Replaces the project chip / "read-only"
+/// / "built-in" pills copied across pages.
 struct TagChip: View {
     let text: String
     var tint: Color = Theme.goldFg
@@ -416,7 +431,8 @@ struct TagChip: View {
     }
 }
 
-/// 启停小圆点（克制绿 = 启用 / 灰 = 停用），点击切换；替换饱和绿方块。
+/// Small enable dot (restrained green = enabled / grey = disabled), click to toggle; replaces the
+/// saturated green square.
 struct StatusDot: View {
     let enabled: Bool
     var size: CGFloat = 9
@@ -438,7 +454,8 @@ struct StatusDot: View {
     }
 }
 
-/// 统一空状态：淡品牌色图标 + 标题 + 可选提示 + 可选主操作按钮（四页共用）。
+/// Unified empty state: faint brand-colored icon + title + optional hint + optional primary action
+/// button (shared by four pages).
 struct EmptyStateView: View {
     let icon: String
     let title: String
@@ -473,15 +490,18 @@ struct EmptyStateView: View {
     }
 }
 
-/// 统一搜索框（紫金主张版）：紫金渐变放大镜方块 + 胶囊底 + 聚焦时紫金渐变环与柔光；
-/// 搜索中右侧显示命中数胶囊 + 圆形清空键。四页共用（来源筛选由下方 chips 承担）。
+/// Unified search field (purple-gold signature version): purple-gold gradient magnifier tile +
+/// capsule fill + purple-gold gradient ring and glow when focused; while searching, a hit-count
+/// capsule + round clear button show at the right. Shared by four pages (source filtering is
+/// handled by the chips below).
 struct SearchField: View {
     let placeholder: String
     @Binding var text: String
     var scanning = false
-    /// 命中数（搜索时显示在右侧；nil = 不显示）
+    /// Hit count (shown at the right while searching; nil = hidden)
     var resultCount: Int?
-    /// 最大宽度：设计稿里搜索框是中等宽度，不铺满整行（nil = 由父容器决定）
+    /// Max width: in the mockup the search field is medium width, not full-row (nil = decided by
+    /// the parent)
     var maxWidth: CGFloat? = 460
 
     @FocusState private var focused: Bool
@@ -495,7 +515,7 @@ struct SearchField: View {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(Theme.font.themed(12.5))
-                .tint(Theme.brand)  // 紫色光标与选区
+                .tint(Theme.brand)  // purple caret and selection
                 .focused($focused)
             if scanning { ProgressView().controlSize(.mini) }
             trailing
@@ -510,7 +530,8 @@ struct SearchField: View {
                 .overlay(
                     Capsule(style: .continuous)
                         .fill(Theme.brandFill(focused ? 0.10 : (hovering ? 0.06 : 0.035))))
-                // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                // Hard shadows go on pure shape layers only: on a composite view containing text,
+                // the text leaves a ghost at the offset
                 .themeControlShadow())
         .overlay(
             Capsule(style: .continuous)
@@ -533,13 +554,15 @@ struct SearchField: View {
         .animation(.easeOut(duration: 0.16), value: hovering)
     }
 
-    /// 品牌渐变放大镜方块（与品牌标 / logo 方块同一套方块语言；金色留给聚焦描边环）。
-    /// 主题化风格 = 品牌平色方块 + 各派描边与阴影。
+    /// Brand gradient magnifier tile (same tile language as the brand mark / logo tiles; gold is
+    /// reserved for the focus ring). Themed styles = flat brand-colored tile + each style's stroke
+    /// and shadow.
     private var glyph: some View {
         RoundedRectangle(
             cornerRadius: ThemeStyle.current.isHardEdged ? Theme.radius.tile : 7, style: .continuous)
             .fill(Theme.brandTileGradient)
-            // 硬影在叠加放大镜图标之前画：只取方块轮廓，图标不会在偏移处留重影
+            // The hard shadow is drawn before overlaying the magnifier icon: it takes only the tile
+            // outline, so the icon leaves no ghost at the offset
             .themeControlShadow()
             .frame(width: 24, height: 24)
             .overlay(
@@ -585,8 +608,10 @@ struct SearchField: View {
     }
 }
 
-/// 统一来源分区头：折叠箭头 + 来源徽标/金图标 + 标题 + 可选副标题 + 中性计数 + 可选备注 + 贯通分隔线。
-/// 收编 Skills / Memory / Plans / Agents 三份重复实现（计数统一为中性灰胶囊，去掉金/紫不一致）。
+/// Unified source section header: disclosure arrow + source logo/gold icon + title + optional
+/// subtitle + neutral count + optional note + full-width divider. Consolidates three duplicate
+/// implementations from Skills / Memory / Plans / Agents (count unified as a neutral grey capsule,
+/// dropping the gold/purple inconsistency).
 struct SourceSectionHeader: View {
     var source: AgentSource?
     var icon: String?
@@ -641,7 +666,8 @@ struct SourceSectionHeader: View {
     }
 }
 
-/// 详情页统一 Markdown 文档卡（限宽居中 + 宽松内边距）。四个详情页共用，替换逐字复制的卡块。
+/// Unified Markdown document card for detail pages (width-limited and centered + generous padding).
+/// Shared by four detail pages, replacing copy-pasted card blocks.
 struct MarkdownDocumentCard: View {
     let text: String
 
@@ -663,27 +689,28 @@ struct MarkdownDocumentCard: View {
     }
 }
 
-// MARK: - 卡片 / 列表行 / 详情工具条共用小控件
-// （原分散在 SkillMemoryView.swift，收敛至此以便 Skills / Memory / Plans / Agents 各页共用）
+// MARK: - Small controls shared by cards / list rows / detail toolbars
+// (previously scattered in SkillMemoryView.swift, consolidated here so the Skills / Memory / Plans / Agents pages can share them)
 
-/// 统一方块规格：浅色染底 + 同色浅描边 + 圆角 8（参考稿简约风）。
-/// logo 块 / 计划图标块都按这一套渲染，保证全站方块协调。
+/// Unified tile spec: light tinted fill + light stroke in the same color + radius 8 (the reference
+/// mockup's minimal style). Logo tiles / plan icon tiles all render with this spec so tiles stay
+/// consistent site-wide.
 struct TileSpec {
-    /// 填充底色（tint 10%）
+    /// Fill color (tint 10%)
     static func fill(_ tint: Color, hovering: Bool = false) -> Color {
         tint.opacity(hovering ? 0.18 : 0.10)
     }
-    /// 描边（tint 16%）
+    /// Stroke (tint 16%)
     static func border(_ tint: Color) -> Color {
         tint.opacity(0.16)
     }
-    /// 圆角：26pt 方块 ≈ 8，随尺寸略缩
+    /// Corner radius: ≈ 8 for a 26pt tile, shrinking slightly with size
     static func radius(_ size: CGFloat) -> CGFloat {
         min(Theme.radius.tile, size * 0.32)
     }
 }
 
-/// 26×26 紫底浅框 logo 小块（技能卡片 / 列表行 / 详情工具条共用）
+/// 26×26 purple-fill light-framed logo tile (shared by skill cards / list rows / detail toolbars)
 struct SourceLogoTile: View {
     let source: AgentSource
     var size: CGFloat = 26
@@ -701,7 +728,8 @@ struct SourceLogoTile: View {
     }
 }
 
-/// 迷你启用开关（30×17）：绿 = 开 / 灰 = 关，圆头右/左；技能卡片 / 列表行 / 详情工具条共用
+/// Mini enable switch (30×17): green = on / grey = off, knob right/left; shared by skill cards /
+/// list rows / detail toolbars
 struct MiniSwitch: View {
     let isOn: Bool
     let onToggle: () -> Void
@@ -745,7 +773,8 @@ struct MiniSwitch: View {
     }
 }
 
-/// 启用状态文字（已启用绿 / 已停用灰）+ 迷你开关（详情工具条 / 列表行用；卡面只用 MiniSwitch）
+/// Enable state text (enabled green / disabled grey) + mini switch (for detail toolbars / list
+/// rows; card faces use only MiniSwitch)
 struct EnableToggle: View {
     let enabled: Bool
     let onToggle: () -> Void
@@ -762,8 +791,9 @@ struct EnableToggle: View {
     }
 }
 
-/// 卡片动作图标按钮（编辑/目录/删除）：中性简约风——浅灰底 + 细灰边 + 灰图标，
-/// 仅删除用红色图标（无红底）；hover 底色加深。列表行 / 详情等常驻动作处用。
+/// Card action icon button (edit/folder/delete): neutral minimal style -- light grey fill + thin
+/// grey border + grey icon, only delete uses a red icon (no red fill); hover darkens the fill. Used
+/// where actions are always shown, like list rows / detail.
 struct CardActionButton: View {
     let icon: String
     var color: Color = .secondary
@@ -793,14 +823,16 @@ struct CardActionButton: View {
     }
 }
 
-// MARK: - 布局切换（卡片 / 列表；Skills / Memory / Plans / Agents 四页共用）
+// MARK: - Layout toggle (cards / list; shared by the Skills / Memory / Plans / Agents pages)
 
-/// 知识库视图模式：通栏列表 / 图标（卡片网格）。顺序即分段控件顺序（列表在左，默认）。
+/// Knowledge view mode: full-width list / icons (card grid). Order is the segmented control order
+/// (list on the left, default).
 enum KnowledgeLayout: String, CaseIterable {
     case list = "列表"
     case cards = "图标"
-    /// 关系图谱：目前只有 Memory 页有（记忆之间有 `[[链接]]`、还指向来源会话；
-    /// 技能/计划/agent 之间没有这种关系，给它们这一档只会是个空图）
+    /// Relation graph: currently only the Memory page has one (memories have `[[links]]` between
+    /// them and point at origin sessions; skills/plans/agents have no such relations, so giving
+    /// them this mode would only show an empty graph)
     case graph = "图谱"
 
     var title: String {
@@ -819,18 +851,20 @@ enum KnowledgeLayout: String, CaseIterable {
         }
     }
 
-    /// 有关系图的页面用它，其余页面用 `withoutGraph`
+    /// Pages with a relation graph use it; other pages use `withoutGraph`
     static let withoutGraph: [KnowledgeLayout] = [.list, .cards]
 }
 
-/// 顶部工具条右侧的「卡片 / 列表 / 图谱」分段切换（与全站分段控件同款）。
-/// `cases` 由调用方给：没有关系可画的页面不该凭空多出一档图谱。
+/// The "cards / list / graph" segmented toggle at the right of the top toolbar (same style as
+/// segmented controls site-wide). `cases` comes from the caller: pages with no relations to draw
+/// shouldn't grow a graph mode out of nowhere.
 struct LayoutToggle: View {
     @Binding var layout: KnowledgeLayout
     var cases: [KnowledgeLayout] = KnowledgeLayout.withoutGraph
 
     var body: some View {
-        // 三档时只留图标：顶栏在最小窗宽（840）下本就紧，带文字会把「列表」挤成省略号
+        // Icons only with three modes: the top bar is already tight at the minimum window width
+        // (840), and labels would squeeze "List" into an ellipsis
         let iconOnly = cases.count > 2
         CapsuleTabTray {
             ForEach(cases, id: \.self) { item in
@@ -844,15 +878,17 @@ struct LayoutToggle: View {
     }
 }
 
-/// 扫描状态标签（Skills / Memory / Plans / Agents 顶栏共用，紧挨刷新按钮）。
+/// Scan status label (shared by the Skills / Memory / Plans / Agents top bars, right next to the
+/// refresh button).
 ///
-/// 为什么需要：这四页的数据在应用启动时就后台扫好了，进页面不再盲扫 —— 那么「现在到底在不在扫」
-/// 与「数据有多旧」就必须显式说出来。原来 `scanning` 只体现在搜索框里一个 mini spinner 和
-/// **空状态**文案上，列表一旦有数据，重扫时几乎看不出来。
-/// 又因为不做文件系统监听（外部新增技能不会自动出现），「上次扫描 X 前」是用户判断该不该点刷新的唯一依据。
+/// Why it's needed: these four pages are scanned in the background at app launch, and entering a page no longer scans blindly -- so "is it scanning right now"
+/// and "how old is the data" must be said explicitly. Previously `scanning` only showed as a mini spinner in the search field and in the
+/// **empty state** copy; once the list had data, a rescan was nearly invisible. And since there's
+/// no file-system watching (externally added skills don't appear automatically), "last scanned X
+/// ago" is the user's only basis for deciding whether to refresh.
 struct ScanStatusLabel: View {
     let scanning: Bool
-    /// 扫描阶段文案（Plans 会在物化/索引之间切换）
+    /// Scan phase text (Plans switches between materializing/indexing)
     var phase: String?
     var lastScanAt: Date?
 
@@ -879,8 +915,9 @@ struct ScanStatusLabel: View {
     }
 }
 
-/// 统一刷新按钮：紫图标 + 淡紫圆底（各管理页顶栏共用）。
-/// 明显但紧凑——作为次级动作，不与「新建」文字胶囊抢戏。
+/// Unified refresh button: purple icon + faint purple round fill (shared by the management page top
+/// bars). Visible but compact -- as a secondary action it doesn't compete with the "New" text
+/// capsule.
 struct RefreshButton: View {
     var help = L10n.text("Refresh", zhHans: "刷新")
     let action: () -> Void
@@ -903,23 +940,25 @@ struct RefreshButton: View {
     }
 }
 
-/// lulu-lumei-dock 品牌标：紫金渐变圆角块 + 金色「Lu」描边（与 Dock 图标同源的 LuluMark）。
-/// 侧栏底部品牌区 / 设置→关于 卡片共用，按 size 等比缩放。
+/// lulu-lumei-dock brand mark: purple-gold gradient rounded tile + gold "Lu" outline (LuluMark,
+/// same source as the Dock icon). Shared by the sidebar's bottom brand area / the Settings → About
+/// card, scaled proportionally by size.
 ///
-/// 比例**全部照 `AppIconView` 的 1024 母版换算**（`IconRenderer.swift:44-95`），
-/// 以前这里是另一套手调数值：字标只占 `0.42` 字高（母版是 `430/824 ≈ 0.522`），
-/// 金色是纯色而非三段渐变，也没有左上白高光与投影 —— 放大后就是一块扁方块。
+/// Proportions are **all converted from `AppIconView`'s 1024 master** (`IconRenderer.swift:44-95`).
+/// This used to be a separate set of hand-tuned values: the wordmark took only `0.42` of the height (the master is `430/824 ≈ 0.522`),
+/// the gold was a flat color instead of a three-stop gradient, and there was no top-left white highlight or shadow -- enlarged it was just a flat square.
 ///
-/// 唯二不照抄的地方（且都有理由）：
-///  - 高光描边与投影按母版换算是 `0.007×size` / `0.034×size`，在 26pt 上不到 0.2pt，
-///    2x 屏也画不出一条线 → 给下限并按 size 放大到肉眼可辨；
-///  - 母版的 824 底板外还有 100px 透明留白（阴影画在留白里），这里 `size` 就是底板本身。
+/// The only two deviations from the master (both deliberate):
+///  - The highlight stroke and shadow convert to `0.007×size` / `0.034×size`, under 0.2pt at 26pt,
+///    which can't draw a line even on 2x displays → given a floor and scaled by size until visible;
+///  - The master has 100px of transparent margin around its 824 plate (the shadow is drawn in it);
+///    here `size` is the plate itself.
 struct LuluLogoTile: View {
     var size: CGFloat = 26
 
-    /// 母版：字高 430 / 底板 824
+    /// Master: glyph height 430 / plate 824
     private var glyphHeight: CGFloat { size * 0.522 }
-    /// 母版：笔画粗 = 字高 / φ³
+    /// Master: stroke width = glyph height / φ³
     private var stroke: CGFloat { max(1, glyphHeight * 0.2361) }
     private var corner: CGFloat { size * 0.2237 }
 
@@ -934,7 +973,8 @@ struct LuluLogoTile: View {
                     ],
                     startPoint: .topLeading, endPoint: .bottomTrailing))
             .frame(width: size, height: size)
-            // 中心暖金柔光，托起金色字标（母版 640/824 直径、300/824 半径）
+            // Warm gold glow at the center, lifting the gold wordmark (master: 640/824 diameter,
+            // 300/824 radius)
             .overlay(
                 Circle()
                     .fill(
@@ -956,12 +996,13 @@ struct LuluLogoTile: View {
                             startPoint: .top, endPoint: .bottom),
                         style: StrokeStyle(
                             lineWidth: stroke, lineCap: .round, lineJoin: .round))
-                    // 宽度给满：LuluMark 自己按 rect 水平居中（母版也是给满底板宽）
+                    // Full width: LuluMark centers itself horizontally in its rect (the master also
+                    // gives it the full plate width)
                     .frame(width: size, height: glyphHeight)
                     .shadow(
                         color: Color(red: 0.10, green: 0.07, blue: 0.30).opacity(0.45),
                         radius: size * 0.035, y: size * 0.025))
-            // 左上白高光描边：把平面染色块变成有厚度的实体
+            // Top-left white highlight stroke: turns a flat tinted tile into a solid with thickness
             .overlay(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .strokeBorder(
@@ -973,11 +1014,12 @@ struct LuluLogoTile: View {
     }
 }
 
-// MARK: - 知识库统一列表行（列表模式共用，对标会话页 SessionRow）
+// MARK: - Unified knowledge list row (shared by list mode, modeled on the Sessions page's SessionRow)
 
-/// 通栏精致行：内容槽（左 logo + 两行文字 + 右侧状态）+ 悬停浮现动作；
-/// 悬停高亮 + 左缘紫细条；整行点击进详情；右键菜单由调用方按各页语义传入。
-/// content 内推荐布局：`HStack { 图标; VStack{ 标题行; 描述行 }; Spacer; 尾附件 }`。
+/// Refined full-width row: content slot (logo at left + two lines of text + status at right) +
+/// actions that appear on hover; hover highlight + thin purple bar on the left edge; clicking the
+/// row opens detail; the context menu is passed in by callers per page. Recommended content layout:
+/// `HStack { icon; VStack{ title row; description row }; Spacer; trailing accessory }`.
 struct KnowledgeRow<Content: View, Menu: View>: View {
     var enabled = true
     var actions: [CardAction] = []
@@ -1018,8 +1060,9 @@ struct KnowledgeRow<Content: View, Menu: View>: View {
     }
 }
 
-/// 列表模式分组容器：白卡圆角 + 细描边 + 柔和投影，把同一分区的行收进一张「表格」卡
-/// （macOS 系统设置式分组列表）；分隔线由调用方按行内文字起始位置缩进。
+/// List-mode group container: white rounded card + thin stroke + soft shadow, gathering a section's
+/// rows into one "table" card (macOS System Settings-style grouped list); dividers are indented by
+/// callers to where the row text starts.
 struct KnowledgeListContainer<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -1040,9 +1083,9 @@ struct KnowledgeListContainer<Content: View>: View {
     }
 }
 
-// MARK: - 紫金改版：统计概览卡 / 来源筛选 chips / 流式布局
+// MARK: - Purple-gold redesign: stats overview card / source filter chips / flow layout
 
-/// 换行流式布局（chips 超宽自动折行；macOS 13+ Layout 协议）。
+/// Wrapping flow layout (chips wrap automatically when too wide; macOS 13+ Layout protocol).
 struct FlowLayout: Layout {
     var spacing: CGFloat = 10
     var lineSpacing: CGFloat = 10
@@ -1085,8 +1128,10 @@ struct FlowLayout: Layout {
     }
 }
 
-/// 顶部统计概览卡：左「大数 + 单位 + 副标题」，竖分隔线，右「分布标题 + 可选堆叠段条 + 图例」。
-/// 四页共用；Agents 传 `showBar: false`（只有模型分布图例，无条）。结构性颜色只用语义/品牌色。
+/// Top stats overview card: left "big number + unit + subtitle", vertical divider, right
+/// "distribution title + optional stacked segment bar + legend". Shared by four pages; Agents
+/// passes `showBar: false` (only a model distribution legend, no bar). Structural colors are
+/// semantic/brand only.
 struct StatOverviewCard: View {
     struct Segment: Identifiable {
         let id = UUID()
@@ -1146,9 +1191,10 @@ struct StatOverviewCard: View {
                             Text("\(seg.count)")
                                 .font(Theme.font.themedMono(11, .semibold))
                         }
-                        // 兜底：图例条目过多时宁可整体溢出裁掉，也不能让「命令」「16,911」
-                        // 逐字竖着折成一列（审计页 9 个 ToolKind 曾真实撞出这个形态）。
-                        // 收口是调用方的责任（照 AgentsView 折成「前 4 + 其他」）。
+                        // Fallback: with too many legend items, overflow and clip the whole thing
+                        // rather than letting a label or "16,911" fold vertically one character per
+                        // line (the audit page's 9 ToolKinds really hit this shape). Trimming is
+                        // the caller's job (fold into "top 4 + other" like AgentsView does).
                         .lineLimit(1)
                         .fixedSize()
                     }
@@ -1182,8 +1228,9 @@ struct StatOverviewCard: View {
     }
 }
 
-/// 来源筛选 chip：nil = 全部（用页内图标）；否则显来源 logo + 名 + 数。
-/// 选中 = 品牌紫底白字；未选 = 白底细边、悬停微染。
+/// Source filter chip: nil = all (uses the page's icon); otherwise shows source logo + name +
+/// count. Selected = brand-purple fill + white text; unselected = white fill + thin border, slight
+/// tint on hover.
 struct SourceFilterChip: View {
     var source: AgentSource?
     var allIcon: String
@@ -1218,7 +1265,8 @@ struct SourceFilterChip: View {
                     isSelected
                         ? AnyShapeStyle(Theme.brand)
                         : AnyShapeStyle(hovering ? Theme.brandFill(0.06) : Theme.surface))
-                    // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                    // Hard shadows go on pure shape layers only: on a composite view containing
+                    // text, the text leaves a ghost at the offset
                     .themeControlShadow(active: isSelected))
             .overlay(
                 Capsule().strokeBorder(
@@ -1233,7 +1281,8 @@ struct SourceFilterChip: View {
     }
 }
 
-/// 来源筛选条：「全部」+ 各来源 chips（换行）。绑定 selectedSource（nil=全部），再点选中项取消。
+/// Source filter bar: "All" + per-source chips (wrapping). Binds selectedSource (nil = all);
+/// clicking the selected one again deselects it.
 struct SourceFilterBar: View {
     @Binding var selected: AgentSource?
     let allLabel: String
@@ -1258,9 +1307,10 @@ struct SourceFilterBar: View {
     }
 }
 
-// MARK: - 紫金改版：进度环 / 进度条 / 范围徽标 / 角色头像 / 角色标签 / 模型芯片
+// MARK: - Purple-gold redesign: progress ring / progress bar / scope badge / role avatar / role tag / model chip
 
-/// Plans 列表行进度条：灰轨 + 紫填充（固定宽度胶囊；% 文字由调用方另附）。
+/// Plans list row progress bar: grey track + purple fill (fixed-width capsule; the % text is added
+/// separately by the caller).
 struct PlanProgressBar: View {
     let progress: Double
     var width: CGFloat = 88
@@ -1275,7 +1325,8 @@ struct PlanProgressBar: View {
     }
 }
 
-/// Memory 范围徽标：全局=紫描边 / 项目=金描边（描边胶囊，无实底）。
+/// Memory scope badge: global = purple stroke / project = gold stroke (stroked capsule, no solid
+/// fill).
 struct ScopeBadge: View {
     let isGlobal: Bool
 
@@ -1292,13 +1343,14 @@ struct ScopeBadge: View {
     }
 }
 
-/// 终端归属标签：「iTerm2 · ttys004」。与 ScopeBadge 同一套胶囊描边规格。
+/// Terminal ownership tag: "iTerm2 · ttys004". Same stroked-capsule spec as ScopeBadge.
 ///
-/// 探测来源（`origin == .probe`）用虚线描边并在 tooltip 里说明精度较低 —— 那是按 cwd
-/// 匹配进程上溯推出来的，不像 hook 那样确定；不该让用户误以为两者一样可靠。
+/// Probe-derived entries (`origin == .probe`) get a dashed stroke and a tooltip noting lower precision -- they're inferred by matching
+/// cwd and walking up the process tree, not as certain as hooks; users shouldn't think the two are equally reliable.
 struct TerminalBadge: View {
     let binding: TerminalBinding
-    /// 终端应用当前是否还在运行（决定要不要显示成"已退出"的灰态）
+    /// Whether the terminal app is still running (decides whether to show the greyed "exited"
+    /// state)
     var isRunning: Bool = true
 
     var body: some View {
@@ -1340,8 +1392,9 @@ struct TerminalBadge: View {
     }
 }
 
-/// Agents 角色方块：与 SourceLogoTile 同一套方块规格（紫底浅框圆角方块），内容换成角色单字
-/// （通/探/实/审/规/建/文）。四页的方块形状 / 线条 / 配色因此完全一致；角色色只留在 RoleTag 上。
+/// Agents role tile: same tile spec as SourceLogoTile (purple-fill light-framed rounded square),
+/// with the content swapped for the role's single-character glyph (`AgentRole.glyph`). Tile shape /
+/// lines / colors are thus identical across the four pages; role colors stay only on RoleTag.
 struct RoleAvatar: View {
     let role: AgentRole
     var size: CGFloat = 28
@@ -1362,7 +1415,7 @@ struct RoleAvatar: View {
     }
 }
 
-/// Agents 角色标签：角色色浅底小胶囊。
+/// Agents role tag: small capsule with a light role-colored fill.
 struct RoleTag: View {
     let role: AgentRole
 
@@ -1377,7 +1430,7 @@ struct RoleTag: View {
     }
 }
 
-/// Agents 模型芯片：中性灰底小胶囊显规整后的模型名。
+/// Agents model chip: small neutral-grey capsule showing the normalized model name.
 struct ModelChip: View {
     let model: String
 

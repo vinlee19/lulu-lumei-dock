@@ -2,9 +2,11 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 尾随 opencode.db 的 `event` 表（append-only）做实时事件。opencode 无 hook/notify 回调，
-/// 这是唯一的实时通道。只读打开外部库，按 `event.rowid` 水位增量；首扫定基线到当前最大 rowid，
-/// 不重放历史（与 Codex initialScan 同理）。子会话（subagent）的事件按 session.parent_id 过滤掉。
+/// Tails the `event` table of opencode.db (append-only) for live events. opencode has no
+/// hook/notify callback, so this is the only live channel. The external db is opened read-only
+/// and read incrementally by an `event.rowid` watermark; the first scan baselines at the current
+/// max rowid without replaying history (same as Codex initialScan). Child-session (subagent)
+/// events are filtered out via session.parent_id.
 public final class OpencodeEventTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -13,11 +15,12 @@ public final class OpencodeEventTailer {
     private let queue = DispatchQueue(label: "com.vinlee.eureka.opencode-tailer")
     private var timer: DispatchSourceTimer?
 
-    private var lastRowid: Int64 = -1  // -1 = 未初始化（首扫定基线）
+    private var lastRowid: Int64 = -1  // -1 = uninitialized (first scan sets the baseline)
     private var knownTopLevel = Set<String>()
     private var knownChild = Set<String>()
-    /// 事件自身时间戳距今超过此秒数即视为积压：只入历史/用量、不触发岛动画
-    /// （与 spool / Hermes tailer 同一口径；消息完成时间可能是几周前的历史）
+    /// An event whose own timestamp is older than this many seconds is backlog: it only enters
+    /// history/usage and never triggers island animations (same rule as the spool / Hermes
+    /// tailer; a message's completion time may be weeks old)
     private let staleThreshold: TimeInterval = 300
 
     static let healthName = "opencode 事件监视"
@@ -30,7 +33,8 @@ public final class OpencodeEventTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must stay below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -44,22 +48,25 @@ public final class OpencodeEventTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动同步调用
+    /// Public so tests and launch can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         guard FileManager.default.fileExists(atPath: dbPath.path),
               let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return }
 
-        // 水位查询失败（IO 抖动 / 锁超时 / 表暂不可用）必须原样返回、保住水位，下轮再试。
-        // 之前把失败读成 0 再当作"rowid 回退"把水位归零 —— 下一轮就把 25,571 条历史事件
-        // 整表当实时事件重放（2026-09-05 实测：灵动岛排进上百张完成卡收不回去，
-        // 22 个 7、8 月的旧会话被重建成运行中、一分钟后又被判"中断"写进历史）。
+        // A failed watermark query (IO hiccup / lock timeout / table temporarily unavailable) must
+        // return as-is and keep the watermark, retrying next tick. It used to read the failure as
+        // 0, treat it as a "rowid regression" and reset the watermark — and the next tick replayed
+        // all 25,571 historic events as live (observed 2026-09-05: the Dynamic Island queued
+        // hundreds of finished cards that wouldn't clear, and 22 old sessions from July/August were
+        // rebuilt as running, then judged "interrupted" a minute later and written to history).
         guard let maxRowid = (try? db.query("SELECT COALESCE(MAX(rowid), 0) FROM event") {
             $0.int(0)
         })?.first else { return }
         if lastRowid < 0 || maxRowid < lastRowid {
-            // 首扫、或表被重建变小（rowid 真回退）：都只定基线、不重放 —— 重建后的表里
-            // 装的同样是历史，当实时事件重放一样会灌满岛；之后的新事件照常增量送达
+            // First scan, or the table was rebuilt smaller (a real rowid regression): only
+            // baseline, never replay — a rebuilt table holds history too, and replaying it as live
+            // would flood the island just the same; later new events still arrive incrementally
             lastRowid = maxRowid
             return
         }
@@ -79,14 +86,16 @@ public final class OpencodeEventTailer {
             for event in OpencodeEventDecoder.decode(type: type, data: data)
             where !isChildSession(event.sessionId, db: db) {
                 HealthRegistry.shared.event(Self.healthName)
-                // 按事件自身时间戳判积压：即便水位失守重放了历史，几周前完成的消息
-                // 也只会进历史/用量，不会再排成岛卡
+                // Judge backlog by the event's own timestamp: even if the watermark is lost and
+                // history replays, messages completed weeks ago only go to history/usage and never
+                // queue up as island cards
                 handler(event, now.timeIntervalSince(event.timestamp) > staleThreshold)
             }
         }
     }
 
-    /// 会话是否为子 agent（session.parent_id 非空）。每个 session id 只查一次表，缓存。
+    /// Whether the session is a subagent (session.parent_id non-empty). The table is queried once
+    /// per session id and cached.
     private func isChildSession(_ sessionID: String, db: SQLiteDB) -> Bool {
         if knownChild.contains(sessionID) { return true }
         if knownTopLevel.contains(sessionID) { return false }

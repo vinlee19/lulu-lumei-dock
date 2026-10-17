@@ -2,12 +2,13 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 审计单一评估点：风险判定 → 幂等落库 → 高危告警决策。CLI 与 app 共用。
-/// 有状态（告警节流），调用方负责线程约束（app 在 AuditService 队列上串行调用）。
+/// Single audit evaluation point: risk assessment → idempotent insert → high-risk alert decision.
+/// Shared by the CLI and the app. Stateful (alert throttling); callers own thread confinement (the
+/// app calls it serially on the AuditService queue).
 public final class AuditPipeline {
     public struct IngestResult: Equatable, Sendable {
-        public var inserted: Bool      // 是否真的新插入（幂等去重后）
-        public var alert: RiskAlert?   // 需呈现的高危告警（已过节流/陈旧过滤）
+        public var inserted: Bool      // whether a row was really inserted (after idempotent dedup)
+        public var alert: RiskAlert?   // high-risk alert to show (already throttled / stale-filtered)
     }
 
     private let store: EurekaStore
@@ -18,7 +19,8 @@ public final class AuditPipeline {
         self.throttle = throttle
     }
 
-    /// 评估风险、落库、决定告警。isStale=true（离线积压/重扫）只入库、永不告警。
+    /// Assess risk, persist, decide on alerting. isStale=true (offline backlog / rescan) only
+    /// persists and never alerts.
     @discardableResult
     public func ingest(_ event: AuditEvent, isStale: Bool, now: Date = Date()) throws -> IngestResult {
         var event = event
@@ -37,7 +39,7 @@ public final class AuditPipeline {
             detail: event.detail, timestamp: event.timestamp))
     }
 
-    /// 回填执行结果（Codex function_call_output 用 call_id=op_id 找到对应行）
+    /// Backfill the execution result (Codex function_call_output finds its row via call_id=op_id)
     public func markOutcome(
         source: AgentSource, sessionId: String, opId: String, exitCode: Int?, isError: Bool
     ) throws {

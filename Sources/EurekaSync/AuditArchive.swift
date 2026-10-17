@@ -2,14 +2,20 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 审计记录按 UTC 日物化为 Parquet（脱敏后），交给备份引擎上传到
-/// `<prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/audit-events-YYYY-MM-DD.parquet`（Hive 分区，Athena / DuckDB 直接查）。
+/// Materializes audit records into Parquet per UTC day (after redaction) for the backup engine
+/// to upload to
+/// `<prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/audit-events-YYYY-MM-DD.parquet` (Hive
+/// partitions, queryable directly from Athena / DuckDB).
 ///
-/// 与 EurekaDBSnapshot 同一模式：本地先写临时文件再原子移动，备份引擎按 size+mtime 增量上传。
-/// 关键约束：
-/// - 每天一个指纹（行数 : 最大 id : 回填 exit_code 数 : 失败数），变了才重写该天；
-/// - **已上传、且早于保留期的日期不再重写**——本地清理会删掉那些行，重写只会用更少的行覆盖远端；
-/// - 本地清理只删"已上传且指纹未变"的日期（`prunableDays`），上传失败宁可超期保留。
+/// Same pattern as EurekaDBSnapshot: write a local temp file then move it atomically; the backup
+/// engine uploads incrementally by size+mtime.
+/// Key constraints:
+/// - One fingerprint per day (row count : max id : backfilled exit_code count : failure count);
+///   a day is rewritten only when it changes;
+/// - **Days already uploaded and older than the retention period are never rewritten**: local
+///   pruning deletes those rows, so a rewrite would only overwrite the remote with fewer rows;
+/// - Local pruning deletes only days that are "uploaded with an unchanged fingerprint"
+///   (`prunableDays`); if uploads fail, keep rows past retention rather than lose them.
 public enum AuditArchive {
     /// Row cap per file; overflow goes to `audit-events-<day>-2.parquet`, `-3`, …
     public static let rowsPerFile = 200_000
@@ -52,7 +58,8 @@ public enum AuditArchive {
         public var errors: [String] = []
     }
 
-    /// 物化所有需要（重）写的日期。cutoff = 保留期截止时间（nil = 永久保留）。
+    /// Materializes every day that needs (re)writing. cutoff = retention cutoff (nil = keep
+    /// forever).
     @discardableResult
     public static func materialize(
         store: EurekaStore, outDir: URL, host: String, appVersion: String,
@@ -73,7 +80,7 @@ public enum AuditArchive {
         for day in fingerprints where !day.day.isEmpty {
             let entry = ledger[day.day]
             let dir = outDir.appendingPathComponent("dt=\(day.day)", isDirectory: true)
-            // 早于保留期且已上传：定稿，不再动
+            // Older than retention and already uploaded: final, never touched again
             if let cutoffDay, day.day < cutoffDay, entry?.uploadedAt != nil { continue }
             let fileMissing = !fm.fileExists(atPath: dir.appendingPathComponent(fileName(day: day.day, chunk: 0)).path)
             let needsWrite = entry?.fingerprint != day.fingerprint
@@ -93,7 +100,8 @@ public enum AuditArchive {
         return outcome
     }
 
-    /// 备份一轮之后：本地文件与 sync_state 完全一致（size + mtime）的日期记为已上传
+    /// After a backup round: mark as uploaded the days whose local files exactly match sync_state
+    /// (size + mtime)
     public static func reconcileUploads(store: EurekaStore, now: Date = Date()) {
         guard let entries = try? store.auditArchive.all() else { return }
         for entry in entries where entry.uploadedFingerprint != entry.fingerprint {
@@ -113,7 +121,8 @@ public enum AuditArchive {
         }
     }
 
-    /// 允许本地清理的日期：已上传，且上传时的指纹等于当前库里的指纹（没有新变化没传上去）
+    /// Days local pruning may delete: uploaded, and the fingerprint at upload time equals the
+    /// current one in the database (no newer change left un-uploaded)
     public static func prunableDays(store: EurekaStore) -> Set<String> {
         guard let current = try? store.audit.dayFingerprints(),
               let ledger = try? store.auditArchive.all()
@@ -124,10 +133,13 @@ public enum AuditArchive {
         return Set(current.filter { uploaded[$0.day] == $0.fingerprint }.map(\.day))
     }
 
-    /// 开启归档时的本地清理：只删"已上传且指纹未变"的**整天**。
-    /// - 保留期：截止日之前的可清理日期整天删除（截止当天留到它整天过期）；
-    /// - 行数上限：仍超出时，从最旧的可清理日期起整天删除。
-    /// 返回删掉的日期。上传一直失败 → 没有可清理日期 → 宁可超期保留，也不丢数据。
+    /// Local pruning while archiving is on: deletes only **whole days** that are "uploaded with an
+    /// unchanged fingerprint".
+    /// - Retention: prunable days before the cutoff day are deleted whole (the cutoff day itself
+    ///   stays until all of it has expired);
+    /// - Row cap: if still over, delete whole days starting from the oldest prunable day.
+    /// Returns the deleted days. Uploads keep failing → no prunable days → keep rows past retention
+    /// rather than lose data.
     @discardableResult
     public static func prune(store: EurekaStore, cutoff: Date?, maxRows: Int) -> [String] {
         let prunable = prunableDays(store: store)
@@ -135,7 +147,7 @@ public enum AuditArchive {
         var deleted: [String] = []
         var total = days.reduce(0) { $0 + $1.rows }
         let cutoffDay = cutoff.map(utcDay)
-        for day in days where prunable.contains(day.day) {  // days 已按日期升序
+        for day in days where prunable.contains(day.day) {  // days is sorted by date ascending
             let expired = cutoffDay.map { day.day < $0 } ?? false
             guard expired || total > maxRows else { continue }
             guard (try? store.audit.deleteDay(day.day)) != nil else { continue }
@@ -145,7 +157,8 @@ public enum AuditArchive {
         return deleted
     }
 
-    /// 早于保留期、且已上传的本地 Parquet 目录可以删（远端保留；引擎只会清掉 sync_state 行）
+    /// Local Parquet directories older than retention and already uploaded may be deleted (the
+    /// remote copy stays; the engine only purges the sync_state rows)
     public static func removeUploadedLocalFiles(store: EurekaStore, cutoff: Date) {
         guard let entries = try? store.auditArchive.all() else { return }
         let cutoffDay = utcDay(cutoff)
@@ -154,7 +167,7 @@ public enum AuditArchive {
         }
     }
 
-    // MARK: - 写文件
+    // MARK: - Writing files
 
     static func writeDay(_ events: [AuditEvent], day: String, to dir: URL, host: String, appVersion: String) throws {
         let fm = FileManager.default
@@ -173,13 +186,13 @@ public enum AuditArchive {
             _ = try? fm.removeItem(at: target)
             try fm.moveItem(at: temp, to: target)
         }
-        // 行数变少导致的多余分片
+        // Extra chunk files left over after the row count shrank
         for stale in partFiles(in: dir) where !keep.contains(stale.lastPathComponent) {
             try? fm.removeItem(at: stale)
         }
     }
 
-    /// 一批记录 → Parquet（detail 先脱敏）
+    /// A batch of records → Parquet (detail is redacted first)
     public static func encode(_ events: [AuditEvent], host: String, appVersion: String) throws -> Data {
         let redacted = events.map { AuditRedactor.redact(detail: $0.detail, tool: $0.tool) }
         typealias Column = ParquetWriter.Column
@@ -206,8 +219,9 @@ public enum AuditArchive {
             columns: columns, compression: .gzip, createdBy: "eureka \(appVersion)")
     }
 
-    /// 按文件名拼回 dir 下的路径——不能用 contentsOfDirectory(at:) 返回的 URL：
-    /// 它会把 /var 解析成 /private/var，与 sync_state 里记的路径对不上
+    /// Rebuilds the path under dir from the file name; the URLs returned by
+    /// contentsOfDirectory(at:) can't be used:
+    /// they resolve /var to /private/var, which won't match the paths recorded in sync_state
     static func partFiles(in dir: URL) -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
             .filter { $0.hasPrefix(filePrefix) && $0.hasSuffix(".parquet") }

@@ -1,13 +1,14 @@
 import Foundation
 
-/// Qoder CLI（CN 版）的本地数据路径（默认 `~/.qoder-cn`，v1.1.5 实勘）。
-/// 布局为 Claude 式：`projects/<cwd编码>/〈sessionId〉.jsonl`（Claude 式信封，
-/// slug = cwd 把 `/` 换成 `-`）+ 伴随 `<sessionId>/subagents/agent-*.jsonl`；
-/// 计划 `plans/<slug>.md`；记忆 `memories/<user-hash>/global/<category>/`。
-/// CLI 二进制 `bin/qoderclicn/qoderclicn-<version>`（版本号在文件名里）。
-/// ⚠️ `.auth/` 是凭据、`settings.json` 含 API key，任何备份/上传都不得纳入。
+/// Qoder CLI (CN edition) local data paths (default `~/.qoder-cn`, surveyed on v1.1.5).
+/// Claude-style layout: `projects/<encoded cwd>/<sessionId>.jsonl` (Claude-style envelope,
+/// slug = cwd with `/` replaced by `-`) + companion `<sessionId>/subagents/agent-*.jsonl`;
+/// plans `plans/<slug>.md`; memory `memories/<user-hash>/global/<category>/`.
+/// CLI binary `bin/qoderclicn/qoderclicn-<version>` (the version is in the file name).
+/// ⚠️ `.auth/` holds credentials and `settings.json` contains API keys; neither may ever be
+/// included in any backup/upload.
 public enum QoderPaths {
-    /// 配置主目录（env `EUREKA_QODER_HOME` > `QODER_CONFIG_DIR` > `~/.qoder-cn`）
+    /// Config home (env `EUREKA_QODER_HOME` > `QODER_CONFIG_DIR` > `~/.qoder-cn`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -21,7 +22,7 @@ public enum QoderPaths {
             .appendingPathComponent(".qoder-cn", isDirectory: true)
     }
 
-    /// 会话根 `<home>/projects`（每项目一个 cwd 编码目录）
+    /// Session root `<home>/projects` (one encoded-cwd directory per project)
     public static func projectsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -29,7 +30,8 @@ public enum QoderPaths {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
-    /// 技能根 `<home>/skills`（与 CodeBuddy 同构；⚠️ 本机未装 Qoder，未实勘）
+    /// Skill root `<home>/skills` (same shape as CodeBuddy; ⚠️ Qoder is not installed locally, not
+    /// surveyed)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -37,7 +39,7 @@ public enum QoderPaths {
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 计划文档根 `<home>/plans`（plan 模式的 <slug>.md）
+    /// Plan document root `<home>/plans` (plan mode's <slug>.md)
     public static func plansRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -45,7 +47,7 @@ public enum QoderPaths {
             .appendingPathComponent("plans", isDirectory: true)
     }
 
-    /// 记忆根 `<home>/memories`（<user-hash>/global/<category>/）
+    /// Memory root `<home>/memories` (<user-hash>/global/<category>/)
     public static func memoriesRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -53,8 +55,8 @@ public enum QoderPaths {
             .appendingPathComponent("memories", isDirectory: true)
     }
 
-    /// CLI 二进制 `<home>/bin/qoderclicn/qoderclicn-<version>`；
-    /// 版本号在文件名里，glob 后取语义版本最高者；找不到返回 nil
+    /// CLI binary `<home>/bin/qoderclicn/qoderclicn-<version>`; the version is in the file name, so
+    /// glob and take the highest semantic version; nil if none found
     public static func cliBinary(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL? {
@@ -72,7 +74,8 @@ public enum QoderPaths {
             }
     }
 
-    /// 语义版本比较（数字段逐段比；非数字段按字典序兜底）
+    /// Semantic version comparison (numeric segments compared one by one; non-numeric segments fall
+    /// back to lexicographic order)
     static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
         let a = lhs.split(separator: ".", omittingEmptySubsequences: false)
         let b = rhs.split(separator: ".", omittingEmptySubsequences: false)

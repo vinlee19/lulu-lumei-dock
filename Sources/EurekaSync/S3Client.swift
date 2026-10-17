@@ -1,13 +1,13 @@
 import EurekaKit
 import Foundation
 
-/// S3 兼容存储配置。endpointHost 由调用方给定 —— 预设服务商用
-/// StorageProvider.endpointHost(region:) 生成，自定义服务商由用户填写；
-/// S3Client 本身不感知服务商差异（纯 S3 协议客户端）。
+/// S3-compatible storage config. endpointHost is supplied by the caller: preset providers use
+/// StorageProvider.endpointHost(region:), custom providers are filled in by the user;
+/// S3Client itself is unaware of provider differences (a pure S3-protocol client).
 public struct S3Config: Equatable {
     public var region: String
     public var bucket: String
-    /// endpoint host（不含 bucket 前缀、不含 scheme），必填
+    /// endpoint host (no bucket prefix, no scheme), required
     public var endpointHost: String
 
     public init(region: String, bucket: String, endpointHost: String) {
@@ -16,13 +16,14 @@ public struct S3Config: Equatable {
         self.endpointHost = endpointHost
     }
 
-    /// 恒用 virtual-hosted style：https://<bucket>.<endpointHost>/<key>
+    /// Always virtual-hosted style: https://<bucket>.<endpointHost>/<key>
     public var resolvedHost: String {
         "\(bucket).\(endpointHost)".lowercased()
     }
 }
 
-/// S3 层错误：只带状态码 + body 片段（COS 错误体是 XML，原样截断展示、不解析）
+/// S3-layer error: carries only the status code + a body snippet (COS error bodies are XML,
+/// shown truncated as-is, not parsed)
 public struct S3Error: Error, CustomStringConvertible {
     public var status: Int
     public var bodySnippet: String
@@ -36,7 +37,8 @@ public struct S3Error: Error, CustomStringConvertible {
     }
 }
 
-/// 最小 S3 客户端：PUT Object + HEAD Bucket（上传-only 首期够用，零 XML 解析）
+/// Minimal S3 client: PUT Object + HEAD Bucket (enough for upload-only phase one, zero XML
+/// parsing)
 public final class S3Client {
     private let config: S3Config
     private let credentials: SigV4Signer.Credentials
@@ -51,14 +53,16 @@ public final class S3Client {
         self.transport = transport
     }
 
-    /// PUT Object；成功返回服务端 ETag（可空）。失败 throw S3Error / 传输层错误。
+    /// PUT Object; returns the server's ETag on success (may be nil). Throws S3Error / transport
+    /// errors on failure.
     @discardableResult
     public func putObject(key: String, data: Data) throws -> String? {
         let path = SyncKeyMapper.canonicalURIPath(forKey: key)
-        // PUT 超时按体积放宽：基础 60s + 每 MB 5s，封顶 300s
+        // PUT timeout scales with size: 60s base + 5s per MB, capped at 300s
         let megabytes = Double(data.count) / 1_048_576.0
         let timeout: TimeInterval = min(300.0, 60.0 + megabytes * 5.0)
-        // 审计归档的 Parquet 带标准类型，便于桶端工具识别（Content-Type 不参与 SigV4 签名）
+        // Audit-archive Parquet gets its standard type so bucket-side tools recognize it
+        // (Content-Type is not part of the SigV4 signature)
         let contentType = key.hasSuffix(".parquet") ? "application/vnd.apache.parquet" : nil
         let reply = try send(
             method: "PUT", path: path, payload: data, timeout: timeout, contentType: contentType)
@@ -68,7 +72,8 @@ public final class S3Client {
         return reply.headers["etag"]
     }
 
-    /// HEAD Bucket → 测试连接/凭证/桶配置（无响应体，无需 XML）
+    /// HEAD Bucket → tests the connection/credentials/bucket config (no response body, no XML
+    /// needed)
     public func headBucket() throws {
         let reply = try send(method: "HEAD", path: "/", payload: nil, timeout: 15)
         guard (200..<300).contains(reply.status) else {

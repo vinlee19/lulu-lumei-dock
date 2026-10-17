@@ -1,7 +1,8 @@
 import Foundation
 import EurekaKit
 
-/// SQLite 持久化入口。所有方法都应在同一队列上调用（app 内用 UsageService 的队列）。
+/// SQLite persistence entry point. Call every method on the same queue (in the app, UsageService's
+/// queue).
 public final class EurekaStore {
     public let db: SQLiteDB
     public let history: TaskHistoryRepo
@@ -40,7 +41,8 @@ public final class EurekaStore {
         prompts = PromptsRepo(db: db)
     }
 
-    /// 默认 ~/Library/Application Support/Eureka/eureka.sqlite（EUREKA_DB_PATH 覆盖）
+    /// Defaults to ~/Library/Application Support/Eureka/eureka.sqlite (overridden by
+    /// EUREKA_DB_PATH)
     public static func defaultURL(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -73,7 +75,8 @@ public final class TaskHistoryRepo {
         ])
     }
 
-    /// 区间内任务结局计数（finished_at 落区间；周报成功/失败/中断率用）
+    /// Task outcome counts in a range (finished_at within the range; feeds the weekly report's
+    /// success/failure/interrupted rates)
     public func outcomeCounts(from: Date, to: Date) throws -> [String: Int] {
         let rows = try db.query("""
         SELECT outcome, COUNT(*) FROM task_history
@@ -95,8 +98,9 @@ public final class TaskHistoryRepo {
         }
     }
 
-    /// 区间内任务列表（finished_at >= since，倒序；历史页 14 天窗口用）。
-    /// `recent(limit:)` 保留：周报表等调用方口径不变。
+    /// Tasks in a range (finished_at >= since, newest first; used by the history page's 14-day
+    /// window). `recent(limit:)` is kept so callers such as the weekly report keep the same
+    /// semantics.
     public func tasks(since: Date, limit: Int) throws -> [FinishedTask] {
         try db.query("""
         SELECT source, session_id, title, cwd, started_at, session_started_at,
@@ -108,8 +112,9 @@ public final class TaskHistoryRepo {
         }
     }
 
-    /// 按天×结局聚合计数（本地时区界；历史页「近 14 天任务量」堆叠图用）。
-    /// SQL 范式同 UsageRepo.dailyRows；无任务的日期不出现，补 0 由 UI 层处理。
+    /// Counts aggregated by day × outcome (local-time day boundaries; feeds the history page's
+    /// "tasks, last 14 days" stacked chart). Same SQL pattern as UsageRepo.dailyRows; days without
+    /// tasks are omitted and the UI layer fills in zeros.
     public func dailyOutcomeCounts(
         since: Date
     ) throws -> [(day: String, outcome: String, count: Int)] {
@@ -153,7 +158,7 @@ public final class UsageRepo {
         }
     }
 
-    /// 插入并返回 rowid（去重键回填 output 用）
+    /// Insert and return the rowid (used to back-fill output for a dedup key)
     public func insertReturningId(_ record: UsageRecord) throws -> Int64 {
         try db.run("""
         INSERT INTO usage_records
@@ -176,14 +181,16 @@ public final class UsageRepo {
         return db.lastInsertRowID
     }
 
-    /// 删除某会话的全部记录（文件被重写、需从头重扫的来源先清再写，避免重复入账）
+    /// Delete every record of a session (sources whose files get rewritten and rescanned from zero
+    /// clear first, so nothing is counted twice)
     public func deleteRecords(source: AgentSource, sessionId: String) throws {
         try db.run(
             "DELETE FROM usage_records WHERE source = ? AND session_id = ?",
             [.text(source.rawValue), .text(sessionId)])
     }
 
-    /// provider 回填：只写仍为 NULL 的行（ts 为 nil 时按整个会话 × 模型匹配）
+    /// Provider back-fill: only writes rows still NULL (when ts is nil, matches on the whole
+    /// session × model)
     public func backfillProvider(
         source: AgentSource, sessionId: String, model: String?, ts: Double?, provider: String
     ) throws {
@@ -202,15 +209,15 @@ public final class UsageRepo {
             [.text(provider)] + bindings)
     }
 
-    /// 流式重复行的 output 递增：用更大的最终值覆盖
+    /// Output growth on streamed duplicate rows: overwrite with the larger final value
     public func updateOutputTokens(recordId: Int64, outputTokens: Int) throws {
         try db.run(
             "UPDATE usage_records SET output_tokens = ? WHERE id = ?",
             [.int(Int64(outputTokens)), .int(recordId)])
     }
 
-    /// 时间区间内按 (project, source, model) 聚合（按项目统计/费用折算用）；
-    /// `source` 与 `totalsBySession` 同义：nil = 全部来源。
+    /// Aggregate by (project, source, model) over a time range (per-project stats / cost
+    /// conversion); `source` means the same as in `totalsBySession`: nil = all sources.
     public func totalsByProject(
         from: Date, to: Date, source: AgentSource? = nil
     ) throws -> [(project: String?, totals: UsageTotals)] {
@@ -246,7 +253,7 @@ public final class UsageRepo {
         }
     }
 
-    /// 给定会话集合的逐会话×模型聚合（会话级费用展示）
+    /// Per-session × model aggregates for a given set of sessions (session-level cost display)
     public func totalsForSessions(_ ids: [String]) throws -> [String: [UsageTotals]] {
         var result: [String: [UsageTotals]] = [:]
         for chunk in stride(from: 0, to: ids.count, by: 500).map({
@@ -282,10 +289,10 @@ public final class UsageRepo {
         return result
     }
 
-    /// 趋势/导出的时间桶粒度
+    /// Time-bucket granularity for trends / exports
     public enum TrendGranularity: String, Sendable {
         case day   // yyyy-MM-dd
-        case hour  // yyyy-MM-dd HH:00（短区间趋势用）
+        case hour  // yyyy-MM-dd HH:00 (for short-range trends)
 
         var bucketExpr: String {
             switch self {
@@ -295,7 +302,7 @@ public final class UsageRepo {
         }
     }
 
-    /// 按日/小时导出聚合（CSV / 趋势图用），本地时区界
+    /// Daily/hourly export aggregates (CSV / trend chart), local-time boundaries
     public func dailyRows(
         from: Date, to: Date, granularity: TrendGranularity = .day
     ) throws -> [DailyUsageRow] {
@@ -329,7 +336,7 @@ public final class UsageRepo {
         }
     }
 
-    /// 原始用量记录行（请求日志分页用）
+    /// Raw usage record row (for the paginated request log)
     public struct UsageRecordRow: Equatable, Sendable {
         public var source: AgentSource
         public var model: String
@@ -344,7 +351,7 @@ public final class UsageRepo {
         public var reportedCostUSD: Double?
     }
 
-    /// 请求日志：按时间倒序分页取原始记录（idx_usage_ts 支撑）
+    /// Request log: page through raw records newest first (backed by idx_usage_ts)
     public func recentRecords(
         from: Date? = nil, to: Date? = nil, source: AgentSource? = nil,
         limit: Int, offset: Int = 0
@@ -372,7 +379,7 @@ public final class UsageRepo {
         }
     }
 
-    /// 请求日志总条数（分页「共 N 条」用）
+    /// Total request-log row count (for the pager's "N total" label)
     public func recordCount(
         from: Date? = nil, to: Date? = nil, source: AgentSource? = nil
     ) throws -> Int {
@@ -382,7 +389,8 @@ public final class UsageRepo {
         ) { Int($0.int(0)) }.first ?? 0
     }
 
-    /// 动态拼 WHERE（ts >= / ts < / source =），返回子句与绑定
+    /// Build the WHERE clause dynamically (ts >= / ts < / source =); returns the clause and its
+    /// bindings
     private static func recordFilter(
         from: Date?, to: Date?, source: AgentSource?
     ) -> (String, [SQLiteValue]) {
@@ -404,15 +412,17 @@ public final class UsageRepo {
         return (clause, bindings)
     }
 
-    /// (会话 × 来源 × 模型) 聚合行（按会话用量排行用；model 维度保留供价目表算钱）
+    /// (session × source × model) aggregate row (for the per-session usage ranking; the model
+    /// dimension is kept so the price table can compute cost)
     public struct SessionUsageRow: Equatable, Sendable {
         public var sessionId: String
         public var project: String?
-        public var lastTs: Date  // 该会话在区间内最近一条记录
+        public var lastTs: Date  // The session's most recent record within the range
         public var totals: UsageTotals
     }
 
-    /// 时间区间内按会话聚合（排除无 session_id 的记录）；排序/limit 由调用方在算完成本后做
+    /// Aggregate by session over a time range (rows without session_id excluded); callers sort /
+    /// limit after computing cost
     public func totalsBySession(
         from: Date, to: Date, source: AgentSource? = nil
     ) throws -> [SessionUsageRow] {
@@ -452,9 +462,9 @@ public final class UsageRepo {
         }
     }
 
-    /// 活跃时段热力格（weekday 用 SQLite %w 语义：0=周日 … 6=周六，本地时区）
+    /// Activity heatmap cell (weekday uses SQLite %w semantics: 0=Sunday … 6=Saturday, local time)
     public struct HeatmapCell: Equatable, Sendable {
-        public var weekday: Int  // 0-6（0=周日）
+        public var weekday: Int  // 0-6 (0=Sunday)
         public var hour: Int     // 0-23
         public var requests: Int
         public var tokens: Int
@@ -467,7 +477,7 @@ public final class UsageRepo {
         }
     }
 
-    /// 周 × 24 小时聚合（一次 SQL 聚合完，最多 168 行）
+    /// Week × 24-hour aggregate (one SQL aggregation, at most 168 rows)
     public func hourlyHeatmap(
         from: Date, to: Date, source: AgentSource? = nil
     ) throws -> [HeatmapCell] {
@@ -496,8 +506,9 @@ public final class UsageRepo {
         }
     }
 
-    /// 时间区间内按 (source, model) 聚合
-    /// 区间内有请求的（本地日期, 小时）去重桶：周报"活跃时长 / 深夜天数"口径（与热力图同源）
+    /// Aggregate by (source, model) over a time range Distinct (local date, hour) buckets that had
+    /// requests in the range: the weekly report's "active hours / late-night days" metric (same
+    /// basis as the heatmap)
     public func activeHourBuckets(from: Date, to: Date) throws -> [(day: String, hour: Int)] {
         try db.query("""
         SELECT DISTINCT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime'),
@@ -509,7 +520,8 @@ public final class UsageRepo {
         }
     }
 
-    /// 账本里出现过的全部 (source, model, provider) 及其 token 量（未定价模型清单用）
+    /// Every (source, model, provider) ever seen in the ledger with its token volume (for the
+    /// unpriced-models list)
     public func distinctModels() throws -> [UsageTotals] {
         try db.query("""
         SELECT source, model,
@@ -560,7 +572,7 @@ public final class UsageRepo {
     }
 }
 
-/// CSV 导出行（按日 × 来源 × 模型 × 项目）
+/// CSV export row (by day × source × model × project)
 public struct DailyUsageRow: Equatable, Sendable {
     public var day: String
     public var project: String
@@ -573,7 +585,8 @@ public struct DailyUsageRow: Equatable, Sendable {
     }
 }
 
-/// (source, model, provider) 聚合结果；provider 只参与算钱，展示层按 model 合并
+/// (source, model, provider) aggregate; provider only matters for pricing, the display layer merges
+/// by model
 public struct UsageTotals: Equatable, Sendable {
     public var source: AgentSource
     public var model: String
@@ -584,7 +597,7 @@ public struct UsageTotals: Equatable, Sendable {
     public var cacheReadTokens: Int
     public var requestCount: Int
     public var provider: String?
-    /// agent 自报费用之和（仅 Grok；nil = 无自报，走价格表）
+    /// Sum of agent-reported cost (Grok only; nil = nothing reported, use the price table)
     public var reportedCostUSD: Double?
 
     public init(
@@ -607,7 +620,7 @@ public struct UsageTotals: Equatable, Sendable {
     }
 }
 
-/// 每会话对话数（用量扫描器顺路计数）
+/// Conversation count per session (counted by the usage scanners in passing)
 public final class SessionStatsRepo {
     private let db: SQLiteDB
 
@@ -615,7 +628,7 @@ public final class SessionStatsRepo {
         self.db = db
     }
 
-    /// reset=true（全量重扫该文件）时覆盖，否则累加
+    /// Overwrite when reset=true (full rescan of the file), otherwise accumulate
     public func recordPrompts(path: String, sessionId: String, count: Int, reset: Bool) throws {
         if reset {
             try db.run("""
@@ -630,7 +643,7 @@ public final class SessionStatsRepo {
         }
     }
 
-    /// 给定会话集合的对话数
+    /// Conversation counts for a given set of sessions
     public func promptCounts(for ids: [String]) throws -> [String: Int] {
         var result: [String: Int] = [:]
         for chunk in stride(from: 0, to: ids.count, by: 500).map({
@@ -695,7 +708,7 @@ public final class ScanStateRepo {
         }
     }
 
-    /// 返回 keys 中已存在的键 → (记录 id, 已记 output)
+    /// Returns the keys that already exist → (record id, recorded output)
     public func existingDedupKeys(_ keys: [String]) throws -> [String: DedupEntry] {
         var existing: [String: DedupEntry] = [:]
         for chunk in stride(from: 0, to: keys.count, by: 500).map({
@@ -730,7 +743,8 @@ public final class ScanStateRepo {
         ])
     }
 
-    /// 8 天窗口剪枝（resume/fork 复制的都是近期行，老键无碰撞风险）
+    /// Prune to an 8-day window (resume/fork only copy recent rows, so old keys carry no collision
+    /// risk)
     public func pruneDedupKeys(before: Date) throws {
         try db.run(
             "DELETE FROM dedup_keys WHERE ts < ?",
@@ -742,7 +756,8 @@ public final class ScanStateRepo {
     }
 }
 
-/// 云端备份状态：path → 最近一次成功上传时的本地指纹（增量同步的 diff 基准）
+/// Cloud backup state: path → local fingerprint at the last successful upload (the diff baseline
+/// for incremental sync)
 public final class SyncStateRepo {
     private let db: SQLiteDB
 
@@ -757,8 +772,8 @@ public final class SyncStateRepo {
         public var mtime: Double
         public var etag: String?
         public var uploadedAt: Date
-        /// 备份类目（`SyncCandidate.category`，如 `claude/skills`）。
-        /// 老行没有这一列 → nil，构成统计会回退按 remote_key 解析。
+        /// Backup category (`SyncCandidate.category`, e.g. `claude/skills`). Old rows lack this
+        /// column → nil, and the composition stats fall back to parsing remote_key.
         public var category: String?
 
         public init(
@@ -782,7 +797,7 @@ public final class SyncStateRepo {
         """, [.text(path)]) { Self.mapRow($0) }.first
     }
 
-    /// 全量加载做 diff（条目数千级，一次 SELECT 可接受）
+    /// Load everything to diff (a few thousand entries; one SELECT is acceptable)
     public func allEntries() throws -> [String: Entry] {
         var result: [String: Entry] = [:]
         let rows = try db.query("""
@@ -807,7 +822,7 @@ public final class SyncStateRepo {
         ])
     }
 
-    /// 备份总量统计（「备份」页签展示用）
+    /// Backup totals (shown on the Backup tab)
     public struct Stats: Equatable {
         public var fileCount: Int
         public var totalBytes: Int64
@@ -831,12 +846,12 @@ public final class SyncStateRepo {
         }.first ?? Stats(fileCount: 0, totalBytes: 0, lastUploadAt: nil)
     }
 
-    /// 备份构成的一格：某来源下某个类目的文件数与字节数
+    /// One cell of the backup composition: file count and bytes for one category under one source
     public struct CompositionBucket: Equatable, Sendable {
-        /// 来源段（`AgentSource.rawValue` 或 `custom`）
+        /// Source segment (`AgentSource.rawValue` or `custom`)
         public var source: String
-        /// 类目段（`skills` / `projects` / `plans` / `memories`…）；
-        /// 根文件（CLAUDE.md、SOUL.md 之类，category 恰等于来源）为 nil
+        /// Category segment (`skills` / `projects` / `plans` / `memories`…);
+        /// nil for root files (CLAUDE.md, SOUL.md and the like, whose category equals the source)
         public var kind: String?
         public var count: Int
         public var bytes: Int64
@@ -849,11 +864,11 @@ public final class SyncStateRepo {
         }
     }
 
-    /// 备份构成（两级：来源 → 类目）。
+    /// Backup composition (two levels: source → category).
     ///
-    /// 优先用 `category` 列（`SyncCandidate.category`，精确）；老行该列为 NULL →
-    /// 回退按 `remote_key` 解析，段数 ≥5 时第 4 段即类目。
-    /// ⚠️ 段数正好 4 时第 4 段是**文件名**而不是类目（根文件），硬拆会造出假类目。
+    /// Prefers the `category` column (`SyncCandidate.category`, exact); old rows have NULL there →
+    /// fall back to parsing `remote_key`, where the 4th segment is the category when there are ≥5 segments.
+    /// ⚠️ With exactly 4 segments the 4th is a **file name**, not a category (a root file); splitting blindly invents fake categories.
     public func composition() throws -> [CompositionBucket] {
         let rows = try db.query(
             "SELECT remote_key, size, category FROM sync_state"
@@ -866,14 +881,16 @@ public final class SyncStateRepo {
             if let category, !category.isEmpty {
                 let parts = category.split(separator: "/", maxSplits: 1)
                 source = String(parts[0])
-                // 类目只留第一段：`claude/skills/project/<名>` 归到 skills
+                // Keep only the first category segment: `claude/skills/project/<name>` goes under
+                // skills
                 kind = parts.count > 1
                     ? parts[1].split(separator: "/").first.map(String.init) : nil
             } else {
-                // 老行（category 列加上之前上传的）：从 remote_key 推。
-                // key = `<prefix>/<host>/<来源>/<类目>/…`，所以 parts[3] 是类目 ——
-                // **但只有段数 ≥5 时才是**：段数正好 4 时那一段是文件名（根文件，
-                // 实勘 GEMINI.md / projects.json / opencode.db / AGENTS.md / SOUL.md 共 5 条）。
+                // Old rows (uploaded before the category column existed): derive from remote_key.
+                // key = `<prefix>/<host>/<source>/<category>/…`, so parts[3] is the category —
+                // **but only with ≥5 segments**: with exactly 4, that segment is a file name (a
+                // root file; inspected locally: GEMINI.md / projects.json / opencode.db / AGENTS.md
+                // / SOUL.md, 5 in total).
                 let parts = key.split(separator: "/")
                 guard parts.count >= 3 else { continue }
                 source = String(parts[2])
@@ -891,7 +908,7 @@ public final class SyncStateRepo {
         }
     }
 
-    /// 兼容旧调用点：只按来源汇总（新 UI 走 `composition()`）
+    /// Compatibility for old call sites: totals by source only (the new UI uses `composition()`)
     public func sourceComposition() throws -> [String: (count: Int, bytes: Int64)] {
         var result: [String: (count: Int, bytes: Int64)] = [:]
         for bucket in try composition() {
@@ -903,7 +920,7 @@ public final class SyncStateRepo {
         return result
     }
 
-    /// 本地已消失的文件清状态（远端不删，上传-only）
+    /// Clear state for files that vanished locally (remote copies are not deleted; upload-only)
     public func deletePaths(_ paths: [String]) throws {
         for chunk in stride(from: 0, to: paths.count, by: 500).map({
             Array(paths[$0..<min($0 + 500, paths.count)])
@@ -931,7 +948,8 @@ public final class SyncStateRepo {
     }
 }
 
-/// 云端备份轮次历史：每轮汇总 + 文件明细（分页展示 + 文件名/数据量）
+/// Cloud backup run history: per-run summary + file details (paginated display + file names /
+/// sizes)
 public final class SyncRunsRepo {
     private let db: SQLiteDB
 
@@ -942,7 +960,8 @@ public final class SyncRunsRepo {
     public struct RunFile: Equatable, Sendable {
         public var name: String
         public var size: Int64
-        /// 来源类目（如 "claude/skills"、"custom/notes"）；老记录无此字段 = nil
+        /// Source category (e.g. "claude/skills", "custom/notes"); nil for old records without this
+        /// field
         public var category: String?
         public init(name: String, size: Int64, category: String? = nil) {
             self.name = name
@@ -977,7 +996,7 @@ public final class SyncRunsRepo {
         ])
     }
 
-    /// 倒序分页
+    /// Paginated, newest first
     public func recent(limit: Int, offset: Int = 0) throws -> [Run] {
         try db.query("""
         SELECT id, ts, uploaded, uploaded_bytes, failed, deferred, error, files
@@ -999,7 +1018,7 @@ public final class SyncRunsRepo {
         try db.query("SELECT COUNT(*) FROM sync_runs") { Int($0.int(0)) }.first ?? 0
     }
 
-    /// 只保留最近 N 轮
+    /// Keep only the most recent N runs
     public func prune(keepingLast: Int) throws {
         try db.run("""
         DELETE FROM sync_runs WHERE id NOT IN (
@@ -1008,7 +1027,7 @@ public final class SyncRunsRepo {
         """, [.int(Int64(keepingLast))])
     }
 
-    // MARK: - files JSON（key n=名 / s=字节 / c=来源类目，c 为后加字段，老行缺省兼容）
+    // MARK: - files JSON (keys n=name / s=bytes / c=source category; c was added later, old rows default compatibly)
 
     public static func encodeFiles(_ files: [RunFile]) -> String? {
         guard !files.isEmpty else { return nil }
@@ -1033,7 +1052,8 @@ public final class SyncRunsRepo {
     }
 }
 
-/// 工具/技能/插件/子代理调用计数（按 日×来源×kind×name×会话 聚合，会话维度仅 Claude 写真实值；用量扫描器顺路计数）
+/// Tool / skill / plugin / subagent call counts (aggregated by day × source × kind × name ×
+/// session; only Claude writes real session values; counted by the usage scanners in passing)
 public final class ToolCallsRepo {
     private let db: SQLiteDB
 
@@ -1048,8 +1068,9 @@ public final class ToolCallsRepo {
         public var count: Int
     }
 
-    /// 全时累计的技能调用统计（供 Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）。
-    /// public init：app 层要为审计流水覆盖不到的源补行（hermes 的计数文件）。
+    /// All-time skill call stats (for the Skills analysis view: total count / last active / tokens
+    /// at trigger). public init: the app layer back-fills rows for sources the audit log doesn't
+    /// cover (Hermes' count file).
     public struct SkillUsageStat: Equatable, Sendable, Identifiable {
         public var source: AgentSource
         public var name: String
@@ -1067,8 +1088,9 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// MCP 调用按原始名全时聚合（名的形态因源而异：codex/kimi 是 `server.tool`，
-    /// Claude 是 `mcp__server__tool`——server 前缀提取在 app 层做，SQL 只管聚合）
+    /// All-time aggregate of MCP calls by raw name (the name's shape varies by source: codex/kimi
+    /// use `server.tool`, Claude uses `mcp__server__tool` — server-prefix extraction happens in the
+    /// app layer; SQL only aggregates)
     public struct MCPCallTotal: Equatable, Sendable {
         public var name: String
         public var count: Int
@@ -1087,8 +1109,8 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// MCP 调用按 (天, 原始名) 全时聚合（详情页 per-server 趋势与 top 工具；
-    /// server 前缀提取照旧在 app 层做，SQL 只管聚合）
+    /// All-time aggregate of MCP calls by (day, raw name) (detail page per-server trend and top
+    /// tools; server-prefix extraction still happens in the app layer; SQL only aggregates)
     public struct MCPDailyTotal: Equatable, Sendable {
         public var day: String
         public var name: String
@@ -1107,8 +1129,10 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// 累加计数（同 日/来源/kind/name/session 合并）；last_ts 取较大值、tokens 累加。
-    /// session：触发会话 id（仅 Claude 扫描器传真实值，其余默认空 —— 与逐技能数据仅 Claude 的现状一致）。
+    /// Accumulate counts (merging on day/source/kind/name/session); last_ts keeps the larger value,
+    /// tokens add up. session: the triggering session id (only the Claude scanner passes a real
+    /// value, others default to empty — consistent with per-skill data currently being
+    /// Claude-only).
     public func bump(
         day: String, source: AgentSource, kind: String, name: String,
         by count: Int = 1, ts: Double = 0, tokens: Int = 0, session: String = ""
@@ -1127,7 +1151,7 @@ public final class ToolCallsRepo {
         ])
     }
 
-    /// 时间区间内按 (source, kind, name) 聚合，count 降序
+    /// Aggregate by (source, kind, name) over a time range, count descending
     public func totals(
         from: Date, to: Date, source: AgentSource? = nil
     ) throws -> [ToolCallTotal] {
@@ -1157,22 +1181,25 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// 技能调用统计（kind='skill'），按累计次数降序。
-    /// from/to 缺省 = 全时累计（"累计次数/最近活跃"口径）；传入则按 day 日期窗过滤（Top 排行口径）。
+    /// Skill call stats (kind='skill'), by total count descending. from/to omitted = all-time
+    /// totals (the "total count / last active" metric); when given, filter by the day window (the
+    /// Top ranking metric).
     public func skillStats(
         source: AgentSource? = nil, from: Date? = nil, to: Date? = nil
     ) throws -> [SkillUsageStat] {
         try statsByName(kind: "skill", source: source, from: from, to: to)
     }
 
-    /// 子代理调用统计（kind='agent'），按累计次数降序（仅 Claude / Kimi 记录了 subagent 调用）。
+    /// Subagent call stats (kind='agent'), by total count descending (only Claude / Kimi record
+    /// subagent calls).
     public func agentStats(
         source: AgentSource? = nil, from: Date? = nil, to: Date? = nil
     ) throws -> [SkillUsageStat] {
         try statsByName(kind: "agent", source: source, from: from, to: to)
     }
 
-    /// 按 (source, name) 聚合某 kind 的调用统计（count 降序）。skill / agent 共用。
+    /// Call stats for one kind aggregated by (source, name) (count descending). Shared by skill /
+    /// agent.
     private func statsByName(
         kind: String, source: AgentSource?, from: Date?, to: Date?
     ) throws -> [SkillUsageStat] {
@@ -1210,7 +1237,8 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// 某项（source×kind×name）按天调用次数序列（详情页趋势图；day 已是主键前缀，零 schema 改动）。
+    /// Daily call-count series for one item (source × kind × name) (detail page trend chart; day is
+    /// already the primary-key prefix, zero schema change).
     public func dailySeries(
         source: AgentSource, kind: String, name: String, from: Date, to: Date
     ) throws -> [(day: Date, count: Int)] {
@@ -1231,7 +1259,8 @@ public final class ToolCallsRepo {
         }
     }
 
-    /// 某技能最近出现过的会话（全时；kind 固定 'skill'）。空 session 的历史行不计。
+    /// Sessions where a skill appeared most recently (all-time; kind fixed to 'skill'). Historic
+    /// rows with an empty session are not counted.
     public func recentSkillSessions(
         source: AgentSource, name: String, limit: Int = 10
     ) throws -> [(sessionId: String, lastTs: Date, count: Int)] {
@@ -1247,8 +1276,8 @@ public final class ToolCallsRepo {
     }
 }
 
-/// agent 操作审计流水（append-only 事实表；命令/路径全文，无输出正文）。
-/// 审计归档台账（audit_archive）
+/// Agent operation audit log (append-only fact table; full command/path text, no output bodies).
+/// Audit archive ledger (audit_archive)
 public final class AuditArchiveRepo {
     private let db: SQLiteDB
 
@@ -1263,7 +1292,8 @@ public final class AuditArchiveRepo {
         public let filePath: String
         public let writtenAt: Date
         public let uploadedAt: Date?
-        /// 上传时文件对应的指纹；与当前库指纹一致才算"这一天已完整归档"
+        /// Fingerprint of the file at upload time; the day counts as "fully archived" only when it
+        /// equals the current DB fingerprint
         public let uploadedFingerprint: String?
     }
 
@@ -1279,7 +1309,8 @@ public final class AuditArchiveRepo {
         }
     }
 
-    /// 写完本地 Parquet 后登记（保留已有的上传记录，直到新文件也传上去）
+    /// Register after writing the local Parquet file (keep any existing upload record until the new
+    /// file is uploaded too)
     public func recordWritten(day: String, fingerprint: String, rows: Int, filePath: String, at date: Date) throws {
         try db.run("""
         INSERT INTO audit_archive (day, fingerprint, rows, file_path, written_at)
@@ -1290,7 +1321,8 @@ public final class AuditArchiveRepo {
         """, [.text(day), .text(fingerprint), .int(Int64(rows)), .text(filePath), .date(date)])
     }
 
-    /// 该日文件已上传成功：把"上传指纹"对齐到当时文件的指纹
+    /// The day's file uploaded successfully: align the "uploaded fingerprint" with that file's
+    /// fingerprint
     public func markUploaded(day: String, fingerprint: String, at date: Date) throws {
         try db.run(
             "UPDATE audit_archive SET uploaded_at = ?, uploaded_fingerprint = ? WHERE day = ? AND fingerprint = ?",
@@ -1305,7 +1337,7 @@ public final class AuditRepo {
         self.db = db
     }
 
-    /// 筛选条件（面板/CLI 共用）。keyword 命中 detail 或 tool。
+    /// Filter criteria (shared by the panel and the CLI). keyword matches detail or tool.
     public struct Query: Equatable, Sendable {
         public var source: AgentSource?
         public var kind: ToolKind?
@@ -1323,7 +1355,8 @@ public final class AuditRepo {
         }
     }
 
-    /// 幂等插入：(source, session_id, op_id) 冲突则忽略。返回是否真的新插入。
+    /// Idempotent insert: ignored on (source, session_id, op_id) conflict. Returns whether a row
+    /// was actually inserted.
     @discardableResult
     public func insert(_ event: AuditEvent) throws -> Bool {
         try db.run("""
@@ -1344,7 +1377,8 @@ public final class AuditRepo {
         return db.changes > 0
     }
 
-    /// 回填执行结果（Codex function_call_output 用 call_id=op_id 找到对应行）。
+    /// Back-fill the execution result (Codex function_call_output finds the matching row via
+    /// call_id=op_id).
     public func markOutcome(
         source: AgentSource, sessionId: String, opId: String,
         exitCode: Int?, isError: Bool
@@ -1359,7 +1393,7 @@ public final class AuditRepo {
         ])
     }
 
-    /// 倒序分页查询（idx_audit_ts 支撑）
+    /// Paginated query, newest first (backed by idx_audit_ts)
     public func recent(_ query: Query = Query(), limit: Int, offset: Int = 0) throws -> [AuditEvent] {
         let (whereClause, bindings) = Self.filter(query)
         return try db.query("""
@@ -1370,7 +1404,7 @@ public final class AuditRepo {
         """, bindings + [.int(Int64(limit)), .int(Int64(offset))]) { Self.mapRow($0) }
     }
 
-    /// 条数（分页「共 N 条」用）
+    /// Row count (for the pager's "N total" label)
     public func count(_ query: Query = Query()) throws -> Int {
         let (whereClause, bindings) = Self.filter(query)
         return try db.query(
@@ -1378,11 +1412,12 @@ public final class AuditRepo {
         ) { Int($0.int(0)) }.first ?? 0
     }
 
-    /// 按某一维度分组计数（筛选条 chip 与总览卡的分布用）。
+    /// Grouped counts on one dimension (for the filter-bar chips and the overview card
+    /// distribution).
     ///
-    /// 只接受白名单列，**绝不把外部字符串拼进 SQL**。先例：同文件 `dailySeries` 的 GROUP BY。
-    /// 实测真实 25,576 行约 30ms（`source`/`kind` 无索引，全表扫）；`prune(keepingLast:)`
-    /// 的 20 万行上限下约 100–200ms —— 只在页面加载时算一次，**不能随输入逐次跑**。
+    /// Accepts only whitelisted columns; **never splices external strings into SQL**. Precedent: `dailySeries`' GROUP BY in this file.
+    /// Measured ~30ms on 25,576 real rows (`source`/`kind` are unindexed, full table scan); at the 200k-row cap of `prune(keepingLast:)`
+    /// ~100–200ms — compute once on page load, **never on every keystroke**.
     public enum CountDimension: String {
         case source
         case kind
@@ -1401,13 +1436,14 @@ public final class AuditRepo {
         return result
     }
 
-    /// 保留策略：删早于 date 的行
+    /// Retention policy: delete rows older than date
     public func prune(olderThan date: Date) throws {
         try db.run(
             "DELETE FROM audit_events WHERE ts < ?", [.real(date.timeIntervalSince1970)])
     }
 
-    /// 兜底上限：只保留最近 N 行（防「永久保留」下无限膨胀）
+    /// Fallback cap: keep only the most recent N rows (prevents unbounded growth under "keep
+    /// forever")
     public func prune(keepingLast: Int) throws {
         try db.run("""
         DELETE FROM audit_events WHERE id NOT IN (
@@ -1420,10 +1456,11 @@ public final class AuditRepo {
         try db.run("DELETE FROM audit_events")
     }
 
-    // MARK: - 归档（按 UTC 日）
+    // MARK: - Archive (by UTC day)
 
-    /// 每个 UTC 日的指纹：行数 : 最大 id : 已回填 exit_code 数 : 失败数。
-    /// 覆盖三种变化——新插入、补插旧时间戳的行（id 变大）、Codex 事后回填结果（UPDATE）。
+    /// Fingerprint of each UTC day: row count : max id : back-filled exit_code count : failure
+    /// count. Covers three kinds of change — new inserts, late inserts with old timestamps (id
+    /// grows), and Codex back-filling results afterwards (UPDATE).
     public struct DayFingerprint: Equatable, Sendable {
         public let day: String
         public let fingerprint: String
@@ -1443,7 +1480,7 @@ public final class AuditRepo {
         }
     }
 
-    /// 某个 UTC 日的全部记录（按时间升序，id 兜底保证稳定）
+    /// Every record of one UTC day (time ascending, id as tie-breaker for stable order)
     public func events(onDay day: String) throws -> [AuditEvent] {
         guard let (start, end) = Self.utcDayRange(day) else { return [] }
         return try db.query("""
@@ -1454,8 +1491,9 @@ public final class AuditRepo {
         """, [.real(start), .real(end)]) { Self.mapRow($0) }
     }
 
-    /// 删除整个 UTC 日（归档联动清理用）。只按整天删：删一部分会改变该天指纹，
-    /// 下一轮就会用更少的行重写并覆盖远端那份完整的归档
+    /// Delete an entire UTC day (archive-linked cleanup). Deletes whole days only: deleting part
+    /// changes that day's fingerprint, and the next cycle would rewrite with fewer rows and
+    /// overwrite the complete remote archive
     public func deleteDay(_ day: String) throws {
         guard let (start, end) = Self.utcDayRange(day) else { return }
         try db.run(
@@ -1466,7 +1504,7 @@ public final class AuditRepo {
         try db.query("SELECT COUNT(*) FROM audit_events") { Int($0.int(0)) }.first ?? 0
     }
 
-    /// "YYYY-MM-DD"（UTC）→ [起, 止) 的 Unix 秒
+    /// "YYYY-MM-DD" (UTC) → [start, end) in Unix seconds
     static func utcDayRange(_ day: String) -> (Double, Double)? {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -1476,7 +1514,7 @@ public final class AuditRepo {
         return (start, start + 86400)
     }
 
-    /// 动态拼 WHERE，返回子句与绑定
+    /// Build the WHERE clause dynamically; returns the clause and its bindings
     private static func filter(_ query: Query) -> (String, [SQLiteValue]) {
         var conditions: [String] = []
         var bindings: [SQLiteValue] = []

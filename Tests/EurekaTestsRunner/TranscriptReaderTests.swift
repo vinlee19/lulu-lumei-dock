@@ -42,8 +42,9 @@ func transcriptReaderTests(_ t: TestRunner) {
         defer { try? fm.removeItem(at: base) }
         try fm.createDirectory(at: base, withIntermediateDirectories: true)
         let path = base.appendingPathComponent("rollout.jsonl")
-        // 当前 Codex 不再写 user_message/agent_message。扩展把标签页说明包在请求外，
-        // 导入会话还会把工具协议塞进没有 phase 的 AgentMessage。
+        // Current Codex no longer writes user_message/agent_message. The extension wraps tab
+        // descriptions around the request, and imported sessions also stuff the tool protocol into
+        // an AgentMessage with no phase.
         let lines = [
             #"{"timestamp":"2026-10-13T15:34:55.097Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","content":[{"type":"text","text":"\n# Chrome tabs:\n- Current URL: https://example.test\n\n## My request:\n分析怎么回复\n"},{"type":"local_image","path":"/tmp/shot.png"}]}}}"#,
             #"{"timestamp":"2026-10-13T15:35:01.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","phase":"commentary","content":[{"type":"Text","text":"我先读订单留言。"}]}}}"#,
@@ -54,7 +55,7 @@ func transcriptReaderTests(_ t: TestRunner) {
             #"{"timestamp":"2026-10-13T15:37:21.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"[external_agent_tool_call: Read] file: /tmp/a.swift"}]}}}"#,
             #"{"timestamp":"2026-10-13T15:37:22.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"[external_agent_tool_result] ok"}]}}}"#,
             #"{"timestamp":"2026-10-13T15:37:23.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"AgentMessage","content":[{"type":"Text","text":"<EXTERNAL SESSION IMPORTED>"}]}}}"#,
-            // 普通消息里出现同样的字样，不能被信封剥离误伤
+            // The same wording inside an ordinary message must not be damaged by envelope stripping
             #"{"timestamp":"2026-10-13T15:37:30.000Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t3","item":{"type":"UserMessage","content":[{"type":"text","text":"请保留这行 ## My request: 不要删"}]}}}"#,
         ]
         try (lines.joined(separator: "\n") + "\n").write(to: path, atomically: true, encoding: .utf8)
@@ -109,7 +110,7 @@ func transcriptReaderTests(_ t: TestRunner) {
         try expect(md.contains("  - [命令] Bash（失败）：make test"))
         try expect(md.contains("## 助手"))
         try expect(md.contains("已完成"))
-        // 文件名安全化
+        // file-name sanitization
         try expectEqual(TranscriptMarkdown.safeFileName("a/b:c*d"), "a-b-c-d")
     }
 
@@ -127,7 +128,7 @@ func transcriptReaderTests(_ t: TestRunner) {
             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
                 time_created INTEGER, time_updated INTEGER, data TEXT);
             """)
-            // 用户消息（两个 text part 拼接）
+            // User message (two text parts concatenated)
             try db.run("INSERT INTO message VALUES (?,?,?,?,?)",
                        [.text("m1"), .text("s1"), .int(1000), .int(1000),
                         .text(#"{"role":"user"}"#)])
@@ -137,7 +138,7 @@ func transcriptReaderTests(_ t: TestRunner) {
             try db.run("INSERT INTO part VALUES (?,?,?,?,?,?)",
                        [.text("p2"), .text("m1"), .text("s1"), .int(1001), .int(1001),
                         .text(#"{"type":"text","text":"帮我看个问题"}"#)])
-            // 助手消息（reasoning 跳过 + tool 小注 + text）
+            // Assistant message (reasoning skipped + tool note + text)
             try db.run("INSERT INTO message VALUES (?,?,?,?,?)",
                        [.text("m2"), .text("s1"), .int(2000), .int(2000),
                         .text(#"{"role":"assistant"}"#)])
@@ -150,7 +151,7 @@ func transcriptReaderTests(_ t: TestRunner) {
             try db.run("INSERT INTO part VALUES (?,?,?,?,?,?)",
                        [.text("q3"), .text("m2"), .text("s1"), .int(2002), .int(2002),
                         .text(#"{"type":"text","text":"看好了"}"#)])
-            // 其他会话的消息（应被过滤）
+            // Messages from another session (should be filtered out)
             try db.run("INSERT INTO message VALUES (?,?,?,?,?)",
                        [.text("m9"), .text("s2"), .int(3000), .int(3000),
                         .text(#"{"role":"user"}"#)])
@@ -193,15 +194,15 @@ func transcriptReaderTests(_ t: TestRunner) {
         let t2 = iso.date(from: "2026-07-09T10:00:00.000Z")
 
         let result = TranscriptReader.loadGrok(path: chatURL.path, maxMessages: 2000)
-        try expectEqual(result.messages.count, 4)  // system 跳过
+        try expectEqual(result.messages.count, 4)  // system skipped
         try expectEqual(result.messages[0].text, "第一问")
         try expectEqual(result.messages[0].timestamp, t1)
-        try expectEqual(result.messages[1].timestamp, t1)  // 第一答同轮
+        try expectEqual(result.messages[1].timestamp, t1)  // first answer in the same turn
         try expectEqual(result.messages[2].text, "第二问")
         try expectEqual(result.messages[2].timestamp, t2)
         try expectEqual(result.messages[3].timestamp, t2)
 
-        // 无 events.jsonl → 时间戳为 nil（不崩）
+        // No events.jsonl → timestamp is nil (no crash)
         try fm.removeItem(at: eventsURL)
         let noEvents = TranscriptReader.loadGrok(path: chatURL.path, maxMessages: 2000)
         try expect(noEvents.messages.allSatisfy { $0.timestamp == nil }, "无 events 应无时间")

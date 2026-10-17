@@ -4,7 +4,7 @@ import EurekaUsage
 import Foundation
 
 extension PricingPaths {
-    /// app 实际使用的四个位置
+    /// The four locations the app actually uses
     static var app: PricingPaths {
         PricingPaths(
             bundledTable: AppResources.bundle.url(forResource: "pricing", withExtension: "json"),
@@ -14,10 +14,13 @@ extension PricingPaths {
     }
 }
 
-/// 远程价格目录服务：每天从 LiteLLM / models.dev 拉一次公开价格表（不带任何用户数据），
-/// 成功后原子写磁盘缓存并热替换 PricingCatalogStore；失败按退避重试，期间继续用缓存/随包快照。
+/// Remote price catalog service: fetches the public price tables from LiteLLM / models.dev once
+/// a day (no user data attached). On success it atomically writes the disk cache and hot-swaps
+/// PricingCatalogStore; on failure it retries with backoff, meanwhile using the cache / bundled
+/// snapshot.
 final class PricingCatalogService: ObservableObject {
-    /// 单例：AppDelegate 启动，设置页直接取用（免得层层传参）
+    /// Singleton: started by AppDelegate, read directly by Settings (avoids passing it down through
+    /// layers)
     static let shared = PricingCatalogService()
     struct Status: Equatable {
         var origin: CatalogOrigin = .none
@@ -34,12 +37,13 @@ final class PricingCatalogService: ObservableObject {
 
     @Published private(set) var status = Status()
 
-    /// 价格表替换后回调（主线程）：用量/会话页据此重算费用
+    /// Called after the price table is replaced (main thread): usage / session pages recompute
+    /// costs
     var onPricingChanged: (() -> Void)?
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.pricing", qos: .utility)
     private var timer: DispatchSourceTimer?
-    /// 以下仅 queue 上访问
+    /// Everything below is accessed only on queue
     private var failures = 0
     private var nextAttemptAt = Date.distantPast
     private var running = false
@@ -55,19 +59,20 @@ final class PricingCatalogService: ObservableObject {
             self?.publishStatus(error: nil)
         }
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // 分钟级轻量检查（只比时间戳），真正联网一天一次或按退避
+        // Lightweight per-minute check (timestamps only); the real network fetch happens once a day
+        // or per backoff
         timer.schedule(deadline: .now() + 10, repeating: 60, leeway: .seconds(10))
         timer.setEventHandler { [weak self] in self?.tick(force: false) }
         timer.resume()
         self.timer = timer
     }
 
-    /// 设置页「立即更新」
+    /// Settings "Update Now"
     func refreshNow() {
         queue.async { [weak self] in self?.tick(force: true) }
     }
 
-    /// 用户改了 pricing.json：重建价格表
+    /// User edited pricing.json: rebuild the price table
     func reloadOverride() {
         queue.async { [weak self] in
             PricingCatalogStore.shared.reloadOverride()
@@ -76,7 +81,7 @@ final class PricingCatalogService: ObservableObject {
         }
     }
 
-    // MARK: - queue 内部
+    // MARK: - queue internals
 
     private func tick(force: Bool) {
         guard !running else { return }
@@ -133,8 +138,9 @@ final class PricingCatalogService: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.status = next }
     }
 
-    /// 同步 HTTP（在 utility 队列上阻塞等待，与 URLSessionTransport 同法）。
-    /// ephemeral：不存 cookie / 缓存，请求只带 User-Agent 与条件头。
+    /// Synchronous HTTP (blocks waiting on the utility queue, same approach as
+    /// URLSessionTransport). ephemeral: no cookies / cache; requests carry only User-Agent and
+    /// conditional headers.
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20

@@ -3,56 +3,63 @@ import Combine
 import EurekaKit
 import Foundation
 
-/// 灵动岛展示状态机：活跃任务 + 卡片队列 → 当前展示形态。
-/// 自动收起计时、hover 暂停都在这里；视图与 panel 控制器只做投影。
+/// Dynamic Island presentation state machine: active tasks + card queue → current presentation.
+/// Auto-dismiss timing and hover pause live here; the views and panel controller are projections
+/// only.
 @MainActor
 final class IslandViewModel: ObservableObject {
     enum Display: Equatable {
         case hidden
         case compact
         case card(IslandState.Card)
-        /// 点击胶囊展开的进行中任务列表
+        /// In-progress task list shown when the capsule is clicked
         case taskList
     }
 
     @Published private(set) var display: Display = .hidden
     @Published private(set) var activeTasks: [AgentTask] = []
-    /// 空闲会话（开着但没在跑 turn）：任务列表展示，胶囊计数不算
+    /// Idle sessions (open but not running a turn): shown in the task list, not counted in the
+    /// capsule
     @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
-    /// 任务列表里当前展开子 agent 框的任务 id（nil = 全收起；单开，几何有界）
+    /// Task id whose subagent box is expanded in the task list (nil = all collapsed; one at a time,
+    /// bounded geometry)
     @Published private(set) var expandedSubagentTaskId: String?
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
-    /// 用户把岛拖到了自定义位置：脱离刘海融合，渲染为四角全圆的悬浮样式
+    /// The user dragged the island to a custom position: detaches from the notch, rendered as a
+    /// floating style with all corners rounded
     @Published var isFloating = false
-    /// 时间显示模式：false=已持续时长（计时器），true=开始的日期时间。
-    /// 真值在 AppSettings（设置页与岛上按钮共用），这里只是投影。
+    /// Time display mode: false = elapsed duration (timer), true = start date-time. The source of
+    /// truth is AppSettings (shared by Settings and the island button); this is only a projection.
     @Published var showStartTime = false
-    /// 界面语言投影。岛上的文案在视图里现取，改语言时靠这次发布重绘。
+    /// Interface language projection. Island copy is looked up in the views; a language change
+    /// redraws via this publish.
     @Published private(set) var language: AppLanguage = L10n.current
-    /// 岛上切换按钮回调（AppDelegate 接到 AppSettings）
+    /// Island toggle button callback (AppDelegate wires it to AppSettings)
     var onToggleTimeMode: (@MainActor () -> Void)?
 
-    /// 当前屏对应布局（随 screen 变化按比例缩放）
+    /// Layout for the current screen (scaled proportionally as the screen changes)
     var layout: IslandGeometry.Layout { IslandGeometry.layout(for: screen) }
-    /// 当前屏 UI 缩放系数（字体/内边距/徽标用；pill 高度受刘海钉死，不适用）
+    /// UI scale factor for the current screen (fonts / padding / badges; pill height is pinned by
+    /// the notch, not affected)
     var uiScale: CGFloat { IslandGeometry.scaleFactor(for: screen) }
-    /// 卡片自动收起的**基准**秒数（设置页 3–15s 可调）。
-    /// 各类卡在此之上叠加自己的偏移，见 `IslandState.Card.autoDismissExtraSeconds`。
+    /// **Base** auto-dismiss seconds for cards (adjustable 3-15s in Settings).
+    /// Each card kind adds its own offset on top, see `IslandState.Card.autoDismissExtraSeconds`.
     var autoDismissSeconds: TimeInterval = 6
 
-    /// 展示形态变化回调（panel 控制器据此显隐窗口）
+    /// Presentation-change callback (the panel controller shows/hides the window from it)
     var onDisplayChange: (@MainActor (Display) -> Void)?
 
     private var queue = IslandCardQueue()
     private var hovering = false
     private var dismissTimer: Timer?
-    /// 当前收起计时是为哪张卡排的。用来区分「换了卡」与「同一张卡被状态刷新重复投影」——
-    /// 后者绝不能重排计时，否则倒计时被无限拨回起点（见 refresh）。
+    /// Which card the current dismiss timer was scheduled for. Distinguishes "card changed" from
+    /// "same card re-projected by a state refresh" -- the latter must never reschedule, or the
+    /// countdown is reset to the start forever (see refresh).
     private var timerCard: IslandState.Card?
 
-    // MARK: - 输入
+    // MARK: - Input
 
     func noteLanguage(_ language: AppLanguage) {
         self.language = language
@@ -65,7 +72,7 @@ final class IslandViewModel: ObservableObject {
     func updateActiveTasks(_ tasks: [AgentTask], idle: [AgentTask] = []) {
         activeTasks = tasks
         idleTasks = idle
-        // 与等待卡对账：任务已不在等待的撤卡
+        // Reconcile with waiting cards: withdraw cards for tasks no longer waiting
         let stillWaiting = Set(tasks.compactMap { task -> String? in
             if case .waiting = task.phase { return task.id }
             return nil
@@ -73,7 +80,8 @@ final class IslandViewModel: ObservableObject {
         for id in queue.waitingTaskIds where !stillWaiting.contains(id) {
             queue.removeWaiting(taskId: id)
         }
-        // 展开的任务消失了就收起（防停在已不存在的会话上）
+        // Collapse if the expanded task disappeared (avoid sticking on a session that no longer
+        // exists)
         if let id = expandedSubagentTaskId, !tasks.contains(where: { $0.id == id }) {
             expandedSubagentTaskId = nil
         }
@@ -114,18 +122,19 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// 行内展开/收起某任务的子 agent 框（任务列表里的内层按钮调用）
+    /// Expand/collapse a task's subagent box inline (called by the inner button in the task list)
     func toggleSubagentExpansion(_ taskId: String) {
         expandedSubagentTaskId = (expandedSubagentTaskId == taskId) ? nil : taskId
-        scheduleAutoDismiss()  // 展开=用户在看，续期收起计时
+        scheduleAutoDismiss()  // Expanding = the user is looking, so renew the dismiss timer
     }
 
     func setHovering(_ value: Bool) {
         hovering = value
         if !value {
             hoverExtensions = 0
-            // 真正移开后正常计时收起。**判据与 refresh() 共用 card.autoDismisses** ——
-            // 这里原本硬列 case，漏掉等待卡，导致它「悬停过一次就退回常驻」。
+            // Once the pointer truly leaves, dismiss on the normal timer. **Shares the
+            // card.autoDismisses predicate with refresh()** -- this used to hardcode the cases and
+            // missed waiting cards, so they "went back to staying open after one hover".
             switch display {
             case .card(let card) where card.autoDismisses:
                 scheduleAutoDismiss(extraSeconds: card.autoDismissExtraSeconds ?? 0)
@@ -135,22 +144,25 @@ final class IslandViewModel: ObservableObject {
                 break
             }
         }
-        // 悬停中不取消定时器：靠续期机制暂停（防 mouseExited 丢失永久卡死）
+            // Don't cancel the timer while hovering: pause by renewal instead (guards against a
+            // lost mouseExited sticking forever)
     }
 
-    // MARK: - 投影
+    // MARK: - Projection
 
-    /// 内容距 panel 顶部留白：浮动模式贴 panel 顶（panel 在哪由用户决定）
+    /// Top inset of content within the panel: floating mode hugs the panel top (the user decides
+    /// where the panel is)
     var topInset: CGFloat {
         isFloating ? 0 : IslandGeometry.contentTopInset(screen: screen, layout: layout)
     }
 
-    /// 胶囊中部为物理刘海留的空隙（浮动模式无意义）
+    /// Gap in the middle of the capsule for the physical notch (meaningless in floating mode)
     var pillCenterGap: CGFloat {
         isFloating ? 0 : IslandGeometry.pillCenterGap(screen: screen)
     }
 
-    /// 是否与刘海融合渲染（上沿直角）；浮动/无刘海 → 四角全圆
+    /// Whether to render merged with the notch (square top edge); floating / no notch → all corners
+    /// rounded
     var fuseWithNotch: Bool {
         !isFloating && screen.hasNotch
     }
@@ -173,7 +185,8 @@ final class IslandViewModel: ObservableObject {
             let activeRows = min(activeTasks.count, 4)
             let idleRows = min(idleTasks.count, 3)
             let idleHeader = idleRows > 0 ? 18 : 0
-            // 展开的子 agent 框（仅当展开任务在可见的前 4 个且确有子 agent）
+            // Expanded subagent box (only when the expanded task is among the visible first 4 and
+            // actually has subagents)
             var expanded: CGFloat = 0
             if let id = expandedSubagentTaskId,
                let task = activeTasks.prefix(4).first(where: { $0.id == id }),
@@ -185,7 +198,7 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// panel 坐标系中的可交互区域（hitTest 穿透 + hover 跟踪）
+    /// Interactive region in panel coordinates (hitTest pass-through + hover tracking)
     var interactiveRect: CGRect {
         IslandGeometry.interactiveRect(
             contentSize: contentSize, topInset: topInset, layout: layout)
@@ -198,26 +211,31 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 内部
+    // MARK: - Internal
 
     private func refresh(collapseTaskList: Bool = false) {
         if case .taskList = display, !collapseTaskList,
            queue.current == nil,
            !(activeTasks.isEmpty && idleTasks.isEmpty) {
-            // 任务列表展开期间不被状态刷新打断（除非有新卡/列表已空）
+            // While the task list is expanded, state refreshes don't interrupt it (unless there is
+            // a new card / the list is empty)
             queuedCount = queue.pendingCount
             if dismissTimer == nil {
-                // 自愈：任何状态变化都确保收起定时器在走（防 hover 卡死）
+                // Self-heal: any state change makes sure the dismiss timer is running (guards
+                // against hover getting stuck)
                 scheduleAutoDismiss()
             }
             return
         }
         if let card = queue.current {
             setDisplay(.card(card))
-            // **只在换卡时重排计时**。refresh() 会被 updateActiveTasks 频繁调用（各源 tailer
-            // 2 秒一轮），无条件重排等于每 2 秒把倒计时拨回起点 —— 卡片于是永远收不掉。
-            // 实测：等待卡 15 秒里被刷新 6 次，一次都没收；完成卡只因 6 秒窗口短才偶尔抢在
-            // 两次刷新之间收掉，notice(11s) / alert(12s) 窗口更长，中招更稳。
+            // **Reschedule only when the card changes.** refresh() is called often via
+            // updateActiveTasks (each source tailer ticks every 2 seconds); rescheduling
+            // unconditionally resets the countdown every 2 seconds -- so cards never dismiss.
+            // Measured: a waiting card was refreshed 6 times in 15 seconds and never dismissed;
+            // finished cards only occasionally slipped out between two refreshes thanks to their
+            // short 6s window, and notice (11s) / alert (12s) with longer windows got stuck more
+            // reliably.
             if timerCard != card {
                 timerCard = card
                 if let extra = card.autoDismissExtraSeconds {
@@ -240,15 +258,17 @@ final class IslandViewModel: ObservableObject {
 
     private func setDisplay(_ new: Display) {
         guard display != new else { return }
-        // 离开任务列表即收起子 agent 框，避免下次再进时停在旧展开态
+        // Leaving the task list collapses the subagent box so the next visit doesn't land on a
+        // stale expanded state
         if case .taskList = new {} else { expandedSubagentTaskId = nil }
         display = new
         logIsland(new)
         onDisplayChange?(new)
     }
 
-    /// 悬停时收起被"续期"而非取消：mouseExited 可能被 performDrag 等吞掉导致
-    /// hover 永久卡住——续期 + 硬上限保证岛绝不会停在旧内容上（曾导致整夜不更新）。
+    /// While hovering, dismissal is "renewed" rather than cancelled: mouseExited can be swallowed
+    /// by performDrag etc., sticking hover forever -- renewal + a hard cap guarantee the island
+    /// never stays on stale content (once caused a whole night without updates).
     private var hoverExtensions = 0
     private let maxHoverExtensions = 5
 
@@ -257,12 +277,13 @@ final class IslandViewModel: ObservableObject {
         dismissTimer = Timer.scheduledTimer(
             withTimeInterval: autoDismissSeconds + extraSeconds, repeats: false
         ) { [weak self] _ in
-            // Timer 回调在主 runloop
+            // Timer callback runs on the main runloop
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.dismissTimer = nil
                 if self.hovering && self.hoverExtensions < self.maxHoverExtensions {
-                    // 用户在看：续期；超上限视为 hover 状态卡死，强制收起
+                    // The user is looking: renew; past the cap, treat hover as stuck and force
+                    // dismissal
                     self.hoverExtensions += 1
                     self.scheduleAutoDismiss()
                     return
@@ -282,7 +303,7 @@ final class IslandViewModel: ObservableObject {
         dismissTimer = nil
     }
 
-    /// e2e 可观测性
+    /// e2e observability
     private func logIsland(_ display: Display) {
         let name: String
         switch display {

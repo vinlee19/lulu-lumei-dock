@@ -1,11 +1,12 @@
 import Foundation
 
-/// 单个限额窗口（5 小时 / 每周）
+/// A single rate-limit window (5-hour / weekly)
 public struct RateLimitWindow: Equatable, Sendable {
     public var usedPercent: Double
     public var windowMinutes: Int
     public var resetsAt: Date?
-    /// 自定义窗口名（Antigravity 按模型家族分额度，不是 5h/周窗口）；nil = 按 windowMinutes 推
+    /// Custom window name (Antigravity splits quota by model family, not 5h/weekly windows); nil =
+    /// derive from windowMinutes
     public var label: String?
 
     public init(usedPercent: Double, windowMinutes: Int, resetsAt: Date? = nil, label: String? = nil) {
@@ -23,16 +24,17 @@ public struct RateLimitWindow: Equatable, Sendable {
     }
 }
 
-/// 某个来源的限额快照。Provider 返回 nil 时 UI 整块隐藏（优雅降级约定）。
+/// Rate-limit snapshot for one source. When a provider returns nil the whole UI block hides
+/// (graceful-degradation contract).
 public struct RateLimitSnapshot: Equatable, Sendable {
     public var source: AgentSource
     public var asOf: Date
     public var planType: String?
-    /// 短窗口（通常 5h = 300 分钟）
+    /// Short window (usually 5h = 300 minutes)
     public var primary: RateLimitWindow?
-    /// 长窗口（通常 7 天 = 10080 分钟）
+    /// Long window (usually 7 days = 10080 minutes)
     public var secondary: RateLimitWindow?
-    /// 数据是否过期（上次成功值的缓存）
+    /// Whether the data is stale (cache of the last successful value)
     public var isStale: Bool
 
     public init(

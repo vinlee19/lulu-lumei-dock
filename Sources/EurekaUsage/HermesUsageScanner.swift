@@ -2,36 +2,44 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 Hermes Agent 的 `state.db`（schema v23，WAL，只读打开）→ usage_records。
+/// Scans Hermes Agent's `state.db` (schema v23, WAL, opened read-only) → usage_records.
 ///
-/// Hermes 没有 JSONL transcript：token / 成本全落在 `session_model_usage`
-/// （PK = session_id + model + billing_provider + billing_base_url + billing_mode + task，
-/// `task=''` 是主循环，其余是 title_generation 等辅助模型），且**行是原地累加的**
-/// —— 会话越长值越大 → 不能像 JSONL 那样"读到即记"，否则每轮都把累计值再加一遍。
+/// Hermes has no JSONL transcript: all tokens / cost live in `session_model_usage`
+/// (PK = session_id + model + billing_provider + billing_base_url + billing_mode + task;
+/// `task=''` is the main loop, the rest are auxiliary models such as title_generation), and
+/// **rows accumulate in place** — they grow as the session goes on → unlike JSONL we cannot
+/// "record on read", or every turn would add the running total again.
 ///
-/// token 口径（对 live DB 算术核验过，与 Codex 不同）：
-///   - `input_tokens` **已扣掉缓存**，总量 = input + cache_read + cache_write + output；
-///   - `reasoning_tokens` 是 `output_tokens` 的子集，**不再另加**，否则 output 双计。
+/// Token semantics (arithmetically verified against a live DB; differs from Codex):
+///   - `input_tokens` **already excludes cache**; total = input + cache_read + cache_write +
+///     output;
+///   - `reasoning_tokens` is a subset of `output_tokens` and is **not added again**, or output
+///     would be double-counted.
 ///
-/// 增量机制：`last_seen` 当水位（存 scan_files.offset，键 `<db>#hermes-usage`）筛出变动行，
-/// 再用"每会话快照"（键 `<db>#hu:<会话 id>`，extra 存该会话各行已计入的累计值）算 delta，
-/// 只写增量。之所以不用 dedup_keys：它只有一个 output_tokens 列，装不下四段 token 的基线，
-/// 而 usage_records 也没有整行覆盖的更新接口。快照按会话分行存（不是整库一坨 JSON），
-/// 写入量只与"本轮变动的会话数"成正比。
+/// Incremental mechanism: `last_seen` serves as the watermark (stored in scan_files.offset, key
+/// `<db>#hermes-usage`) to pick out changed rows, then a "per-session snapshot" (key
+/// `<db>#hu:<session id>`, extra holds the totals already counted for each of that session's rows)
+/// yields the delta, and only the increment is written. dedup_keys is not used: it has a single
+/// output_tokens column and cannot hold a four-part token baseline, and usage_records has no
+/// whole-row overwrite API. Snapshots are stored one row per session (not one JSON blob for the
+/// whole DB), so write volume scales only with "sessions changed this round".
 public final class HermesUsageScanner {
     private let stateDBs: () -> [URL]
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
-    /// 分批查询的会话数上限（IN 占位符规模，与 Store 各仓一致量级）
+    /// Max sessions per batched query (IN placeholder count, same order of magnitude as the Store
+    /// repos)
     private static let chunkSize = 300
-    /// `ended_at IS NULL`（在跑 / 崩溃未收尾）的会话回看窗：它们的 sessions 行没有
-    /// last_seen 语义，靠这个窗把僵尸会话挡在候选集外；首轮（水位 0）则全量回扫。
+    /// Lookback window for `ended_at IS NULL` sessions (running / crashed without closing): their
+    /// sessions rows have no last_seen semantics, so this window keeps zombie sessions out of the
+    /// candidate set; the first round (watermark 0) rescans everything.
     private static let runningLookback: TimeInterval = 2 * 86400
 
-    /// stateDBs 由调用方传入（app/CLI 用 `HermesPaths.allStateDBs()` 覆盖全部 profile，
-    /// 测试用临时库）—— EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
-    /// 传**闭包**而非数组：`allStateDBs()` 按 `fileExists` 过滤，运行期才装 Hermes
-    /// （或新建 profile）的用户否则要重启 app 才有用量。与 HermesStateTailer 同一口径。
+    /// stateDBs is supplied by the caller (app/CLI pass `HermesPaths.allStateDBs()` to cover every
+    /// profile, tests pass a temp DB) — EurekaUsage does not depend on EurekaIngest, so there is no
+    /// default here. Pass a **closure**, not an array: `allStateDBs()` filters by `fileExists`, so
+    /// users who install Hermes (or create a new profile) at runtime would otherwise have to
+    /// restart the app to see usage. Same approach as HermesStateTailer.
     public init(stateDBs: @escaping () -> [URL], store: EurekaStore) {
         self.stateDBs = stateDBs
         self.store = store
@@ -41,7 +49,7 @@ public final class HermesUsageScanner {
         self.init(stateDBs: { stateDBs }, store: store)
     }
 
-    /// 返回本轮新增的 usage 记录数
+    /// Returns the number of usage records added this round
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
@@ -52,9 +60,10 @@ public final class HermesUsageScanner {
         return inserted
     }
 
-    /// 每会话的用户提问数（`messages.role = 'user'`）。同 opencode：共享库没有每会话文件，
-    /// 取绝对值 + `reset: true` 覆盖写，不挂在 usage 的快照水位上。
-    /// 注意不能用 `sessions.message_count` —— 那是所有角色的总数（含 assistant/tool）。
+    /// Per-session user prompt count (`messages.role = 'user'`). As with opencode: a shared DB has
+    /// no per-session file, so take the absolute value and overwrite with `reset: true`, not tied
+    /// to the usage snapshot watermark. Note `sessions.message_count` cannot be used — it counts
+    /// all roles (including assistant/tool).
     private func recordPromptCounts(dbPath: URL) throws {
         guard FileManager.default.fileExists(atPath: dbPath.path),
               let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return }
@@ -71,7 +80,7 @@ public final class HermesUsageScanner {
         }
     }
 
-    // MARK: - 单库扫描
+    // MARK: - Single-DB scan
 
     private func scan(dbPath: URL, now: Date) throws -> Int {
         let path = dbPath.path
@@ -81,7 +90,8 @@ public final class HermesUsageScanner {
         let inode = fileInode(path)
         let markerKey = path + "#hermes-usage"
         let saved = try store.scanState.fileState(path: markerKey)
-        // 库被重建（inode 变）→ 水位归零重扫；每会话快照仍在，delta 天然为 0，不会重复计
+        // DB rebuilt (inode changed) → reset the watermark and rescan; per-session snapshots
+        // survive, so the delta is naturally 0 and nothing is double-counted
         let watermark: Int64 = (saved?.inode == inode ? saved?.offset : nil) ?? 0
         let candidates = changedSessionIDs(db: db, watermark: Double(watermark), now: now)
         guard !candidates.isEmpty else { return 0 }
@@ -105,10 +115,13 @@ public final class HermesUsageScanner {
                     snapshot: &snapshot, now: now)
                 let seen = Self.seconds(rows.map(\.lastSeen).max() ?? 0)
                 newWatermark = max(newWatermark, seen)
-                // 快照变了也要落盘：库被重建 / 回滚时累计值会变小，基线要跟着降下来，
-                // 否则要等新会话重新长过旧基线才恢复记账（无 delta 时则完全不写，零开销复查）
+                // Persist even when only the snapshot changed: a rebuilt / rolled-back DB shrinks
+                // the totals and the baseline must drop with it, otherwise accounting resumes only
+                // once new sessions outgrow the old baseline (with no delta nothing is written, so
+                // rechecks cost nothing)
                 guard !records.isEmpty || snapshot != baseline else { continue }
-                // 每会话一个事务：快照与记录同生共死，中途失败最多让下一轮重算该会话
+                // One transaction per session: snapshot and records commit or fail together; a
+                // mid-way failure at most makes the next round recompute that session
                 try store.scanState.transaction {
                     try store.usage.insert(records)
                     try store.scanState.setFileState(
@@ -117,14 +130,16 @@ public final class HermesUsageScanner {
                 inserted += records.count
             }
         }
-        // 水位最后推进：任何一步失败都让下一轮重扫同一批（快照保证不重复计）
+        // Advance the watermark last: any failure makes the next round rescan the same batch
+        // (snapshots prevent double counting)
         try store.scanState.setFileState(
             path: markerKey, .init(inode: inode, offset: newWatermark))
         return inserted
     }
 
-    /// 候选会话：`session_model_usage.last_seen` 过水位的（真实变动），
-    /// 并上 sessions 侧近期收尾 / 仍在跑的（网关会话可能一行 usage 都没有，见 residual 注释）
+    /// Candidate sessions: those whose `session_model_usage.last_seen` passed the watermark (real
+    /// changes), plus sessions recently closed / still running on the sessions side (gateway
+    /// sessions may have no usage row at all; see the residual comment)
     private func changedSessionIDs(db: SQLiteDB, watermark: Double, now: Date) -> [String] {
         let runningCutoff = watermark > 0
             ? max(0, watermark - Self.runningLookback)
@@ -150,7 +165,8 @@ public final class HermesUsageScanner {
             """, sessionIDs.map { .text($0) }) { row in
             UsageRow(
                 sessionID: row.text(0) ?? "",
-                // 行标识 = PK 去掉 session_id 的五元组（\u{1} 分隔，不会出现在这些字段里）
+                // Row identity = PK minus session_id, a 5-tuple (\u{1}-separated; never appears in
+                // these fields)
                 identity: ([1, 2, 3, 4, 5] as [Int32])
                     .map { row.text($0) ?? "" }.joined(separator: "\u{1}"),
                 model: row.text(1) ?? "hermes-unknown",
@@ -172,7 +188,8 @@ public final class HermesUsageScanner {
                    cache_read_tokens, cache_write_tokens
             FROM sessions WHERE id IN (\(placeholders))
             """, sessionIDs.map { .text($0) }) { row -> SessionMeta in
-            // 时间是 epoch **秒**（不是毫秒）；未收尾的会话用 started_at 落桶
+            // Times are epoch **seconds** (not milliseconds); unfinished sessions are bucketed by
+            // started_at
             let started = row.real(3)
             return SessionMeta(
                 id: row.text(0) ?? "",
@@ -187,7 +204,7 @@ public final class HermesUsageScanner {
         return Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// 逐行 delta → UsageRecord，并把快照推到当前累计值
+    /// Per-row delta → UsageRecord, advancing the snapshot to the current totals
     private func deltaRecords(
         sessionID: String, meta: SessionMeta?, rows: [UsageRow],
         snapshot: inout [String: Counted], now: Date
@@ -202,15 +219,18 @@ public final class HermesUsageScanner {
                 timestamp: row.lastSeen > 0 ? Date(timeIntervalSince1970: row.lastSeen) : now,
                 tokens: delta))
         }
-        // 网关会话（absolute=True 的累计写路径）只更新 sessions 行、不落 session_model_usage，
-        // 故 SUM(主循环行) <= sessions 聚合。选择"补记残差"而不是丢弃：否则这部分 token
-        // 在账本里整段消失。比较只取 task='' 的主循环行（sessions 聚合不含辅助模型：
-        // live DB 上 sessions.input == 主循环行 input，title_generation 那 117 token 不在其中）。
+        // Gateway sessions (the absolute=True cumulative write path) update only the sessions row
+        // and write nothing to session_model_usage, so SUM(main-loop rows) <= the sessions
+        // aggregate. Record the residual instead of dropping it: otherwise those tokens vanish from
+        // the ledger entirely. Compare only task='' main-loop rows (the sessions aggregate excludes
+        // auxiliary models: on the live DB sessions.input == main-loop row input;
+        // title_generation's 117 tokens are not in it).
         if let meta {
             let mainLoop = rows.filter { $0.task.isEmpty }
                 .reduce(Counted()) { $0.adding($1.tokens) }
             let residual = meta.tokens.subtracting(mainLoop)
-            // 真实行标识必带 4 个 \u{1} 分隔符，故这个键不会和它们撞
+            // Real row identities always carry 4 \u{1} separators, so this key cannot collide with
+            // them
             let key = "#residual"
             let delta = residual.subtracting(snapshot[key] ?? Counted())
             snapshot[key] = residual
@@ -223,7 +243,8 @@ public final class HermesUsageScanner {
         return records
     }
 
-    /// model 原样入库（自由文本、多 provider，如 `gpt-5.6-sol`；价目表按前缀匹配，不硬编码清单）
+    /// model is stored verbatim (free text, many providers, e.g. `gpt-5.6-sol`; the price table
+    /// matches by prefix, no hardcoded list)
     private func record(
         model: String, provider: String?, meta: SessionMeta?, sessionID: String,
         timestamp: Date, tokens: Counted
@@ -241,21 +262,23 @@ public final class HermesUsageScanner {
             provider: provider)
     }
 
-    // MARK: - 官方成本
+    // MARK: - Official cost
 
-    /// Hermes 自报成本。usage_records 没有 cost 列（全项目统一由 PricingTable 估算），
-    /// 而 Hermes 多走第三方网关 / 订阅路由、model 名在价目表里根本匹配不到 →
-    /// 官方成本单独读出来，由展示层覆盖估算值。
+    /// Hermes' self-reported cost. usage_records has no cost column (the whole project estimates
+    /// via PricingTable), but Hermes often goes through third-party gateways / subscription routes
+    /// whose model names never match the price table → read the official cost separately and let
+    /// the presentation layer override the estimate.
     public struct OfficialCost: Equatable, Sendable {
         public var sessionId: String
         public var model: String
-        /// nil = Hermes 自己也不知道 → 交回价目表估算
+        /// nil = Hermes doesn't know either → fall back to the price-table estimate
         public var costUSD: Double?
-        /// 同 Hermes `cost_status`：actual / estimated / included / unknown
+        /// Same as Hermes `cost_status`: actual / estimated / included / unknown
         public var status: String
     }
 
-    /// 区间内各会话的官方成本（sessions 行为准：它含网关旁路的累计写，比 usage 表全）
+    /// Official cost per session in the range (the sessions row is authoritative: it includes the
+    /// gateway bypass's cumulative writes, so it is more complete than the usage table)
     public func officialCosts(from: Date, to: Date) -> [OfficialCost] {
         var result: [OfficialCost] = []
         for dbPath in stateDBs() {
@@ -279,10 +302,11 @@ public final class HermesUsageScanner {
         return result.filter { !$0.sessionId.isEmpty }
     }
 
-    /// 成本优先级：actual > 0 是账单事实，最高；`included`（订阅内路由，如
-    /// billing_mode=subscription_included）真实增量支出**就是 0**，要记 0 而不是 nil ——
-    /// 它的 estimated 只是"若按 API 计价"的参考值，拿来展示会虚增账单；
-    /// 再退 estimated；全无 → nil，交给价目表。
+    /// Cost priority: actual > 0 is billing fact and ranks highest; `included` (in-subscription
+    /// routing, e.g. billing_mode=subscription_included) has a real incremental spend of **exactly
+    /// 0**, so record 0, not nil — its estimated value is only a "what if billed at API rates"
+    /// reference and would inflate the bill; next fall back to estimated; nothing at all → nil,
+    /// left to the price table.
     private static func cost(actual: Double?, estimated: Double, status: String) -> Double? {
         if let actual, actual > 0 { return actual }
         if status == "included" { return 0 }
@@ -290,10 +314,11 @@ public final class HermesUsageScanner {
         return nil
     }
 
-    // MARK: - 内部类型与工具
+    // MARK: - Internal types and helpers
 
-    /// 四段 token 的累计值（既作快照基线，也作 delta 载体）。
-    /// 字段名压短是因为它要 JSON 序列化进 scan_files.extra，每会话一行、越小越好。
+    /// Running totals for the four token parts (both the snapshot baseline and the delta carrier).
+    /// Field names are short because it is JSON-serialized into scan_files.extra, one row per
+    /// session, so smaller is better.
     private struct Counted: Codable, Equatable {
         var input: Int = 0
         var output: Int = 0
@@ -306,7 +331,8 @@ public final class HermesUsageScanner {
 
         var isEmpty: Bool { input == 0 && output == 0 && cacheRead == 0 && cacheWrite == 0 }
 
-        /// 逐字段相减，负数截零：库回滚 / 重建时只重新对齐基线，绝不倒扣账本
+        /// Field-wise subtraction clamped at zero: on DB rollback / rebuild only realign the
+        /// baseline, never deduct from the ledger
         func subtracting(_ other: Counted) -> Counted {
             Counted(
                 input: max(0, input - other.input), output: max(0, output - other.output),
@@ -325,7 +351,7 @@ public final class HermesUsageScanner {
         var sessionID: String
         var identity: String
         var model: String
-        /// billing_provider（`auto` / 空 = 未知）
+        /// billing_provider (`auto` / empty = unknown)
         var provider: String?
         var task: String
         var tokens: Counted
@@ -340,8 +366,10 @@ public final class HermesUsageScanner {
         var tokens: Counted
     }
 
-    /// 该会话已计入的累计值：行标识 → 基线。extra 只由本扫描器写；
-    /// 解析不出来只能当空基线（会把该会话重记一遍），故格式若要改，得随 schema 版本重建派生表。
+    /// Totals already counted for this session: row identity → baseline. extra is written only by
+    /// this scanner; if it fails to parse it can only be treated as an empty baseline (recounting
+    /// that session), so changing the format requires rebuilding derived tables with a schema
+    /// version bump.
     private func snapshot(key: String) -> [String: Counted] {
         guard let extra = (try? store.scanState.fileState(path: key))?.extra,
               let decoded = try? JSONDecoder().decode(
@@ -355,8 +383,9 @@ public final class HermesUsageScanner {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// epoch 秒 → 整秒水位（NaN / 越界脏值截零，避免 Int64(Double) 转换陷阱）。
-    /// 取下取整 + 查询侧用 `>=` 是刻意的：同一秒内又长大的行会被重扫一遍，delta 为 0，不重复计。
+    /// Epoch seconds → whole-second watermark (NaN / out-of-range junk clamps to zero, avoiding the
+    /// Int64(Double) conversion trap). Flooring plus `>=` on the query side is deliberate: rows
+    /// that grew again within the same second get rescanned with delta 0, never double-counted.
     private static func seconds(_ value: Double) -> Int64 {
         guard value.isFinite, value > 0, value < 4e9 else { return 0 }
         return Int64(value)

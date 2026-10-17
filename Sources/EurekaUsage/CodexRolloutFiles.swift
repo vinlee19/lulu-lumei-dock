@@ -1,18 +1,20 @@
 import Foundation
 
-/// ~/.codex/sessions 下全部 rollout-*.jsonl 的递归枚举器。
-/// 与 EurekaIngest.CodexRolloutFiles 同逻辑：EurekaUsage 不能依赖 EurekaIngest，
-/// 自带一份（同 JSONLinesReader / CodexRolloutDecoderProxy 的跨模块惯例）。
-/// resume 的旧会话在创建日目录原地追加（mtime 刷新、不新建当天目录），
-/// "数最近 N 个日期目录"必然漏掉它们 → 各消费方统一整树遍历。
+/// Recursive enumerator for every rollout-*.jsonl under ~/.codex/sessions.
+/// Same logic as EurekaIngest.CodexRolloutFiles: EurekaUsage can't depend on EurekaIngest,
+/// so it carries its own copy (the cross-module convention of JSONLinesReader /
+/// CodexRolloutDecoderProxy).
+/// A resumed old session appends in place under its creation-day directory (mtime refreshes,
+/// no new day directory is created),
+/// so "count the last N date directories" always misses it → every consumer walks the whole tree.
 enum CodexRolloutFiles {
-    /// 一个 rollout 文件及其 mtime（读取失败为 nil，由调用方决定取舍）
+    /// A rollout file and its mtime (nil when unreadable; the caller decides what to do with it)
     struct Entry {
         let url: URL
         let mtime: Date?
     }
 
-    /// 整树枚举 sessionsRoot 下所有 YYYY/MM/DD 数字目录里的 rollout-*.jsonl
+    /// Enumerates rollout-*.jsonl in every numeric YYYY/MM/DD directory under sessionsRoot
     static func enumerate(sessionsRoot: URL) -> [Entry] {
         var results: [Entry] = []
         for year in numericSubdirs(of: sessionsRoot, digits: 4) {
@@ -36,7 +38,8 @@ enum CodexRolloutFiles {
         return results
     }
 
-    /// 列出 N 位纯数字命名的子目录（YYYY=4 位，MM/DD=2 位），其余条目一律跳过
+    /// Lists subdirectories named with exactly N digits (YYYY = 4, MM/DD = 2); every other entry is
+    /// skipped
     private static func numericSubdirs(of dir: URL, digits: Int) -> [URL] {
         let children = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []

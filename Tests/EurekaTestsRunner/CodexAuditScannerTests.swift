@@ -12,7 +12,7 @@ func codexAuditScannerTests(_ t: TestRunner) {
         return try EurekaStore(path: url)
     }
 
-    /// 今天日期目录（rolloutFiles 按 Date() 回看）
+    /// Today's date directory (rolloutFiles looks back from Date())
     func makeDayDir() throws -> (root: URL, dayDir: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-auditscan-\(UUID().uuidString)", isDirectory: true)
@@ -35,7 +35,7 @@ func codexAuditScannerTests(_ t: TestRunner) {
         let scanner = CodexAuditScanner(
             sessionsRoot: root, store: store, pipeline: AuditPipeline(store: store))
         let inserted = try scanner.scanOnce()
-        // exec_command + mcp + web_search + shell = 4（_query-docs 跳过）
+        // exec_command + mcp + web_search + shell = 4 (_query-docs skipped)
         try expectEqual(inserted, 4)
 
         let rows = try store.audit.recent(limit: 100)
@@ -79,7 +79,7 @@ func codexAuditScannerTests(_ t: TestRunner) {
     t.test("陈旧事件（fixture 旧时间戳）只入库不告警") {
         let store = try makeStore()
         let (root, dayDir) = try makeDayDir()
-        // 写一条高危命令，但用很旧的时间戳 → stale
+        // Write a high-risk command but with a very old timestamp → stale
         let lines = [
             #"{"type":"session_meta","payload":{"id":"s-old","cwd":"/w"}}"#,
             #"{"type":"response_item","timestamp":"2020-01-01T00:00:00.000Z","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"bash\",\"-lc\",\"sudo rm -rf /\"]}","call_id":"c1"}}"#,
@@ -93,7 +93,7 @@ func codexAuditScannerTests(_ t: TestRunner) {
             sessionsRoot: root, store: store, pipeline: AuditPipeline(store: store))
         try expectEqual(try scanner.scanOnce { alerts.append($0) }, 1)
         try expect(alerts.isEmpty, "陈旧高危事件不应告警")
-        // 但入库并标了风险
+        // but it is stored and flagged as risky
         try expectEqual(try store.audit.count(.init(riskOnly: true)), 1)
         try expectEqual(try store.audit.recent(limit: 1)[0].riskRule, "rm-rf")
     }
@@ -123,7 +123,8 @@ func codexAuditScannerTests(_ t: TestRunner) {
         let store = try makeStore()
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-auditscan-\(UUID().uuidString)", isDirectory: true)
-        // 创建日目录很老的 rollout：resume 后原地追加，只数最近日期目录会漏
+        // A rollout in a very old creation-day directory: appended in place after resume, so
+        // counting only recent date directories would miss it
         let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
         try FileManager.default.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
         try FileManager.default.copyItem(

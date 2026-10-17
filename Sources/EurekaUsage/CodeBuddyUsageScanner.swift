@@ -2,14 +2,15 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.codebuddy/projects/**/*.jsonl（含 `<sessionId>/subagents/agent-*.jsonl`）。
-/// schema 已对真实会话核验（2026-07）：token 挂在 `function_call` 行的
-/// `providerData.usage` / `message.usage`（实勘为 camelCase：inputTokens 含缓存读、
-/// inputTokensDetails[0].cached_tokens；snake_case Claude 式作兜底）→ 写 usage_records；
-/// `function_call` 的 name → tool_calls（Skill/mcp__/Agent 归类与 Kimi 扫描器同口径）；
-/// user 消息（非 skipRun 元行）→ session_stats 提问数。
-/// 子代理 token 是真实开销，归属父会话 id；提问只在主会话文件计。
-/// 按 inode+offset 水位增量续读（jsonl 单写者 append-only，无跨文件重复行，无需 dedup_keys）。
+/// Scans ~/.codebuddy/projects/**/*.jsonl (including `<sessionId>/subagents/agent-*.jsonl`). Schema
+/// verified against real sessions (2026-07): tokens sit on `function_call` lines in
+/// `providerData.usage` / `message.usage` (observed as camelCase: inputTokens includes cache reads,
+/// inputTokensDetails[0].cached_tokens; Claude-style snake_case is the fallback) → usage_records;
+/// `function_call` name → tool_calls (Skill/mcp__/Agent classified the same way as the Kimi
+/// scanner); user messages (excluding skipRun meta lines) → session_stats prompt count. Subagent
+/// tokens are real spend and are attributed to the parent session id; prompts count only in the
+/// main session file. Reads incrementally from an inode+offset watermark (jsonl is single-writer
+/// append-only, no cross-file duplicate lines, so no dedup_keys).
 public final class CodeBuddyUsageScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
@@ -22,21 +23,22 @@ public final class CodeBuddyUsageScanner {
         return formatter
     }()
 
-    /// 每文件私有状态（存 scan_files.extra）：会话归属 + 是否主会话文件（提问只在主会话计）
+    /// Per-file private state (stored in scan_files.extra): session attribution + whether this is
+    /// the main session file (prompts count only there)
     private struct FileExtra: Codable {
         var project: String?
         var sessionId: String?
         var isMain: Bool?
     }
 
-    /// projectsRoot 由调用方传入（app/CLI 用 `CodeBuddyPaths.projectsRoot()`，测试用临时目录）——
-    /// EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
+    /// projectsRoot is passed in by the caller (app/CLI use `CodeBuddyPaths.projectsRoot()`, tests
+    /// use a temp dir) — EurekaUsage does not depend on EurekaIngest, so there is no default here.
     public init(projectsRoot: URL, store: EurekaStore) {
         self.projectsRoot = projectsRoot
         self.store = store
     }
 
-    /// 返回本轮新增的 usage 记录数
+    /// Returns the number of usage records added this pass
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
@@ -46,8 +48,9 @@ public final class CodeBuddyUsageScanner {
         return inserted
     }
 
-    /// projects/<slug>/*.jsonl（主会话）+ projects/<slug>/<sessionId>/subagents/*.jsonl
-    /// （子代理；不按 mtime 过滤——scan_state 水位使无新数据的老文件近乎零成本）
+    /// projects/<slug>/*.jsonl (main sessions) + projects/<slug>/<sessionId>/subagents/*.jsonl
+    /// (subagents; no mtime filter — the scan_state watermark makes old files with no new data
+    /// nearly free)
     private func sessionFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -96,7 +99,7 @@ public final class CodeBuddyUsageScanner {
 
         var records: [UsageRecord] = []
         var promptCount = 0
-        // 工具/技能调用：逐条带真实时间戳（tool_calls.last_ts 取 MAX 用）
+        // Tool/skill calls: each carries its real timestamp (used for MAX of tool_calls.last_ts)
         var toolBumps: [(day: String, kind: String, name: String, ts: Double)] = []
 
         for line in chunk.lines {
@@ -111,7 +114,8 @@ public final class CodeBuddyUsageScanner {
 
             switch type {
             case "message":
-                // 真实用户提问（skipRun 是本地命令回显等元行）；提问数只在主会话文件计
+                // Real user prompts (skipRun marks meta lines such as local command echoes);
+                // prompts count only in the main session file
                 guard extra.isMain == true,
                       root["role"] as? String == "user",
                       (root["providerData"] as? [String: Any])?["skipRun"] as? Bool != true,
@@ -130,7 +134,8 @@ public final class CodeBuddyUsageScanner {
                     let args = parseArguments(root["arguments"] as? String)
                     let day = Self.dayFormatter.string(from: date)
                     let ts = date.timeIntervalSince1970
-                    // kind 归类与 Kimi 扫描器同口径（技能分析/插件面板跨源一致）
+                    // kind classification matches the Kimi scanner (keeps skill analytics / plugin
+                    // panel consistent across sources)
                     if name == "Skill" {
                         toolBumps.append((day, "skill", (args["skill"] as? String) ?? "?", ts))
                     } else if name.hasPrefix("mcp__") {
@@ -146,7 +151,8 @@ public final class CodeBuddyUsageScanner {
                         toolBumps.append((day, "tool", name, ts))
                     }
                 }
-                // token：providerData.usage / message.usage（camelCase 主格式，snake_case 兜底）
+                // Tokens: providerData.usage / message.usage (camelCase is the main format,
+                // snake_case the fallback)
                 let providerData = root["providerData"] as? [String: Any]
                 let message = root["message"] as? [String: Any]
                 guard let usage = (providerData?["usage"] ?? message?["usage"]) as? [String: Any]
@@ -159,12 +165,12 @@ public final class CodeBuddyUsageScanner {
                     cached = details.reduce(0) { $0 + intValue($1, ["cached_tokens"]) }
                 }
                 guard rawInput > 0 || output > 0 || cached > 0 else { continue }
-                // camelCase 的 inputTokens 含缓存读（OpenAI 口径）→ 减掉；
-                // snake_case 的 input_tokens 不含（Claude 口径）→ 原样
+                // camelCase inputTokens includes cache reads (OpenAI convention) → subtract them;
+                // snake_case input_tokens excludes them (Claude convention) → use as-is
                 let input = usage["inputTokens"] != nil ? max(0, rawInput - cached) : rawInput
                 records.append(UsageRecord(
                     source: .codebuddy,
-                    // model 在 providerData.model（如 "glm-5.2"，存原样）
+                    // model lives in providerData.model (e.g. "glm-5.2", stored verbatim)
                     model: ((providerData?["model"] ?? message?["model"]) as? String)
                         ?? "codebuddy/unknown",
                     project: extra.project,
@@ -202,7 +208,8 @@ public final class CodeBuddyUsageScanner {
         return inserted
     }
 
-    /// 行时间：epoch 毫秒 `timestamp`（>1e12 判毫秒）；缺失回退当前时间
+    /// Line time: epoch-milliseconds `timestamp` (>1e12 means milliseconds); falls back to now when
+    /// missing
     private func eventDate(_ root: [String: Any]) -> Date {
         if let number = root["timestamp"] as? NSNumber {
             let value = number.doubleValue
@@ -211,7 +218,7 @@ public final class CodeBuddyUsageScanner {
         return Date()
     }
 
-    /// arguments 是 JSON 字符串（如 `{"skill":"tdd"}`）；解析失败按空
+    /// arguments is a JSON string (e.g. `{"skill":"tdd"}`); a parse failure is treated as empty
     private func parseArguments(_ raw: String?) -> [String: Any] {
         guard let raw,
               let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8))
@@ -226,9 +233,9 @@ public final class CodeBuddyUsageScanner {
         return 0
     }
 
-    /// 会话归属：主会话文件 = <slug>/<sessionId>.jsonl（文件名 stem 即会话 id）；
-    /// 子代理文件 = <slug>/<sessionId>/subagents/agent-*.jsonl（父目录名即会话 id，
-    /// token 归父会话、提问不计）
+    /// Session attribution: main session file = <slug>/<sessionId>.jsonl (the file name stem is the
+    /// session id); subagent file = <slug>/<sessionId>/subagents/agent-*.jsonl (the parent dir name
+    /// is the session id; tokens go to the parent session, prompts are not counted)
     private func resolveOwnership(fileURL: URL, into extra: inout FileExtra) {
         let parent = fileURL.deletingLastPathComponent()
         if parent.lastPathComponent == "subagents" {

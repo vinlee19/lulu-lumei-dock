@@ -2,12 +2,15 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.grok/sessions/<enc-cwd>/<uuid>/ 下两个文件：
-/// - `events.jsonl`：`tool_started`（工具调用 → tool_calls）与 `turn_started`（提问 → session_stats）；
-/// - `updates.jsonl`：每轮结束的 `turn_completed`（Grok 1.0.4x 起），`usage.modelUsage.<模型>`
-///   带该轮 token 与 `costUsdTicks`（10¹⁰ tick = 1 USD，Grok 自报的 API 等价费用）→ 每轮每模型一行
-///   usage_records，费用直接采用自报值（build 模型在价格目录里没有对应条目）。
-/// 两个文件各自按 inode+offset 水位增量续读（与 Codex/opencode 扫描器同构）。
+/// Scans two files under ~/.grok/sessions/<enc-cwd>/<uuid>/:
+/// - `events.jsonl`: `tool_started` (tool calls → tool_calls) and `turn_started` (prompts →
+///   session_stats);
+/// - `updates.jsonl`: the end-of-turn `turn_completed` (since Grok 1.0.4x), whose
+///   `usage.modelUsage.<model>` carries that turn's tokens and `costUsdTicks` (10¹⁰ ticks = 1 USD,
+///   Grok's self-reported API-equivalent cost) → one usage_records row per turn per model, using
+///   the self-reported cost directly (build models have no price catalog entry).
+/// Each file is read incrementally from its own inode+offset watermark (same shape as the
+/// Codex/opencode scanners).
 public final class GrokUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
@@ -24,13 +27,14 @@ public final class GrokUsageScanner {
         return formatter
     }()
 
-    /// 每文件私有状态（存 scan_files.extra）：会话 id（与 GrokSessionIndexer 一致）
+    /// Per-file private state (stored in scan_files.extra): session id (consistent with
+    /// GrokSessionIndexer)
     private struct FileExtra: Codable {
         var sessionId: String?
     }
 
-    /// sessionsRoot 由调用方传入（app/CLI 用 `GrokPaths.sessionsRoot()`，测试用临时目录）——
-    /// EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
+    /// sessionsRoot is passed in by the caller (app/CLI use `GrokPaths.sessionsRoot()`, tests use a
+    /// temp dir) — EurekaUsage does not depend on EurekaIngest, so there is no default here.
     public init(sessionsRoot: URL, store: EurekaStore) {
         self.sessionsRoot = sessionsRoot
         self.store = store
@@ -39,7 +43,7 @@ public final class GrokUsageScanner {
     private let projectResolver = ProjectResolver()
     private static let turnCompletedMarker = Data("\"turn_completed\"".utf8)
 
-    /// 返回本轮新增的工具调用计数 + 用量记录数
+    /// Returns the tool-call count + usage record count added this pass
     @discardableResult
     public func scanOnce() throws -> Int {
         var bumped = 0
@@ -53,8 +57,9 @@ public final class GrokUsageScanner {
         return bumped
     }
 
-    /// updates.jsonl 的 turn_completed → usage_records。
-    /// 文件被重写（inode 变 / 变短）时从头重扫：先删该会话已入账的行再重写，不靠 8 天就清理的去重键。
+    /// turn_completed in updates.jsonl → usage_records. A rewritten file (new inode / shorter) is
+    /// rescanned from the start: delete the session's booked rows first, then rewrite; never rely
+    /// on dedup keys, which are pruned after 8 days.
     private func scanUpdates(_ url: URL) throws -> Int {
         let path = url.path
         guard let info = JSONLinesReader.fileInfo(path: path) else { return 0 }
@@ -68,13 +73,14 @@ public final class GrokUsageScanner {
 
         let sessionDir = url.deletingLastPathComponent()
         let sessionId = resolveSessionId(sessionDir: sessionDir)
-        // 父目录名是百分号编码的 cwd（%2FUsers%2F…）
+        // The parent dir name is the percent-encoded cwd (%2FUsers%2F…)
         let cwd = sessionDir.deletingLastPathComponent().lastPathComponent.removingPercentEncoding
         let project = projectResolver.projectName(forCwd: cwd)
 
         var records: [UsageRecord] = []
         for line in chunk.lines {
-            // 文件大头是流式正文（最大见过 76MB），先按字节筛再解析
+            // Most of the file is streamed body text (up to 76MB seen), so filter on bytes before
+            // parsing
             guard line.range(of: Self.turnCompletedMarker) != nil,
                 let object = try? JSONSerialization.jsonObject(with: line),
                 let root = object as? [String: Any],
@@ -88,7 +94,8 @@ public final class GrokUsageScanner {
                 Date(timeIntervalSince1970: $0 / 1000)
             } ?? ((root["timestamp"] as? NSNumber)?.doubleValue).map(Date.init(timeIntervalSince1970:))
                 ?? Date()
-            // 按模型拆；老版本没有 modelUsage 时整轮记在 primaryModel / grok 名下
+            // Split by model; older versions without modelUsage book the whole turn under
+            // primaryModel / grok
             var perModel = usage["modelUsage"] as? [String: [String: Any]] ?? [:]
             if perModel.isEmpty { perModel = ["grok": usage] }
             for (model, counts) in perModel {
@@ -105,7 +112,8 @@ public final class GrokUsageScanner {
                     project: project,
                     sessionId: sessionId,
                     timestamp: timestamp,
-                    // inputTokens 含缓存读（OpenAI 口径）→ 拆开记；reasoning 已计入 outputTokens
+                    // inputTokens includes cache reads (OpenAI convention) → split them out;
+                    // reasoning is already in outputTokens
                     inputTokens: max(0, input - cachedRead),
                     outputTokens: output,
                     cacheCreationTokens: cacheWrite,
@@ -124,9 +132,10 @@ public final class GrokUsageScanner {
         return records.count
     }
 
-    /// sessions/<enc-cwd>/<uuid>/events.jsonl 全量（两级目录遍历；
-    /// 不按 mtime 过滤——scan_state 水位使无新数据的老文件近乎零成本，
-    /// 每行按其 `ts` 归日，历史活动自然落到历史日期，不影响当月统计）。
+    /// All of sessions/<enc-cwd>/<uuid>/events.jsonl (two-level directory walk; no mtime filter —
+    /// the scan_state watermark makes old files with no new data nearly free, and each line is
+    /// bucketed by its own `ts`, so historic activity lands on historic dates without affecting
+    /// this month).
     private func eventFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -161,8 +170,8 @@ public final class GrokUsageScanner {
                 extra = decoded
             }
         }
-        // 会话 id：与 GrokSessionIndexer 一致（summary.json info.id，缺则目录名），使
-        // session_stats 行能按 id join 到会话列表
+        // Session id: consistent with GrokSessionIndexer (summary.json info.id, else the dir name),
+        // so session_stats rows can join to the session list by id
         if extra.sessionId == nil {
             extra.sessionId = resolveSessionId(sessionDir: url.deletingLastPathComponent())
         }
@@ -213,7 +222,7 @@ public final class GrokUsageScanner {
         return bumped
     }
 
-    /// 同 GrokSessionIndexer：summary.json 的 info.id，缺则会话目录名
+    /// Same as GrokSessionIndexer: summary.json's info.id, else the session dir name
     private func resolveSessionId(sessionDir: URL) -> String {
         let summary = sessionDir.appendingPathComponent("summary.json")
         if let data = try? Data(contentsOf: summary),

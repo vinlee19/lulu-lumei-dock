@@ -13,7 +13,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         url: "https://mcp.linear.app/sse",
         headers: ["Authorization": "Bearer fake"], timeout: 30)
 
-    // MARK: JSON 方言
+    // MARK: JSON dialect
 
     t.test("typed 方言（claude/qwen）：stdio 写 type=stdio，remote 写 type=http") {
         let stdio = try MCPServerEditor.upsertJSON(
@@ -88,7 +88,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
             NSDictionary(dictionary: outRoot) == NSDictionary(dictionary: expected),
             "除新增 server 外全部键值必须语义保真")
 
-        // 同名拒绝（不覆盖）
+        // Same name is refused (no overwrite)
         do {
             _ = try MCPServerEditor.upsertJSON(
                 into: out, definition: stdioDef, container: "mcpServers", style: .typed)
@@ -100,14 +100,14 @@ func mcpServerEditorTests(_ t: TestRunner) {
             }
         }
 
-        // 容器不是对象 → 中止不写
+        // Container is not an object → abort without writing
         do {
             _ = try MCPServerEditor.upsertJSON(
                 into: #"{"mcpServers": []}"#, definition: stdioDef,
                 container: "mcpServers", style: .typed)
             try expect(false, "非对象容器应抛 foreignConfig")
         } catch is InstallError {
-            // 预期
+            // expected
         }
     }
 
@@ -133,7 +133,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         }
     }
 
-    // MARK: TOML 方言
+    // MARK: TOML dialect
 
     t.test("upsertTOML：EOF 追加段 + env 子段；notify/profiles/相邻 mcp_servers 不可破坏") {
         let toml = try fixtureString("configs/config-with-tables.toml")
@@ -290,7 +290,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         }
     }
 
-    // MARK: 跨方言 round-trip（传播的正确性核心）
+    // MARK: Cross-dialect round-trip (the correctness core of propagation)
 
     t.test("round-trip：JSON 读定义 → TOML 写 → TOML 读回，含 env 值逐字段一致") {
         let json = try MCPServerEditor.upsertJSON(
@@ -329,7 +329,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expectEqual(def.env["SUB_KEY"], "sub-value")
     }
 
-    // MARK: 编辑（update：合并式 / 原位改写）
+    // MARK: Edit (update: merge / in-place rewrite)
 
     t.test("updateJSON：未建模键保留、enabled 不被翻转、置空的建模字段删除") {
         let json = """
@@ -340,7 +340,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         """
         var edited = MCPServerDefinition(
             name: "runner", transport: .stdio, command: "npx", args: ["new-server"])
-        edited.env = [:]  // 置空 environment
+        edited.env = [:]  // Clear environment
         let out = try MCPServerEditor.updateJSON(
             in: json, definition: edited, container: "mcp", style: .opencode)
         let entry = (try MCPServerEditor.parse(out)["mcp"]
@@ -408,14 +408,14 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expect(out.contains("NOTION_TOKEN = \"new-token\""), "env 子段体应被重写")
         try expect(!out.contains("old-token"))
         try expect(out.contains("[mcp_servers.keep]"), "邻段无损")
-        // 段落顺序未搬动：notion 主段仍在 keep 之前
+        // Section order unchanged: the notion main section still precedes keep
         let notionPos = out.range(of: "[mcp_servers.notion]")!.lowerBound
         let keepPos = out.range(of: "[mcp_servers.keep]")!.lowerBound
         try expect(notionPos < keepPos, "原位改写不该搬动段落")
     }
 
     t.test("updateTOML：env 三形态——置空删子段；内联行重写；无 env 时补内联行") {
-        // ① 置空 → 删除 .env 子段
+        // (1) Cleared → delete the .env subsection
         let withSub = """
         [mcp_servers.a]
         command = "npx"
@@ -429,7 +429,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expect(!out1.contains(".env]"), "env 置空应删除子段")
         try expect(!out1.contains("KEY = "))
 
-        // ② 内联 env 行重写
+        // (2) Rewrite the inline env line
         let withInline = """
         [mcp_servers.b]
         command = "npx"
@@ -441,7 +441,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expect(out2.contains("env = { NEW = \"2\" }"))
         try expect(!out2.contains("OLD"))
 
-        // ③ 原本无 env → 补内联行
+        // (3) No env originally → add an inline line
         let bare = "[mcp_servers.c]\ncommand = \"npx\"\n"
         let addEnv = MCPServerDefinition(
             name: "c", transport: .stdio, command: "npx", env: ["K": "v"])
@@ -461,7 +461,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expect(!out.contains("old.example"))
     }
 
-    // MARK: 启停（enabled 键，实证 codex/grok TOML 与 opencode JSON 有此语义）
+    // MARK: Enable/disable (the enabled key; verified to carry this meaning in codex/grok TOML and opencode JSON)
 
     t.test("setEnabledTOML：原位改写 enabled 行 / 缺失则补在段末；其余行不动") {
         let toml = """
@@ -510,10 +510,10 @@ func mcpServerEditorTests(_ t: TestRunner) {
             "headers 原样保留")
     }
 
-    // MARK: 粘贴解析
+    // MARK: Paste parsing
 
     t.test("parseQuickInput：命令 / URL / JSON 三形态与名称派生") {
-        // npm 包（带版本后缀）
+        // npm package (with a version suffix)
         let npx = MCPServerEditor.parseQuickInput("npx -y chrome-devtools-mcp@latest")
         try expectEqual(npx.count, 1)
         try expectEqual(npx[0].name, "chrome-devtools-mcp")
@@ -521,15 +521,16 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expectEqual(npx[0].args, ["-y", "chrome-devtools-mcp@latest"])
         try expectEqual(npx[0].transport, .stdio)
 
-        // scoped npm 包
+        // scoped npm package
         let scoped = MCPServerEditor.parseQuickInput("npx -y @upstash/context7-mcp")
         try expectEqual(scoped.first?.name, "context7-mcp")
 
-        // 非 npm：首个非 flag 参数（uvx 的包名不含 mcp 也要能派生）
+        // Non-npm: first non-flag argument (a uvx package name without "mcp" must still derive a
+        // name)
         let uvx = MCPServerEditor.parseQuickInput("uvx code-review-graph serve")
         try expectEqual(uvx.first?.name, "code-review-graph")
 
-        // URL：域名派生 + mcp. 前缀剥离
+        // URL: derived from the domain + strip the mcp. prefix
         let url = MCPServerEditor.parseQuickInput("https://mcp.notion.com/mcp")
         try expectEqual(url.first?.name, "notion")
         try expectEqual(url.first?.transport, .remote)
@@ -537,7 +538,7 @@ func mcpServerEditorTests(_ t: TestRunner) {
         try expectEqual(
             MCPServerEditor.parseQuickInput("https://example.com/mcp").first?.name, "example")
 
-        // JSON 原样走 parsePasted
+        // JSON goes through parsePasted unchanged
         let json = MCPServerEditor.parseQuickInput(
             #"{"mcpServers": {"a": {"command": "npx"}}}"#)
         try expectEqual(json.map(\.name), ["a"])

@@ -1,7 +1,7 @@
 import Foundation
 
-/// 菜单栏标题组装（纯函数）：任务计数 + 可选的限额百分比。
-/// 形如 `✦ 37%` / `▶2 · 37%` / `⏳1 · 88%`。
+/// Menu-bar title assembly (pure function): task count + optional rate-limit percentage.
+/// Shaped like `✦ 37%` / `▶2 · 37%` / `⏳1 · 88%`.
 public enum StatusTitleComposer {
     public enum Tier: Equatable, Sendable {
         case normal
@@ -20,7 +20,7 @@ public enum StatusTitleComposer {
         }
     }
 
-    /// 所有可用来源 5h 窗口用量取最大（最先见顶的才要紧）。
+    /// Take the max 5h-window usage across all available sources (the one that tops out first is what matters).
     /// Windows whose reset time has passed are skipped: a week-old Codex snapshot would
     /// otherwise pin a dead "9%" on the menu bar and the sidebar badge.
     public static func maxPrimaryPercent(

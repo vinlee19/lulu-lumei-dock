@@ -2,9 +2,9 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// opencode 会话索引：只读 `opencode.db` 的 `session` 表 → `AgentSessionInfo`。
-/// 只取顶层会话（parent_id 空）；子会话是 opencode 的子 agent，不进浏览列表。
-/// 时间是 epoch 毫秒；opencode 无 transcript 文件，故 sizeBytes 记 0。
+/// opencode session index: reads only the `session` table of `opencode.db` → `AgentSessionInfo`.
+/// Only top-level sessions (parent_id empty); child sessions are opencode subagents and stay out
+/// of the browse list. Times are epoch ms; opencode has no transcript file, so sizeBytes is 0.
 public enum OpencodeSessionIndexer {
     public static func index(
         dbPath: URL,
@@ -36,7 +36,7 @@ public enum OpencodeSessionIndexer {
         return rows.filter { !$0.id.isEmpty }
     }
 
-    /// 顶层会话目录集合（供项目级技能/agent 发现并入）
+    /// Top-level session directories (merged into project-level skill/agent discovery)
     public static func recentDirectories(dbPath: URL, maxSessions: Int = 300) -> [String] {
         index(dbPath: dbPath, maxSessions: maxSessions).compactMap(\.cwd)
     }

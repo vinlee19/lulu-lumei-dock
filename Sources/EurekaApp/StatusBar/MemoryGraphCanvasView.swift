@@ -1,30 +1,36 @@
 import EurekaKit
 import SwiftUI
 
-/// 记忆图谱画布：把 `MemoryGraphLayout.Result` 画出来。
+/// Memory graph canvas: draws a `MemoryGraphLayout.Result`.
 ///
-/// 渲染取舍与 `TurnGraphCanvasView` 完全一致，理由也一样：**ZStack 绝对定位 + 每种边角色一个
-/// `Shape`，不用 `Canvas`** —— 本项目的验收手段是 `NSHostingView + cacheDisplay`
-/// （见 `PreviewRenderer`），而 `Canvas` 等价隐式 `drawingGroup()`（Metal 离屏合成），
-/// 渲成空白就没有 fallback。节点是真 View 于是 `.onHover` / `onTapGesture` / `.help()` 全部免费。
+/// The rendering trade-offs are exactly those of `TurnGraphCanvasView`, for the same reasons:
+/// **ZStack absolute positioning + one
+/// `Shape` per edge role, no `Canvas`**: this project verifies via `NSHostingView + cacheDisplay`
+/// (see `PreviewRenderer`), and `Canvas` is equivalent to an implicit `drawingGroup()` (Metal
+/// offscreen compositing),
+/// so if it renders blank there is no fallback. Nodes are real Views, so `.onHover` /
+/// `onTapGesture` / `.help()` all come for free.
 struct MemoryGraphCanvasView: View {
     let result: MemoryGraphLayout.Result
-    /// 当前选中的节点（详情条由外层展示）
+    /// Currently selected node (the detail strip is shown by the parent)
     @Binding var selected: MemoryGraph.NodeID?
-    /// 点条目节点 → 打开这条记忆（参数是记忆文件路径）
+    /// Tap an entry node → open that memory (the argument is the memory file path)
     var onOpenMemory: ((String) -> Void)?
-    /// 点会话节点 → 跳「会话」页；transcript 已删除的节点不会调用
+    /// Tap a session node → jump to the Sessions page; never called for nodes whose transcript was
+    /// deleted
     var onRevealSession: ((String) -> Void)?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // 泳道底轨在最底层：分类归属靠「列 + 底轨」表达，不靠每条一根连线
+            // Swim-lane base tracks at the very bottom: category membership is expressed by "column
+            // + base track", not one line per entry
             ForEach(result.rails) { rail in
                 railView(rail)
                     .frame(width: rail.rect.width, height: rail.rect.height)
                     .offset(x: rail.rect.minX, y: rail.rect.minY)
             }
-            // 边在节点之下：边贴着节点边缘起止，压在下面才不会盖住圆角
+            // Edges under the nodes: edges start and end at node borders, so they must sit below to
+            // avoid covering the rounded corners
             ForEach(MemoryGraph.EdgeRole.allCases, id: \.self) { role in
                 let edges = result.edges.filter { $0.role == role }
                 if !edges.isEmpty {
@@ -33,7 +39,8 @@ struct MemoryGraphCanvasView: View {
                         .foregroundStyle(color(role))
                     MemoryArrowShape(edges: edges)
                         .fill(color(role))
-                    // 互相引用：起点也画一个箭头，而不是画第二条重合的线
+                    // Mutual reference: draw an arrow at the start too, instead of drawing a second
+                    // overlapping line
                     MemoryArrowShape(
                         edges: edges.filter(\.isBidirectional), atStart: true)
                         .fill(color(role))
@@ -45,7 +52,8 @@ struct MemoryGraphCanvasView: View {
                     isSelected: selected == placed.id,
                     onTap: { tap(placed) })
                     .frame(width: placed.frame.width, height: placed.frame.height)
-                    // 用 offset 而不是 position：position 是中心坐标语义，会和 frame 打架
+                    // offset rather than position: position has center-coordinate semantics and
+                    // fights with frame
                     .offset(x: placed.frame.minX, y: placed.frame.minY)
             }
         }
@@ -63,7 +71,8 @@ struct MemoryGraphCanvasView: View {
                 selected = selected == placed.id ? nil : placed.id
             }
         case .session(let exists):
-            // transcript 不在了就没有可跳的目标：宁可不响应，也别跳去一个空会话页
+            // No transcript means no target to jump to: better not to respond than to jump to an
+            // empty session page
             if exists, let sessionId = placed.node.sessionId, let onRevealSession {
                 onRevealSession(sessionId)
             } else {
@@ -83,7 +92,8 @@ struct MemoryGraphCanvasView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(tint.opacity(0.16), lineWidth: 0.8))
             .overlay(alignment: .top) {
-                // 分类道的标题由 header 节点承载；会话道没有 header 节点，标题画在轨顶
+                // Category lane titles are carried by header nodes; the session lane has no header
+                // node, so its title is drawn at the top of the track
                 if rail.type == nil {
                     HStack(spacing: 4) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
@@ -105,7 +115,8 @@ struct MemoryGraphCanvasView: View {
         }
     }
 
-    /// 实线 = 记忆之间的引用（这张图的主角）；虚线 = 结构性的收录与来源
+    /// Solid = references between memories (the star of this graph); dashed = structural inclusion
+    /// and origin
     private func strokeStyle(_ role: MemoryGraph.EdgeRole) -> StrokeStyle {
         switch role {
         case .link:
@@ -120,9 +131,10 @@ struct MemoryGraphCanvasView: View {
     }
 }
 
-// MARK: - 边（按角色聚合成一个 Shape，与边数无关）
+// MARK: - Edges (aggregated into one Shape per role, independent of edge count)
 
-/// 折线段。引擎保证每段严格水平或竖直、且不穿节点，这里只负责描出来。
+/// Polyline segments. The engine guarantees each segment is strictly horizontal or vertical and
+/// never crosses a node; this only strokes them.
 struct MemoryEdgeShape: Shape {
     let edges: [MemoryGraphLayout.RoutedEdge]
 
@@ -137,10 +149,11 @@ struct MemoryEdgeShape: Shape {
     }
 }
 
-/// 箭头单独一层：`fill` 出实心三角，不跟着虚线样式走（虚线箭头认不出方向）
+/// Arrowheads on their own layer: `fill` gives solid triangles that don't follow the dash style
+/// (dashed arrowheads don't read as a direction)
 struct MemoryArrowShape: Shape {
     let edges: [MemoryGraphLayout.RoutedEdge]
-    /// true = 画在起点（双向边用）
+    /// true = drawn at the start (for bidirectional edges)
     var atStart = false
     var size: CGFloat = 4.5
 
@@ -175,10 +188,11 @@ struct MemoryArrowShape: Shape {
     }
 }
 
-// MARK: - 节点
+// MARK: - Nodes
 
-/// 一个节点。hover / 选中的视觉沿用 `KnowledgeCard`（换描边 + 0.12 easeOut），
-/// 悬停详情走 `.help()` 而**不用 popover** —— popover 依赖真实窗口，离屏渲染时不被光栅化。
+/// One node. Hover / selection visuals follow `KnowledgeCard` (swap the stroke + 0.12 easeOut);
+/// hover details use `.help()` and **not a popover**: a popover needs a real window and isn't
+/// rasterized during offscreen rendering.
 struct MemoryGraphNodeView: View {
     let placed: MemoryGraphLayout.PlacedNode
     var isSelected = false
@@ -229,7 +243,8 @@ struct MemoryGraphNodeView: View {
                     .frame(width: 12)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(node.title)
-                        // 契约：标签必须放进引擎给的固定 frame，绝不让文字反向影响布局
+                        // Contract: the label must fit in the fixed frame the engine provides; text
+                        // must never feed back into the layout
                         .font(.system(size: 10.5, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -252,7 +267,7 @@ struct MemoryGraphNodeView: View {
         }
     }
 
-    // MARK: 视觉
+    // MARK: Visuals
 
     private var isCategory: Bool {
         if case .category = node.kind { return true }
@@ -300,7 +315,8 @@ struct MemoryGraphNodeView: View {
         return Theme.cardBorder
     }
 
-    /// 虚线描边 = 「这个节点有问题」：已删除的会话（点不开）、未被索引收录的记忆（agent 读不到）
+    /// Dashed stroke = "this node has a problem": a deleted session (can't be opened), a memory not
+    /// listed in the index (agents can't read it)
     private var isDashed: Bool { isMissingSession || node.isUnindexed }
 
     private var helpText: String {

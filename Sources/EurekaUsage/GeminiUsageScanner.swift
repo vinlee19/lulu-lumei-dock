@@ -2,34 +2,36 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.gemini/tmp/<slug>/chats/session-*.jsonl（Gemini CLI v0.51 实勘格式）。
-/// `type == "gemini"` 的消息行自带 model 与 tokens{input, output, cached, thoughts}：
-/// Gemini 口径 input 含 cached、thoughts 按输出计费 → 写库时
-/// inputTokens = input - cached、cacheRead = cached、outputTokens = output + thoughts。
-/// `type == "user"`（非 session_context 注入）计入 session_stats 提问数。
-/// 按 inode+offset 水位增量续读；会话恢复可能整写文件（水位失效回 0 重读），
-/// 故 usage 记录再用 dedup_keys（gemini:<sessionId>:<messageId>）兜底防重。
+/// Scans ~/.gemini/tmp/<slug>/chats/session-*.jsonl (format observed in Gemini CLI v0.51).
+/// Message lines with `type == "gemini"` carry model and tokens{input, output, cached, thoughts}:
+/// Gemini's input includes cached, and thoughts bill as output → stored as
+/// inputTokens = input - cached, cacheRead = cached, outputTokens = output + thoughts.
+/// `type == "user"` lines (not session_context injections) count toward session_stats prompts.
+/// Reads incrementally from an inode+offset watermark; resuming a session may rewrite the whole
+/// file (watermark invalidated → reread from 0),
+/// so usage records also go through dedup_keys (gemini:<sessionId>:<messageId>) as a fallback.
 public final class GeminiUsageScanner {
     private let tmpRoot: URL
     private let projectsFile: URL
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
 
-    /// 每文件私有状态（存 scan_files.extra）：会话/项目归属（首扫时从 header/slug 解析）
+    /// Per-file private state (stored in scan_files.extra): session/project attribution (parsed
+    /// from header/slug on first scan)
     private struct FileExtra: Codable {
         var project: String?
         var sessionId: String?
     }
 
-    /// 路径由调用方传入（app/CLI 用 GeminiPaths，测试用临时目录）——
-    /// EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
+    /// Paths are passed in by the caller (app/CLI use GeminiPaths, tests use a temp dir) -
+    /// EurekaUsage doesn't depend on EurekaIngest, so there is no default here.
     public init(tmpRoot: URL, projectsFile: URL, store: EurekaStore) {
         self.tmpRoot = tmpRoot
         self.projectsFile = projectsFile
         self.store = store
     }
 
-    /// 返回本轮新增的 usage 记录数
+    /// Returns the number of usage records added this pass
     @discardableResult
     public func scanOnce() throws -> Int {
         let slugToProject = loadSlugMap()
@@ -101,7 +103,7 @@ public final class GeminiUsageScanner {
             guard let object = try? JSONSerialization.jsonObject(with: line),
                   let root = object as? [String: Any]
             else { continue }
-            // header 行（sessionId 归属）
+            // header line (sessionId attribution)
             if extra.sessionId == nil, let sessionId = root["sessionId"] as? String,
                root["type"] == nil {
                 extra.sessionId = sessionId
@@ -141,8 +143,9 @@ public final class GeminiUsageScanner {
         let extraJSON = String(
             data: (try? JSONEncoder().encode(extra)) ?? Data(), encoding: .utf8)
         try store.scanState.transaction {
-            // 会话恢复可能整写文件 → 用 dedup_keys 过滤已见消息；
-            // CLI 流式写入会把同一消息行写两次 → 同批次内也要去重（seenThisBatch）
+            // Resuming a session may rewrite the whole file → filter already-seen messages via
+            // dedup_keys; CLI streaming writes the same message line twice → also dedup within the
+            // batch (seenThisBatch)
             let existing = try store.scanState.existingDedupKeys(candidates.map(\.dedupKey))
             var seenThisBatch = Set<String>()
             for candidate in candidates

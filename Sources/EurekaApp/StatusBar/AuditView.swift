@@ -4,27 +4,35 @@ import EurekaKit
 import EurekaStore
 import SwiftUI
 
-/// 「审计」页签：agent 操作安全审计流水。筛选（来源/类型/仅风险/关键词）+ 分页 + 展开全文 + 导出 CSV。
+/// Audit tab: security audit log of agent operations.
+/// Filters (source / kind / risk only / keyword) + pagination + expand full text + CSV export.
 ///
-/// 骨架与 Skills/Memory/Plans/Agents 四页刻意同构（`PlansView.content` 是样板）：
-/// `header + Divider + ScrollView{ 总览卡 / 来源 chips / 类型 chips / 列表容器 }.background(surfaceSecondary)`。
-/// 此前这一页 `Styles.swift` 的复用组件一个都没用：手抄了空态与搜索框，来源徽标是
-/// `Color.orange`/`Color.cyan` 的纯文字胶囊而不是真的 `SourceBadge`，来源筛选还是硬编码
-/// 的 `Picker` —— 12 个来源里只列了 7 个，那是功能缺失不只是观感问题。
+/// The skeleton deliberately mirrors the Skills/Memory/Plans/Agents pages (`PlansView.content` is
+/// the template):
+/// `header + Divider + ScrollView{ overview card / source chips / kind chips / list container }.background(surfaceSecondary)`.
+/// Previously this page used none of the shared components in `Styles.swift`: it hand-copied the
+/// empty state and search field, source badges were text-only `Color.orange`/`Color.cyan` capsules instead of a real `SourceBadge`, and the
+/// source filter was a hardcoded `Picker` — listing only 7 of the 12 sources, which was a missing
+/// feature, not just a cosmetic issue.
 ///
-/// ⚠️ 本页从「设置 → 审计」升为顶级页签，**不再继承**设置子树注入的
-/// `.toggleStyle(.switch)` / `.controlSize(.small)` / `.font(11.5)`，
-/// 所以设置浮层必须自己声明这三样，否则控件尺寸与字号会突变。
+/// ⚠️ This page was promoted from Settings → Audit to a top-level tab and **no longer inherits**
+/// the `.toggleStyle(.switch)` / `.controlSize(.small)` / `.font(11.5)` injected by the Settings
+/// subtree, so the settings popover must declare all three itself, or control sizes and font sizes
+/// jump.
 struct AuditView: View {
     @ObservedObject var service: AuditService
     @ObservedObject var installer: InstallerService
-    /// 采集/告警/保留时长四个开关原在「设置 → 审计」的卡里，现收进页头齿轮浮层
+    /// The four capture / alert / retention toggles used to live in a card under Settings → Audit;
+    /// they are now in the header's gear popover
     @ObservedObject var settings: AppSettings
-    /// 只为「系统通知不可用」的降级提示（开发态 / 权限被拒）
+    /// Only for the "system notifications unavailable" degraded hint (dev build / permission
+    /// denied)
     @ObservedObject var notificationService: NotificationService
-    /// 跨源配置一致性卡的数据源（技能 / 指令 / 记忆库都在它手上）
+    /// Data source for the cross-source config consistency card (it holds skills / instructions /
+    /// memory library)
     @ObservedObject var skillMemory: SkillMemoryService
-    /// MCP 条目快照（同名异义漂移检查用；构造方每次渲染传最新值，默认空不影响离屏渲染）
+    /// MCP entry snapshot (for the same-name-different-meaning drift check; the caller passes the
+    /// latest value on every render, and the empty default doesn't affect offscreen rendering)
     var mcpServers: [MCPServerEntry] = []
 
     @State private var sourceFilter: AgentSource?
@@ -40,8 +48,9 @@ struct AuditView: View {
 
     private let pageSize = 100
 
-    /// 离屏渲染/预览专用：指定初始筛选（交互时由 chips / 搜索框改）。
-    /// 照 `PlansView(initialLayout:)` 的做法 —— 空态与「仅风险」态否则没法自动出图核对。
+    /// Offscreen rendering / previews only: sets the initial filters (chips / search field change
+    /// them during interaction). Follows `PlansView(initialLayout:)` — otherwise the empty state
+    /// and the risk-only state can't be rendered automatically for checking.
     init(
         service: AuditService, installer: InstallerService, settings: AppSettings,
         notificationService: NotificationService, skillMemory: SkillMemoryService,
@@ -58,7 +67,8 @@ struct AuditView: View {
         self._keyword = State(initialValue: initialKeyword)
     }
 
-    /// 规则 id → 中文标题（徽标展示；只存了 id，标题从内置规则查）
+    /// Rule id → rule title (for badges; only the id is stored, the title is looked up in the
+    /// built-in rules)
     private static let ruleTitles: [String: String] = Dictionary(
         RiskRuleEngine.builtinRules.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
 
@@ -108,7 +118,7 @@ struct AuditView: View {
         }
     }
 
-    // MARK: - 页头（标题 15/bold + 搜索 + 齿轮 / 导出 / 清空 / 刷新）
+    // MARK: - Header (title 15/bold + search + gear / export / clear / refresh)
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -139,11 +149,13 @@ struct AuditView: View {
         .padding(.vertical, 10)
     }
 
-    /// 采集开关与保留策略。用 popover 而不是 `Menu`：这里有三段必须保留的说明文字
-    /// （隐私口径 / 启发式免责 / 通知降级），NSMenu 的条目会把长文本截断。
+    /// Capture toggles and retention policy. A popover rather than a `Menu`: there are three
+    /// explanatory texts that must stay (privacy scope / heuristic disclaimer / notification
+    /// fallback), and NSMenu items truncate long text.
     ///
-    /// 非 private 是为了给 `PreviewRenderer` 单独出图 —— popover 依赖真实窗口，
-    /// 离屏渲染整页时它不会被光栅化，只能单独渲这个内容视图才能核对排版。
+    /// Not private so `PreviewRenderer` can render it on its own — a popover needs a real window,
+    /// so it isn't rasterized when the whole page is rendered offscreen; only rendering this
+    /// content view alone lets us check the layout.
     var settingsPopover: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(L10n.text("Record an audit log of agent actions", zhHans: "记录 agent 操作审计流水"), isOn: $settings.auditEnabled)
@@ -188,7 +200,8 @@ struct AuditView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        // 顶级页签不继承设置子树的样式注入，这三行必须自己声明
+        // A top-level tab doesn't inherit the Settings subtree's style injection, so these three
+        // lines must be declared here
         .toggleStyle(.switch)
         .controlSize(.small)
         .font(.system(size: 11.5))
@@ -196,7 +209,7 @@ struct AuditView: View {
         .frame(width: 320)
     }
 
-    /// 审计归档状态一行（开启归档才显示）
+    /// Audit archive status line (shown only when archiving is on)
     private var archiveLine: String {
         guard settings.cloudBackupEnabled else {
             return L10n.text("Audit archive is on, but cloud backup is off: nothing is uploaded, and cleanup follows the retention period.", zhHans: "审计归档已开启，但云端备份未开启：不会上传，清理按原保留时长执行。")
@@ -208,7 +221,8 @@ struct AuditView: View {
         return text + L10n.text(". Only days that have been uploaded are pruned.", zhHans: "。只清理已上传的日期。")
     }
 
-    /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）
+    /// System notification fallback hint: reflects the real authorization state (unavailable in dev
+    /// builds / denied / normal)
     private var notificationHint: String? {
         switch notificationService.availability {
         case .unavailableNotBundled:
@@ -220,14 +234,15 @@ struct AuditView: View {
         }
     }
 
-    // MARK: - 主体
+    // MARK: - Body
 
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
-                // 配置一致性：与审计流水同页，因为两者回答的是同一类问题
-                // 「我这一堆 CLI 的配置到底是什么状态」。它不需要审计开关，也不受筛选影响。
+                // Config consistency sits on the same page as the audit log because both answer the
+                // same kind of question: "what state are all my CLI configs actually in". It needs
+                // no audit toggle and ignores the filters.
                 ConsistencyCard(service: skillMemory, mcpDrifts: ConsistencyChecker.mcpDrifts(mcpServers))
                 sourceBar
                 kindBar
@@ -236,7 +251,8 @@ struct AuditView: View {
                 } else if installer.claudeStatus != .installed {
                     hooksHint
                 }
-                // 读库失败以前只发布不渲染 —— 出错时整页静默空白，无从判断
+                // A failed DB read used to be published but not rendered — on error the whole page
+                // was silently blank, with no way to tell
                 if let error = service.lastError {
                     noticeCard(
                         icon: "exclamationmark.octagon.fill", tint: Theme.failureRed,
@@ -271,7 +287,7 @@ struct AuditView: View {
         .background(Theme.surfaceSecondary)
     }
 
-    // MARK: - 总览卡
+    // MARK: - Overview card
 
     private var statsCard: some View {
         StatOverviewCard(
@@ -286,15 +302,19 @@ struct AuditView: View {
     private var subtitle: String {
         let retention = settings.auditRetentionDays == 0
             ? L10n.text("Kept forever", zhHans: "永久保留") : L10n.format("Keep %@ days", zhHans: "保留 %@ 天", String(settings.auditRetentionDays))
-        // `riskTotal` 是**全库**风险数（不跟筛选走），筛选态下与旁边的大数不同基准，
-        // 摆在一起会读成「0 条里有 123 条风险」→ 筛选时只留保留策略，风险数交给「仅风险」chip。
+        // `riskTotal` is the risk count for the **whole DB** (ignores filters); while filtered it
+        // has a different base than the big number next to it, and side by side it reads as "123
+        // risky out of 0" → when filtering show only the retention policy and leave the risk count
+        // to the risk-only chip.
         guard service.riskTotal > 0, !filtering else { return retention }
         return L10n.format("Risk %@ · %@", zhHans: "风险 %@ · %@", String(service.riskTotal), String(retention))
     }
 
-    /// 类型分布：前 4 名 + 「其他」，同 `AgentsView.modelSegments` 的做法与配色阶梯。
-    /// **必须收口**：`ToolKind` 有 9 个 case，9 条图例在 780pt 最小内容宽下会把
-    /// 「命令」「16,911」都竖着折成一列字。全部 9 类的精确条数由下方类型 chips 承担。
+    /// Kind distribution: top 4 + "other", same approach and color ramp as
+    /// `AgentsView.modelSegments`. **Must be capped**: `ToolKind` has 9 cases, and 9 legend items
+    /// at the 780pt minimum content width would fold labels like the zhHans "Command" and "16,911"
+    /// into vertical one-character columns. Exact counts for all 9 kinds come from the kind chips
+    /// below.
     private var kindSegments: [StatOverviewCard.Segment] {
         let shades: [Double] = [1.0, 0.78, 0.6, 0.45]
         var segments: [StatOverviewCard.Segment] = []
@@ -313,17 +333,17 @@ struct AuditView: View {
         return segments
     }
 
-    /// 有数据的类型，多者在前（chips 与分布共用同一排序）
+    /// Kinds that have data, most first (chips and distribution share the same order)
     private var sortedKinds: [(key: ToolKind, value: Int)] {
         service.kindCounts.filter { $0.value > 0 }
             .sorted { ($0.value, $0.key.rawValue) > ($1.value, $1.key.rawValue) }
             .map { (key: $0.key, value: $0.value) }
     }
 
-    // MARK: - 筛选
+    // MARK: - Filters
 
-    /// 来源筛选：换成 `SourceFilterBar`，自动覆盖**所有有数据的**来源
-    /// （旧的硬编码 `Picker` 漏了 opencode/antigravity/kimi/gemini/hermes）
+    /// Source filter: switched to `SourceFilterBar`, which automatically covers **every source with
+    /// data** (the old hardcoded `Picker` missed opencode/antigravity/kimi/gemini/hermes)
     private var sourceBar: some View {
         SourceFilterBar(
             selected: $sourceFilter,
@@ -335,7 +355,8 @@ struct AuditView: View {
             count: { service.sourceCounts[$0] ?? 0 })
     }
 
-    /// 类型 chips + 仅风险（换行流式，同 `SourceFilterBar` 的视觉语言、小一号）
+    /// Kind chips + risk only (wrapping flow layout, same visual language as `SourceFilterBar`, one
+    /// size smaller)
     private var kindBar: some View {
         FlowLayout(spacing: 8, lineSpacing: 8) {
             kindChip(nil, label: L10n.text("All types", zhHans: "全部类型"), icon: "square.grid.2x2",
@@ -394,7 +415,7 @@ struct AuditView: View {
         .contentShape(Capsule())
     }
 
-    // MARK: - 提示卡（采集关闭 / hooks 未装 / 读库失败共用一套圆角卡）
+    // MARK: - Notice cards (capture off / hooks not installed / DB read failure share one rounded card)
 
     private var captureOffHint: some View {
         noticeCard(
@@ -406,19 +427,21 @@ struct AuditView: View {
         }
     }
 
-    /// Claude hooks 未装提示。原先是一块全幅无圆角的 `Color.orange.opacity(0.08)` 矩形，
-    /// 全 app 没有第二处这么做的。
+    /// Claude hooks not installed notice. Used to be a full-width, square-cornered
+    /// `Color.orange.opacity(0.08)` rectangle, done nowhere else in the app.
     private var hooksHint: some View {
         noticeCard(
             icon: "exclamationmark.triangle.fill", tint: Theme.gold,
             text: L10n.text("Claude hooks are not installed, so Claude actions are not being audited yet", zhHans: "Claude hooks 未安装，Claude 的操作暂未被审计采集")
                 + L10n.text(" (Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen are unaffected;", zhHans: "（Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen 不受影响；")
                 + L10n.text(" Trae also depends on hooks — see Settings → Integrations).", zhHans: "Trae 同样依赖 hooks，见 设置 → 集成）。"),
-            // 装卸结果必须回显：否则被拒（配置解析不了 / 路径被手改）时毫无反馈
+            // The install / uninstall result must be echoed back: otherwise a refusal (unparseable
+            // config / hand-edited path) gives no feedback
             detail: installer.message
         ) {
-            // 只装 Claude hooks。绝不能调 installAll() —— 那会连带写
-            // ~/.codex/config.toml，给只用 Claude 的人凭空造出另一个 agent 的配置文件。
+            // Install Claude hooks only. Never call installAll() — it would also write
+            // ~/.codex/config.toml, conjuring up another agent's config file for someone who only
+            // uses Claude.
             Button(L10n.text("Install", zhHans: "安装")) { installer.install(.claudeHooks) }
                 .controlSize(.small)
         }
@@ -456,7 +479,7 @@ struct AuditView: View {
                 .strokeBorder(tint.opacity(0.25), lineWidth: 0.5))
     }
 
-    // MARK: - 行（KnowledgeRow：悬停品牌底 + 3pt 左缘条 + 右键菜单，与四大知识页同构）
+    // MARK: - Row (KnowledgeRow: brand-tinted hover + 3pt leading bar + context menu, same as the four knowledge pages)
 
     @ViewBuilder
     private func row(_ event: AuditEvent) -> some View {
@@ -480,7 +503,7 @@ struct AuditView: View {
                                 event.exitCode.map { L10n.format("Exit %@", zhHans: "退出码 %@", String($0)) } ?? L10n.text("Failed", zhHans: "失败"),
                                 tint: Theme.failureRed)
                         }
-                        // cwd 一直存着却从不展示，白放着
+                        // cwd was always stored but never shown, wasted
                         if let project = projectName(event.cwd) {
                             TagChip(project, neutral: true)
                         }
@@ -492,7 +515,9 @@ struct AuditView: View {
                         .lineLimit(isExpanded ? nil : 1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
-                        // 展开态必须锁竖向固有高度，否则多行命令会被压回一行（旧版也有这行）
+                        // The expanded state must lock its vertical intrinsic height, or multi-line
+                        // commands get squashed back to one line (the old version had this line
+                        // too)
                         .fixedSize(horizontal: false, vertical: isExpanded)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -513,7 +538,8 @@ struct AuditView: View {
         }
     }
 
-    /// 类型图标块：复用 `TileSpec` + `ToolKind.icon`，位置与四大知识页的 `SourceLogoTile` 对齐
+    /// Kind icon tile: reuses `TileSpec` + `ToolKind.icon`, positioned like `SourceLogoTile` on the
+    /// four knowledge pages
     private func kindTile(_ kind: ToolKind) -> some View {
         RoundedRectangle(cornerRadius: TileSpec.radius(28), style: .continuous)
             .fill(TileSpec.fill(Theme.brand))
@@ -528,14 +554,15 @@ struct AuditView: View {
             .help(kind.label)
     }
 
-    // MARK: - 分页（照 UsageDashboardView.paginationBar，含以前缺的「跳至」）
+    // MARK: - Pagination (after UsageDashboardView.paginationBar, including the previously missing "Go to")
 
     private var paginationBar: some View {
         HStack(spacing: 8) {
             Text(L10n.format("%@ total", zhHans: "共 %@ 条", String(service.total)))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.tertiary)
-            // 同 subtitle：全库风险数与筛选后的「共 N 条」不同基准，不并排显示
+            // Same as subtitle: the whole-DB risk count and the filtered "N total" have different
+            // bases, so don't show them side by side
             if service.riskTotal > 0, !filtering {
                 Text(L10n.format("· Risk %@", zhHans: "· 风险 %@", String(service.riskTotal)))
                     .font(.system(size: 10).monospacedDigit())
@@ -572,7 +599,7 @@ struct AuditView: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: - 助手
+    // MARK: - Helpers
 
     private func toggle(_ opId: String) {
         if expanded.contains(opId) { expanded.remove(opId) } else { expanded.insert(opId) }
@@ -603,7 +630,8 @@ struct AuditView: View {
         return text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? text
     }
 
-    /// cwd → 项目名（取末段即可；不为一个展示串把 EurekaUsage 的 ProjectResolver 引进来）
+    /// cwd → project name (the last path component is enough; not worth pulling in EurekaUsage's
+    /// ProjectResolver for a display string)
     private func projectName(_ cwd: String?) -> String? {
         guard let cwd, !cwd.isEmpty else { return nil }
         let name = URL(fileURLWithPath: cwd).lastPathComponent

@@ -1,13 +1,14 @@
 import EurekaStore
 import Foundation
 
-/// 一轮同步的上传计划
+/// Upload plan for one sync round
 public struct SyncPlan: Equatable {
-    /// 待上传，已按 priority → mtime 降序排列并截断到限量
+    /// To upload, sorted by priority → mtime descending and truncated to the limits
     public var uploads: [SyncCandidate]
-    /// 因限量被推迟到下轮的数量
+    /// Number deferred to the next round because of the limits
     public var deferred: Int
-    /// sync_state 有记录、磁盘已消失的路径 → 清状态行（远端不删，上传-only）
+    /// Paths recorded in sync_state but gone from disk → clear the state rows (remote copies are
+    /// not deleted; upload-only)
     public var vanishedPaths: [String]
 
     public init(uploads: [SyncCandidate], deferred: Int, vanishedPaths: [String]) {
@@ -17,9 +18,10 @@ public struct SyncPlan: Equatable {
     }
 }
 
-/// 纯函数 diff：候选清单 × sync_state → 上传计划。
-/// 变更判定只看 size + mtime —— transcripts 均 append-only，足够可靠；
-/// 内容 SHA256 反正在上传签名（x-amz-content-sha256）时会算一次。
+/// Pure-function diff: candidate list × sync_state → upload plan.
+/// Change detection looks only at size + mtime: transcripts are all append-only, so this is
+/// reliable enough;
+/// the content SHA256 is computed once anyway when signing the upload (x-amz-content-sha256).
 public enum SyncPlanner {
     public static func plan(
         candidates: [SyncCandidate], state: [String: SyncStateRepo.Entry],
@@ -32,12 +34,13 @@ public enum SyncPlanner {
             if let entry = state[candidate.localPath],
                entry.size == candidate.size,
                abs(entry.mtime - candidate.mtime) <= 0.001 {
-                continue  // 未变
+                continue  // unchanged
             }
             changed.append(candidate)
         }
 
-        // 小而贵的 memory/skills 先传；同级内新会话先受保护
+        // Small but valuable memory/skills upload first; within a tier, newer sessions are
+        // protected first
         changed.sort {
             $0.priority == $1.priority ? $0.mtime > $1.mtime : $0.priority < $1.priority
         }

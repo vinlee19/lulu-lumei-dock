@@ -1,13 +1,14 @@
 import Foundation
 
-/// grok CLI 的本地数据路径（`~/.grok`）。env `EUREKA_GROK_*` 覆盖，便于单测。
-/// grok 把每个会话存成一个目录：`sessions/<url-encoded-cwd>/<session-uuid>/`，
-/// 内含 `events.jsonl`（生命周期）、`summary.json`（元信息）、`updates.jsonl`（含上下文 token）、
-/// `chat_history.jsonl`（消息）。技能/agent 是磁盘上的目录，和 Claude 同构。
+/// grok CLI local data paths (`~/.grok`). Overridable via env `EUREKA_GROK_*` for unit tests.
+/// grok stores each session as a directory: `sessions/<url-encoded-cwd>/<session-uuid>/`,
+/// containing `events.jsonl` (lifecycle), `summary.json` (metadata), `updates.jsonl` (includes
+/// context tokens) and `chat_history.jsonl` (messages). Skills/agents are on-disk directories,
+/// same shape as Claude.
 public enum GrokPaths {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
-    /// 配置主目录 `~/.grok`（env `EUREKA_GROK_HOME`）
+    /// Config home `~/.grok` (env `EUREKA_GROK_HOME`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -17,7 +18,7 @@ public enum GrokPaths {
         return home().appendingPathComponent(".grok", isDirectory: true)
     }
 
-    /// 会话根 `~/.grok/sessions`（env `EUREKA_GROK_SESSIONS`）
+    /// Session root `~/.grok/sessions` (env `EUREKA_GROK_SESSIONS`)
     public static func sessionsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -28,22 +29,22 @@ public enum GrokPaths {
             .appendingPathComponent("sessions", isDirectory: true)
     }
 
-    /// 活跃会话清单 `~/.grok/active_sessions.json`
+    /// Active session list `~/.grok/active_sessions.json`
     public static func activeSessions(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("active_sessions.json")
     }
 
-    /// 模型目录缓存 `~/.grok/models_cache.json`（取 context_window 作 ctx% 分母）
+    /// Model catalog cache `~/.grok/models_cache.json` (context_window is the ctx% denominator)
     public static func modelsCache(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("models_cache.json")
     }
 
-    /// 统一日志 `~/.grok/logs/unified.jsonl`（含 `billing: fetched credits config` 配额快照）。
-    /// env `EUREKA_GROK_UNIFIED_LOG` 覆盖，便于单测。
+    /// Unified log `~/.grok/logs/unified.jsonl` (includes `billing: fetched credits config` quota
+    /// snapshots). Overridable via env `EUREKA_GROK_UNIFIED_LOG` for unit tests.
     public static func unifiedLog(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -54,7 +55,7 @@ public enum GrokPaths {
             .appendingPathComponent("logs/unified.jsonl")
     }
 
-    /// 系统级技能根 `~/.grok/skills`（env `EUREKA_GROK_SKILLS`）
+    /// System-level skill root `~/.grok/skills` (env `EUREKA_GROK_SKILLS`)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -65,7 +66,7 @@ public enum GrokPaths {
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 内置/携带技能根 `~/.grok/bundled/skills`（随 grok CLI 分发，只读）
+    /// Built-in/bundled skill root `~/.grok/bundled/skills` (shipped with the grok CLI, read-only)
     public static func bundledSkillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -73,8 +74,8 @@ public enum GrokPaths {
             .appendingPathComponent("bundled/skills", isDirectory: true)
     }
 
-    /// 系统级 agent 根：用户 `~/.grok/agents` + 内置 `~/.grok/bundled/agents`。
-    /// env `EUREKA_GROK_AGENTS` 覆盖时只用该单一根。
+    /// System-level agent roots: user `~/.grok/agents` + built-in `~/.grok/bundled/agents`.
+    /// When env `EUREKA_GROK_AGENTS` overrides, only that single root is used.
     public static func agentsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
@@ -88,7 +89,8 @@ public enum GrokPaths {
         ]
     }
 
-    /// 跨会话记忆根 `~/.grok/memory`（env `EUREKA_GROK_MEMORY`；实验特性，可能不存在）
+    /// Cross-session memory root `~/.grok/memory` (env `EUREKA_GROK_MEMORY`; experimental, may not
+    /// exist)
     public static func memoryRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

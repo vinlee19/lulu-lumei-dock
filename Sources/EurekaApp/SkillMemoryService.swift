@@ -5,32 +5,40 @@ import EurekaKit
 import EurekaUsage
 import Foundation
 
-/// 技能 & 记忆的浏览与完整管理：覆盖全部 agent 源（含项目级目录，发现口径见
-/// ProjectRoots.recentCwds / SkillMemoryIndexer.projectSkillRoots）。
-/// 自带后台扫描队列；编辑写前备份、删除进废纸篓、停用 = 移到 *.eureka-disabled 同级目录（均可逆）。
+/// Browsing and full management of skills & memories across every agent source (including
+/// project-level dirs; discovery rules in ProjectRoots.recentCwds /
+/// SkillMemoryIndexer.projectSkillRoots). Owns a background scan queue; edits back up before
+/// writing, deletes go to the Trash, and disabling = moving to a sibling *.eureka-disabled dir (all
+/// reversible).
 final class SkillMemoryService: ObservableObject {
     @Published private(set) var skills: [SkillEntry] = []
-    /// 记忆列表里的**独立记忆条目**（各 CLI 的全局记忆目录）。两类东西不在这里：
-    /// 项目记忆库的条目折叠进 `libraries`（一个项目 70+ 条会把全局记忆冲掉）；
-    /// CLAUDE.md / AGENTS.md 这类**用户维护的持久指令**归 `instructions`，它们不是记忆。
+    /// **Standalone memory entries** in the memory list (each CLI's global memory dir). Two things
+    /// are not here: project memory-library entries fold into `libraries` (one project's 70+
+    /// entries would drown out the global memories); **user-maintained persistent instructions**
+    /// such as CLAUDE.md / AGENTS.md belong to `instructions` - they aren't memories.
     @Published private(set) var memories: [MemoryEntry] = []
-    /// 持久指令文件：CLAUDE.md / AGENTS.md / GEMINI.md / QWEN.md / `.cursor/rules` / Hermes SOUL。
-    /// 独立成「指令」页签 —— 它们是用户写给 agent 的规则，不是 agent 攒下来的记忆，
-    /// 混在一起统计会让「记忆有多少」这个数字失去意义。
+    /// Persistent instruction files: CLAUDE.md / AGENTS.md / GEMINI.md / QWEN.md / `.cursor/rules`
+    /// / Hermes SOUL. They get their own Instructions tab: they are rules the user writes for the
+    /// agent, not memories the agent accumulated, and counting them together would make the "how
+    /// many memories" number meaningless.
     @Published private(set) var instructions: [MemoryEntry] = []
-    /// 记忆库（Claude / Qwen 的 `projects/<encoded>/memory`）；搜索时为空（改为扁平展开命中条目）
+    /// Memory libraries (Claude / Qwen `projects/<encoded>/memory`); empty while searching
+    /// (matching entries are expanded flat instead)
     @Published private(set) var libraries: [MemoryLibrary] = []
-    /// **统计唯一口径**：独立条目 + 全部库内文件（搜索时 = 命中集）。
-    /// 统计卡、来源 chips、搜索结果数都读它 —— 以前它们读的是被过滤后的列表数组，
-    /// 于是 97 条项目记忆一条都没算进去。
+    /// **The single counting basis**: standalone entries + every library file (= the hit set while
+    /// searching). The stats card, source chips and search result count all read it - they used to
+    /// read the filtered list arrays, so none of the 97 project memories were counted.
     @Published private(set) var memoryEntries: [MemoryEntry] = []
     @Published private(set) var scanning = false
-    /// 扫描中的阶段文案（列表已有数据时，仅靠搜索框那个小 spinner 看不出在扫）；扫完置 nil
+    /// Phase copy while scanning (once the list has data, the small spinner in the search box
+    /// alone doesn't show a scan is running); set to nil when done
     @Published private(set) var scanPhase: String?
-    /// 上次扫完的时间。nil = 从未扫过（refresh 的判据）；UI 用它显示「上次扫描 X 前」
+    /// When the last scan finished. nil = never scanned (refresh's criterion); the UI uses it
+    /// to show "last scanned X ago"
     @Published private(set) var lastScanAt: Date?
     @Published private(set) var lastError: String?
-    /// 跨页直达：待聚焦条目的文件路径（PopoverRootView 写入，对应页签消费后清空）
+    /// Cross-page deep link: file path of the entry to focus (written by PopoverRootView,
+    /// cleared once the matching tab consumes it)
     @Published var focusPath: String?
     @Published var searchText = "" {
         didSet { rebuild() }
@@ -41,36 +49,42 @@ final class SkillMemoryService: ObservableObject {
     private var allSkills: [SkillEntry] = []
     private var allMemories: [MemoryEntry] = []
     private var allLibraries: [MemoryLibrary] = []
-    /// 本轮扫描发现的全部仓库根。一致性检查要靠它发现「**完全没有**指令文件」的仓库 ——
-    /// 那种仓库压根不会出现在 allMemories 里（实勘 starrocks 就是这样）。
+    /// Every repo root found by this scan. The consistency check needs it to find repos with
+    /// **no** instruction files at all -
+    /// such repos never appear in allMemories (observed: starrocks is one).
     private var allRepoRoots: [(root: URL, name: String)] = []
-    /// 记忆库 → 关系图。构图是纯函数但不便宜（semantic-layer 126 节点），
-    /// 而 SwiftUI 的 body 会反复求值 → 按库缓存，每次重扫清空。
+    /// Memory library → relationship graph. Building it is a pure function but not cheap
+    /// (semantic-layer has 126 nodes),
+    /// and SwiftUI re-evaluates body repeatedly → cache per library, cleared on every rescan.
     private var graphCache: [String: MemoryGraph.Graph] = [:]
-    /// `"<库 key>|<画布宽度>"` → 排版结果（见 layout(for:width:)）
+    /// `"<library key>|<canvas width>"` → layout result (see layout(for:width:))
     private var layoutCache: [String: MemoryGraphLayout.Result] = [:]
 
-    // MARK: - 扫描
+    // MARK: - Scanning
 
-    /// force = false：只在「从未扫过」时扫 —— 启动预热与页面 onAppear 都走这条，天然幂等，
-    /// 所以进页面不会再盲扫一遍（数据靠启动预热已就绪）。
-    /// force = true：无条件全量重扫，仅刷新按钮使用。
+    /// force = false: scan only if never scanned - startup warm-up and page onAppear both take
+    /// this path, so it's naturally idempotent
+    /// and entering the page doesn't blindly rescan (the data is already ready from warm-up).
+    /// force = true: unconditional full rescan, used only by the refresh button.
     func refresh(force: Bool = false) {
         guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
-        // 用户点刷新就是要最新的：丢掉 cwd 发现缓存，否则 60s 内拿到的还是上次那份
+        // A user hitting refresh wants the latest: drop the cwd discovery cache, otherwise
+        // within 60s they'd get the previous result
         if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
         scanPhase = L10n.text("Scanning skills and memories…", zhHans: "正在扫描技能与记忆…")
         queue.async { [weak self] in
             guard let self else { return }
-            // 各项目仓库根（技能与记忆共用同一份发现）
+            // Repo root of each project (skills and memories share one discovery)
             let repoRoots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)
             let codexInstructionScopes = ProjectScopeDiscovery.codexInstructionScopes(
                 resolver: self.resolver)
-            // 项目级技能根：与云备份共用同一发现口径（见 SkillMemoryIndexer.projectSkillRoots）
+            // Project-level skill roots: same discovery rules as cloud backup (see
+            // SkillMemoryIndexer.projectSkillRoots)
             let projectRoots = SkillMemoryIndexer.projectSkillRoots(repoRoots: repoRoots)
-            // 内置/携带技能根（只读，供详情矩阵与跨源判定；不进列表）
+            // Built-in / bundled skill roots (read-only, for the detail matrix and cross-source
+            // checks; not listed)
             var bundledRoots: [(root: URL, source: AgentSource)] = []
             for root in SkillMemoryIndexer.claudePluginSkillsRoots() {
                 bundledRoots.append((root, .claude))
@@ -79,22 +93,26 @@ final class SkillMemoryService: ObservableObject {
                 SkillMemoryIndexer.codexSkillsRoot()
                     .appendingPathComponent(".system", isDirectory: true), .codex))
             bundledRoots.append((GrokPaths.bundledSkillsRoot(), .grok))
-            // antigravity：skillsRoots 首根为用户级，其余为内置 builtin
+            // antigravity: the first of skillsRoots is user-level, the rest are builtin
             for root in AntigravityPaths.skillsRoots().dropFirst() {
                 bundledRoots.append((root, .antigravity))
             }
-            // cursor 内置技能 ~/.cursor/skills-cursor（官方分发、随客户端更新，
-            // 它自己的 create-skill 技能明写「绝不要往这里写」→ 只读，走 bundled）
+            // cursor's built-in skills in ~/.cursor/skills-cursor (officially distributed, updated
+            // with the client,
+            // and its own create-skill skill explicitly says "never write here" → read-only,
+            // treated as bundled)
             bundledRoots.append((CursorPaths.bundledSkillsRoot(), .cursor))
-            // trae 内置技能有**两处**且内容不同：`builtin_skills`（TRAE-code-review…）与
-            // `builtin/global/skills`（TRAE-computer-use…）。只扫一处会漏一半。
+            // trae has built-in skills in **two** places with different contents: `builtin_skills`
+            // (TRAE-code-review...) and
+            // `builtin/global/skills` (TRAE-computer-use...). Scanning only one misses half.
             for root in TraePaths.bundledSkillsRoots() {
                 bundledRoots.append((root, .trae))
             }
             let skills = SkillMemoryIndexer.indexSkills(
                 claudeSkillsRoot: SkillMemoryIndexer.claudeSkillsRoot(),
                 codexSkillsRoot: SkillMemoryIndexer.codexSkillsRoot(),
-                // Codex 把技能也塞进了 memories git 仓库；不在这里收，记忆页就会多出一条假记忆
+                // Codex also stuffs skills into the memories git repo; if not collected here, the
+                // memory page shows a fake memory
                 codexMemorySkillsRoot: SkillMemoryIndexer.codexHome()
                     .appendingPathComponent("memories/skills", isDirectory: true),
                 opencodeSkillsRoot: OpencodePaths.skillsRoot(),
@@ -102,19 +120,21 @@ final class SkillMemoryService: ObservableObject {
                 kimiSkillsRoot: KimiPaths.skillsRoot(),
                 geminiSkillsRoot: GeminiPaths.skillsRoot(),
                 qwenSkillsRoot: QwenPaths.skillsRoot(),
-                // 用户级 ~/.gemini/antigravity/skills；内置 builtin 走 bundledRoots
+                // user-level ~/.gemini/antigravity/skills; builtin ones go through bundledRoots
                 antigravitySkillsRoots: [AntigravityPaths.userSkillsRoot()],
                 hermesSkillsRoot: HermesPaths.skillsRoot(),
-                // Hermes 的启停名单在 config.yaml 里（不是目录位置）；EurekaIngest 不依赖
-                // EurekaInstall，故在 app 层读出来传进去
+                // Hermes keeps its enable/disable list in config.yaml (not in dir placement);
+                // EurekaIngest doesn't depend on
+                // EurekaInstall, so the app layer reads it and passes it in
                 hermesDisabledSkills: HermesConfigEditor.disabledSkills(
                     from: ConfigFile.read(HermesPaths.configFile())),
                 cursorSkillsRoot: CursorPaths.skillsRoot(),
                 codeBuddySkillsRoot: CodeBuddyPaths.skillsRoot(),
                 qoderSkillsRoot: QoderPaths.skillsRoot(),
-                // zcode 技能装在共享的 ~/.agents/skills（与桌面版共用）
+                // zcode skills live in the shared ~/.agents/skills (shared with the desktop app)
                 zcodeSkillsRoot: ZcodePaths.skillsRoot(),
-                // CN 与国际版可能同时装着 → 已装渠道各一个可写根
+                // CN and international may both be installed → one writable root per installed
+                // channel
                 traeSkillsRoots: TraePaths.userSkillsRoots(),
                 projectSkillRoots: projectRoots,
                 bundledRoots: bundledRoots)
@@ -130,7 +150,7 @@ final class SkillMemoryService: ObservableObject {
                 hermesHome: HermesPaths.configHome(),
                 codeBuddyMemoryRoot: CodeBuddyPaths.memoryRoot(),
                 qoderMemoriesRoot: QoderPaths.memoriesRoot(),
-                // 记忆库只有 CN 版有；用户手写规则两个渠道都有
+                // Only CN has a memory library; user-written rules exist in both channels
                 traeMemoryRoot: TraePaths.memoryRoot(),
                 traeRulesHomes: TraePaths.installedChannels().map { TraePaths.configHome($0) },
                 projectRoots: repoRoots,
@@ -153,12 +173,14 @@ final class SkillMemoryService: ObservableObject {
 
     private func rebuild() {
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        // 列表只展示用户自建/安装技能；内置(bundled) 仅供详情矩阵与跨源判定
+        // The list shows only user-created / installed skills; bundled ones are only for the
+        // detail matrix and cross-source checks
         let userSkills = allSkills.filter { $0.origin == .user }
-        // 记忆分三路（**不丢弃任何条目**）：
-        //  1. 指令文件 → instructions（独立页签）
-        //  2. 不属于记忆库的独立记忆 → memories
-        //  3. 库内条目 → 折叠成 libraries 一行一库，但照样计入统计口径 memoryEntries
+        // Memories split three ways (**no entry is dropped**):
+        //  1. Instruction files → instructions (own tab)
+        //  2. Standalone memories outside any library → memories
+        //  3. Library entries → folded into libraries, one row per library, but still counted
+        //     in the counting basis memoryEntries
         let standalone = allMemories.filter { $0.libraryKey == nil }
         let standaloneMemories = standalone.filter { $0.kind != .instructions }
         let instructionFiles = standalone.filter { $0.kind == .instructions }
@@ -175,7 +197,8 @@ final class SkillMemoryService: ObservableObject {
             [$0.name, $0.description, $0.path]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)
         }
-        // 搜索时**库要展开**：命中的库内条目扁平并入结果，否则用户搜一条记忆会什么都搜不到
+        // While searching, **libraries expand**: matching library entries merge flat into the
+        // results, otherwise searching for a memory would find nothing
         let matched = (standaloneMemories + libraryFiles).filter { Self.matches($0, query: query) }
         memories = matched
         instructions = instructionFiles.filter { Self.matches($0, query: query) }
@@ -188,10 +211,12 @@ final class SkillMemoryService: ObservableObject {
             .joined(separator: " ").lowercased().contains(query)
     }
 
-    // MARK: - 跨源配置矩阵 / 名称归一
+    // MARK: - Cross-source configuration matrix / name normalization
 
-    /// 某技能名在各来源的配置情况（详情页 logo 矩阵）：来源 → .user/.bundled（缺=未配置）。
-    /// best-effort：按归一化名（去 `plugin:` 前缀、小写）匹配 name 或目录名；同源 user 优先于 bundled。
+    /// How a skill name is configured in each source (detail page logo matrix):
+    /// source → .user/.bundled (missing = not configured).
+    /// Best-effort: matches name or dir name by normalized name (strip `plugin:` prefix,
+    /// lowercase); within a source, user wins over bundled.
     func configurations(forName name: String) -> [AgentSource: SkillOrigin] {
         let key = Self.normalizeSkillName(name)
         var result: [AgentSource: SkillOrigin] = [:]
@@ -205,7 +230,8 @@ final class SkillMemoryService: ObservableObject {
         return result
     }
 
-    /// 归一化技能名用于跨源/统计匹配（委托 SkillMemoryIndexer，纯函数便于单测）
+    /// Normalizes a skill name for cross-source / stats matching (delegates to
+    /// SkillMemoryIndexer, a pure function for easy unit testing)
     static func normalizeSkillName(_ name: String) -> String {
         SkillMemoryIndexer.normalizeSkillName(name)
     }
@@ -215,9 +241,9 @@ final class SkillMemoryService: ObservableObject {
     func skills(for source: AgentSource) -> [SkillEntry] { skills.filter { $0.source == source } }
     func memories(for source: AgentSource) -> [MemoryEntry] { memories.filter { $0.source == source } }
 
-    // MARK: - 记忆统计（唯一口径：memoryEntries，含库内条目）
+    // MARK: - Memory stats (single basis: memoryEntries, including library entries)
 
-    /// 记忆总数（独立条目 + 库内文件；搜索时 = 命中数）
+    /// Total memory count (standalone entries + library files; = hit count while searching)
     var memoryTotal: Int { memoryEntries.count }
 
     func memoryCount(for source: AgentSource) -> Int {
@@ -228,7 +254,8 @@ final class SkillMemoryService: ObservableObject {
         memoryEntries.reduce(UInt64(0)) { $0 + $1.sizeBytes }
     }
 
-    /// 记忆的范围分布：全局记忆 / 项目记忆库（指令文件已不在记忆口径里）
+    /// Memory scope breakdown: global memories / project memory libraries (instruction files
+    /// are no longer counted as memory)
     var memoryScopeBreakdown: (global: Int, library: Int) {
         var global = 0
         var library = 0
@@ -240,7 +267,7 @@ final class SkillMemoryService: ObservableObject {
 
     var memorySourceCount: Int { Set(memoryEntries.map(\.source)).count }
 
-    // MARK: - 指令统计（与记忆完全分开的一套）
+    // MARK: - Instruction stats (a set entirely separate from memory)
 
     var instructionTotal: Int { instructions.count }
 
@@ -252,7 +279,7 @@ final class SkillMemoryService: ObservableObject {
         instructions.reduce(UInt64(0)) { $0 + $1.sizeBytes }
     }
 
-    /// 指令的范围分布：全局（`~/.claude/CLAUDE.md` 之类）/ 项目根
+    /// Instruction scope breakdown: global (`~/.claude/CLAUDE.md` and the like) / project root
     var instructionScopeBreakdown: (global: Int, project: Int) {
         let project = instructions.filter { $0.projectName != nil }.count
         return (instructions.count - project, project)
@@ -269,23 +296,25 @@ final class SkillMemoryService: ObservableObject {
         return libraries.filter { $0.source == source }
     }
 
-    /// 某条记忆所属的记忆库（详情页的关联小图要拿整库的图再取一跳）
+    /// The memory library an entry belongs to (the detail page's related mini-graph takes the
+    /// whole library's graph and then one hop from it)
     func library(containing entry: MemoryEntry) -> MemoryLibrary? {
         guard let key = entry.libraryKey else { return nil }
         return allLibraries.first { $0.key == key }
     }
 
-    // MARK: - 跨源配置一致性
+    // MARK: - Cross-source configuration consistency
 
-    /// 计算在 `ConsistencyChecker`（EurekaIngest 的纯函数，阈值口径由单测钉住）。
-    /// 这里只负责把手上的四份数据递进去。
+    /// Computed in `ConsistencyChecker` (a pure function in EurekaIngest; thresholds pinned
+    /// by unit tests).
+    /// This only hands it the four data sets we hold.
     var consistencyReport: ConsistencyChecker.Report {
         ConsistencyChecker.report(
             skills: allSkills, memories: allMemories, libraries: allLibraries,
             repoNames: allRepoRoots.map(\.name))
     }
 
-    /// 记忆库的关系图（按库缓存；重扫时清空）
+    /// Relationship graph of a memory library (cached per library; cleared on rescan)
     func graph(for library: MemoryLibrary) -> MemoryGraph.Graph {
         if let cached = graphCache[library.key] { return cached }
         let graph = MemoryGraphBuilder.build(library.graphInput())
@@ -293,9 +322,11 @@ final class SkillMemoryService: ObservableObject {
         return graph
     }
 
-    /// 记忆库图谱的**排版结果**（按库 + 画布宽度缓存）。
-    /// 排版是纯函数但不便宜（semantic-layer 126 节点 / 53 行），而它跑在 `GeometryReader`
-    /// 的 body 里 —— 不缓存就是每帧重排。宽度量化到整数点，避免浮点抖动让缓存永不命中。
+    /// **Layout result** of a memory library graph (cached per library + canvas width).
+    /// Layout is a pure function but not cheap (semantic-layer: 126 nodes / 53 rows), and it
+    /// runs inside a `GeometryReader`
+    /// body - without a cache it re-lays out every frame. Width is quantized to whole points
+    /// so float jitter can't keep the cache from ever hitting.
     func layout(for library: MemoryLibrary, width: CGFloat) -> MemoryGraphLayout.Result {
         let key = "\(library.key)|\(Int(width.rounded()))"
         if let cached = layoutCache[key] { return cached }
@@ -305,15 +336,15 @@ final class SkillMemoryService: ObservableObject {
         return result
     }
 
-    // MARK: - 读
+    // MARK: - Reading
 
     func readContent(path: String) -> String? {
         try? String(contentsOfFile: path, encoding: .utf8)
     }
 
-    // MARK: - 写（队列上执行，完成回主线程刷新）
+    // MARK: - Writing (runs on the queue, refreshes back on the main thread when done)
 
-    /// 原子写入：写前留 .bak.eureka.<ts> 备份
+    /// Atomic write: leaves a .bak.eureka.<ts> backup before writing
     func save(path: String, content: String, completion: ((Bool) -> Void)? = nil) {
         guard !Self.isCodexGeneratedMemory(path) else {
             completion?(false)
@@ -337,9 +368,11 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 一键修复记忆库索引漂移：删悬空行 + 补未收录行。
-    /// 读**完整**索引文件（索引器的解析带 64KB 头部上限，重写必须全量），
-    /// 写走 save()（备份 + 原子写 + 完成后强制重扫，漂移提示随之消失）。
+    /// One-click fix for memory-library index drift: remove dangling lines + add missing ones.
+    /// Reads the **whole** index file (the indexer's parser caps at a 64KB head; a rewrite
+    /// must be complete),
+    /// and writes through save() (backup + atomic write + forced rescan afterwards, so the
+    /// drift warning goes away).
     func repairLibraryIndex(_ library: MemoryLibrary, completion: ((Bool) -> Void)? = nil) {
         guard let index = library.index,
               let text = try? String(contentsOfFile: index.path, encoding: .utf8),
@@ -351,9 +384,10 @@ final class SkillMemoryService: ObservableObject {
         save(path: index.path, content: outcome.text, completion: completion)
     }
 
-    /// 各源的**可写**技能根（新建与跨源安装共用同一口径）。
-    /// Hermes 走顶层无分类深度（实勘存在，扫描器也认）；Trae 优先已装渠道（CN 在前）；
-    /// zcode 是共享的 ~/.agents/skills —— 装进去其它兼容 CLI 也会读到。
+    /// **Writable** skill root of each source (shared by create and cross-source install). Hermes
+    /// uses the top level with no category depth (observed to exist, and the scanner accepts it);
+    /// Trae prefers installed channels (CN first); zcode is the shared ~/.agents/skills - other
+    /// compatible CLIs will read what's installed there too.
     static func writableSkillRoot(for source: AgentSource) -> URL {
         switch source {
         case .claude: return SkillMemoryIndexer.claudeSkillsRoot()
@@ -369,17 +403,21 @@ final class SkillMemoryService: ObservableObject {
         case .codebuddy: return CodeBuddyPaths.skillsRoot()
         case .qoder: return QoderPaths.skillsRoot()
         case .trae:
-            // 两个渠道都可能装：优先写已装的第一个（CN 在前）；都没装就按 CN 建。
-            // `builtin_skills` / `builtin/global/skills` 随客户端分发，只读，不能往里建。
+            // Either channel may be installed: write to the first installed one (CN first); if
+            // neither is, create under CN.
+            // `builtin_skills` / `builtin/global/skills` ship with the client and are read-only;
+            // never create in them.
             return TraePaths.userSkillsRoots().first ?? TraePaths.skillsRoot(.cn)
         case .zcode:
             return ZcodePaths.skillsRoot()
         }
     }
 
-    /// Prompt 毕业为技能：建目录并一次写入完整 SKILL.md（与 createSkill 的空模板不同，
-    /// 毕业自带内容）。同名已存在则失败回 nil、绝不覆盖。成功回创建的 SKILL.md 路径
-    /// （调用方拿它发 .eurekaRevealKnowledge 跳转）。
+    /// Graduate a prompt to a skill: create the dir and write the complete SKILL.md in one go
+    /// (unlike createSkill's empty template,
+    /// graduation brings its own content). If the name already exists, fail with nil and
+    /// never overwrite. On success returns the created SKILL.md path
+    /// (the caller uses it to post .eurekaRevealKnowledge for the jump).
     func createSkillFromPrompt(
         source: AgentSource, name: String, description: String, body: String,
         completion: ((String?) -> Void)? = nil
@@ -394,7 +432,8 @@ final class SkillMemoryService: ObservableObject {
                 if !FileManager.default.fileExists(atPath: file.path) {
                     try FileManager.default.createDirectory(
                         at: dir, withIntermediateDirectories: true)
-                    // 正文生成在 EurekaInstall（纯文本、有单测）：frontmatter 的 YAML 转义不在这里手搓
+                    // The body is generated in EurekaInstall (plain text, unit-tested): no
+                    // hand-rolled YAML escaping of frontmatter here
                     let content = PromptGraduationDocument.skill(
                         slug: slug, description: description, body: body)
                     try content.write(to: file, atomically: true, encoding: .utf8)
@@ -407,13 +446,19 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// Prompt 毕业为持久指令：追加一节到该 agent **每次会话都加载**的共享指令文件。落点由
-    /// `PromptInstructionDestination` 裁定（UI 的目标列表、reveal 的 kind 同源）：claude →
-    /// `~/.claude/CLAUDE.md`（不是 `~/.claude/memories/`，Claude Code 不读那个目录，见枚举注释）；
-    /// codex → `~/.codex/AGENTS.md`，存在 `AGENTS.override.md` 时追加到它（Codex 只加载两者中第一个）。
-    /// 读-追加-写，写前留 .bak —— 共享文件绝不整写覆盖；**读失败即放弃**，绝不拿默认头替换掉
-    /// 读不出来的原文。正文拼接在 EurekaInstall.PromptGraduationDocument（纯文本、有单测）。
-    /// 成功回写入的文件路径。
+    /// Graduate a prompt to persistent instructions: append a section to the shared
+    /// instruction file the agent **loads in every session**. The destination is decided by
+    /// `PromptInstructionDestination` (same source as the UI's target list and reveal's
+    /// kind): claude →
+    /// `~/.claude/CLAUDE.md` (not `~/.claude/memories/` - Claude Code doesn't read that dir,
+    /// see the enum's comment);
+    /// codex → `~/.codex/AGENTS.md`, or `AGENTS.override.md` when it exists (Codex loads only
+    /// the first of the two).
+    /// Read-append-write with a .bak first - a shared file is never overwritten wholesale;
+    /// **a failed read aborts**, never replacing
+    /// unreadable original text with the default header. Body assembly lives in
+    /// EurekaInstall.PromptGraduationDocument (plain text, unit-tested).
+    /// On success returns the written file path.
     func graduatePromptToInstructions(
         source: AgentSource, name: String, body: String,
         completion: ((String?) -> Void)? = nil
@@ -480,11 +525,15 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 跨源安装：把一个已有技能复制到其它 agent 的技能根（详情矩阵"安装/更新"与
-    /// 一致性卡"补齐"共用）。只写各源技能根（用户目录），不碰任何配置文件。
-    /// `overwrite = false` 时同名已存在按失败报告；`overwrite = true` 做覆盖更新
-    /// （旧版进废纸篓，详见 SkillPropagator）。回调给出每个目标的失败原因
-    /// （nil = 成功），全部完成后强制重扫。
+    /// Cross-source install: copy an existing skill into another agent's skill root (shared
+    /// by the detail matrix's "install/update" and
+    /// the consistency card's "fill in"). Writes only each source's skill root (user dir),
+    /// never touches any config file.
+    /// With `overwrite = false` an existing same-named skill is reported as a failure;
+    /// `overwrite = true` does an overwriting update
+    /// (the old version goes to the Trash, see SkillPropagator). The callback gives each
+    /// target's failure reason
+    /// (nil = success), and a forced rescan runs once everything is done.
     func propagate(
         _ skill: SkillEntry, to targets: [AgentSource], overwrite: Bool = false,
         completion: (([AgentSource: String?]) -> Void)? = nil
@@ -512,9 +561,10 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 一致性卡"补齐"：把一组技能（归一化名）安装到某个源。
-    /// 名单在主线程先解析成实际条目（allSkills 只在主线程读写），复制在队列上串行做，
-    /// 全部完成后**只重扫一次**（逐个 propagate 会触发 N 次全量重扫）。
+    /// The consistency card's "fill in": install a set of skills (by normalized name) into one
+    /// source. Names are resolved to actual entries on the main thread first (allSkills is read and
+    /// written only on the main thread), copies run serially on the queue, and **only one rescan**
+    /// happens when all are done (propagating one by one would trigger N full rescans).
     func propagateAll(
         names: [String], to target: AgentSource,
         completion: ((_ succeeded: Int, _ failures: [String]) -> Void)? = nil
@@ -549,8 +599,10 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 按归一化名找一份可作为传播来源的技能：用户自建、启用中，系统级优先。
-    /// 一致性卡的缺口名单只有归一化名，靠这个反查出实际目录。
+    /// Finds a skill by normalized name to use as the propagation source: user-created,
+    /// enabled, system-level preferred.
+    /// The consistency card's gap list has only normalized names; this maps them back to the
+    /// actual dir.
     func skillEntry(named name: String) -> SkillEntry? {
         let key = Self.normalizeSkillName(name)
         let candidates = allSkills.filter {
@@ -570,7 +622,8 @@ final class SkillMemoryService: ObservableObject {
                 dir = SkillMemoryIndexer.claudeHome()
                     .appendingPathComponent("memories", isDirectory: true)
             case .codex:
-                // Codex memories/ 是后台生成状态；用户持久指令写 AGENTS.md。
+                // Codex memories/ is background-generated state; user persistent instructions go to
+                // AGENTS.md.
                 let home = SkillMemoryIndexer.codexHome()
                 let file = home.appendingPathComponent("AGENTS.md")
                 var ok = false
@@ -591,16 +644,18 @@ final class SkillMemoryService: ObservableObject {
                 dir = OpencodePaths.configHome()
                     .appendingPathComponent("memories", isDirectory: true)
             case .grok:
-                dir = GrokPaths.memoryRoot()  // grok 用 ~/.grok/memory（无 memories 子目录）
+                dir = GrokPaths.memoryRoot()  // grok uses ~/.grok/memory (no memories subdir)
             case .antigravity:
-                // antigravity 没有自己的记忆目录（~/.gemini/antigravity/ 下只有 skills）。
-                // 以前这里写 ~/.gemini/memories —— 那是 Gemini 的，建完会被索引成 gemini
-                // 来源。宁可不提供入口，也不借用别人的目录。
+                // antigravity has no memory dir of its own (only skills under
+                // ~/.gemini/antigravity/). This used to write ~/.gemini/memories - that's Gemini's,
+                // and the file got indexed as a gemini source. Better to offer no entry point than
+                // to borrow someone else's dir.
                 DispatchQueue.main.async { completion?(false) }
                 return
             case .kimi:
-                // kimi 记忆 = 单一全局 AGENTS.md（AGENTS.md-first，无 memories 目录概念）：
-                // 直接创建 ~/.kimi-code/AGENTS.md（name 参数忽略），已存在则不覆盖
+                // kimi memory = a single global AGENTS.md (AGENTS.md-first, no memories-dir
+                // concept): create ~/.kimi-code/AGENTS.md directly (name ignored), never
+                // overwriting an existing one
                 let file = KimiPaths.globalAgentsMd()
                 var ok = false
                 do {
@@ -618,17 +673,18 @@ final class SkillMemoryService: ObservableObject {
             case .qwen:
                 dir = QwenPaths.memoriesRoot()
             case .cursor:
-                // Cursor 没有**全局**记忆目录：服务端记忆只有开关落在本地
-                // （`cursor/memoriesEnabled`），本地那份等价物是项目级规则
-                // `<repo>/.cursor/rules/*.mdc`——它归属某个仓库，不该由这个
-                // 「新建全局记忆」入口凭空造。索引照常收（见 SkillMemoryIndexer）。
+                // Cursor has no **global** memory dir: of the server-side memories only the toggle
+                // lives locally (`cursor/memoriesEnabled`); the local equivalent is the
+                // project-level rules `<repo>/.cursor/rules/*.mdc` - they belong to a repo and
+                // shouldn't be conjured by this "new global memory" entry point. Indexing still
+                // collects them (see SkillMemoryIndexer).
                 DispatchQueue.main.async { completion?(false) }
                 return
             case .codebuddy:
-                dir = CodeBuddyPaths.memoryRoot()  // ~/.codebuddy/memery（官方拼写）
+                dir = CodeBuddyPaths.memoryRoot()  // ~/.codebuddy/memery (official spelling)
             case .qoder:
-                // qoder 记忆布局 memories/<user-hash>/global/<category>/；
-                // 新建落到首个 <user-hash>/global/（一个都没有就 memories/global/）
+                // qoder memory layout: memories/<user-hash>/global/<category>/; new entries go to
+                // the first <user-hash>/global/ (memories/global/ if there is none)
                 let root = QoderPaths.memoriesRoot()
                 let subdirs = ((try? FileManager.default.contentsOfDirectory(
                     at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
@@ -638,9 +694,11 @@ final class SkillMemoryService: ObservableObject {
                 dir = (subdirs.first ?? root)
                     .appendingPathComponent("global", isDirectory: true)
             case .hermes:
-                // hermes 记忆 = 固定两份全局文件（memories/MEMORY.md 与 USER.md），name 参数忽略。
-                // 正文是「条目以 \n§\n 相连」的扁平格式且有字数上限，外部写坏会触发 Hermes 的
-                // 漂移保护（存 .bak 并拒绝后续写入）→ 这里建**空文件**，让 Hermes 自己写第一条。
+                // hermes memory = two fixed global files (memories/MEMORY.md and USER.md); name is
+                // ignored. The body is a flat format of "entries joined by \n§\n" with a length
+                // cap; an external bad write trips Hermes' drift protection (saves a .bak and
+                // refuses further writes) → create an **empty file** here and let Hermes write the
+                // first entry.
                 let file = HermesPaths.memoriesRoot().appendingPathComponent("MEMORY.md")
                 var ok = false
                 do {
@@ -656,8 +714,9 @@ final class SkillMemoryService: ObservableObject {
                 DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             case .gemini:
-                // gemini 记忆 = 全局 GEMINI.md（GEMINI.md-first，无 memories 目录概念）：
-                // 直接创建 ~/.gemini/GEMINI.md（name 参数忽略），已存在则不覆盖
+                // gemini memory = the global GEMINI.md (GEMINI.md-first, no memories-dir concept):
+                // create ~/.gemini/GEMINI.md directly (name ignored), never overwriting an existing
+                // one
                 let file = GeminiPaths.globalGeminiMd()
                 var ok = false
                 do {
@@ -673,15 +732,16 @@ final class SkillMemoryService: ObservableObject {
                 DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             case .trae:
-                // trae 有两份固定名字的全局文件，靠 name 选（同 codex/kimi/gemini 的做法：
-                // 菜单传一个固定名字进来，不是用户输入的标题）：
-                //   `user_rules` → `<dataFolder>/user_rules.md`（用户手写规则 → 指令页）
-                //   其它        → `~/.trae-cn/memory/user_profile.md`（Trae 自写画像 → 记忆页）
-                // 项目记忆 `memory/projects/<encoded>/project_memory.md` 归属某个仓库，
-                // 不该由这个「新建全局」入口凭空造。
-                // 一律建**空文件**（同 Hermes 的规矩）：两份都是分节扁平文档，塞一个假标题
-                // 进去会污染 Trae 自己的分节解析。记忆库只有 CN 版有，所以画像固定落 CN；
-                // 规则落已装渠道的第一个。
+                // trae has two fixed-name global files, picked by name (same approach as
+                // codex/kimi/gemini: the menu passes a fixed name, not a user-typed title):
+                //   `user_rules` → `<dataFolder>/user_rules.md` (user-written rules → Instructions tab)
+                //   others       → `~/.trae-cn/memory/user_profile.md` (Trae's self-written profile → Memory tab)
+                // Project memory `memory/projects/<encoded>/project_memory.md` belongs to a repo
+                // and shouldn't be conjured by this "new global" entry point. Always create an
+                // **empty file** (same rule as Hermes): both are sectioned flat docs, and stuffing
+                // in a fake title would pollute Trae's own section parsing. Only CN has a memory
+                // library, so the profile always goes to CN; rules go to the first installed
+                // channel.
                 let file = Self.slugify(name) == "user-rules" || name == "user_rules"
                     ? (TraePaths.installedChannels().first.map { TraePaths.userRulesFile($0) }
                         ?? TraePaths.userRulesFile(.cn))
@@ -700,8 +760,9 @@ final class SkillMemoryService: ObservableObject {
                 DispatchQueue.main.async { completion?(ok); self?.refresh(force: true) }
                 return
             case .zcode:
-                // zcode 未观测到全局记忆文件布局（~/.zcode 无 AGENTS.md 类文件）——
-                // 不提供入口（同 antigravity 的规矩：宁可不建，也不造一个 CLI 不认的文件）
+                // zcode: no global memory file layout observed (~/.zcode has no AGENTS.md-like
+                // file) - no entry point (same rule as antigravity: better to create nothing than a
+                // file the CLI doesn't recognize)
                 DispatchQueue.main.async { completion?(false) }
                 return
             }
@@ -720,12 +781,12 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 删除技能（整个目录）→ 废纸篓
+    /// Deletes a skill (the whole dir) → Trash
     func deleteSkill(_ skill: SkillEntry, completion: ((Bool) -> Void)? = nil) {
         trash(path: skill.directory, completion: completion)
     }
 
-    /// 删除记忆文件 → 废纸篓
+    /// Deletes a memory file → Trash
     func deleteMemory(_ memory: MemoryEntry, completion: ((Bool) -> Void)? = nil) {
         guard memory.isDeletable else { completion?(false); return }
         trash(path: memory.path, completion: completion)
@@ -745,19 +806,24 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// 启用/停用技能：在启用区 ↔ <root>.eureka-disabled 之间移动整个目录（可逆、非破坏）。
-    /// 从技能自身目录推导所属 skills 根（父目录），因此系统级与项目级技能都适用。
+    /// Enables/disables a skill: moves the whole dir between the active area and
+    /// <root>.eureka-disabled (reversible, non-destructive).
+    /// The owning skills root (parent dir) is derived from the skill's own dir, so it works
+    /// for both system-level and project-level skills.
     func setSkillEnabled(_ skill: SkillEntry, _ enabled: Bool, completion: ((Bool) -> Void)? = nil) {
         guard skill.enabled != enabled else { completion?(true); return }
-        // Hermes 的启停是 config.yaml 里的 skills.disabled 名单，**不能挪目录**：
-        // 它用 .bundled_manifest 的 md5 + curator 状态记账内置技能，目录一动就被判成篡改/丢失。
+        // Hermes enable/disable is the skills.disabled list in config.yaml; **never move the
+        // dir**:
+        // it tracks built-in skills via .bundled_manifest md5 + curator state, and moving a dir
+        // gets it flagged as tampered/missing.
         if skill.source == .hermes {
             setHermesSkillEnabled(skill, enabled, completion: completion)
             return
         }
         queue.async { [weak self] in
             let dirURL = URL(fileURLWithPath: skill.directory)
-            // 当前所在根 = 技能目录的父目录；停用区推导出启用区，反之亦然
+            // Current root = the skill dir's parent; the active root is derived from the disabled
+            // one and vice versa
             let currentRoot = dirURL.deletingLastPathComponent()
             let activeRoot = skill.enabled
                 ? currentRoot
@@ -777,16 +843,20 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    /// Hermes 技能启停：往 `~/.hermes/config.yaml` 的 `skills.disabled` 增删 frontmatter name。
-    /// 走 ConfigFile.backupThenWrite（写前留 *.bak.eureka.<ts>），与 Codex config.toml 同一套安全网。
-    /// 编辑器是行级手术，注释与键序原样保留；无法安全改写的形态会原样返回 → 视作失败不落盘。
+    /// Hermes skill enable/disable: add/remove the frontmatter name in `skills.disabled` of
+    /// `~/.hermes/config.yaml`. Goes through ConfigFile.backupThenWrite (leaves *.bak.eureka.<ts>
+    /// before writing), the same safety net as Codex config.toml. The editor does line-level
+    /// surgery, keeping comments and key order intact; shapes it can't safely rewrite come back
+    /// unchanged → treated as failure, nothing written.
     private func setHermesSkillEnabled(
         _ skill: SkillEntry, _ enabled: Bool, completion: ((Bool) -> Void)? = nil
     ) {
         queue.async { [weak self] in
             let configURL = HermesPaths.configFile()
-            // config.yaml 不在就不写：ConfigFile.backupThenWrite 会连 ~/.hermes 一起 mkdir，
-            // 凭空造出一份只有 skills.disabled 的配置，而 Hermes 会把它当"已配置"读。
+            // No config.yaml means no write: ConfigFile.backupThenWrite would mkdir ~/.hermes along
+            // with it,
+            // conjuring a config holding only skills.disabled, which Hermes would read as
+            // "configured".
             guard FileManager.default.fileExists(atPath: configURL.path) else {
                 DispatchQueue.main.async {
                     self?.lastError = L10n.format("%@ not found; cannot update the Hermes skill enable/disable list", zhHans: "未找到 %@，无法改写 Hermes 技能启停名单", String(configURL.path))
@@ -799,7 +869,8 @@ final class SkillMemoryService: ObservableObject {
                 skill.name, disabled: !enabled, in: original)
             var ok = false
             if updated == original {
-                // 名单已是目标状态，或该 config 形态无法行级改写 —— 两种情况都不写盘
+                // The list is already in the target state, or this config shape can't be rewritten
+                // line-by-line - write nothing in either case
                 ok = HermesConfigEditor.disabledSkills(from: original).contains(skill.name) != enabled
             } else {
                 do {
@@ -813,14 +884,16 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    // MARK: - 跨页联动（主线程；与 rebuild 同一约束）
+    // MARK: - Cross-page linkage (main thread; same constraint as rebuild)
 
-    /// 知识面快照（全文索引用）：用户技能 + 全部记忆（含库内条目与指令）。搜索过滤前的全集。
+    /// Knowledge snapshot (for full-text indexing): user skills + all memories (including
+    /// library entries and instructions). The full set before search filtering.
     func knowledgeSnapshot() -> (skills: [SkillEntry], memories: [MemoryEntry]) {
         (allSkills.filter { $0.origin == .user }, allMemories)
     }
 
-    /// 与某会话相关的记忆（originSessionId 或 relatedSessions 命中；会话详情「本会话产出」用）
+    /// Memories related to a session (originSessionId or relatedSessions match; for the
+    /// session detail's "produced by this session")
     func memories(relatedTo sessionId: String) -> [MemoryEntry] {
         allMemories.filter { entry in
             entry.originSessionId == sessionId
@@ -828,7 +901,7 @@ final class SkillMemoryService: ObservableObject {
         }
     }
 
-    // MARK: - 外部打开（主线程）
+    // MARK: - Open externally (main thread)
 
     func reveal(path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
@@ -838,14 +911,15 @@ final class SkillMemoryService: ObservableObject {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
-    // MARK: - 工具
+    // MARK: - Utilities
 
     private func report(_ error: Error) {
         let message = error.localizedDescription
         DispatchQueue.main.async { self.lastError = message }
     }
 
-    /// `~/.codex/memories` 由 Codex 后台维护，服务层也拒绝写入，避免绕过 UI 只读态。
+    /// `~/.codex/memories` is maintained by Codex in the background; the service layer also
+    /// refuses writes so the UI's read-only state can't be bypassed.
     private static func isCodexGeneratedMemory(_ path: String) -> Bool {
         let root = SkillMemoryIndexer.codexHome()
             .appendingPathComponent("memories", isDirectory: true)
@@ -854,7 +928,7 @@ final class SkillMemoryService: ObservableObject {
         return target.hasPrefix(root + "/")
     }
 
-    /// 停用区根 `<x>.eureka-disabled` → 对应启用区根 `<x>`（反推）
+    /// Disabled root `<x>.eureka-disabled` → its active root `<x>` (reverse mapping)
     static func activeRoot(fromDisabled disabledRoot: URL) -> URL {
         let name = disabledRoot.lastPathComponent
         let suffix = ".eureka-disabled"

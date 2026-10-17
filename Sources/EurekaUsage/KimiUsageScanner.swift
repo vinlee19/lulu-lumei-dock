@@ -2,12 +2,14 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.kimi-code/sessions/<ws>/<session>/agents/<agentId>/wire.jsonl。
-/// schema 已对真实会话核验：`usage.record` 自带 model + 四段 token
-/// （inputOther/output/inputCacheRead/inputCacheCreation，均为该次 LLM 请求的增量）→ 写 usage_records；
-/// loop 事件 `tool.call`（Skill/mcp__/Agent…）→ tool_calls；`turn.prompt`(origin=user) → session_stats。
-/// 覆盖所有 agent（子代理 token 是真实开销，归属父会话 id），提问只在 main 计。
-/// 按 inode+offset 水位增量续读（wire.jsonl 单写者 append-only，无跨文件重复行，无需 dedup_keys）。
+/// Scans ~/.kimi-code/sessions/<ws>/<session>/agents/<agentId>/wire.jsonl. Schema verified against
+/// real sessions: `usage.record` carries the model + four token fields
+/// (inputOther/output/inputCacheRead/inputCacheCreation, each the delta for that LLM request) →
+/// usage_records; loop event `tool.call` (Skill/mcp__/Agent…) → tool_calls;
+/// `turn.prompt`(origin=user) → session_stats. Covers every agent (subagent tokens are real spend,
+/// attributed to the parent session id); prompts count only in main. Reads incrementally from an
+/// inode+offset watermark (wire.jsonl is single-writer append-only, no cross-file duplicate lines,
+/// so no dedup_keys).
 public final class KimiUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
@@ -20,21 +22,22 @@ public final class KimiUsageScanner {
         return formatter
     }()
 
-    /// 每文件私有状态（存 scan_files.extra）：会话归属 + 是否主 agent（提问只在 main 计）
+    /// Per-file private state (stored in scan_files.extra): session attribution + whether this is
+    /// the main agent (prompts count only in main)
     private struct FileExtra: Codable {
         var project: String?
         var sessionId: String?
         var isMain: Bool?
     }
 
-    /// sessionsRoot 由调用方传入（app/CLI 用 `KimiPaths.sessionsRoot()`，测试用临时目录）——
-    /// EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
+    /// sessionsRoot is passed in by the caller (app/CLI use `KimiPaths.sessionsRoot()`, tests use a
+    /// temp dir) — EurekaUsage does not depend on EurekaIngest, so there is no default here.
     public init(sessionsRoot: URL, store: EurekaStore) {
         self.sessionsRoot = sessionsRoot
         self.store = store
     }
 
-    /// 返回本轮新增的 usage 记录数
+    /// Returns the number of usage records added this pass
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
@@ -44,8 +47,8 @@ public final class KimiUsageScanner {
         return inserted
     }
 
-    /// sessions/<ws>/<session>/agents/<agentId>/wire.jsonl 全量（三级目录遍历；
-    /// 不按 mtime 过滤——scan_state 水位使无新数据的老文件近乎零成本）
+    /// All of sessions/<ws>/<session>/agents/<agentId>/wire.jsonl (three-level directory walk; no
+    /// mtime filter — the scan_state watermark makes old files with no new data nearly free)
     private func wireFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -93,7 +96,7 @@ public final class KimiUsageScanner {
 
         var records: [UsageRecord] = []
         var promptCount = 0
-        // 工具/技能调用：逐条带真实时间戳（tool_calls.last_ts 取 MAX 用）
+        // Tool/skill calls: each carries its real timestamp (used for MAX of tool_calls.last_ts)
         var toolBumps: [(day: String, kind: String, name: String, ts: Double)] = []
 
         for line in chunk.lines {
@@ -105,7 +108,7 @@ public final class KimiUsageScanner {
 
             switch type {
             case "turn.prompt":
-                // 真实用户提问（origin=user）；提问数只在主 agent 计
+                // Real user prompts (origin=user); prompts count only in the main agent
                 if extra.isMain == true,
                    (root["origin"] as? [String: Any])?["kind"] as? String ?? "user" == "user" {
                     promptCount += 1
@@ -120,7 +123,8 @@ public final class KimiUsageScanner {
                 guard input > 0 || output > 0 || cacheRead > 0 || cacheCreation > 0 else { continue }
                 records.append(UsageRecord(
                     source: .kimi,
-                    // model 就在事件上（如 "kimi-code/k3"，存原样带前缀，pricing 按前缀匹配）
+                    // model is on the event itself (e.g. "kimi-code/k3", stored verbatim with its
+                    // prefix; pricing matches by prefix)
                     model: (root["model"] as? String) ?? "kimi-code/unknown",
                     project: extra.project,
                     sessionId: extra.sessionId,
@@ -139,7 +143,8 @@ public final class KimiUsageScanner {
                 let date = eventDate(root)
                 let day = Self.dayFormatter.string(from: date)
                 let ts = date.timeIntervalSince1970
-                // kind 归类与 Claude 扫描器同口径（技能分析/插件面板跨源一致）
+                // kind classification matches the Claude scanner (keeps skill analytics / plugin
+                // panel consistent across sources)
                 if name == "Skill" {
                     toolBumps.append((day, "skill", (args?["skill"] as? String) ?? "?", ts))
                 } else if name.hasPrefix("mcp__") {
@@ -182,7 +187,8 @@ public final class KimiUsageScanner {
         return inserted
     }
 
-    /// 行时间：epoch 毫秒 `time`（>1e12 判毫秒）；缺失回退当前时间
+    /// Line time: epoch-milliseconds `time` (>1e12 means milliseconds); falls back to now when
+    /// missing
     private func eventDate(_ root: [String: Any]) -> Date {
         if let number = root["time"] as? Double {
             return Date(timeIntervalSince1970: number > 1e12 ? number / 1000 : number)
@@ -190,8 +196,9 @@ public final class KimiUsageScanner {
         return Date()
     }
 
-    /// 会话归属：wire.jsonl ← <agentId> ← agents ← session_<uuid>（目录名即会话 id，
-    /// 与 KimiSessionIndexer 一致）；workDir 从 state.json 读一次 → 项目名
+    /// Session attribution: wire.jsonl ← <agentId> ← agents ← session_<uuid> (the dir name is the
+    /// session id, consistent with KimiSessionIndexer); workDir is read once from state.json →
+    /// project name
     private func resolveOwnership(wireURL: URL, into extra: inout FileExtra) {
         let agentDir = wireURL.deletingLastPathComponent()
         let sessionDir = agentDir

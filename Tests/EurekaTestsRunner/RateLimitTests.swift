@@ -9,7 +9,7 @@ func rateLimitTests(_ t: TestRunner) {
         let snapshot = CodexRateLimitProvider.lastRateLimits(
             in: try fixtureURL("codex-rollout-token-count-ratelimits.jsonl"))
         try expect(snapshot != nil)
-        // 文件里有两条 token_count，应取最后一条（3.5%/38.5%）
+        // The file has two token_count entries; the last one (3.5%/38.5%) should win
         try expectEqual(snapshot?.primary?.usedPercent, 3.5)
         try expectEqual(snapshot?.secondary?.usedPercent, 38.5)
         try expectEqual(snapshot?.primary?.windowMinutes, 300)
@@ -30,7 +30,7 @@ func rateLimitTests(_ t: TestRunner) {
         let root = fm.temporaryDirectory
             .appendingPathComponent("eureka-cxrl-\(UUID().uuidString)", isDirectory: true)
 
-        // 今天目录里的干扰文件：mtime 稍旧
+        // Distractor file in today's directory: slightly older mtime
         let parts = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         let todayDir = root
             .appendingPathComponent(String(format: "%04d", parts.year!), isDirectory: true)
@@ -44,7 +44,8 @@ func rateLimitTests(_ t: TestRunner) {
         try fm.setAttributes(
             [.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: decoy.path)
 
-        // resume 的旧会话：创建日目录很老，但原地追加使 mtime 最新 → 必须赢过干扰文件
+        // A resumed old session: its creation-date directory is old, but in-place appends make its
+        // mtime newest → it must beat the distractor
         let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
         try fm.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
         let resumed = oldDayDir.appendingPathComponent(

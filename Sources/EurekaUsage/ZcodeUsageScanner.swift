@@ -2,17 +2,18 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.zcode/cli/rollout/model-io-sess_<id>.jsonl（模型 IO 流水）。
-/// schema 已对真实会话核验（2026-08）：每行一次模型请求 `type:"model_io"`，
-/// `response.usage` 为四段 token（inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens），
-/// **OpenAI 口径**：inputTokens 含缓存读（实测 cacheReadTokens ⊆ inputTokens）→ 入库前减掉，
-/// 与账本约定（inputTokens = 非缓存输入）对齐，否则 token/费用双重计数（与 CodeBuddy 同例）。
-/// `response.modelId` 如 "glm-5.3"，`startedAt` ISO8601。
-/// 子代理文件（sess_subagent_*）的 token 是真实开销，一并收（归属该子会话 id）。
-/// `response.toolCalls[].name` → tool_calls。
-/// 按 inode+offset 水位增量续读（单写者 append-only，无需 dedup_keys）；
-/// cwd/项目归属从 db 的 session 表懒查（directory 列，每文件一次）。
-/// prompt 计数见 `recordPromptCounts()`：db message 表绝对值聚合（与 opencode 同例）。
+/// Scans ~/.zcode/cli/rollout/model-io-sess_<id>.jsonl (the model IO log). Schema verified against
+/// real sessions (2026-08): each line is one model request `type:"model_io"`, and `response.usage`
+/// has four token fields (inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens) with **OpenAI
+/// semantics**: inputTokens includes cache reads (measured cacheReadTokens is a subset of
+/// inputTokens) -> subtracted before storing, to match the ledger convention (inputTokens =
+/// non-cached input); otherwise tokens/cost would be double-counted (same case as CodeBuddy).
+/// `response.modelId` looks like "glm-5.3"; `startedAt` is ISO8601. Tokens in subagent files
+/// (sess_subagent_*) are real spend and are collected too (attributed to that subsession's id).
+/// `response.toolCalls[].name` -> tool_calls. Reads incrementally from an inode+offset watermark
+/// (single append-only writer, so no dedup_keys needed); cwd/project attribution is looked up
+/// lazily from the db's session table (directory column, once per file). Prompt counting: see
+/// `recordPromptCounts()` -- absolute aggregation over the db message table (same as opencode).
 public final class ZcodeUsageScanner {
     private let rolloutRoot: URL
     private let dbPath: URL
@@ -26,20 +27,21 @@ public final class ZcodeUsageScanner {
         return formatter
     }()
 
-    /// 每文件私有状态（存 scan_files.extra）：会话归属项目名（cwd -> 仓库根）
+    /// Per-file private state (stored in scan_files.extra): the session's project name (cwd -> repo
+    /// root)
     private struct FileExtra: Codable {
         var project: String?
     }
 
-    /// rolloutRoot/dbPath 由调用方传入（app/CLI 用 `ZcodePaths.*()`，测试用临时目录）——
-    /// EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
+    /// rolloutRoot/dbPath are supplied by the caller (app/CLI use `ZcodePaths.*()`, tests use a
+    /// temp dir) -- EurekaUsage does not depend on EurekaIngest, so there are no defaults here.
     public init(rolloutRoot: URL, dbPath: URL, store: EurekaStore) {
         self.rolloutRoot = rolloutRoot
         self.dbPath = dbPath
         self.store = store
     }
 
-    /// 返回本轮新增的 usage 记录数
+    /// Returns the number of usage records added in this pass
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
@@ -49,8 +51,8 @@ public final class ZcodeUsageScanner {
         return inserted
     }
 
-    /// rollout/ 下全部 model-io-*.jsonl（不按 mtime 过滤——scan_state 水位使
-    /// 无新数据的老文件近乎零成本）
+    /// Every model-io-*.jsonl under rollout/ (not filtered by mtime -- the scan_state watermark
+    /// makes old files with no new data nearly free)
     private func rolloutFiles() -> [URL] {
         let fm = FileManager.default
         return ((try? fm.contentsOfDirectory(
@@ -72,7 +74,7 @@ public final class ZcodeUsageScanner {
                 extra = decoded
             }
         }
-        // 会话 id 从文件名解出（model-io-sess_xxx.jsonl -> sess_xxx）
+        // Session id parsed from the file name (model-io-sess_xxx.jsonl -> sess_xxx)
         guard let sessionId = Self.sessionId(fileName: url.lastPathComponent) else { return 0 }
         if extra.project == nil {
             extra.project = projectFor(sessionId: sessionId)
@@ -94,13 +96,15 @@ public final class ZcodeUsageScanner {
                 let response = root["response"] as? [String: Any]
             else { continue }
 
-            // 用量：response.usage（全零/空对象 = error 行或进行中行，跳过）
+            // Usage: response.usage (all zeros / empty object = an error line or an in-progress
+            // line; skipped)
             if let dict = response["usage"] as? [String: Any] {
                 let rawInput = dict["inputTokens"] as? Int ?? 0
                 let output = dict["outputTokens"] as? Int ?? 0
                 let cacheRead = dict["cacheReadTokens"] as? Int ?? 0
                 let cacheWrite = dict["cacheWriteTokens"] as? Int ?? 0
-                // inputTokens 含缓存读（OpenAI 口径）→ 减掉，账本里两者分列
+                // inputTokens includes cache reads (OpenAI semantics) -> subtract; the ledger keeps
+                // them in separate columns
                 let input = max(0, rawInput - cacheRead)
                 if input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0 {
                     let model = ((response["modelId"] as? String)
@@ -119,13 +123,14 @@ public final class ZcodeUsageScanner {
                         outputTokens: output,
                         cacheCreationTokens: cacheWrite,
                         cacheReadTokens: cacheRead,
-                        // model.providerId 如 `builtin:bigmodel`（别名表映射到智谱按量价）
+                        // model.providerId looks like `builtin:bigmodel` (the alias table maps it
+                        // to Zhipu's pay-as-you-go price)
                         provider: ((root["model"] as? [String: Any])?["providerId"] as? String)?
                             .lowercased()))
                 }
             }
 
-            // 工具调用：response.toolCalls[].name（kind 归类与 kimi 扫描器同口径）
+            // Tool calls: response.toolCalls[].name (kind classification matches the kimi scanner)
             if let calls = response["toolCalls"] as? [[String: Any]] {
                 let date = (root["startedAt"] as? String).flatMap {
                     isoFraction.date(from: $0) ?? isoPlain.date(from: $0)
@@ -178,9 +183,10 @@ public final class ZcodeUsageScanner {
         return body.isEmpty ? nil : body
     }
 
-    /// 每会话用户提问数：db message 表按 `json_extract(data,'$.role')='user'` 绝对值聚合，
-    /// 用 `<db>#<sessionId>` 作 path、reset:true 覆盖写（与 opencode 同例：不依赖水位，
-    /// 重扫幂等）。db 缺失/表不存在时静默跳过。
+    /// Per-session user prompt count: absolute aggregation over the db message table by
+    /// `json_extract(data,'$.role')='user'`, written with `<db>#<sessionId>` as the path and
+    /// reset:true overwrite (same as opencode: independent of the watermark, rescans are
+    /// idempotent). Silently skipped when the db is missing or the table doesn't exist.
     public func recordPromptCounts() throws {
         guard let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return }
         let rows = (try? db.query("""
@@ -198,7 +204,8 @@ public final class ZcodeUsageScanner {
         }
     }
 
-    /// 会话 cwd -> 项目名（db 只读查一次 session.directory；db 不存在时留空）
+    /// Session cwd -> project name (one read-only lookup of session.directory in the db; empty when
+    /// the db doesn't exist)
     private func projectFor(sessionId: String) -> String? {
         guard let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return nil }
         let rows = (try? db.query(

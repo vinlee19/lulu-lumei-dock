@@ -4,12 +4,13 @@ import EurekaKit
 import Foundation
 import Network
 
-/// MCP 浏览器 OAuth 授权编排（app 层）：发现 → 动态注册 → 默认浏览器授权 →
-/// 回环回调 → token 交换。纯逻辑在 MCPOAuth（可测）；这里只做网络/浏览器/监听。
+/// MCP browser OAuth orchestration (app layer): discovery → dynamic registration → default-browser
+/// authorization → loopback callback → token exchange. Pure logic lives in MCPOAuth (testable);
+/// this only does network/browser/listening.
 ///
-/// 隐私姿态：全部由用户点击触发；出网仅指向该 server 自己披露的授权服务器域名；
-/// token 只交给调用方存 Keychain，这里不落任何文件/日志。
-/// Network.framework 是系统框架——"Sparkle 唯一第三方依赖"纪律不破。
+/// Privacy posture: everything is triggered by a user click; outbound traffic only goes to the authorization-server domain the server itself discloses;
+/// the token is only handed to the caller to store in Keychain, nothing is written to any file/log here.
+/// Network.framework is a system framework — the "Sparkle is the only third-party dependency" rule holds.
 enum MCPOAuthFlow {
     enum FlowError: LocalizedError {
         case invalidServerURL
@@ -42,9 +43,10 @@ enum MCPOAuthFlow {
         }
     }
 
-    /// 同步执行完整流程（调用方在后台队列上）；progress 已回主线程。
-    /// preRegisteredClientID：用户手动填入的预注册 client_id（规范注册优先级第一位），
-    /// 有则跳过动态注册——DCR 不被支持时的规范出口（"prompt the user"）。
+    /// Runs the full flow synchronously (caller is on a background queue); progress is already
+    /// delivered on main. preRegisteredClientID: a pre-registered client_id the user entered
+    /// manually (registration priority #1 in the spec); when present, dynamic registration is
+    /// skipped — the spec's way out when DCR isn't supported ("prompt the user").
     static func run(
         serverURL: String, headers: [String: String],
         preRegisteredClientID: String? = nil,
@@ -55,9 +57,10 @@ enum MCPOAuthFlow {
         }
         guard URL(string: serverURL) != nil else { throw FlowError.invalidServerURL }
 
-        // ① 发现：initialize 探测拿 WWW-Authenticate 质询（resource_metadata + 权威
-        //    scope）；无 header 时按规范 MUST 试探 PRM well-known（路径插入式 → 根路径）；
-        //    全败才回退 server origin 作为 issuer
+        // (1) Discovery: an initialize probe gets the WWW-Authenticate challenge (resource_metadata
+        //     + authoritative scope); with no header the spec MUST-probes the PRM well-known
+        //     (path-inserted → root path); only if all fail does it fall back to the server origin
+        //     as issuer
         report(L10n.text("Discovering authorization server…", zhHans: "正在发现授权服务器…"))
         let challenge = discoverChallenge(serverURL: serverURL, headers: headers)
         var metadataURLs = challenge.resourceMetadata.flatMap(URL.init(string:)).map { [$0] } ?? []
@@ -72,7 +75,7 @@ enum MCPOAuthFlow {
         if issuers.isEmpty, let origin = MCPOAuth.origin(of: serverURL) {
             issuers = [origin]
         }
-        // AS 元数据：规范 MUST 双机制按序（OAuth AS 元数据 → OIDC Discovery）
+        // AS metadata: the spec MUSTs both mechanisms in order (OAuth AS metadata → OIDC Discovery)
         guard let issuer = issuers.first else { throw FlowError.discoveryFailed }
         var metadata: MCPOAuth.ASMetadata?
         for candidate in MCPOAuth.asMetadataCandidates(issuer: issuer) {
@@ -82,17 +85,20 @@ enum MCPOAuthFlow {
             }
         }
         guard let metadata else { throw FlowError.discoveryFailed }
-        // PKCE 能力校验（规范 MUST：元数据缺 S256 即拒绝，防降级攻击）
+        // PKCE capability check (spec MUST: refuse when metadata lacks S256, to prevent downgrade
+        // attacks)
         guard metadata.codeChallengeMethodsSupported.contains("S256") else {
             throw FlowError.pkceUnsupported
         }
 
-        // ② 先起回环监听拿端口（注册必须带准确的 redirect_uri）
+        // (2) Start the loopback listener first to get the port (registration must carry the exact
+        //     redirect_uri)
         let listener = try LoopbackListener()
         defer { listener.cancel() }
         let redirectURI = "http://127.0.0.1:\(listener.port)/callback"
 
-        // ③ 客户端注册：预注册 client_id 优先（规范优先级①），否则动态注册（RFC 7591）
+        // (3) Client registration: pre-registered client_id first (spec priority 1), otherwise
+        //     dynamic registration (RFC 7591)
         let clientID: String
         if let preRegistered = preRegisteredClientID?.trimmingCharacters(in: .whitespaces),
            !preRegistered.isEmpty {
@@ -110,7 +116,8 @@ enum MCPOAuthFlow {
             clientID = registered
         }
 
-        // ④ 默认浏览器打开授权页（PKCE + state + resource + 权威 scope 优先）
+        // (4) Open the authorization page in the default browser (PKCE + state + resource +
+        //     authoritative scope preferred)
         let verifier = MCPOAuth.generateVerifier()
         let state = MCPOAuth.generateVerifier()
         guard let authorizationURL = MCPOAuth.authorizationURL(
@@ -124,13 +131,14 @@ enum MCPOAuthFlow {
         report(L10n.text("Browser opened; waiting for authorization…", zhHans: "已打开浏览器，等待授权…"))
         DispatchQueue.main.async { NSWorkspace.shared.open(authorizationURL) }
 
-        // ⑤ 等回调（2 分钟；favicon 之类的杂请求由监听器自行 404 并继续等）
+        // (5) Wait for the callback (2 minutes; stray requests like favicon get a 404 from the
+        //     listener, which keeps waiting)
         guard let requestHead = listener.waitForCallback(timeout: 120) else {
             throw FlowError.callbackTimeout
         }
         switch MCPOAuth.parseCallbackRequest(requestHead, expectedState: state) {
         case .code(let code):
-            // ⑥ 换 token
+            // (6) Exchange the token
             report(L10n.text("Exchanging token…", zhHans: "正在交换令牌…"))
             guard let tokenURL = URL(string: metadata.tokenEndpoint),
                   let tokenData = httpPost(
@@ -150,10 +158,10 @@ enum MCPOAuthFlow {
         }
     }
 
-    // MARK: - 发现辅助
+    // MARK: - Discovery helpers
 
-    /// 对 server 发一次 initialize，取 401 的 WWW-Authenticate 完整质询
-    /// （resource_metadata 地址 + 权威 scope 参数）
+    /// Send one initialize to the server and take the full WWW-Authenticate challenge from the 401
+    /// (resource_metadata URL + authoritative scope parameter)
     private static func discoverChallenge(
         serverURL: String, headers: [String: String]
     ) -> MCPProbe.Challenge {
@@ -174,7 +182,7 @@ enum MCPOAuthFlow {
         return MCPProbe.parseChallenge(header)
     }
 
-    // MARK: - HTTP（阻塞式，只在后台队列使用）
+    // MARK: - HTTP (blocking, only used on background queues)
 
     private static func httpGet(_ url: URL) -> Data? {
         var request = URLRequest(url: url, timeoutInterval: 8)
@@ -205,8 +213,9 @@ enum MCPOAuthFlow {
     }
 }
 
-/// 一次性回环 HTTP 监听：只绑 127.0.0.1、随机端口；`/callback` 之外的请求
-/// （浏览器顺手要的 /favicon.ico）回 404 并继续等待；命中回调即回"授权完成"页并收工。
+/// One-shot loopback HTTP listener: binds only 127.0.0.1 on a random port; requests other than
+/// `/callback` (like the /favicon.ico the browser asks for along the way) get a 404 and it keeps
+/// waiting; on a callback hit it serves the "authorization complete" page and finishes.
 private final class LoopbackListener {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "com.vinlee.eureka.mcp.oauth-listener")
@@ -234,8 +243,9 @@ private final class LoopbackListener {
             throw MCPOAuthFlow.FlowError.listenerFailed
         }
         self.port = port
-        // handler 在全部属性初始化后再挂（init 里捕获 self 的编译约束）；
-        // 浏览器还没打开，此刻不可能已有回调连接。
+        // The handler is attached after all properties are initialized (compiler constraint on
+        // capturing self in init); the browser hasn't opened yet, so no callback connection can
+        // exist at this point.
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection)
         }

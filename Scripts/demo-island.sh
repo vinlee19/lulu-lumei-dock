@@ -1,6 +1,6 @@
 #!/bin/bash
-# 灵动岛演示：用临时 spool 注入各场景事件，肉眼走查视觉与交互。
-# 用法: Scripts/demo-island.sh
+# Dynamic Island demo: injects events for each scenario into a temporary spool for a visual and interaction walkthrough.
+# Usage: Scripts/demo-island.sh
 set -e
 cd "$(dirname "$0")/.."
 

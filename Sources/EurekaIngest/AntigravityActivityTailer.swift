@@ -1,16 +1,18 @@
 import Foundation
 import EurekaKit
 
-/// Antigravity 活动监视：轮询 conversations/<uuid>.db 的写入（mtime）判会话在跑/空闲。
-/// 内容是 protobuf blob，取不到"正在做什么"的文字，故只发无细节的 running/idle 生命周期：
-/// 有新写入 → running（taskStarted/activity）；静默超 idleThreshold → taskFinished→空闲。
-/// 与 opencode/grok tailer 同为无 hook 的实时通道；不读 db 内容，规避 live-WAL 只读问题。
+/// Antigravity activity monitor: polls writes (mtime) to conversations/<uuid>.db to decide whether
+/// a session is running or idle. The content is a protobuf blob with no readable "what is it doing"
+/// text, so it only emits a detail-free running/idle lifecycle:
+/// new writes → running (taskStarted/activity); silent beyond idleThreshold → taskFinished → idle.
+/// Like the opencode/grok tailers, a hook-less live channel; it never reads DB content, which
+/// sidesteps the live-WAL read-only problem.
 public final class AntigravityActivityTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
     private let conversationsRoot: URL
-    private let runningWindow: TimeInterval   // 首见/写入多新算"在跑"
-    private let idleThreshold: TimeInterval   // 静默多久判 turn 结束
+    private let runningWindow: TimeInterval   // max age of a first sighting / write that still counts as running
+    private let idleThreshold: TimeInterval   // how long a silence ends the turn
     private let handler: Handler
     private let queue = DispatchQueue(label: "com.vinlee.eureka.antigravity-tailer")
     private var timer: DispatchSourceTimer?
@@ -40,7 +42,8 @@ public final class AntigravityActivityTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must be below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -54,7 +57,7 @@ public final class AntigravityActivityTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public for tests and for a synchronous call at startup
     public func scanOnce(now: Date = Date()) {
         HealthRegistry.shared.beat(Self.healthName)
         let fm = FileManager.default
@@ -85,18 +88,18 @@ public final class AntigravityActivityTailer {
         }
 
         guard var state = states[uuid] else {
-            // 首见：建基线，不重放历史
+            // First sighting: set a baseline, don't replay history
             let active = now.timeIntervalSince(mtime) < runningWindow
             states[uuid] = State(
                 lastMtime: mtime, lastActivityAt: active ? now : mtime,
                 running: active, cwd: nil)
-            _ = cwd()  // 缓存工作区
+            _ = cwd()  // Cache the workspace
             emit(active ? .taskStarted(title: nil) : .sessionStarted, at: active ? now : mtime)
             return
         }
 
         if mtime > state.lastMtime {
-            // 有新写入 → 活跃
+            // New writes → active
             let wasRunning = state.running
             state.lastMtime = mtime
             state.lastActivityAt = now
@@ -107,7 +110,8 @@ public final class AntigravityActivityTailer {
         }
     }
 
-    /// 在跑但静默超时的会话 → 收尾转空闲（下次有写入再 taskStarted）
+    /// Running sessions that have gone silent past the timeout → wind down to idle (the next write
+    /// taskStarts again)
     private func reapIdle(now: Date) {
         for (uuid, var state) in states where state.running {
             guard now.timeIntervalSince(state.lastActivityAt) > idleThreshold else { continue }

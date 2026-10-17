@@ -1,18 +1,23 @@
 import EurekaKit
 import Foundation
 
-/// 尾随 Cursor 的会话转录 `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`。
+/// Tails Cursor's session transcripts
+/// `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`.
 ///
-/// 这是 Cursor 的**第二条**实时通道，与 `CursorStateTailer`（轮询 `state.vscdb`）分工明确：
-///   - 转录有**显式的 `turn_ended`**，收尾不用像库侧那样靠「状态收口 + 水位不动」防抖
-///     （库里同一轮会先写 `aborted` 再写 `completed`）；
-///   - 转录**没有** token / ctx% / todos / 子会话，那些只有库里有。
-/// 所以：**同一个 composer 一旦有转录文件，生命周期事件由本 tailer 独占**，
-/// 库侧让出（见 `CursorStateTailer` 的 `transcriptOwned`），只继续供 ctx% 与子会话。
-/// 两边的 sessionId 都是 composerId，让出之后不会出现两张卡或两条历史。
+/// This is Cursor's **second** live channel, with a clear split of duties versus
+/// `CursorStateTailer` (which polls `state.vscdb`):
+///   - the transcript has an **explicit `turn_ended`**, so finishing doesn't need the DB side's
+///     "status settles + watermark stops moving" debounce (the DB writes `aborted` and then
+///     `completed` for the same turn);
+///   - the transcript has **no** tokens / ctx% / todos / child sessions; only the DB has those.
+/// So: **once a composer has a transcript file, this tailer owns its lifecycle events exclusively**
+/// and the DB side yields (see `transcriptOwned` in `CursorStateTailer`), still supplying ctx% and
+/// child sessions. Both sides use composerId as the sessionId, so after yielding there are never
+/// two cards or two history rows.
 ///
-/// ⚠️ 转录只覆盖这个特性上线之后的回合（实勘 3.13.10 才开始写），历史会话一条都没有 →
-/// 它永远不能替代库通道，只能叠在上面。
+/// ⚠️ Transcripts only cover turns after this feature shipped (observed: writing started in
+/// 3.13.10); historical sessions have none → it can never replace the DB channel, only layer on top
+/// of it.
 public final class CursorTranscriptTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -63,7 +68,7 @@ public final class CursorTranscriptTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public for tests and synchronous calls at launch
     public func scanOnce(now: Date = Date()) {
         HealthRegistry.shared.beat(Self.healthName)
         for entry in CursorTranscriptIndex.entries(
@@ -75,11 +80,12 @@ public final class CursorTranscriptTailer {
     private func tail(_ entry: CursorTranscriptIndex.Entry, now: Date) {
         let path = entry.url.path
         guard let size = fileSize(path) else { return }
-        // 先取出来改、再整体写回：绝不能写成
+        // Take it out, modify it, then write it back whole: never write it as
         // `contexts[path]?.cwd = entry.cwd ?? contexts[path]?.cwd` ——
-        // 左边对字典是独占的修改访问，右边又读同一个键，重叠访问会让 Swift 直接 abort。
-        // （`??` 在 cwd 非 nil 时短路，所以只有 empty-window 那种无 cwd 的会话才炸，
-        //   测试里 cwd 恒非 nil 就漏掉了这条路径。）
+        // The left side is an exclusive modifying access to the dictionary while the right side
+        // reads the same key; the overlapping access makes Swift abort outright. (`??`
+        // short-circuits when cwd is non-nil, so only cwd-less sessions like empty-window blow up,
+        // and tests always had a non-nil cwd, so they missed this path.)
         var stored = contexts[path] ?? FileContext(composerId: entry.composerId, cwd: entry.cwd)
         if let cwd = entry.cwd { stored.cwd = cwd }
         contexts[path] = stored
@@ -88,7 +94,7 @@ public final class CursorTranscriptTailer {
             initialScan(entry, size: size, now: now)
             return
         }
-        if size < offset { offset = 0 }  // 整写（重开同一会话）→ 从头再来
+        if size < offset { offset = 0 }  // Rewritten wholesale (same session reopened) → start over
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -96,7 +102,7 @@ public final class CursorTranscriptTailer {
         guard (try? handle.seek(toOffset: offset)) != nil,
             let data = try? handle.readToEnd(), !data.isEmpty
         else { return }
-        // 半行不消费：Cursor 正在写的那一行下一轮才完整
+        // Don't consume a partial line: the line Cursor is still writing is only complete next pass
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return }
         let complete = data[data.startIndex...lastNewline]
 
@@ -110,7 +116,8 @@ public final class CursorTranscriptTailer {
                 if let title { ctx.title = title }
             case .taskFinished(let outcome, _, let detail):
                 ctx.running = false
-                // 收尾行本身不带标题，补上本轮的提问摘要，历史里才看得出这轮干了啥
+                // The finishing line carries no title; attach this turn's prompt summary so history
+                // shows what the turn did
                 event.kind = .taskFinished(outcome: outcome, title: ctx.title, detail: detail)
             default:
                 break
@@ -122,9 +129,9 @@ public final class CursorTranscriptTailer {
         offsets[path] = offset + UInt64(complete.count)
     }
 
-    /// 首见一个转录文件：只建水位，**绝不重放历史**。
-    /// 唯一的例外是「文件已存在但这一轮还没收尾」——那说明 app 是在回合中途启动的，
-    /// 补一张运行卡，否则这轮到结束前岛上什么都没有。
+    /// First sight of a transcript file: only set the watermark, **never replay history**.
+    /// The one exception is "the file exists but this turn hasn't finished": the app launched
+    /// mid-turn, so post a running card, or the island shows nothing for this turn until it ends.
     private func initialScan(_ entry: CursorTranscriptIndex.Entry, size: UInt64, now: Date) {
         let path = entry.url.path
         offsets[path] = size
@@ -144,9 +151,9 @@ public final class CursorTranscriptTailer {
             lastKind = event.kind
         }
         guard let lastKind else { return }
-        if case .taskFinished = lastKind { return }  // 已收尾的历史回合：静默
+        if case .taskFinished = lastKind { return }  // Historical turn already finished: stay silent
 
-        // 中途启动：这轮还在跑
+        // Launched mid-turn: this turn is still running
         ctx.running = true
         HealthRegistry.shared.event(Self.healthName)
         handler(

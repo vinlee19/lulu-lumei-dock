@@ -2,17 +2,18 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 「轮次血缘」下钻页：轮次诊断列表 + 单轮血缘图。
+/// "Turn lineage" drill-down page: per-turn diagnostics list + single-turn lineage graph.
 ///
-/// **挂在 `SessionsView` 层替换整个内容区，而不是嵌在右栏。**
-/// 右栏是 `HSplitView` 的一半（`minWidth 380`），最坏只有 ~423pt 宽，图根本铺不开；
-/// 替换整页才拿得到 674 / 780 / 1270 三档宽度。骨架照 `PlansView` 的下钻样板。
+/// **Mounted at the `SessionsView` level replacing the whole content area, not nested in the right
+/// pane.** The right pane is half of an `HSplitView` (`minWidth 380`), as narrow as ~423pt at
+/// worst, far too small for the graph; only replacing the whole page gets the three widths 674 /
+/// 780 / 1270. The skeleton follows `PlansView`'s drill-down template.
 struct TurnLineageView: View {
-    /// 会话名（页头显示）
+    /// Session name (shown in the header)
     let sessionName: String
     let turns: [TurnInput]
     let onBack: () -> Void
-    /// 跳回会话页的某条消息
+    /// Jump back to a message on the Sessions page
     var onJumpToMessage: ((Int) -> Void)?
 
     enum Pane: String, CaseIterable {
@@ -40,10 +41,11 @@ struct TurnLineageView: View {
     @State private var current: Int
     @State private var density: Density = .comfortable
     @State private var expandedFolds: Set<TurnGraph.NodeID> = []
-    /// 展开的子代理（键 = 类型|描述，跨轮切换保持稳定）
+    /// Expanded subagents (key = type|description, stable across turn switches)
     @State private var expandedSubagents: Set<String> = []
 
-    /// 离屏渲染/预览专用：指定初始页与初始轮（照 `AuditView(initialRiskOnly:)` 的注入约定）
+    /// Offscreen rendering/preview only: sets the initial page and turn (follows the injection
+    /// convention of `AuditView(initialRiskOnly:)`)
     init(
         sessionName: String, turns: [TurnInput], onBack: @escaping () -> Void,
         onJumpToMessage: ((Int) -> Void)? = nil,
@@ -57,7 +59,7 @@ struct TurnLineageView: View {
         self._current = State(initialValue: initialTurn)
     }
 
-    /// 逐轮诊断只算一次（切换轮次/密度都不必重算）
+    /// Per-turn diagnostics are computed once (switching turns/density needs no recompute)
     private var diagnostics: [TurnDiagnostics] {
         turns.map { turn in
             TurnDiagnostics.evaluate(
@@ -86,7 +88,7 @@ struct TurnLineageView: View {
         .background(Theme.surfaceSecondary)
     }
 
-    // MARK: - 页头
+    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -148,10 +150,11 @@ struct TurnLineageView: View {
         .fixedSize()
     }
 
-    // MARK: - 血缘图
+    // MARK: - Lineage graph
 
     private var graphPane: some View {
-        // 宽度由视口给：引擎按它反推每层列数，层宽因此有上界，横向永不裁剪
+        // Width comes from the viewport: the engine derives columns per layer from it, so layer
+        // width is bounded and nothing is ever clipped horizontally
         GeometryReader { proxy in
             ScrollView(.vertical) {
                 board(width: proxy.size.width)
@@ -179,7 +182,8 @@ struct TurnLineageView: View {
             onJumpToMessage: onJumpToMessage,
             onToggleSubagent: { node in
                 let key = "\(node.title)|\(node.subtitle)"
-                // 副标在收起态带了「N 步」后缀，用前缀匹配找回原键
+                // In the collapsed state the subtitle carries an "N steps" suffix; recover the
+                // original key by prefix match
                 let existing = expandedSubagents.first { key.hasPrefix($0) }
                 if let existing {
                     expandedSubagents.remove(existing)
@@ -188,7 +192,8 @@ struct TurnLineageView: View {
                 }
             },
             onToggleFold: { id in
-                // 折叠/展开一律**不做动画**：LazyVStack 内结构性动画会残留幽灵空白
+                // Folding/unfolding is **never animated**: structural animation inside LazyVStack
+                // leaves ghost blank space
                 if expandedFolds.contains(id) {
                     expandedFolds.remove(id)
                 } else {
@@ -197,7 +202,7 @@ struct TurnLineageView: View {
             })
     }
 
-    // MARK: - 轮次诊断列表
+    // MARK: - Turn diagnostics list
 
     private var turnList: some View {
         ScrollView {

@@ -1,20 +1,23 @@
 import Foundation
 
-/// 岛上任务行的「在做什么」标签：工具名 + 尽量短的对象串。
+/// The "what it's doing" label on an island task row: tool name + the shortest useful object
+/// string.
 ///
-/// 岛上一行要同时容纳标题、这个标签、ctx% 与计时器，空间很紧。所以这里给对象串定预算，
-/// 而不是交给 `truncationMode(.middle)` —— 那会把 `swift build -c release` 挤成
-/// `s…release`（既没信息量，还顺带把标题也压掉了）。装不下就只留工具名：
-/// 完整对象在「等待授权」卡与审计页里都看得到，这一行不必承担全部。
+/// One island row must fit the title, this label, ctx% and the timer, so space is tight.
+/// Hence an explicit budget for the object string instead of `truncationMode(.middle)` --
+/// that squeezes `swift build -c release` into `s…release` (no information, and it squashes
+/// the title too). If it doesn't fit, keep only the tool name: the full object is visible on
+/// the "waiting for permission" card and the audit page, so this row needn't carry it all.
 ///
-/// 路径取末段（`/repo/src/main.swift` → `main.swift`，那才是有辨识力的部分）；
-/// 命令则从**头部**截断 —— 命令里带斜杠不代表它是路径（`rm -rf node_modules/`），
-/// 而且命令最该先看见的就是动词和参数（`rm -rf` 正是要留住的部分）。
+/// Paths keep their last component (`/repo/src/main.swift` → `main.swift`, the distinctive
+/// part); commands are truncated from the **head** -- a slash in a command doesn't make it a
+/// path (`rm -rf node_modules/`), and what you most need to see first in a command is the verb
+/// and arguments (`rm -rf` is exactly the part to keep).
 public func compactToolLabel(tool: String, detail: String?, budget: Int = 12) -> String {
     guard let detail, !detail.isEmpty else { return tool }
     let short: String
     if isPathLike(detail) {
-        // 末段可能因结尾斜杠为空（`/a/b/` → 取 b）
+        // The last component may be empty due to a trailing slash (`/a/b/` → take b)
         let parts = detail.split(separator: "/", omittingEmptySubsequences: true)
         short = parts.last.map(String.init) ?? detail
     } else {
@@ -24,9 +27,9 @@ public func compactToolLabel(tool: String, detail: String?, budget: Int = 12) ->
     return "\(tool) \(short.prefix(budget))…"
 }
 
-/// 看起来是单个文件/目录路径（而不是含路径的命令）
+/// Looks like a single file/directory path (rather than a command containing a path)
 func isPathLike(_ text: String) -> Bool {
-    guard !text.contains(" ") else { return false }  // 有空格就是命令
+    guard !text.contains(" ") else { return false }  // a space means it's a command
     return text.hasPrefix("/") || text.hasPrefix("~/") || text.hasPrefix("./")
         || text.contains("/")
 }

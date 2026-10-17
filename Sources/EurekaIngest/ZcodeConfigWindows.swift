@@ -1,11 +1,13 @@
 import Foundation
 
-/// ZCode `~/.zcode/v2/config.json` 的 per-model `limit.context` 解析（ctx% 分母的
-/// 权威来源：ZCode 自己维护的模型目录，随客户端版本更新，比内建表的模型上限更准）。
-/// 结构：`{ "provider": { "<providerId>": { "models": { "<型号>": { "limit": { "context": N } } } } } }`
-/// 同一型号可能出现在多个 provider（builtin:zai / *-coding-plan / 自定义）下且值一致；
-/// 不一致时取最大（自定义 provider 配了大窗口以它为准）。键统一小写匹配
-/// （rollout 记 "glm-5.3"、config 写 "GLM-5.3"）。文件缺失/格式异常返回空表，不抛错。
+/// Parses the per-model `limit.context` from ZCode's `~/.zcode/v2/config.json` (the authoritative
+/// ctx% denominator: a model catalog ZCode maintains itself, updated with client versions, more
+/// accurate than the built-in table's model limits). Shape: `{ "provider": { "<providerId>": {
+/// "models": { "<model>": { "limit": { "context": N } } } } } }` The same model may appear under
+/// several providers (builtin:zai / *-coding-plan / custom) with the same value; when they differ,
+/// take the max (a custom provider configured with a larger window wins). Keys are matched
+/// lowercased (rollout records "glm-5.3", config writes "GLM-5.3"). A missing / malformed file
+/// returns an empty map, never throws.
 public enum ZcodeConfigWindows {
     public static func parse(configURL: URL) -> [String: Int] {
         guard let data = try? Data(contentsOf: configURL),
@@ -28,8 +30,9 @@ public enum ZcodeConfigWindows {
         return map
     }
 
-    /// 会话详情卡片 / tailer 用：按模型名查窗口（大小写不敏感；无记录返回 nil，
-    /// 调用方决定是否发 contextUpdate）
+    /// For the session detail card / tailer: look up the window by model name
+    /// (case-insensitive; returns nil when unknown, and the caller decides whether to emit
+    /// contextUpdate)
     public static func window(
         forModel model: String?,
         configURL: URL = ZcodePaths.modelConfig()

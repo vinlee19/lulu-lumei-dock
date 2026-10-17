@@ -1,23 +1,27 @@
 import Foundation
 
-/// Prompt 静态结构检测：官方提示词清单（点名文件 / 给验收标准 / 上下文自足 / 分节）
-/// 的启发式落地。**弱先验**：静态特征与实际效果的相关性未经本地验证（业界结论也仅
-/// "有益经验"级），所以只作详情页提示，不参与严重度升级、不进列表色点。
+/// Static prompt-structure detection: a heuristic take on the official prompting checklist (name
+/// files / give acceptance criteria / self-contained context / sections). **Weak prior**: the link
+/// between static features and real outcomes is not locally verified (industry evidence is only
+/// "helpful rule of thumb" grade), so it is only a detail-page hint, never escalates severity, and
+/// never colors list dots.
 public enum PromptStructure {
     public struct Flags: OptionSet, Equatable, Sendable {
         public let rawValue: Int
         public init(rawValue: Int) { self.rawValue = rawValue }
 
-        /// 带验收标准（怎样算成功/期望输出/跑测试验证）
+        /// Has acceptance criteria (what counts as success / expected output / verify by running
+        /// tests)
         public static let acceptance = Flags(rawValue: 1 << 0)
-        /// 点名了文件/路径（省掉 agent 的定位开销）
+        /// Names files/paths (saves the agent the cost of locating them)
         public static let filePath = Flags(rawValue: 1 << 1)
-        /// 指代词开头（"这个/那个/它"——上下文不自足，离开会话即失效）
+        /// Starts with a pronoun ("this / that / it": context isn't self-contained and breaks
+        /// outside the session)
         public static let deicticStart = Flags(rawValue: 1 << 2)
-        /// 结构化分节（标题/列表——长指令的可读性特征）
+        /// Structured sections (headings / lists: a readability trait of long instructions)
         public static let sectioned = Flags(rawValue: 1 << 3)
 
-        /// 落库编码（稳定短码，逗号相连；顺序固定便于比对）
+        /// Storage encoding (stable short codes joined by commas; fixed order for easy comparison)
         public var encoded: String {
             var parts: [String] = []
             if contains(.acceptance) { parts.append("a") }
@@ -42,7 +46,8 @@ public enum PromptStructure {
         }
     }
 
-    /// 验收标准字样（用复合短语而不是单词——"测试"单字会把"帮我修测试"误判成带验收）
+    /// Acceptance-criteria wording (compound phrases, not single words: the bare word for "test"
+    /// would misflag "help me fix the test" as having criteria)
     static let acceptancePhrases = [
         "验收标准", "怎样算成功", "期望输出", "期望结果", "预期输出", "预期结果",
         "跑一下测试", "运行测试", "测试通过", "全部通过", "验证方式", "验证一下",
@@ -50,7 +55,7 @@ public enum PromptStructure {
         "make sure tests", "run the tests", "verify that",
     ]
 
-    /// 指代词开头（上下文不自足的标志）
+    /// Leading pronouns (a sign the context isn't self-contained)
     static let deicticPrefixes = [
         "这个", "那个", "这里", "这段", "这些", "它", "上面", "刚才", "刚刚",
         "this ", "that ", "it ", "these ", "the above",
@@ -65,7 +70,8 @@ public enum PromptStructure {
         if acceptancePhrases.contains(where: { lowered.contains($0) }) {
             flags.insert(.acceptance)
         }
-        // 路径：含 / 且带扩展名的 token（`a/b.swift`、`./x.md`、`~/.claude/CLAUDE.md`）
+        // path: a token containing / with an extension (`a/b.swift`, `./x.md`,
+        // `~/.claude/CLAUDE.md`)
         if lowered.range(
             of: #"[\w~.@-]+/[\w./@-]*\.[a-z0-9]{1,6}"#, options: .regularExpression
         ) != nil {

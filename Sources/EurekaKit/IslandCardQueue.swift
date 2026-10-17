@@ -1,15 +1,19 @@
 import Foundation
 
-/// 展开卡片队列：完成卡排队逐显（不刷屏、待显封顶），等待卡置顶且同任务去重。
-/// 纯逻辑；自动收起的计时由 UI 层负责。
+/// Expanded card queue: finished cards queue up and show one at a time (no flooding, pending
+/// count capped); waiting cards go to the top and are deduped per task.
+/// Pure logic; the auto-dismiss timer is the UI layer's job.
 public struct IslandCardQueue: Equatable, Sendable {
     public private(set) var current: IslandState.Card?
     public private(set) var pending: [IslandState.Card] = []
 
-    /// 完成/提示这类"知会型"卡的待显上限：超出时丢最旧的（历史页有全部记录）。
-    /// 一次爆发几百个完成事件（2026-09-05 实测：opencode 事件表被整表重放）不能把岛按住
-    /// 几分钟 —— 每张卡都要占满一个收起窗口，队列不封顶 = 岛永远收不回去。
-    /// 等待/告警卡不受限：它们本就按任务 / 告警 id 去重，且是需要用户处理的事。
+    /// Pending cap for "informational" cards (finished/notice): beyond it the oldest are
+    /// dropped (the history page keeps everything). A burst of hundreds of finished events
+    /// (observed 2026-09-05: the opencode event table was replayed wholesale) must not pin
+    /// the island open for minutes -- each card occupies a full dismiss window, so an
+    /// uncapped queue = an island that never collapses.
+    /// Waiting/alert cards are exempt: they are already deduped by task / alert id, and they
+    /// need user action.
     public static let maxPendingPassive = 5
 
     public init() {}
@@ -20,7 +24,8 @@ public struct IslandCardQueue: Equatable, Sendable {
     public mutating func enqueue(_ card: IslandState.Card) {
         switch card {
         case .waiting(let task):
-            // 同任务旧等待卡先撤掉，新卡插队（等待确认比完成通知更紧急）
+            // Drop the same task's old waiting card first, then let the new one jump the queue
+            // (a pending confirmation is more urgent than a finished notification)
             removeWaiting(taskId: task.id)
             if current == nil {
                 current = card
@@ -28,7 +33,8 @@ public struct IslandCardQueue: Equatable, Sendable {
                 pending.insert(card, at: 0)
             }
         case .alert(let alert):
-            // 同一告警不重复入队；安全告警插队置顶（与等待卡同级紧急）
+            // The same alert is never enqueued twice; security alerts jump to the top (as
+            // urgent as waiting cards)
             guard !alertExists(id: alert.id) else { return }
             if current == nil {
                 current = card
@@ -52,7 +58,8 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 知会型卡超出上限时从最旧的开始丢；等待/告警卡原位不动
+    /// When informational cards exceed the cap, drop from the oldest; waiting/alert cards stay
+    /// in place
     private mutating func trimPassiveOverflow() {
         var overflow = pending.filter(Self.isPassive).count - Self.maxPendingPassive
         while overflow > 0, let index = pending.firstIndex(where: Self.isPassive) {
@@ -61,7 +68,7 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 队列（当前 + 待显）中是否已有该 id 的告警卡
+    /// Whether the queue (current + pending) already holds an alert card with this id
     private func alertExists(id: String) -> Bool {
         if case .alert(let alert)? = current, alert.id == id { return true }
         return pending.contains {
@@ -70,7 +77,8 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 任务离开等待状态（恢复运行/结束/会话终止）时撤掉它的等待卡
+    /// Removes a task's waiting card when it leaves the waiting state (resumed / finished /
+    /// session ended)
     public mutating func removeWaiting(taskId: String) {
         pending.removeAll {
             if case .waiting(let task) = $0 { return task.id == taskId }
@@ -81,7 +89,8 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 队列中所有等待卡对应的任务 id（与活跃任务对账清卡用）
+    /// Task ids of all waiting cards in the queue (reconciled against active tasks to clear
+    /// cards)
     public var waitingTaskIds: [String] {
         var ids: [String] = []
         if case .waiting(let task)? = current { ids.append(task.id) }
@@ -91,7 +100,7 @@ public struct IslandCardQueue: Equatable, Sendable {
         return ids
     }
 
-    /// 收起当前卡，推进到下一张；返回新的当前卡
+    /// Dismisses the current card and advances to the next; returns the new current card
     @discardableResult
     public mutating func advance() -> IslandState.Card? {
         current = pending.isEmpty ? nil : pending.removeFirst()

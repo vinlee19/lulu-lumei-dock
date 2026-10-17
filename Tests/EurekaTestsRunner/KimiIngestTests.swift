@@ -143,7 +143,7 @@ private func parse(_ json: String) throws -> [String: Any] {
     return root
 }
 
-/// 在临时目录搭一个 kimi 会话树：
+/// Builds a kimi session tree in a temp directory:
 /// <root>/wd_demo_ea973e2e828f/session_abc/{state.json, agents/<id>/wire.jsonl}
 private func makeKimiSession(
     title: String = "补全语义层缓存",
@@ -222,7 +222,7 @@ func kimiTailerTests(_ t: TestRunner) {
     t.test("state.json 标题刷新 → titleUpdate；usage.record → contextUpdate（config.toml 窗口）") {
         let session = try makeKimiSession(title: "New Session")
         defer { try? FileManager.default.removeItem(at: session.root) }
-        // config.toml：k3 窗口 1000 → usage total 175 → 17.5%
+        // config.toml: k3 window 1000 → usage total 175 → 17.5%
         let configToml = session.root.appendingPathComponent("config.toml")
         try Data("""
         [models."kimi-code/k3"]
@@ -235,11 +235,12 @@ func kimiTailerTests(_ t: TestRunner) {
         ) { events.append(($0, $1)) }
 
         try appendKimiLines([turnPrompt], to: session.mainWire)
-        tailer.scanOnce()  // 初见（默认标题不发 titleUpdate）
+        tailer.scanOnce()  // First sight (a default title emits no titleUpdate)
         try expect(!events.contains { if case .titleUpdate = $0.0.kind { return true } else { return false } },
                    "默认标题 New Session 不应发 titleUpdate")
 
-        // 标题在首轮后生成 → 改写 state.json，增量轮询发 titleUpdate
+        // The title is generated after the first turn → state.json is rewritten and the incremental
+        // poll emits titleUpdate
         events.removeAll()
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -270,7 +271,7 @@ func kimiTailerTests(_ t: TestRunner) {
         ) { events.append(($0, $1)) }
 
         try appendKimiLines([turnPrompt], to: session.mainWire)
-        tailer.scanOnce()  // 初见定基线
+        tailer.scanOnce()  // First sight sets the baseline
         events.removeAll()
 
         let handle = try FileHandle(forWritingTo: session.mainWire)
@@ -302,7 +303,7 @@ func kimiSessionIndexerTests(_ t: TestRunner) {
             to: session.sessionDir.appendingPathComponent("agents/sub1/wire.jsonl"))
 
         let sessions = KimiSessionIndexer.index(sessionsRoot: session.root)
-        try expectEqual(sessions.count, 1)  // 子代理不单列
+        try expectEqual(sessions.count, 1)  // Subagents are not listed separately
         try expectEqual(sessions[0].source, .kimi)
         try expectEqual(sessions[0].id, "session_abc")
         try expectEqual(sessions[0].cwd, "/Users/me/work/demo")
@@ -318,7 +319,7 @@ func kimiSessionIndexerTests(_ t: TestRunner) {
         try expect(KimiSessionIndexer.index(sessionsRoot: empty.root).isEmpty,
                    "空会话应被过滤")
 
-        // 有真实标题的照常展示（即使时间接近）
+        // Sessions with a real title are shown as usual (even when close in time)
         let titled = try makeKimiSession(title: "真标题", updatedOffset: -3600 + 5)
         defer { try? FileManager.default.removeItem(at: titled.root) }
         try Data(#"{"type":"metadata"}"#.utf8).write(to: titled.mainWire)
@@ -347,7 +348,7 @@ func kimiUsageScannerTests(_ t: TestRunner) {
         let inserted = try scanner.scanOnce()
         try expectEqual(inserted, 1)
 
-        // 用量行：model 原样带前缀、token 四段、会话归属
+        // Usage row: model keeps its prefix verbatim, four token buckets, session attribution
         let usageRows = try store.usage.totalsForSessions(["session_abc"])
         let rows = usageRows["session_abc"] ?? []
         try expectEqual(rows.count, 1)
@@ -357,7 +358,8 @@ func kimiUsageScannerTests(_ t: TestRunner) {
         try expectEqual(rows[0].cacheReadTokens, 20)
         try expectEqual(rows[0].cacheCreationTokens, 5)
 
-        // tool_calls kind 归类（skill 名取 args.skill；mcp 去前缀；agent 取 subagent_type）
+        // tool_calls kind classification (skill name from args.skill; mcp prefix stripped; agent
+        // from subagent_type)
         let totals = try store.toolCalls.totals(
             from: Date(timeIntervalSince1970: 0),
             to: Date(timeIntervalSince1970: 4_000_000_000), source: .kimi)
@@ -369,16 +371,16 @@ func kimiUsageScannerTests(_ t: TestRunner) {
         try expectEqual(entry("agent")?.name, "reviewer")
         try expectEqual(entry("tool")?.name, "Bash")
 
-        // 技能统计有 last_ts（Skills 分析视图数据源）
+        // Skill stats carry last_ts (data source for the Skills analytics view)
         let skillStats = try store.toolCalls.skillStats(source: .kimi)
         try expectEqual(skillStats.count, 1)
         try expect(skillStats[0].lastTs != nil, "skill 调用应带 last_ts")
 
-        // 提问数（main agent）
+        // Prompt count (main agent)
         try expectEqual(
             try store.sessionStats.promptCounts(for: ["session_abc"])["session_abc"] ?? 0, 1)
 
-        // 重扫幂等：水位已过，不翻倍
+        // Rescan is idempotent: the watermark is already past, no doubling
         _ = try scanner.scanOnce()
         let rows2 = (try store.usage.totalsForSessions(["session_abc"]))["session_abc"] ?? []
         try expectEqual(rows2.count, 1)
@@ -400,8 +402,8 @@ func kimiUsageScannerTests(_ t: TestRunner) {
         let scanner = KimiUsageScanner(sessionsRoot: session.root, store: store)
         try expectEqual(try scanner.scanOnce(), 1)
         let rows = (try store.usage.totalsForSessions(["session_abc"]))["session_abc"] ?? []
-        try expectEqual(rows.count, 1)  // 子代理 usage 归父会话
-        // 子代理的 turn.prompt 不计提问
+        try expectEqual(rows.count, 1)  // Subagent usage is attributed to the parent session
+        // A subagent's turn.prompt doesn't count as a prompt
         try expectEqual(
             try store.sessionStats.promptCounts(for: ["session_abc"])["session_abc"] ?? 0, 0)
     }
@@ -425,8 +427,9 @@ func kimiTranscriptAndPlansTests(_ t: TestRunner) {
         try expectEqual(result.messages.count, 4)
         try expectEqual(result.messages[0].role, .user)
         try expectEqual(result.messages[0].text, "你好")
-        // Kimi 的 think 段是**明文**（不加密不剥离，实机单段可达 19.5k）→ 独立成思考消息，
-        // 不再像旧版那样丢掉
+        // Kimi's think segments are **plaintext** (neither encrypted nor stripped; one segment
+        // reached 19.5k on a real machine) → they become their own thinking message instead of
+        // being dropped as in the old version
         try expectEqual(result.messages[1].role, .thinking)
         try expectEqual(result.messages[1].text, "推理中")
         try expectEqual(result.messages[2].role, .toolNote)
@@ -452,12 +455,12 @@ func kimiTranscriptAndPlansTests(_ t: TestRunner) {
             PlanMaterializer.materializeKimi(sessionsRoot: session.root, into: staging), 1)
         let out = staging.appendingPathComponent("kimi/session_abc-refactor.md")
         try expectEqual(try String(contentsOf: out, encoding: .utf8), "# 计划\n步骤")
-        // 幂等
+        // idempotent
         try expectEqual(
             PlanMaterializer.materializeKimi(
                 sessionsRoot: session.root, into: staging), 0)
 
-        // 空 plans 目录 no-op
+        // Empty plans directory is a no-op
         let empty = try makeKimiSession()
         defer { try? FileManager.default.removeItem(at: empty.root) }
         try expectEqual(

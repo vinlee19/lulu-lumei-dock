@@ -4,8 +4,8 @@ import EurekaStore
 import EurekaSync
 import SwiftUI
 
-/// 「备份」页签：云端备份的状态/进度/统计/历史一站式面板；
-/// 配置（服务商/连接/密钥/间隔）收在独立弹窗 ConfigSheet 里。
+/// Backup tab: one-stop panel for cloud backup status / progress / stats / history; configuration
+/// (provider / connection / secrets / interval) lives in the separate ConfigSheet dialog.
 struct BackupView: View {
     @ObservedObject var service: SyncService
     @ObservedObject var settings: AppSettings
@@ -14,7 +14,7 @@ struct BackupView: View {
     @State private var historyPage = 1
     @State private var expandedRuns: Set<Int64> = []
     @State private var expandedSources: Set<String> = []
-    /// 展开中的「轮次+类目」，键 `<runId>|<category>`
+    /// Expanded "run + category" entries, keyed `<runId>|<category>`
     @State private var expandedRunGroups: Set<String> = []
 
     private let historyPageSize = 20
@@ -53,7 +53,7 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 状态卡
+    // MARK: - Status card
 
     private var statusCard: some View {
         card(L10n.text("Backup status", zhHans: "备份状态")) {
@@ -124,7 +124,7 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 进度卡
+    // MARK: - Progress card
 
     private var progressCard: some View {
         card(L10n.text("Sync in progress", zhHans: "同步进行中")) {
@@ -134,7 +134,8 @@ struct BackupView: View {
                 HStack(spacing: 8) {
                     Text(L10n.format("%@/%@ files", zhHans: "%@/%@ 个文件", String(progress.completedFiles), String(progress.totalFiles)))
                         .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                    // 统一用带 GB 的格式化：大备份用 formatBytes 会显示成「1234.5 MB」
+                    // Always use the GB-aware formatter: formatBytes would show a large backup as
+                    // "1234.5 MB"
                     Text("\(formatSyncBytes(max(0, progress.transferredBytes))) / \(formatSyncBytes(max(0, progress.totalBytes)))")
                         .font(.system(size: 10.5).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -159,7 +160,7 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 统计卡
+    // MARK: - Stats card
 
     private var statsCard: some View {
         card(L10n.text("Backup statistics", zhHans: "备份统计")) {
@@ -178,9 +179,9 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 备份构成（总览卡 + 每来源可折叠分组）
+    // MARK: - Backup composition (overview card + collapsible group per source)
 
-    /// 按来源聚合后的构成，字节降序
+    /// Composition aggregated by source, bytes descending
     private var compositionBySource:
         [(source: String, count: Int, bytes: Int64, kinds: [SyncStateRepo.CompositionBucket])] {
         var grouped: [String: [SyncStateRepo.CompositionBucket]] = [:]
@@ -197,10 +198,12 @@ struct BackupView: View {
             .sorted { $0.bytes > $1.bytes }
     }
 
-    /// 构成区。旧版是单行横向 ScrollView + 12 个 9.5pt 胶囊：最小窗口宽度（可用约 610pt）
-    /// 下必然溢出，而 `showsIndicators: false` 让用户根本看不出还有内容被藏起来。
-    /// 现在改成总览卡 + 每来源一行可折叠分组，展开看二级类目占比 —— 与 Skills/Memory/
-    /// Plans/Agents 四页同一套语言（`StatOverviewCard` + `SourceSectionHeader`）。
+    /// Composition area. The old version was a single-row horizontal ScrollView + 12 9.5pt
+    /// capsules: at the minimum window width (~610pt usable) it inevitably overflowed, and
+    /// `showsIndicators: false` meant users couldn't tell content was hidden. Now it is an overview
+    /// card + one collapsible group row per source, expanding to show second-level category shares
+    /// — the same language as the Skills/Memory/Plans/Agents pages (`StatOverviewCard` +
+    /// `SourceSectionHeader`).
     @ViewBuilder
     private var compositionCard: some View {
         let bySource = compositionBySource
@@ -242,7 +245,7 @@ struct BackupView: View {
         }
     }
 
-    /// 二级类目一行：名称 + 占该来源的比例条 + 文件数 + 字节
+    /// Second-level category row: name + share-of-source bar + file count + bytes
     private func kindRow(
         _ bucket: SyncStateRepo.CompositionBucket, sourceBytes: Int64
     ) -> some View {
@@ -281,27 +284,31 @@ struct BackupView: View {
         }
     }
 
-    /// 来源段 → 展示名。`custom` 与未知段回退原文（以前页面上直接印裸 rawValue 如 `codebuddy`）
+    /// Source segment → display name. `custom` and unknown segments fall back to the raw text (the
+    /// page used to print bare rawValues like `codebuddy`)
     private func displayName(forSource source: String) -> String {
         AgentSource(rawValue: source)?.displayName ?? source
     }
 
-    /// 总览条的分段色：命中来源用品牌色，其余（custom）按序取品牌色不同透明度
+    /// Overview bar segment colors: matched sources use their brand color, the rest (custom) take
+    /// the brand color at varying opacity in order
     private func sourceColor(_ source: String, fallbackIndex: Int) -> Color {
         if let agent = AgentSource(rawValue: source) { return agent.brandColor }
         return Theme.brand.opacity(max(0.25, 0.8 - Double(fallbackIndex) * 0.12))
     }
 
-    // MARK: - 历史卡（持久化 + 分页 + 可展开文件明细）
+    // MARK: - History card (persisted + paginated + expandable file details)
 
     private var totalHistoryPages: Int {
         max(1, (service.runsTotal + historyPageSize - 1) / historyPageSize)
     }
 
-    /// 同步历史。旧版无列头无对齐（字段左挤、跨行对不齐）、20 行非 lazy、
-    /// 展开后最多 500 个文件平铺、且只按来源一级分组（把 `RunFile.category` 的二级丢了）。
-    /// 现在照仓库里最相近的两页（`AuditView` 的 LazyVStack + `UsageDashboardView` 的
-    /// 固定列宽表格）重做，并给每行加一条来源占比微条 —— 不展开也能看出这轮传了谁的东西。
+    /// Sync history. The old version had no column headers or alignment (fields crammed left,
+    /// misaligned across rows), 20 non-lazy rows, up to 500 files flattened when expanded, and
+    /// grouping by source only (dropping `RunFile.category`'s second level). Now rebuilt after the
+    /// two closest pages in the repo (`AuditView`'s LazyVStack + `UsageDashboardView`'s fixed-width
+    /// column table), with a per-row source-share micro bar — you can see whose data the run
+    /// uploaded without expanding.
     private var historyCard: some View {
         card(L10n.text("Sync history", zhHans: "同步历史")) {
             historyHeader
@@ -317,7 +324,7 @@ struct BackupView: View {
 
     private var historyHeader: some View {
         HStack(spacing: 8) {
-            Color.clear.frame(width: 10)  // chevron 列
+            Color.clear.frame(width: 10)  // chevron column
             Text(L10n.text("Time", zhHans: "时间")).frame(width: 84, alignment: .leading)
             Text(L10n.text("Status", zhHans: "状态")).frame(width: 46, alignment: .leading)
             Text(L10n.text("Uploaded", zhHans: "上传")).frame(width: 58, alignment: .trailing)
@@ -353,7 +360,8 @@ struct BackupView: View {
 
     private func goToHistoryPage(_ page: Int) {
         historyPage = min(max(1, page), totalHistoryPages)
-        // 服务侧每轮同步后按这个页码原地刷新，不再把用户顶回第 1 页
+        // The service refreshes in place at this page number after each sync, instead of bouncing
+        // the user back to page 1
         service.visibleRunsPage = historyPage
         service.loadRuns(page: historyPage, pageSize: historyPageSize)
     }
@@ -418,7 +426,8 @@ struct BackupView: View {
 
         if expanded {
             VStack(alignment: .leading, spacing: 1) {
-                // 按**完整 category** 分组（claude/skills 而不是 claude），每组可再折叠
+                // Group by the **full category** (claude/skills rather than claude); each group is
+                // collapsible again
                 ForEach(groups, id: \.category) { group in
                     runGroupRow(run: run, group: group)
                 }
@@ -437,7 +446,7 @@ struct BackupView: View {
         }
     }
 
-    /// 每行一条来源占比微条（照 UsageDashboardView.toolRow 的做法）
+    /// Per-row source-share micro bar (after UsageDashboardView.toolRow)
     @ViewBuilder
     private func compositionBar(_ groups: [RunGroup]) -> some View {
         let total = max(Int64(1), groups.reduce(Int64(0)) { $0 + $1.bytes })
@@ -458,7 +467,8 @@ struct BackupView: View {
         }
     }
 
-    /// 展开区的一个类目组：默认收起，点开才列文件（最多 30 个，避免 500 个平铺）
+    /// A category group in the expanded area: collapsed by default, files listed only when opened
+    /// (at most 30, instead of 500 flattened)
     @ViewBuilder
     private func runGroupRow(run: SyncRunsRepo.Run, group: RunGroup) -> some View {
         let key = "\(run.id)|\(group.category)"
@@ -520,7 +530,7 @@ struct BackupView: View {
         }
     }
 
-    /// 一轮里的一个类目组
+    /// A category group within one run
     struct RunGroup {
         var category: String
         var source: String
@@ -528,8 +538,9 @@ struct BackupView: View {
         var bytes: Int64
     }
 
-    /// 一轮的文件按**完整 category** 分组（`claude/skills` 而不是 `claude`），字节降序。
-    /// 旧版只取首段，把二级信息丢了 —— 而 `RunFile.category` 本来就带着。
+    /// A run's files grouped by **full category** (`claude/skills` rather than `claude`), bytes
+    /// descending. The old version took only the first segment and lost the second level — even
+    /// though `RunFile.category` already carries it.
     private func groupedFiles(_ files: [SyncRunsRepo.RunFile]) -> [RunGroup] {
         var groups: [String: [SyncRunsRepo.RunFile]] = [:]
         for file in files {
@@ -547,7 +558,7 @@ struct BackupView: View {
             .sorted { $0.bytes > $1.bytes }
     }
 
-    // MARK: - 空态
+    // MARK: - Empty state
 
     private var emptyState: some View {
         VStack(spacing: 10) {
@@ -568,7 +579,7 @@ struct BackupView: View {
         .padding(.vertical, 48)
     }
 
-    // MARK: - 助手
+    // MARK: - Helpers
 
     private var configReady: Bool {
         let endpointReady = provider != .custom
@@ -617,9 +628,10 @@ struct BackupView: View {
     }
 }
 
-// MARK: - 配置弹窗
+// MARK: - Config dialog
 
-/// 云端备份配置：服务商/连接参数/密钥/同步间隔 + 实时请求 URL 预览
+/// Cloud backup config: provider / connection parameters / secrets / sync interval + live request
+/// URL preview
 private struct BackupConfigSheet: View {
     @ObservedObject var service: SyncService
     @ObservedObject var settings: AppSettings
@@ -635,7 +647,7 @@ private struct BackupConfigSheet: View {
         StorageProvider(rawValue: settings.storageProvider) ?? .tencentCOS
     }
 
-    /// 实时拼出的请求 URL 预览（与实际上传请求一致的形态）
+    /// Live-assembled request URL preview (same shape as the real upload request)
     private var urlPreview: String {
         let bucket = settings.cosBucket.trimmingCharacters(in: .whitespaces)
         let region = settings.cosRegion.trimmingCharacters(in: .whitespaces)
@@ -801,9 +813,10 @@ private struct BackupConfigSheet: View {
         .onDisappear { clampInterval() }
     }
 
-    /// 自定义同步目录：任意本地目录 → 远端 custom/<远端名>/…
+    /// Custom sync folders: any local folder → remote custom/<remote name>/…
     @ViewBuilder
-    /// 审计归档：脱敏后的审计记录按天写成 Parquet 随备份上传（Athena / DuckDB 可直接查）
+    /// Audit archive: redacted audit records written as daily Parquet files uploaded with backups
+    /// (queryable directly with Athena / DuckDB)
     private var auditArchiveSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(L10n.text("Audit archive (Parquet)", zhHans: "审计归档（Parquet）"), isOn: $settings.auditArchiveEnabled)
@@ -868,7 +881,7 @@ private struct BackupConfigSheet: View {
         }
     }
 
-    /// 系统目录选择器（非沙盒，直接存路径）
+    /// System folder picker (not sandboxed, stores the path directly)
     private func pickFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -876,13 +889,13 @@ private struct BackupConfigSheet: View {
         panel.allowsMultipleSelection = false
         panel.prompt = L10n.text("Choose", zhHans: "选择")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        // 同一路径不重复添加
+        // Don't add the same path twice
         guard !settings.customSyncFolders.contains(where: { $0.path == url.path }) else { return }
         settings.customSyncFolders.append(CustomSyncFolder(
             path: url.path, remoteName: url.lastPathComponent))
     }
 
-    /// 间隔钳制：最小 1 分钟
+    /// Interval clamp: minimum 1 minute
     private func clampInterval() {
         if settings.cosSyncIntervalMinutes < 1 || !settings.cosSyncIntervalMinutes.isFinite {
             settings.cosSyncIntervalMinutes = 1

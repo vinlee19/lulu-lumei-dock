@@ -2,8 +2,9 @@ import EurekaIngest
 import EurekaKit
 import Foundation
 
-/// Qoder ingest 测试：fixture 按本机真实会话（~/.qoder-cn，v1.1.5）的行格式伪造，
-/// 路径/会话 id 全部换成假值；全程临时目录，不碰真实 ~/。
+/// Qoder ingest tests: fixtures mimic the line format of real local sessions (~/.qoder-cn, v1.1.5),
+/// with all paths/session ids replaced by fake values; everything runs in a temp dir, real ~/ is
+/// never touched.
 func qoderIngestTests(_ t: TestRunner) {
     qoderPathsTests(t)
     qoderTranscriptDecoderTests(t)
@@ -46,7 +47,7 @@ private func qoderPathsTests(_ t: TestRunner) {
         for name in ["qoderclicn-0.9.9", "qoderclicn-1.1.5", "qoderclicn-1.10.0", "unrelated"] {
             try Data().write(to: binDir.appendingPathComponent(name))
         }
-        // macOS 临时目录 /var → /private/var 符号链接：比后缀不比全路径
+        // macOS temp dir /var → /private/var symlink: compare the suffix, not the full path
         let binary = QoderPaths.cliBinary(environment: ["EUREKA_QODER_HOME": home.path])
         try expect(
             binary?.path.hasSuffix("bin/qoderclicn/qoderclicn-1.10.0") == true,
@@ -79,7 +80,7 @@ private func qoderTranscriptDecoderTests(_ t: TestRunner) {
         try expectEqual(title, "分析一下当前项目")
         try expectEqual(event?.source, .qoder)
         try expectEqual(event?.sessionId, "s-abc")
-        // ISO-8601 带小数秒 → Date
+        // ISO-8601 with fractional seconds → Date
         try expect(
             abs((event?.timestamp.timeIntervalSince1970 ?? 0) - 1_784_958_450.143) < 0.001,
             "时间戳应解析 ISO 小数秒: \(String(describing: event?.timestamp))")
@@ -147,7 +148,7 @@ private func qoderTranscriptDecoderTests(_ t: TestRunner) {
 
 // MARK: - QoderChatTailer
 
-/// 在临时目录搭一个 qoder 会话树：<root>/<cwd-slug>/<sessionId>.jsonl
+/// Builds a qoder session tree in a temp dir: <root>/<cwd-slug>/<sessionId>.jsonl
 private func makeQoderSession(
     sessionId: String = "b3ddabc0-0000-4201-82e1-4e0f65e78212"
 ) throws -> (root: URL, file: URL) {
@@ -224,14 +225,15 @@ private func qoderChatTailerTests(_ t: TestRunner) {
 
         try appendQoderLines([qoderWorkspaceLine, qoderHumanPrompt, qoderFinalText], to: session.file)
         tailer.scanOnce()
-        // 只恢复最后状态（sessionStarted + 附带的 titleUpdate），不重放历史
+        // Restore only the final state (sessionStarted + the accompanying titleUpdate), no history
+        // replay
         try expectEqual(events.count, 2, "不重放: \(events.map(\.0.kind))")
         guard case .sessionStarted = events[0].0.kind else {
             throw ExpectationError(description: "已完成会话初见应为 sessionStarted: \(events[0].0.kind)")
         }
         try expectEqual(events[1].0.kind, .titleUpdate(title: "分析项目结构"))
 
-        // 增量：fixture 时间戳远旧于 300s 阈值 → stale
+        // Incremental: fixture timestamps are far older than the 300s threshold → stale
         events.removeAll()
         try appendQoderLines([qoderHumanPrompt], to: session.file)
         tailer.scanOnce()
@@ -248,7 +250,7 @@ private func qoderChatTailerTests(_ t: TestRunner) {
         let tailer = QoderChatTailer(projectsRoot: session.root) { events.append(($0, $1)) }
 
         try appendQoderLines([qoderWorkspaceLine, qoderHumanPrompt], to: session.file)
-        tailer.scanOnce()  // 初见定基线
+        tailer.scanOnce()  // First sight sets the baseline
         events.removeAll()
 
         try appendQoderLines([
@@ -270,7 +272,7 @@ private func qoderChatTailerTests(_ t: TestRunner) {
         let tailer = QoderChatTailer(projectsRoot: session.root) { events.append(($0, $1)) }
 
         try appendQoderLines([qoderWorkspaceLine, qoderHumanPrompt], to: session.file)
-        tailer.scanOnce()  // 初见定基线
+        tailer.scanOnce()  // First sight sets the baseline
         events.removeAll()
 
         let handle = try FileHandle(forWritingTo: session.file)
@@ -285,7 +287,7 @@ private func qoderChatTailerTests(_ t: TestRunner) {
         try handle2.write(contentsOf: Data(
             (String(qoderFinalText.suffix(qoderFinalText.count - qoderFinalText.count / 2)) + "\n").utf8))
         try handle2.close()
-        // isMeta + 命令行夹杂在同一批：都不该产出事件
+        // isMeta + command lines in the same batch: none should produce events
         try appendQoderLines([
             #"{"type":"user","uuid":"u1","timestamp":"2026-07-25T05:45:19.102Z","message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"},"isMeta":true,"sessionId":"b3ddabc0-0000-4201-82e1-4e0f65e78212"}"#,
             #"{"type":"user","uuid":"u3","timestamp":"2026-07-25T05:45:19.413Z","message":{"role":"user","content":"<command-message>plan</command-message>"},"sessionId":"b3ddabc0-0000-4201-82e1-4e0f65e78212"}"#,
@@ -316,9 +318,10 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
             qoderFinalText,
         ], to: session.file)
 
-        // now 钉在 fixture 时间附近：窗口过滤按墙钟，不钉会随时间自然过期
+        // Pin now near the fixture time: the window filter uses the wall clock, so unpinned it
+        // would expire over time
         let pinnedNow = Date(timeIntervalSince1970: 1_784_958_500)
-        // 无 custom-title：ai-title 胜出
+        // No custom-title: ai-title wins
         var sessions = QoderSessionIndexer.index(projectsRoot: session.root, now: pinnedNow)
         try expectEqual(sessions.count, 1)
         try expectEqual(sessions[0].source, .qoder)
@@ -332,7 +335,7 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
         try expect(sessions[0].sizeBytes > 0)
         try expect(sessions[0].transcriptPath.hasSuffix(".jsonl"))
 
-        // 追加 custom-title：优先级最高
+        // Append a custom-title: highest priority
         try appendQoderLines([
             #"{"type":"custom-title","sessionId":"b3ddabc0-0000-4201-82e1-4e0f65e78212","customTitle":"自定义标题"}"#,
         ], to: session.file)
@@ -343,23 +346,24 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
     t.test("last-prompt / 首条 user 兜底；窗口过滤；subagents 子目录不索引") {
         let session = try makeQoderSession()
         defer { try? FileManager.default.removeItem(at: session.root) }
-        // 只有 last-prompt
+        // only last-prompt
         try appendQoderLines([
             qoderWorkspaceLine,
             #"{"type":"last-prompt","sessionId":"b3ddabc0-0000-4201-82e1-4e0f65e78212","lastPrompt":"只剩末轮提问"}"#,
         ], to: session.file)
-        // 只有首条 user 正文
+        // only the first user message body
         let other = session.root.appendingPathComponent(
             "-Users-me-work-demo/b5cc0000-0000-4201-82e1-4e0f65e78212.jsonl")
         try appendQoderLines([qoderWorkspaceLine, qoderHumanPrompt], to: other)
-        // subagents 子目录：不该进索引
+        // subagents subdirectory: must not be indexed
         let subagentsDir = session.root.appendingPathComponent(
             "-Users-me-work-demo/b3ddabc0-0000-4201-82e1-4e0f65e78212/subagents", isDirectory: true)
         try FileManager.default.createDirectory(at: subagentsDir, withIntermediateDirectories: true)
         try appendQoderLines([qoderHumanPrompt], to: subagentsDir.appendingPathComponent("agent-1.jsonl"))
 
-        // now 钉在 fixture 时间附近（窗口过滤按墙钟，不钉会随时间自然过期）；
-        // 无行级时间戳的文件回退 mtime（相对 pinned now 在"未来"，负差值仍在窗口内）
+        // Pin now near the fixture time (the window filter uses the wall clock, so unpinned it
+        // would expire over time); files without line-level timestamps fall back to mtime (in the
+        // "future" relative to the pinned now; a negative delta is still in the window)
         let sessions = QoderSessionIndexer.index(
             projectsRoot: session.root, now: Date(timeIntervalSince1970: 1_784_958_500))
         try expectEqual(sessions.count, 2, "subagents/ 不应单列: \(sessions.map(\.id))")
@@ -370,7 +374,7 @@ private func qoderSessionIndexerTests(_ t: TestRunner) {
             sessions.first { $0.id == "b5cc0000-0000-4201-82e1-4e0f65e78212" }?.name,
             "分析项目结构")
 
-        // 窗口过滤：now 拉到 31 天后 → 全部超窗
+        // Window filter: move now 31 days ahead → everything falls outside
         let future = Date().addingTimeInterval(31 * 86400)
         try expect(QoderSessionIndexer.index(projectsRoot: session.root, now: future).isEmpty,
                    "超窗会话应被过滤")

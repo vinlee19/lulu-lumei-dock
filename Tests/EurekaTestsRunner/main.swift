@@ -1,8 +1,9 @@
 import Foundation
 import EurekaKit
 
-// 应用默认是英文。既有断言锁的是中文文案，所以套件钉在简体中文，
-// 这些断言继续充当中文目录的规格。英文输出由 localizationTests 单独覆盖。
+// The app defaults to English. Existing assertions pin the Chinese copy, so the suite is pinned to
+// Simplified Chinese and these assertions keep serving as the spec for the Chinese catalog. English
+// output is covered separately by localizationTests.
 L10n.current = .simplifiedChinese
 
 let t = TestRunner()

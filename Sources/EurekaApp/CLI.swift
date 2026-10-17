@@ -6,8 +6,8 @@ import EurekaSync
 import EurekaUsage
 import Foundation
 
-/// 命令行模式（不起 GUI）：hooks 安装/卸载/状态。
-/// 设置 UI 亦提供同样能力，CLI 便于脚本化与无 GUI 环境使用。
+/// Command-line mode (no GUI): hooks install / uninstall / status.
+/// The Settings UI offers the same; the CLI is handy for scripting and GUI-less environments.
 enum EurekaCLI {
     static var claudeSettingsURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -19,16 +19,17 @@ enum EurekaCLI {
             .appendingPathComponent(".codex/config.toml")
     }
 
-    /// Codex 的 hooks 配置（与 notify 的 config.toml 是**两个不同文件**）
+    /// Codex's hooks config (a **different file** from notify's config.toml)
     static var codexHooksURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/hooks.json")
     }
 
-    /// Trae 的全局 hooks 配置。**只有 CN 版有 hooks**，所以固定指向 `~/.trae-cn`。
+    /// Trae's global hooks config. **Only the CN edition has hooks**, so it always points at
+    /// `~/.trae-cn`.
     static var traeHooksURL: URL { TraePaths.hooksConfig() }
 
-    /// 返回 true 表示已按 CLI 处理，调用方应直接退出
+    /// Returns true when handled as CLI; the caller should exit right away
     static func runIfNeeded() -> Bool {
         let args = Array(CommandLine.arguments.dropFirst())
         guard let first = args.first else { return false }
@@ -67,7 +68,8 @@ enum EurekaCLI {
             }
             if failed { exit(1) }
         case "--audit-archive":
-            // 调试：把审计记录按 UTC 日物化为 Parquet（已脱敏）到指定目录；不上传、不动台账以外的数据
+            // Debug: materialize audit records per UTC day as Parquet (redacted) into the given
+            // directory; no upload, touches nothing beyond the ledger
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-audit-archive"
             do {
                 let store = try EurekaStore(path: EurekaStore.defaultURL())
@@ -109,7 +111,8 @@ enum EurekaCLI {
                 PreviewRenderer.renderMascot(to: dir)
             }
         case "--render-knowledge":
-            // 与 --render-shell 同款参数解析：--style 的值不是位置参数
+            // Same argument parsing as --render-shell: the value of --style is not a positional
+            // argument
             var positional = [String]()
             var styleRaw = "classic"
             var index = 1
@@ -127,9 +130,10 @@ enum EurekaCLI {
                 PreviewRenderer.renderKnowledge(to: dir, style: ThemeStyle.resolve(styleRaw))
             }
         case "--render-shell":
-            // 参数解析：--style 的值不是位置参数；其余非 flag 参数第一个是输出目录
+            // Argument parsing: the value of --style is not a positional argument; the first other
+            // non-flag argument is the output directory
             var positional = [String]()
-            var styleRaw = args.contains("--raft") ? "brutal" : "classic"  // --raft 是旧 flag，兼容
+            var styleRaw = args.contains("--raft") ? "brutal" : "classic"  // --raft is the old flag, kept for compatibility
             var i = 1
             while i < args.count {
                 if args[i] == "--style", args.indices.contains(i + 1) {
@@ -168,8 +172,9 @@ enum EurekaCLI {
                 PreviewRenderer.renderPages(to: dir, style: ThemeStyle.resolve(styleRaw))
             }
         case "--mcp-inspect":
-            // 走真实探测路径（remote 握手 / stdio 深探），结果落真缓存——
-            // 显式执行本命令等同于在 UI 点「重新检测」（同一次性、同披露）。
+            // Goes through the real probe path (remote handshake / stdio deep inspect), and the
+            // result lands in the real cache; running this command explicitly is equivalent to
+            // clicking "re-check" in the UI (same one-shot, same disclosure).
             let name = args.count > 1 ? args[1] : ""
             MainActor.assumeIsolated {
                 mcpInspect(name: name)
@@ -280,7 +285,7 @@ enum EurekaCLI {
     private static func printStatus() {
         let claude = ClaudeHooksInstaller.status(of: ConfigFile.read(claudeSettingsURL))
         let codexNotify = CodexNotifyInstaller.status(of: ConfigFile.read(codexConfigURL))
-        // Codex hooks 与 Trae hooks 都是独立文件，与上面两项互不相干
+        // Codex hooks and Trae hooks are separate files, independent of the two items above
         let codexHooks = CodexHooksInstaller.status(of: ConfigFile.read(codexHooksURL))
         let trae = TraeHooksInstaller.status(of: ConfigFile.read(traeHooksURL))
         print("Claude hooks: \(claude.rawValue)")
@@ -290,7 +295,8 @@ enum EurekaCLI {
         print(L10n.format("relay stable path: %@", zhHans: "relay 稳定路径: %@", String(RelaySyncer.stableRelayURL.path)))
     }
 
-    /// 一次性全量扫描并输出今日/本周聚合（ccusage 对拍脚本用）
+    /// One-shot full scan that prints today's/this week's aggregates (used by the ccusage
+    /// cross-check script)
     private static func usageSnapshot() {
         do {
             let store = try EurekaStore(path: EurekaStore.defaultURL())
@@ -324,15 +330,16 @@ enum EurekaCLI {
             let newClaude = try claude.scanOnce()
             let newCodex = try codex.scanOnce()
             let newOpencode = try opencode.scanOnce()
-            let newGrok = try grok.scanOnce()  // 工具调用计数 + updates.jsonl 每轮用量
+            let newGrok = try grok.scanOnce()  // tool-call counts + per-turn usage from updates.jsonl
             let newKimi = try kimi.scanOnce()
             let newGemini = try gemini.scanOnce()
             let newQwen = try qwen.scanOnce()
             let newHermes = try hermes.scanOnce()
-            let newCodeBuddy = try codebuddy.scanOnce()  // qoder 无 token（CN 后端全零），不扫描
-            let newCursor = try cursor.scanOnce()  // cursor 有 token 无价（成本恒 0）
+            let newCodeBuddy = try codebuddy.scanOnce()  // qoder has no tokens (CN backend reports all zeros), not scanned
+            let newCursor = try cursor.scanOnce()  // cursor has tokens but no prices (cost is always 0)
             let newZcode = try zcode.scanOnce()
-            // Antigravity（实验）：CLI 调试入口总是扫（app 里受设置开关门控）
+            // Antigravity (experimental): the CLI debug entry always scans (in the app it is gated
+            // by the Settings toggle)
             let newAntigravity = try AntigravityUsageScanner(
                 conversationsRoot: AntigravityPaths.conversationsRoot(), store: store,
                 cwdResolver: { AntigravityPaths.cwd(dbURL: $0) }).scanOnce()
@@ -368,7 +375,8 @@ enum EurekaCLI {
         }
     }
 
-    /// 审计快照：跑一次 Codex 审计扫描，再输出最近的操作流水（调试/脚本对拍用）
+    /// Audit snapshot: runs one Codex audit scan, then prints the recent operation log (for
+    /// debugging / script cross-checks)
 
     private static func auditSnapshot(riskOnly: Bool, limit: Int) {
         do {
@@ -413,7 +421,8 @@ enum EurekaCLI {
         }
     }
 
-    /// 限额快照（默认只读本地 Codex；--claude 同时测非官方接口）
+    /// Rate-limit snapshot (reads only local Codex by default; --claude also exercises the
+    /// unofficial API)
     private static func limitsSnapshot(includeClaude: Bool) {
         let semaphore = DispatchSemaphore(value: 0)
         Task {
@@ -455,8 +464,9 @@ enum EurekaCLI {
         semaphore.wait()
     }
 
-    /// --pricing-resolve <model…> [--provider p] [--catalog 目录快照]：打印价格解析结果与出处。
-    /// 不给模型名时解析本地账本里出现过的全部 (source, model, provider)。
+    /// --pricing-resolve <model…> [--provider p] [--catalog catalog-snapshot]: prints the price
+    /// resolution result and its origin. Without model names, resolves every (source, model,
+    /// provider) seen in the local ledger.
     private static func pricingResolve(args: [String]) {
         var models: [String] = []
         var provider: String?
@@ -504,8 +514,9 @@ enum EurekaCLI {
         }
     }
 
-    /// --build-pricing-catalog <litellm.json> <models.dev.json> <输出>：生成随包价格目录快照
-    /// （Scripts/update-pricing-catalog.sh 调用；与运行时同一套解析/校验代码）
+    /// --build-pricing-catalog <litellm.json> <models.dev.json> <output>: generates the bundled
+    /// pricing catalog snapshot (called by Scripts/update-pricing-catalog.sh; same
+    /// parsing/validation code as the runtime)
     private static func buildPricingCatalog(args: [String]) {
         guard args.count >= 3 else {
             FileHandle.standardError.write(Data(
@@ -584,8 +595,8 @@ enum EurekaCLI {
         """))
     }
 
-    /// --mcp-inspect：走 MCPService 的真实探测路径（与 UI「重新检测」同一条代码路径、
-    /// 同一份缓存），供无头验证与调试。
+    /// --mcp-inspect: goes through MCPService's real probe path (the same code path as the UI's
+    /// "re-check", the same cache), for headless verification and debugging.
     @MainActor
     private static func mcpInspect(name: String) {
         guard !name.isEmpty else {
@@ -615,7 +626,7 @@ enum EurekaCLI {
             if allDone { break }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))  // 等 toolCache 回主线程
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))  // wait for toolCache to land back on the main thread
         for entry in entries {
             guard let snapshot = service.probeSnapshots[entry.id] else {
                 print(L10n.format("[%@] Timed out without a result", zhHans: "[%@] 超时未出结果", String(entry.source.displayName)))

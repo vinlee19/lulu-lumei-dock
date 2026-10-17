@@ -2,25 +2,28 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 扫描 Cursor `state.vscdb` 的助手气泡累计 token 用量。
+/// Scans cumulative token usage of assistant bubbles in Cursor's `state.vscdb`.
 ///
-/// **口径（重要，改之前先读完）**：Cursor 的 `tokenCount` 只有
-/// `{inputTokens, outputTokens}` 两个数，**没有缓存读写拆分**，而 `inputTokens`
-/// 是「这一轮送进去的整个上下文」——同一会话里逐轮单调递增（实勘
-/// 50684 → 59288 → 85571 → 93562 → 111408 → 112382）。直接当新鲜输入记账
-/// 会把一个会话的输入放大十几倍。
-/// 所以按**相邻差分**归集（与 `CodexUsageScanner` 对 `total_token_usage` 的做法同源）：
-///   `cacheRead = 上一轮的 inputTokens`，`input = max(0, 本轮 - 上一轮)`；
-///   本轮反而变小 = 发生了压缩/新开话题，视作重置（`cacheRead = 0`）。
-/// 于是一个会话的「新鲜输入」总和 ≈ 最终上下文大小，符合直觉。
+/// **Accounting (important, read fully before changing)**: Cursor's `tokenCount` has only two
+/// numbers, `{inputTokens, outputTokens}`, **with no cache read/write split**, and `inputTokens` is
+/// "the entire context sent this turn" — it grows monotonically turn by turn within a session
+/// (observed 50684 → 59288 → 85571 → 93562 → 111408 → 112382). Booking it directly as fresh input
+/// would inflate a session's input more than tenfold. So it is aggregated by **adjacent
+/// differencing** (same approach as `CodexUsageScanner` on `total_token_usage`):
+///   `cacheRead = previous turn's inputTokens`, `input = max(0, this turn - previous turn)`; if
+///   this turn is smaller, compaction / a new topic happened and it is treated as a reset
+///   (`cacheRead = 0`).
+/// The sum of a session's "fresh input" then ≈ the final context size, which matches intuition.
 ///
-/// 模型名一律写成 `cursor/<model>`：Cursor 按请求订阅计费，且 93% 的轮次只报
-/// `default`（真实模型名在 `modelInfo` 里只有少数几条有）。`pricing.json` 里
-/// `cursor/` 前缀标了 `unknown` → **成本恒为 0**，只统计 token，不给误导性金额。
+/// Model names are always written as `cursor/<model>`: Cursor bills per request on a subscription,
+/// and 93% of turns only report `default` (only a few entries carry the real model name in
+/// `modelInfo`). In `pricing.json` the `cursor/` prefix is marked `unknown` → **cost is always 0**;
+/// only tokens are counted, no misleading amounts.
 ///
-/// 增量：每 composer 一条 `scan_files`（key `cursor-usage://<composerId>`），
-/// `offset` = 已计入的气泡条数，`inode` = 库 inode（库被换掉则整体重来）。
-/// 气泡只追加不重排，所以按条数做水位天然幂等，重扫返回 0。
+/// Incremental: one `scan_files` row per composer (key `cursor-usage://<composerId>`), `offset` =
+/// number of bubbles already counted, `inode` = DB inode (a replaced DB restarts from scratch).
+/// Bubbles are only appended, never reordered, so a count watermark is naturally idempotent; a
+/// rescan returns 0.
 public final class CursorUsageScanner {
     private let dbPath: URL
     private let workspaceStorageRoot: URL
@@ -29,12 +32,13 @@ public final class CursorUsageScanner {
     private let recentWindow: TimeInterval
     private let maxSessions: Int
 
-    /// 每 composer 的扫描私有状态（存 scan_files.extra）
+    /// Per-composer private scan state (stored in scan_files.extra)
     private struct Extra: Codable {
         var project: String?
         var lastInput: Int?
-        /// 上次扫过时该会话的 lastActiveAt：没动过就整段跳过，
-        /// 免得每轮把 100+ 个 composerData（单个可达 236KB）读出来白解一遍 JSON
+        /// The session's lastActiveAt at the last scan: if unchanged, skip it entirely, rather than
+        /// reading 100+ composerData blobs (up to 236KB each) every pass and decoding JSON for
+        /// nothing
         var seenActiveAt: Double?
     }
 
@@ -51,8 +55,8 @@ public final class CursorUsageScanner {
         return formatter
     }()
 
-    /// `sessions` 由调用方注入（`EurekaUsage` 不依赖 `EurekaIngest`，
-    /// 拿不到 `CursorSessionIndexer`）：(composerId, cwd, lastActiveAt) 三元组。
+    /// `sessions` is injected by the caller (`EurekaUsage` does not depend on `EurekaIngest`, so it
+    /// cannot reach `CursorSessionIndexer`): (composerId, cwd, lastActiveAt) triples.
     public typealias SessionRef = (id: String, cwd: String?, lastActiveAt: Date)
     private let sessions: (Date) -> [SessionRef]
 
@@ -109,7 +113,8 @@ public final class CursorUsageScanner {
         guard let composer = Self.json(db: db, key: "composerData:\(session.id)") else { return 0 }
         let bubbleIds = (composer["fullConversationHeadersOnly"] as? [[String: Any]] ?? [])
             .compactMap { $0["bubbleId"] as? String }
-        // 没有新气泡也要落一次 state：把 seenActiveAt 推上去，下轮才跳得掉
+        // Persist state even with no new bubbles: advancing seenActiveAt is what lets the next pass
+        // skip it
         guard bubbleIds.count > processed else {
             try store.scanState.setFileState(
                 path: stateKey,
@@ -128,7 +133,7 @@ public final class CursorUsageScanner {
             }
             let timestamp = (bubble["createdAt"] as? String)
                 .flatMap { Self.iso8601.date(from: $0) } ?? session.lastActiveAt
-            // type 1 = 用户气泡 → 会话页的「对话数」
+            // type 1 = user bubble → the session page's conversation count
             if (bubble["type"] as? NSNumber)?.intValue == 1 { promptCount += 1 }
 
             if let tool = bubble["toolFormerData"] as? [String: Any],
@@ -146,7 +151,8 @@ public final class CursorUsageScanner {
             guard rawInput > 0 || output > 0 else { continue }
 
             let previous = extra.lastInput ?? 0
-            // 上下文变小 = 压缩或换话题，缓存作废，本轮整份都算新鲜输入
+            // Context shrank = compaction or topic change; the cache is void and this whole turn
+            // counts as fresh input
             let reset = rawInput < previous
             let cacheRead = reset ? 0 : previous
             let input = reset ? rawInput : rawInput - previous
@@ -172,7 +178,8 @@ public final class CursorUsageScanner {
             try store.scanState.setFileState(
                 path: stateKey,
                 .init(inode: inode, offset: Int64(bubbleIds.count), extra: Self.encode(extra)))
-            // 首扫（processed == 0）覆盖写，之后增量累加——与 CodeBuddy 同口径
+            // First scan (processed == 0) overwrites, later scans accumulate — same convention as
+            // CodeBuddy
             try store.sessionStats.recordPrompts(
                 path: stateKey, sessionId: session.id, count: promptCount, reset: processed == 0)
         }

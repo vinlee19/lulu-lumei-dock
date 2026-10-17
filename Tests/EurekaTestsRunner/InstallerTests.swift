@@ -33,7 +33,7 @@ func installerTests(_ t: TestRunner) {
             let timeout = (entries[0]["hooks"] as? [[String: Any]])?.first?["timeout"] as? Int
             try expectEqual(timeout, 5)
         }
-        // PostToolUse 需要 matcher=*，其余不带 matcher
+        // PostToolUse needs matcher=*; the others carry no matcher
         try expectEqual(hookEntries(root, "PostToolUse")[0]["matcher"] as? String, "*")
         try expect(hookEntries(root, "Stop")[0]["matcher"] == nil)
     }
@@ -72,17 +72,18 @@ func installerTests(_ t: TestRunner) {
         let installed = try ClaudeHooksInstaller.install(into: original, relayPath: relayPath)
         var root = try parseJSON(installed)
 
-        // Stop 事件：他人的 terminal-notifier + 我们的，共 2 条
+        // Stop event: someone else's terminal-notifier + ours, 2 entries total
         let stopEntries = hookEntries(root, "Stop")
         try expectEqual(stopEntries.count, 2)
         try expect(stopEntries.flatMap(commands(in:)).contains { $0.contains("terminal-notifier") })
 
-        // PreToolUse 现在也受管（提供"即将执行什么"）：他人的 audit.sh 与我们并存共 2 条
+        // PreToolUse is now managed too (it reports "what is about to run"): someone else's
+        // audit.sh coexists with ours, 2 entries total
         let preEntries = hookEntries(root, "PreToolUse")
         try expectEqual(preEntries.count, 2)
         try expect(preEntries.flatMap(commands(in:)).contains { $0.contains("audit.sh") })
 
-        // 我们从不受管的事件（SubagentStop）必须一条不差、原样不动
+        // Events we never manage (SubagentStop) must stay exactly as they were
         try expectEqual(hookEntries(root, "SubagentStop").count, 1)
         try expect(commands(in: hookEntries(root, "SubagentStop")[0])[0]
             .contains("subagent-notify.sh"))
@@ -91,7 +92,7 @@ func installerTests(_ t: TestRunner) {
         root = try parseJSON(uninstalled)
         try expectEqual(hookEntries(root, "Stop").count, 1)
         try expect(commands(in: hookEntries(root, "Stop")[0])[0].contains("terminal-notifier"))
-        // 受管事件上的他人条目同样只删我们的那条
+        // Others' entries on managed events: likewise, only our entry is removed
         try expectEqual(hookEntries(root, "PreToolUse").count, 1)
         try expect(commands(in: hookEntries(root, "PreToolUse")[0])[0].contains("audit.sh"))
         try expectEqual(hookEntries(root, "SubagentStop").count, 1)
@@ -116,7 +117,7 @@ func installerTests(_ t: TestRunner) {
         try expectEqual(ClaudeHooksInstaller.status(of: ""), InstallStatus.none)
         let installed = try ClaudeHooksInstaller.install(into: "", relayPath: relayPath)
         try expectEqual(ClaudeHooksInstaller.status(of: installed), .installed)
-        // 手工去掉一个事件 → partial
+        // Remove one event by hand → partial
         var root = try parseJSON(installed)
         var hooks = root["hooks"] as! [String: Any]
         hooks.removeValue(forKey: "Stop")

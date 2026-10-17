@@ -2,16 +2,18 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// Cursor 会话索引：只读 `state.vscdb` 的 `cursorDiskKV` → `AgentSessionInfo`。
+/// Cursor session index: read-only over `cursorDiskKV` in `state.vscdb` → `AgentSessionInfo`.
 ///
-/// 主源是 `composerData:<id>` 的键前缀范围扫描（走 `key` 唯一索引，实勘 151 个会话 40ms），
-/// 名字/时间直接由 SQLite 的 `json_extract` 在 C 侧取出，不把 200KB 的 JSON 搬进 Swift。
-/// 万一系统 libsqlite3 没编 JSON1，整条 query 会抛错 → 自动退回只用会话头（`CursorWorkspaceIndex`），
-/// 少一部分历史但不至于整块瞎掉。
+/// The main source is a key-prefix range scan over `composerData:<id>` (uses the unique `key`
+/// index; 151 sessions in 40ms observed), with name/time extracted on the C side by SQLite's
+/// `json_extract`, so the 200KB JSON never gets hauled into Swift. If the system libsqlite3 was
+/// built without JSON1, the whole query throws → it falls back automatically to session headers
+/// only (`CursorWorkspaceIndex`), losing some history but never going blind entirely.
 ///
-/// cwd 不在会话里，要经 `composerHeaders.workspaceId`（当前打开的 workspace）
-/// 或各 workspace 库的 `allComposers`（历史）反查；两边都查不到就记 nil。
-/// Cursor 无 transcript 文件，故 `transcriptPath` 记库路径、`sizeBytes` 记 0（同 opencode / hermes）。
+/// cwd isn't in the session; it is looked up via `composerHeaders.workspaceId` (currently open
+/// workspaces) or each workspace database's `allComposers` (history); if neither has it, nil is
+/// recorded. Cursor has no transcript file, so `transcriptPath` records the database path and
+/// `sizeBytes` records 0 (same as opencode / hermes).
 public enum CursorSessionIndexer {
     public static func index(
         dbPath: URL = CursorPaths.globalStateDB(),
@@ -24,7 +26,7 @@ public enum CursorSessionIndexer {
             let db = try? SQLiteDB(path: dbPath.path, readOnly: true)
         else { return [] }
 
-        // composerId → (cwd, 标题兜底)
+        // composerId → (cwd, fallback title)
         var cwds: [String: String] = [:]
         var names: [String: String] = [:]
         for entry in CursorWorkspaceIndex.historicalComposers(root: workspaceStorageRoot) {
@@ -39,7 +41,7 @@ public enum CursorSessionIndexer {
         let cutoffMs = Self.cutoffMillis(window: window, now: now)
         var rows = composerRows(db: db, cutoffMs: cutoffMs, maxSessions: maxSessions)
         if rows.isEmpty {
-            // JSON1 缺席或库里没有 composerData：退回会话头
+            // JSON1 missing or no composerData in the database: fall back to session headers
             rows = CursorWorkspaceIndex.historicalComposers(root: workspaceStorageRoot)
                 .compactMap { entry in
                     guard let updated = entry.lastUpdatedAt,
@@ -68,7 +70,7 @@ public enum CursorSessionIndexer {
             .map { $0 }
     }
 
-    /// 顶层会话目录集合（供项目发现并入）
+    /// Set of top-level session directories (merged into project discovery)
     public static func recentDirectories(
         dbPath: URL = CursorPaths.globalStateDB(),
         workspaceStorageRoot: URL = CursorPaths.workspaceStorageRoot(),
@@ -85,14 +87,16 @@ public enum CursorSessionIndexer {
         var lastUpdatedAt: Date
     }
 
-    /// 用量 / 审计扫描用的「全量历史」窗口：它们各有 per-composer 水位，
-    /// 回访老会话近乎零成本，按 30 天截断反而会让一个月前的用量永远进不了账。
-    /// 用有限值而不是 `.greatestFiniteMagnitude`，见 `cutoffMillis` 的注释。
+    /// "Full history" window for the usage / audit scans: each keeps a per-composer watermark, so
+    /// revisiting old sessions is nearly free, whereas truncating at 30 days would keep usage from
+    /// a month ago out of the ledger forever. A finite value rather than
+    /// `.greatestFiniteMagnitude`; see the comment on `cutoffMillis`.
     public static let fullHistoryWindow: TimeInterval = 100 * 365 * 86400
 
-    /// 时间窗 → epoch 毫秒下界。
-    /// ⚠️ 会话页「全部」传的是 `.greatestFiniteMagnitude`，直接 `(now - window) * 1000`
-    /// 会溢出成 -inf，`Int64(-inf)` 在 Swift 里是**运行时崩溃**（不是截断）。故先夹再转。
+    /// Time window → lower bound in epoch milliseconds.
+    /// ⚠️ The sessions page's "All" passes `.greatestFiniteMagnitude`; computing
+    /// `(now - window) * 1000` directly overflows to -inf, and `Int64(-inf)` is a **runtime crash**
+    /// in Swift (not a truncation). So clamp before converting.
     static func cutoffMillis(window: TimeInterval, now: Date) -> Int64 {
         let seconds = now.timeIntervalSince1970 - window
         guard seconds.isFinite else { return 0 }
@@ -102,8 +106,9 @@ public enum CursorSessionIndexer {
     private static func composerRows(
         db: SQLiteDB, cutoffMs: Int64, maxSessions: Int
     ) -> [Row] {
-        // 键前缀范围扫描（`composerData;` 是 `:` 的下一个 ASCII 字符）走覆盖索引，
-        // 不能写 LIKE：默认 LIKE 大小写不敏感，优化器不会退化成索引区间查找。
+        // Key-prefix range scan (`;` in `composerData;` is the ASCII character right after `:`)
+        // uses the covering index. It can't be written as LIKE: default LIKE is case-insensitive,
+        // so the optimizer won't turn it into an index range lookup.
         let rows = (try? db.query("""
             SELECT substr(key, 14),
                    json_extract(value, '$.name'),
@@ -129,7 +134,7 @@ public enum CursorSessionIndexer {
         return rows.compactMap { $0 }
     }
 
-    /// 当前打开的 workspace 里的 composer → workspaceId
+    /// composer → workspaceId for the currently open workspaces
     private static func openWorkspaceMap(db: SQLiteDB) -> [String: String] {
         let rows = (try? db.query(
             "SELECT composerId, workspaceId FROM composerHeaders", []) { row in

@@ -1,17 +1,19 @@
 import Foundation
 
-/// provider 别名：把各 agent 里五花八门的 provider id（含用户自定义名）映射到
-/// 价格目录认识的厂商，并标出是否订阅套餐。订阅套餐按厂商按量价算 **API 等价费用**。
+/// Provider aliases: map the assorted provider ids used across agents (including user-defined
+/// names) to vendors the price catalogs know, and flag subscription plans. Subscription plans are
+/// priced at the vendor's pay-as-you-go rate as an **API-equivalent cost**.
 public struct ProviderAlias: Codable, Equatable, Sendable {
     public enum Billing: String, Codable, Sendable {
-        case payg          // 按量计费：可直接采信该 provider 在目录里的价格
-        case subscription  // 订阅套餐：目录价为 0，改按厂商按量价折算
+        case payg          // Pay-as-you-go: the provider's catalog price can be trusted directly
+        case subscription  // Subscription plan: catalog price is 0, so convert at the vendor's pay-as-you-go rate
     }
 
-    /// 模型厂商（VendorFamily.id），nil = 仅按模型名推断
+    /// Model vendor (VendorFamily.id); nil = infer from the model name only
     public var vendor: String?
     public var billing: Billing
-    /// 显式指定取价的 models.dev provider（如火山方舟托管的模型取 volcengine 的价）
+    /// models.dev provider to take prices from explicitly (e.g. models hosted on Volcengine Ark
+    /// take volcengine's price)
     public var priceFrom: String?
 
     public init(vendor: String? = nil, billing: Billing = .payg, priceFrom: String? = nil) {
@@ -21,19 +23,21 @@ public struct ProviderAlias: Codable, Equatable, Sendable {
     }
 }
 
-/// 模型厂商：按模型名前缀认家族，再到该厂商在两个目录里的官方 id 下取价
+/// Model vendor: identifies the family by model-name prefix, then takes prices under that vendor's
+/// official ids in both catalogs
 public struct VendorFamily: Sendable {
     public let id: String
-    /// 模型名前缀（已小写，按顺序匹配）
+    /// Model-name prefixes (lowercase, matched in order)
     let modelPrefixes: [String]
-    /// models.dev 里该厂商的官方 provider id（按优先级）
+    /// The vendor's official provider ids on models.dev (in priority order)
     let modelsDevIds: [String]
-    /// LiteLLM 里该厂商的键前缀（不含斜杠）
+    /// The vendor's key prefix in LiteLLM (without the slash)
     let litellmPrefixes: [String]
 }
 
 public enum ProviderCatalog {
-    /// 内置别名（键小写）。用户 pricing.json 的 `providers` 可覆盖/追加。
+    /// Built-in aliases (lowercase keys). `providers` in the user's pricing.json can
+    /// override/extend them.
     public static let builtinAliases: [String: ProviderAlias] = [
         "openai": ProviderAlias(vendor: "openai"),
         "openai-codex": ProviderAlias(vendor: "openai", billing: .subscription),
@@ -76,8 +80,9 @@ public enum ProviderCatalog {
                      modelsDevIds: ["volcengine"], litellmPrefixes: ["volcengine"]),
     ]
 
-    /// 转售 / 聚合平台：报价与官方差异大（同一 glm-5.2 从 $0.3 到 $1.8），
-    /// 只有用户明确走了它（provider 提示就是它）才采信
+    /// Resellers / aggregators: their prices differ widely from official ones (the same glm-5.2
+    /// ranges from $0.3 to $1.8), so they are trusted only when the user explicitly goes through
+    /// them (the provider hint is that reseller)
     public static let resellers: Set<String> = [
         "openrouter", "qiniu-ai", "poe", "orcarouter", "aihubmix", "vercel", "vercel_ai_gateway",
         "fireworks-ai", "fireworks_ai", "together_ai", "togetherai", "replicate", "azure_ai",
@@ -89,7 +94,7 @@ public enum ProviderCatalog {
         vendors.first { $0.id == id }
     }
 
-    /// 按模型名认厂商（候选名任一命中前缀即可）
+    /// Identifies the vendor by model name (any candidate name matching a prefix is enough)
     public static func vendor(forModel candidates: [String]) -> VendorFamily? {
         for name in candidates {
             if let family = vendors.first(where: { family in

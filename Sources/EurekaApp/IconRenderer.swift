@@ -2,8 +2,10 @@ import AppKit
 import EurekaKit
 import SwiftUI
 
-/// 应用图标：靛紫渐变圆角方 + 金色「Lu」抽象字母组（黄金比例构造），呼应 lulu-lumei-dock 的紫金品牌色（Theme.brand / Theme.gold 同源）。
-/// 用 SwiftUI 离屏渲染 1024px 母版（Scripts/make-icns.sh 据此生成 .icns）。
+/// App icon: indigo-violet gradient rounded square + a gold abstract "Lu" letter group
+/// (golden-ratio construction), echoing lulu-lumei-dock's violet-gold brand colors (same source as
+/// Theme.brand / Theme.gold). Renders the 1024px master offscreen with SwiftUI
+/// (Scripts/make-icns.sh builds the .icns from it).
 @MainActor
 enum IconRenderer {
     static func render(to path: String) {
@@ -31,18 +33,21 @@ enum IconRenderer {
     }
 }
 
-/// 1024×1024 母版。遵循 macOS 图标网格：可见圆角方块 824px 居中，四周透明留白（阴影画在留白里）。
-/// 靛紫渐变圆角方（锚定 Theme.brand 靛紫）+ 金色「Lu」抽象字母组（锚定 Theme.gold，黄金比例构造）。
+/// 1024×1024 master. Follows the macOS icon grid: the visible rounded square is 824px centered,
+/// with transparent margin around it (the shadow is drawn in the margin). Indigo-violet gradient
+/// rounded square (anchored on Theme.brand indigo) + gold abstract "Lu" letter group (anchored on
+/// Theme.gold, golden-ratio construction).
 struct AppIconView: View {
     private let canvas: CGFloat = 1024
     private let plate: CGFloat = 824
-    /// 字母组字高（L 竖臂）；笔画粗 = H/φ³
+    /// Letter-group height (the L's vertical stem); stroke width = H/φ³
     private let glyphHeight: CGFloat = 430
     private static let phi: CGFloat = 1.6180339
 
     var body: some View {
         ZStack {
-            // 底板：靛紫渐变（左上亮紫 → 右下深紫）+ 左上高光描边 + 投影
+            // Base plate: indigo-violet gradient (bright violet top-left -> deep violet
+            // bottom-right) + top-left highlight stroke + drop shadow
             RoundedRectangle(cornerRadius: plate * 0.2237, style: .continuous)
                 .fill(
                     LinearGradient(
@@ -67,7 +72,7 @@ struct AppIconView: View {
                 .frame(width: plate, height: plate)
                 .shadow(color: .black.opacity(0.32), radius: 28, y: 14)
 
-            // 中心暖金柔光，托起金色字母
+            // Warm gold glow at the center, lifting the gold letters
             Circle()
                 .fill(
                     RadialGradient(
@@ -75,7 +80,8 @@ struct AppIconView: View {
                         center: .center, startRadius: 0, endRadius: 300))
                 .frame(width: 640, height: 640)
 
-            // 「Lu」抽象字母组（圆头笔画，黄金比例）：金色渐变（亮金 → 琥珀）
+            // "Lu" abstract letter group (round-capped strokes, golden ratio): gold gradient
+            // (bright gold -> amber)
             LuluMark()
                 .stroke(
                     LinearGradient(
@@ -97,33 +103,35 @@ struct AppIconView: View {
     }
 }
 
-/// 「Lu」抽象字母组：大写 L + 小写 u，笔画/长度/字高全部由黄金比 φ 推导。
-/// L 竖臂 = 字高 H；L 底脚 = H/φ；u 字高 = H/φ；u 宽 = H/φ²；笔画粗 = H/φ³。
+/// "Lu" abstract letter group: capital L + lowercase u, with stroke, lengths and height all derived
+/// from the golden ratio φ. L stem = height H; L foot = H/φ; u height = H/φ; u width = H/φ²; stroke
+/// width = H/φ³.
 struct LuluMark: Shape {
     func path(in rect: CGRect) -> Path {
         let phi: CGFloat = 1.6180339
         let H = rect.height
-        let t = H / (phi * phi * phi)           // 笔画粗细
-        let foot = H / phi                       // L 底脚长
-        let uH = H / phi                         // u 字高
-        let uW = H / (phi * phi)                 // u 宽
-        let gap = t                              // L 与 u 间距
-        // 组合自然宽度（含两端圆头半径 t/2）→ 用于在 rect 内水平居中
+        let t = H / (phi * phi * phi)           // stroke width
+        let foot = H / phi                       // L foot length
+        let uH = H / phi                         // u height
+        let uW = H / (phi * phi)                 // u width
+        let gap = t                              // gap between L and u
+        // Natural width of the group (including the round-cap radius t/2 at both ends) -> used to
+        // center it horizontally in rect
         let groupW = foot + gap + uW + t
-        let x0 = rect.midX - groupW / 2 + t / 2  // L 竖臂中线 x
-        let topY = rect.midY - H / 2 + t / 2     // L 顶
-        let baseY = rect.midY + H / 2 - t / 2    // 基线（L 底脚 / u 底 的中线）
+        let x0 = rect.midX - groupW / 2 + t / 2  // x of the L stem's center line
+        let topY = rect.midY - H / 2 + t / 2     // top of the L
+        let baseY = rect.midY + H / 2 - t / 2    // baseline (center line of the L foot / u bottom)
 
         var path = Path()
-        // 大写 L：竖臂 + 底脚
+        // Capital L: stem + foot
         path.move(to: CGPoint(x: x0, y: topY))
         path.addLine(to: CGPoint(x: x0, y: baseY))
         path.addLine(to: CGPoint(x: x0 + foot, y: baseY))
 
-        // 小写 u：左竖 + 底半圆 + 右竖（圆头）
-        let uLx = x0 + foot + gap                // u 左竖中线
-        let uRx = uLx + uW                        // u 右竖中线
-        let r = uW / 2                            // 底弧半径（中线）
+        // Lowercase u: left stem + bottom semicircle + right stem (round caps)
+        let uLx = x0 + foot + gap                // center line of the u's left stem
+        let uRx = uLx + uW                        // center line of the u's right stem
+        let r = uW / 2                            // bottom arc radius (center line)
         let uTopY = baseY - uH
         path.move(to: CGPoint(x: uLx, y: uTopY))
         path.addLine(to: CGPoint(x: uLx, y: baseY - r))

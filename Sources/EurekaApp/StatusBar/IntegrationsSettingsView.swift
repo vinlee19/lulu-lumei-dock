@@ -2,14 +2,19 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// 设置→集成：逐项决定是否接入各 agent 的 hook，并把配置异常显式报出来。
+/// Settings → Integrations: decide per agent whether to install its hook, and surface config
+/// problems explicitly.
 ///
-/// 设计要点（均为用户明确要求）：
-/// - **每项独立开关**，而不是一键装全部；默认什么都不装。
-/// - 开关前就说清**会改哪个文件**、会先备份、只动我们自己的条目。
-/// - 检测到异常（路径被手改 / relay 缺失 / 配置解析不了 / 他人占用）**必须显示出来**，
-///   而不是像原来那样一律显示成"未安装"让人以为没装过。
-/// - 同一份配置里检测到他人的 hook 时明确告知不会碰它们。
+/// Design points (all explicitly requested by the user):
+/// - **An independent toggle per item**, not install-everything-at-once; nothing is installed by
+///   default.
+/// - Before toggling, say clearly **which file will change**, that it is backed up first, and that
+///   only our own entries are touched.
+/// - Detected problems (path edited by hand / relay missing / config unparseable / occupied by
+///   someone else) **must be shown**, instead of all showing as "Not installed" like before, making
+///   it look as if it was never installed.
+/// - When another tool's hooks are detected in the same config, say explicitly that we won't touch
+///   them.
 struct IntegrationsSettingsView: View {
     @ObservedObject var installer: InstallerService
     @ObservedObject var settings: AppSettings
@@ -31,7 +36,7 @@ struct IntegrationsSettingsView: View {
         .onAppear { installer.refresh() }
     }
 
-    // MARK: - 说明与风险
+    // MARK: - Explanation and risks
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -46,7 +51,8 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    /// 写盘前把风险讲明白 —— 改的是用户自己的配置文件，必须先交代清楚
+    /// Explain the risks before writing to disk: these are the user's own config files, so it must
+    /// be spelled out first
     private var riskNotice: some View {
         VStack(alignment: .leading, spacing: 3) {
             noticeLine("doc.on.doc", L10n.text("A *.bak.eureka.<timestamp> backup is written first (the latest 5 are kept)", zhHans: "写入前自动备份为 *.bak.eureka.<时间戳>（保留最近 5 份）"))
@@ -71,7 +77,8 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    /// 他人 hook 共存提示（本机实测：`~/.claude/settings.json` 里就有别的工具）
+    /// Notice about coexisting with other tools' hooks (observed on this machine:
+    /// `~/.claude/settings.json` already has another tool's)
     private var foreignNotice: some View {
         let report = installer.foreignHooks
         return HStack(alignment: .top, spacing: 5) {
@@ -92,7 +99,7 @@ struct IntegrationsSettingsView: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Theme.gold.opacity(0.08)))
     }
 
-    // MARK: - 单项卡片
+    // MARK: - Per-item card
 
     @ViewBuilder
     private func card(_ integration: InstallerService.Integration) -> some View {
@@ -120,7 +127,8 @@ struct IntegrationsSettingsView: View {
                         else { installer.uninstall(integration) }
                     }))
                     .labelsHidden()
-                    // 配置解析不了 / 他人占用时，开关不该给人"点一下就好"的错觉
+                    // When the config can't be parsed / is occupied by someone else, the toggle
+                    // must not give the illusion that one tap fixes it
                     .disabled(blocksToggle(diagnosis))
             }
             if integration == .codexNotify, diagnosis.isInstalledInSomeForm,
@@ -139,7 +147,8 @@ struct IntegrationsSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if needsRepair(diagnosis) {
-                // 路径漂移只有从这个按钮点进去才允许改写（默认拒绝，见 install(repairDriftedPath:)）
+                // A drifted path may only be rewritten via this button (refused by default, see
+                // install(repairDriftedPath:))
                 Button(repairLabel(diagnosis)) {
                     installer.install(integration, repairDriftedPath: true)
                 }
@@ -148,8 +157,10 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    /// 需要用户点一下才修的：缺事件（更新）、路径歪了（修复）、relay 没了（重建）。
-    /// 路径漂移刻意**不**自动改 —— 那可能是用户手改的，我们无权覆盖。
+    /// Things that need a user tap to fix: missing events (Update), path off (Repair), relay gone
+    /// (Rebuild).
+    /// Path drift is deliberately **not** fixed automatically: the user may have edited it by hand,
+    /// and we have no right to overwrite it.
     private func needsRepair(_ diagnosis: HookDiagnosis) -> Bool {
         switch diagnosis {
         case .stale, .legacyRelayName, .driftedPath, .relayMissing: return true
@@ -166,7 +177,7 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    /// 这些异常下点开关也没用，先让用户去处理文件本身
+    /// Under these problems the toggle is useless; have the user deal with the file itself first
     private func blocksToggle(_ diagnosis: HookDiagnosis) -> Bool {
         switch diagnosis {
         case .unparseable, .foreignOccupied: return true
@@ -193,7 +204,7 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    // MARK: - 更新策略
+    // MARK: - Update policy
 
     private var updatePolicy: some View {
         VStack(alignment: .leading, spacing: 5) {

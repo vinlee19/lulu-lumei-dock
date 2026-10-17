@@ -117,7 +117,7 @@ func taskStoreTests(_ t: TestRunner) {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "任务"), at: 100))
         store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 150))
-        // transcript 监视器随后也报完成（双源）→ 抑制
+        // The transcript watcher then reports completion too (dual source) → suppressed
         try expectEqual(
             store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 155)),
             [])
@@ -139,7 +139,7 @@ func taskStoreTests(_ t: TestRunner) {
         store.apply(event(.taskStarted(title: nil), source: .codex, at: 100))
         store.apply(event(
             .taskFinished(outcome: .success, title: nil, detail: nil), source: .codex, at: 150))
-        // 完成后会话留在 idle 区（不计入 active）
+        // After finishing, the session stays in the idle area (not counted as active)
         try expect(store.sortedActiveTasks.isEmpty, "active 应为空")
         try expectEqual(store.sortedIdleTasks.count, 1, "idle 应有 Codex 会话")
         try expectEqual(store.sortedIdleTasks[0].source, .codex)
@@ -151,7 +151,7 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.sortedIdleTasks.count, 1)
         try expect(store.sortedActiveTasks.isEmpty, "空闲不算运行")
 
-        // app 在 turn 中途启动：第一个心跳就该把会话挂出来
+        // App launched mid-turn: the first heartbeat should surface the session
         let effects = store.apply(event(.activity(tool: "Bash"), session: "midturn", at: 110))
         try expectEqual(effects, [.activeTasksChanged])
         try expectEqual(store.sortedActiveTasks.count, 1)
@@ -171,20 +171,20 @@ func taskStoreTests(_ t: TestRunner) {
     t.test("会话首启时间：任意事件补设一次，turn 重置不影响它") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "第一轮"), at: 1000))
-        // 心跳带来首启时间（管道从文件头读到的）
+        // The heartbeat carries the first-start time (read by the pipeline from the file head)
         var heartbeat = event(.activity(tool: "Bash"), at: 1010)
         heartbeat.sessionStartedAt = ts(500)
         store.apply(heartbeat)
         try expectEqual(store.sortedActiveTasks[0].sessionStartedAt, ts(500))
 
-        // turn 结束→空闲→新 turn：startedAt 重置，sessionStartedAt 不变
+        // Turn ends → idle → new turn: startedAt resets, sessionStartedAt stays
         store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 1100))
         store.apply(event(.taskStarted(title: "第二轮"), at: 2000))
         let task = store.sortedActiveTasks[0]
         try expectEqual(task.startedAt, ts(2000))
         try expectEqual(task.sessionStartedAt, ts(500), "会话首启时间跨 turn 保持")
 
-        // 后续更小的值不覆盖（只设一次）
+        // A later smaller value doesn't overwrite (set only once)
         var later = event(.activity(tool: nil), at: 2010)
         later.sessionStartedAt = ts(999)
         store.apply(later)
@@ -194,7 +194,7 @@ func taskStoreTests(_ t: TestRunner) {
     t.test("WellnessAdvisor：阈值触发、每小时冷却、歇够重置") {
         var calendar = Calendar.current
         calendar.timeZone = TimeZone.current
-        // 用白天时间避免误触深夜规则
+        // Use a daytime hour so the late-night rule isn't triggered by accident
         let base = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11, hour: 14))!
         func input(streakHours: Double?, at offset: TimeInterval = 0) -> WellnessAdvisor.Input {
             WellnessAdvisor.Input(
@@ -206,31 +206,31 @@ func taskStoreTests(_ t: TestRunner) {
         }
         let pickFirst: (Int) -> Int = { _ in 0 }
 
-        // 未达阈值不提醒
+        // Below the threshold: no reminder
         var state = WellnessAdvisor.State()
         var result = WellnessAdvisor.evaluate(
             input(streakHours: 1.5), state: state, calendar: calendar, pick: pickFirst)
         try expect(result.notices.isEmpty)
 
-        // 达阈值提醒一次
+        // Threshold reached: remind once
         result = WellnessAdvisor.evaluate(
             input(streakHours: 2.1), state: result.state, calendar: calendar, pick: pickFirst)
         try expectEqual(result.notices.count, 1)
         try expect(result.notices[0].headline.contains("2 小时"), result.notices[0].headline)
 
-        // 10 分钟后仍在阈值上：冷却期内不重复
+        // Still above the threshold 10 minutes later: no repeat within the cooldown
         result = WellnessAdvisor.evaluate(
             input(streakHours: 2.3, at: 600), state: result.state,
             calendar: calendar, pick: pickFirst)
         try expect(result.notices.isEmpty, "冷却期内不应重复")
 
-        // 1 小时后再次提醒
+        // Remind again after 1 hour
         result = WellnessAdvisor.evaluate(
             input(streakHours: 3.2, at: 3700), state: result.state,
             calendar: calendar, pick: pickFirst)
         try expectEqual(result.notices.count, 1)
 
-        // 歇下来（无活跃段）→ 状态重置，下个段重新计
+        // Quiet down (no active segment) → state resets, the next segment counts afresh
         result = WellnessAdvisor.evaluate(
             input(streakHours: nil, at: 7200), state: result.state,
             calendar: calendar, pick: pickFirst)
@@ -244,14 +244,14 @@ func taskStoreTests(_ t: TestRunner) {
         let night = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11, hour: 23, minute: 30))!
         let pickFirst: (Int) -> Int = { _ in 0 }
 
-        // 会话过多
+        // too many sessions
         var result = WellnessAdvisor.evaluate(
             WellnessAdvisor.Input(
                 now: day, streakStartAt: nil, activeSessionCount: 2, aliveSessionCount: 6),
             state: .init(), calendar: calendar, pick: pickFirst)
         try expectEqual(result.notices.count, 1)
         try expect(result.notices[0].headline.contains("6 个会话"))
-        // 冷却期内不重复
+        // No repeat within the cooldown
         result = WellnessAdvisor.evaluate(
             WellnessAdvisor.Input(
                 now: day.addingTimeInterval(600), streakStartAt: nil,
@@ -259,7 +259,7 @@ func taskStoreTests(_ t: TestRunner) {
             state: result.state, calendar: calendar, pick: pickFirst)
         try expect(result.notices.isEmpty)
 
-        // 深夜有任务 → 一次；同晚不再
+        // A task late at night → once; not again the same night
         result = WellnessAdvisor.evaluate(
             WellnessAdvisor.Input(
                 now: night, streakStartAt: nil, activeSessionCount: 1, aliveSessionCount: 1),
@@ -268,12 +268,12 @@ func taskStoreTests(_ t: TestRunner) {
         try expect(result.notices[0].emoji == "🌙")
         result = WellnessAdvisor.evaluate(
             WellnessAdvisor.Input(
-                now: night.addingTimeInterval(3600),  // 凌晨 0:30 仍算同一晚
+                now: night.addingTimeInterval(3600),  // 0:30 a.m. still counts as the same night
                 streakStartAt: nil, activeSessionCount: 1, aliveSessionCount: 1),
             state: result.state, calendar: calendar, pick: pickFirst)
         try expect(result.notices.isEmpty, "同一晚不应重复")
 
-        // 总开关关闭：什么都不发
+        // Master switch off: nothing is sent
         result = WellnessAdvisor.evaluate(
             WellnessAdvisor.Input(
                 now: night, streakStartAt: night.addingTimeInterval(-10 * 3600),
@@ -289,12 +289,12 @@ func taskStoreTests(_ t: TestRunner) {
                 source: .codex, asOf: Date(),
                 primary: RateLimitWindow(usedPercent: percent, windowMinutes: 300))
         }
-        // 双源取最大
+        // Take the max of the two sources
         try expectEqual(
             StatusTitleComposer.maxPrimaryPercent([snapshot(37), snapshot(22)]), 37)
         try expectEqual(StatusTitleComposer.maxPrimaryPercent([nil, nil]), nil)
 
-        // 组装与分档
+        // Assembly and bucketing
         let normal = StatusTitleComposer.compose(
             taskCount: 2, hasWaiting: false, maxUsedPercent: 37, showLimit: true)
         try expectEqual(normal.combined, "▶2 · 37%")
@@ -310,7 +310,7 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(critical.combined, "✦ · 91%")
         try expectEqual(critical.tier, .critical)
 
-        // 无数据 / 开关关闭 → 回退纯计数
+        // No data / switch off → fall back to a plain count
         try expectEqual(
             StatusTitleComposer.compose(
                 taskCount: 3, hasWaiting: false, maxUsedPercent: nil, showLimit: true).combined,
@@ -330,10 +330,11 @@ func taskStoreTests(_ t: TestRunner) {
                     usedPercent: percent, windowMinutes: 300, resetsAt: resetsAt),
                 isStale: true)
         }
-        // 7 天前的快照：5h 窗口早已重置，9% 描述的是一个不存在的窗口
+        // A snapshot from 7 days ago: the 5h window reset long ago, so 9% describes a window that
+        // no longer exists
         let expired = snapshot(9, resetsAt: now.addingTimeInterval(-6 * 86400))
         let live = snapshot(22, resetsAt: now.addingTimeInterval(3600))
-        // 没有重置时间 → 无法判定过期，照常计入
+        // No reset time → expiry can't be determined, counted as usual
         let unknown = snapshot(5, resetsAt: nil)
 
         try expect(expired.primary!.hasReset(at: now))
@@ -356,10 +357,10 @@ func taskStoreTests(_ t: TestRunner) {
         registry.beat("eventer")
         snapshot = Dictionary(uniqueKeysWithValues: registry.snapshot())
         try expectEqual(snapshot["poller"]?.status(), .ok)
-        // 轮询型：心跳早于 3×interval（且 ≥15s 容忍）→ 停摆
+        // Polling type: heartbeat older than 3×interval (with ≥15s tolerance) → stalled
         let future = Date().addingTimeInterval(60)
         try expectEqual(snapshot["poller"]?.status(now: future), .stalled)
-        // 事件驱动：不按时间判停摆
+        // Event-driven: stalls are not judged by time
         try expectEqual(snapshot["eventer"]?.status(now: future), .ok)
 
         registry.failure("eventer", note: "坏行")
@@ -417,7 +418,7 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.apply(event(.contextUpdate(percent: 41.4), at: 111)), [])
         try expectEqual(
             store.apply(event(.contextUpdate(percent: 87.0), at: 120)), [.activeTasksChanged])
-        // 没有对应任务的上下文更新是无操作
+        // A context update with no matching task is a no-op
         try expectEqual(
             store.apply(event(.contextUpdate(percent: 50), session: "ghost", at: 130)), [])
     }
@@ -443,9 +444,9 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(
             store.apply(event(.subagentsUpdated(subs), at: 110)), [.activeTasksChanged])
         try expectEqual(store.sortedActiveTasks[0].subagents, subs)
-        // 相同快照不刷 UI（防 5s 抖动）
+        // An identical snapshot doesn't refresh the UI (guards against 5s jitter)
         try expectEqual(store.apply(event(.subagentsUpdated(subs), at: 111)), [])
-        // 未知会话：不凭空建任务
+        // Unknown session: don't create a task out of thin air
         try expectEqual(
             store.apply(event(.subagentsUpdated(subs), session: "ghost", at: 112)), [])
         try expectEqual(store.sortedActiveTasks.count, 1)

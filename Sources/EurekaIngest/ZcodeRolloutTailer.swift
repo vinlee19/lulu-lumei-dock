@@ -2,12 +2,14 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 增量 tail ZCode 模型 IO 流水（~/.zcode/cli/rollout/model-io-sess_<id>.jsonl）。
-/// ZCode 无 hook/notify 回调，这是实时通道（与 grok/kimi tailer 同理）：
-/// 轮询近期有写入的 rollout 文件，按 offset 续读、半行不消费；新发现文件只做
-/// 尾部状态恢复，不重放历史。会话 cwd 从 db 的 session 表懒查（directory 列）。
-/// 子代理文件（`model-io-sess_subagent_*`）跳过：逐行入岛会造成幻影任务，
-/// 其 token 由用量扫描器单独收取，现场由 ZcodeSubagentScanner 做快照。
+/// Incrementally tails the ZCode model IO log (~/.zcode/cli/rollout/model-io-sess_<id>.jsonl).
+/// ZCode has no hook/notify callback, so this is the live channel (same idea as the grok/kimi
+/// tailers): poll rollout files written recently, resume from the offset, never consume a
+/// partial line; newly discovered files only recover the tail state, never replay history.
+/// Session cwd is looked up lazily from the db's session table (directory column).
+/// Subagent files (`model-io-sess_subagent_*`) are skipped: feeding them line by line into the
+/// island would create phantom tasks; their tokens are collected separately by the usage
+/// scanner, and ZcodeSubagentScanner snapshots their live state.
 public final class ZcodeRolloutTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -21,7 +23,7 @@ public final class ZcodeRolloutTailer {
     private var timer: DispatchSourceTimer?
 
     private var offsets: [String: UInt64] = [:]
-    /// 会话上下文（cwd 从 db 懒查；缓存避免每轮询都开库）
+    /// Session context (cwd looked up lazily from the db; cached so each poll doesn't open it)
     private struct FileContext {
         var sessionId: String
         var cwd: String?
@@ -29,7 +31,7 @@ public final class ZcodeRolloutTailer {
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
-    /// v2/config.json 的 per-model limit.context（懒加载；ctx% 分母的权威来源）
+    /// Per-model limit.context from v2/config.json (lazy; the authoritative ctx% denominator)
     private var contextWindows: [String: Int]?
 
     static let healthName = "zcode 事件监视"
@@ -53,7 +55,8 @@ public final class ZcodeRolloutTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // Leeway lets the system coalesce wakeups to save power; it must stay below the poll
+        // interval (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -67,7 +70,7 @@ public final class ZcodeRolloutTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public so tests and startup can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentRolloutFiles() {
@@ -75,9 +78,10 @@ public final class ZcodeRolloutTailer {
         }
     }
 
-    // MARK: - 文件发现
+    // MARK: - File discovery
 
-    /// rollout/ 下近期（recentWindow 内）有写入、且会话 id 非 subagent 的流水文件
+    /// Log files under rollout/ written recently (within recentWindow) whose session id is
+    /// not a subagent
     private func recentRolloutFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(
@@ -96,7 +100,7 @@ public final class ZcodeRolloutTailer {
         return results
     }
 
-    // MARK: - 增量读取
+    // MARK: - Incremental reads
 
     private func tail(_ url: URL) {
         let path = url.path
@@ -106,7 +110,7 @@ public final class ZcodeRolloutTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 文件被截断/重写
+        if size < offset { offset = 0 }  // file truncated / rewritten
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -119,8 +123,8 @@ public final class ZcodeRolloutTailer {
         offsets[path] = offset + UInt64(consumed)
     }
 
-    /// 处理完整行（最后的半行不消费），返回消费字节数。
-    /// 单次 JSON 解析同时喂生命周期解码与用量旁路（-> ctx%）。
+    /// Processes complete lines (a trailing partial line is not consumed) and returns the bytes
+    /// consumed. One JSON parse feeds both the lifecycle decoder and the usage side path (-> ctx%).
     private func processLines(_ data: Data, url: URL) -> Int {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
         let complete = data[data.startIndex...lastNewline]
@@ -144,7 +148,8 @@ public final class ZcodeRolloutTailer {
                 deliver(event)
             }
         }
-        // 本批没有生命周期事件但有新用量 -> 至少发一次心跳（模型在跑）
+        // No lifecycle event in this batch but new usage -> emit at least one heartbeat (the
+        // model is running)
         if lastUsage != nil {
             deliver(TaskEvent(
                 source: .zcode, sessionId: ctx.sessionId, kind: .activity(tool: nil),
@@ -173,9 +178,9 @@ public final class ZcodeRolloutTailer {
         handler(enriched, isStale)
     }
 
-    /// 新发现文件：从尾部恢复"最后状态"--
-    /// - 最后一条已完成记录是 tool-calls 中间步（无终轮 stop）：补发 running
-    /// - 已有终轮（stop/error）：注册为空闲会话
+    /// Newly discovered file: recover the "last state" from the tail --
+    /// - last completed record is a tool-calls intermediate step (no final stop): emit running
+    /// - a final turn exists (stop/error): register as an idle session
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         let ctx = context(for: url)
@@ -215,14 +220,14 @@ public final class ZcodeRolloutTailer {
 
         if let finished {
             var event = finished
-            event.kind = .sessionStarted  // 已结束：注册为空闲（直接 finished 会造成竞态）
+            event.kind = .sessionStarted  // already over: register as idle (emitting finished directly would race)
             event.cwd = event.cwd ?? ctx.cwd
             handler(event, false)
             titleEvent(from: event)
         } else if let last = lastEvent {
             var event = last
             event.cwd = event.cwd ?? ctx.cwd
-            handler(event, false)  // 中间步 -> running
+            handler(event, false)  // intermediate step -> running
             titleEvent(from: event)
         } else {
             handler(TaskEvent(
@@ -234,7 +239,7 @@ public final class ZcodeRolloutTailer {
         }
     }
 
-    // MARK: - 上下文占用（usage.total ÷ config.json 的 per-model limit.context）
+    // MARK: - Context usage (usage.total ÷ per-model limit.context from config.json)
 
     private func emitContext(
         for url: URL, context ctx: FileContext,
@@ -243,11 +248,12 @@ public final class ZcodeRolloutTailer {
         if contextWindows == nil {
             contextWindows = ZcodeConfigWindows.parse(configURL: modelConfigURL)
         }
-        // 窗口取该次请求模型在 config 里的值；查不到（自定义 provider 未配 limit）不发
+        // The window is the request model's value in config; not found (custom provider with
+        // no limit configured) -> emit nothing
         guard let window = usage.model.flatMap({ contextWindows?[$0] }), window > 0
         else { return }
         let percent = min(100, Double(usage.usage.total) / Double(window) * 100)
-        // 只在变化时补发，避免刷屏
+        // Emit only on change, to avoid flooding
         if let last = lastContextPercent[url.path], abs(last - percent) < 0.5 { return }
         lastContextPercent[url.path] = percent
         handler(TaskEvent(
@@ -256,10 +262,11 @@ public final class ZcodeRolloutTailer {
             timestamp: Date(), cwd: ctx.cwd), false)
     }
 
-    // MARK: - 会话上下文（cwd 从 db.session 懒查一次）
+    // MARK: - Session context (cwd looked up lazily, once, from db.session)
 
     private func eventKey(for sessionId: String) -> String? {
-        // 反查：contexts 以文件路径为键，这里按 sessionId 匹配（每会话一个文件）
+        // Reverse lookup: contexts is keyed by file path, so match on sessionId here (one file
+        // per session)
         contexts.first { $0.value.sessionId == sessionId }?.key
     }
 
@@ -268,7 +275,8 @@ public final class ZcodeRolloutTailer {
         if let cached = contexts[path] { return cached }
         let sessionId = ZcodeRolloutDecoder.sessionId(fileName: url.lastPathComponent) ?? path
         var ctx = FileContext(sessionId: sessionId, cwd: nil, dbMtime: nil)
-        // 懒查 db：directory 列（db 不存在/无该行 -> cwd 留空，岛上显示短 id）
+        // Lazy db lookup: directory column (no db / no such row -> cwd stays empty and the
+        // island shows the short id)
         if let db = try? SQLiteDB(path: dbPath.path, readOnly: true) {
             let rows = (try? db.query(
                 "SELECT directory FROM session WHERE id = ?", [.text(sessionId)]) { $0.text(0) }) ?? []

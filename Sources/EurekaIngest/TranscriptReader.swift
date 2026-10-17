@@ -2,27 +2,30 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 一条对话消息（Claude / Codex / opencode 三源统一模型，会话查看器用）
+/// One conversation message (unified model across the Claude / Codex / opencode sources, for the
+/// session viewer)
 public struct TranscriptMessage: Identifiable, Equatable, Sendable {
     public enum Role: Equatable, Sendable {
         case user
         case assistant
-        case toolNote   // 工具调用小注（🔧 <名称>，opencode/grok/antigravity 用）
-        case error      // API 错误等
-        case turnTrail  // 一轮工具/检索轨迹聚合（Claude/Codex 产出，steps 承载明细）
-        /// 模型思考正文。**只有部分源有**（Codex `agent_reasoning` / Kimi `think` /
-        /// Qwen `thought`）；Claude 的 `thinking` 块落盘时正文已被剥离，只剩加密签名，
-        /// 所以 Claude 永远不产出这个 role。
+        case toolNote   // tool call note (🔧 <name>, used by opencode/grok/antigravity)
+        case error      // API errors etc.
+        case turnTrail  // per-turn tool/retrieval trail aggregate (from Claude/Codex; steps hold the details)
+        /// Model thinking text. **Only some sources have it** (Codex `agent_reasoning` / Kimi
+        /// `think` / Qwen `thought`); Claude's `thinking` blocks have their text stripped when
+        /// written to disk, leaving only the encrypted signature, so Claude never produces this
+        /// role.
         case thinking
     }
 
-    /// 文件内序号（对话目录跳转锚点）
+    /// Index within the file (jump anchor for the conversation outline)
     public let id: Int
     public var role: Role
-    /// turnTrail 的 text 是轨迹纯文本渲染（会话内搜索/导出兜底可命中）
+    /// For turnTrail, text is the plain-text rendering of the trail (so in-session search and the
+    /// export fallback can match it)
     public var text: String
     public var timestamp: Date?
-    /// 工具轨迹明细（仅 role == .turnTrail 非空）
+    /// Tool trail details (non-empty only when role == .turnTrail)
     public var steps: [ToolStep]
 
     public init(
@@ -36,7 +39,8 @@ public struct TranscriptMessage: Identifiable, Equatable, Sendable {
     }
 }
 
-/// 会话对话记录读取器：整文件解析（容错跳过坏行），超上限截断。
+/// Session transcript reader: parses the whole file (tolerantly skipping bad lines) and truncates
+/// past the limit.
 public enum TranscriptReader {
     public struct Result: Equatable, Sendable {
         public var messages: [TranscriptMessage]
@@ -49,12 +53,12 @@ public enum TranscriptReader {
         return formatter
     }()
 
-    /// 默认加载预算。Claude 的预算同时计消息与工具步（一条 13k 行的真实会话
-    /// 在 2000 时只render出 1241 条消息就截断了）；LazyVStack 惰性建行，
-    /// 上限的意义只是防住病态超大文件，而不是省渲染。
+    /// Default load budget. Claude's budget counts both messages and tool steps (a real 13k-line
+    /// session at 2000 rendered only 1241 messages before truncating); LazyVStack builds rows
+    /// lazily, so the limit only guards against pathologically huge files, not rendering cost.
     public static let defaultMaxMessages = 20_000
 
-    /// 统一入口：按 source 分派
+    /// Single entry point: dispatches by source
     public static func load(
         session: AgentSessionInfo, maxMessages: Int = defaultMaxMessages
     ) -> Result {
@@ -92,21 +96,22 @@ public enum TranscriptReader {
         case .trae:
             return loadTrae()
         case .zcode:
-            // zcode 的 message/part 表与 opencode 同构（同 schema 的 sqlite 库），
-            // transcriptPath 传的是 db 路径
+            // zcode's message/part tables mirror opencode's (a sqlite database with the same
+            // schema); transcriptPath carries the db path
             return loadOpencode(
                 dbPath: session.transcriptPath, sessionId: session.id,
                 maxMessages: maxMessages)
         }
     }
 
-    // MARK: - Trae（会话库加密，只能给一句说明）
+    // MARK: - Trae (session database is encrypted; only a one-line note is possible)
 
-    /// Trae 的会话正文在 `ModularData/ai-agent/database.db` 里，而那个库是 **SQLCipher
-    /// 加密**的（文件头 16 字节是随机 salt，`sqlite3` 直接报 "file is not a database"），
-    /// 全机也没有任何明文转录文件。所以正文永远拿不到 —— 同 Antigravity 的口径，
-    /// 给一句说明而不是一个空白页。会话本身仍可见（标题/时间来自明文记忆库，见
-    /// `TraeSessionIndexer`）。
+    /// Trae's session content lives in `ModularData/ai-agent/database.db`, which is **SQLCipher
+    /// encrypted** (the first 16 bytes are a random salt; `sqlite3` reports "file is not a
+    /// database"), and there is no plaintext transcript anywhere on the machine. So the content is
+    /// never available; as with Antigravity, show a one-line note instead of a blank page. The
+    /// session itself stays visible (title/time come from the plaintext memory library; see
+    /// `TraeSessionIndexer`).
     public static func loadTrae() -> Result {
         Result(
             messages: [TranscriptMessage(
@@ -115,11 +120,12 @@ public enum TranscriptReader {
             truncated: false)
     }
 
-    // MARK: - Cursor（state.vscdb 只读：composerData 给气泡顺序，bubbleId 行给正文）
+    // MARK: - Cursor (state.vscdb read-only: composerData gives bubble order, bubbleId rows give text)
 
-    /// 消息顺序取 `composerData.fullConversationHeadersOnly`（气泡在 KV 里是散的，
-    /// key 按 uuid 排序，只有这张表知道时序）。`type` 1=user / 2=assistant；
-    /// `toolFormerData` 记 🔧 小注；空文本且无工具的气泡（纯 thinking 占位）跳过。
+    /// Message order comes from `composerData.fullConversationHeadersOnly` (bubbles are scattered
+    /// in the KV store with keys sorted by uuid; only this table knows the order). `type`
+    /// 1=user / 2=assistant; `toolFormerData` becomes a 🔧 note; bubbles with empty text and no
+    /// tool (pure thinking placeholders) are skipped.
     public static func loadCursor(dbPath: String, composerId: String, maxMessages: Int) -> Result {
         guard let db = try? SQLiteDB(path: dbPath, readOnly: true),
             let composer = cursorJSON(
@@ -169,11 +175,12 @@ public enum TranscriptReader {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    // MARK: - CodeBuddy（projects/<cwd-slug>/<sessionId>.jsonl；message/function_call 行）
+    // MARK: - CodeBuddy (projects/<cwd-slug>/<sessionId>.jsonl; message/function_call lines)
 
-    /// user input_text → 用户消息（skipRun 元行跳过）；assistant output_text → 助手消息；
-    /// function_call → 🔧 工具小注，function_call_result 仅失败（status != completed）记错误注；
-    /// reasoning / file-history-snapshot / ai-title / summary 跳过。
+    /// user input_text → user message (skipRun meta lines skipped); assistant output_text →
+    /// assistant message; function_call → 🔧 tool note; function_call_result becomes an error
+    /// note only on failure (status != completed); reasoning / file-history-snapshot / ai-title /
+    /// summary are skipped.
     public static func loadCodeBuddy(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
@@ -207,11 +214,12 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - Qoder（projects/<slug>/<sessionId>.jsonl；Claude 式信封，规则同 loadClaude 裁剪）
+    // MARK: - Qoder (projects/<slug>/<sessionId>.jsonl; Claude-style envelope, a trimmed loadClaude)
 
-    /// 与 loadClaude 同构：human 用户正文（origin.kind=="human"、非 isMeta）→ 用户消息；
-    /// assistant text → 助手消息；tool_use 聚成轮轨迹（tool_result is_error 回填）；
-    /// thinking / runtime-config / workspace-directories / last-prompt / 标题行等跳过。
+    /// Mirrors loadClaude: human user text (origin.kind=="human", not isMeta) → user message;
+    /// assistant text → assistant message; tool_use aggregated into the turn trail (tool_result
+    /// is_error back-filled); thinking / runtime-config / workspace-directories / last-prompt /
+    /// title lines etc. are skipped.
     public static func loadQoder(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
@@ -230,14 +238,15 @@ public enum TranscriptReader {
             switch root["type"] as? String {
             case "user":
                 if let text = QoderTranscriptDecoder.userPromptText(root) {
-                    // 真实用户提问 = 新一轮
+                    // A real user prompt = a new turn
                     trailIndex = nil
                     batch = 0
                     messages.append(TranscriptMessage(
                         id: messages.count, role: .user, text: text, timestamp: timestamp))
                 } else if let message = root["message"] as? [String: Any],
                           let blocks = message["content"] as? [[String: Any]] {
-                    // 数组 = tool_result：不入正文，仅按 tool_use_id 回填失败标记
+                    // Array = tool_result: not part of the text; only back-fills failure flags
+                    // by tool_use_id
                     for block in blocks where block["type"] as? String == "tool_result" {
                         guard block["is_error"] as? Bool == true,
                               let toolUseId = block["tool_use_id"] as? String,
@@ -289,7 +298,7 @@ public enum TranscriptReader {
                     }
                 }
             default:
-                break  // 标题行 / runtime-config / workspace-directories / system 等跳过
+                break  // title lines / runtime-config / workspace-directories / system etc. skipped
             }
             return true
         }
@@ -297,10 +306,12 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - Hermes（~/.hermes/state.db 的 messages 表；role=tool 转工具注记）
+    // MARK: - Hermes (messages table in ~/.hermes/state.db; role=tool becomes a tool note)
 
-    /// Hermes 把消息全部存在 state.db（无逐会话 JSONL）。timestamp 是 epoch **秒**（opencode 那张表是毫秒）。
-    /// 只读打开：SQLITE_OPEN_READONLY + 普通路径 → WAL 可见（不能用 immutable=1，会读到旧数据）。
+    /// Hermes stores every message in state.db (no per-session JSONL). timestamp is epoch
+    /// **seconds** (opencode's table uses milliseconds).
+    /// Opened read-only: SQLITE_OPEN_READONLY + a plain path → WAL is visible (immutable=1 must not
+    /// be used; it would read stale data).
     public static func loadHermes(dbPath: String, sessionId: String, maxMessages: Int) -> Result {
         guard let db = try? SQLiteDB(path: dbPath, readOnly: true) else {
             return Result(messages: [], truncated: false)
@@ -332,21 +343,21 @@ public enum TranscriptReader {
                     id: messages.count, role: .toolNote,
                     text: "🔧 \(toolName.isEmpty ? L10n.text("Tool", zhHans: "工具") : toolName)", timestamp: timestamp))
             default:
-                break  // system / 其它角色不进正文
+                break  // system / other roles stay out of the text
             }
         }
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - Qwen（projects/<encoded>/chats/<uuid>.jsonl）
+    // MARK: - Qwen (projects/<encoded>/chats/<uuid>.jsonl)
 
-    /// `{text, thought:true}` part 是**明文思考**（实勘单段 5000+ 字符）→ 出 `.thinking`；
-    /// functionCall → 🔧 小注。
+    /// A `{text, thought:true}` part is **plaintext thinking** (a single part measured 5000+
+    /// characters locally) → emits `.thinking`; functionCall → 🔧 note.
 
     public static func loadQwen(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
-        var seenIds = Set<String>()  // 防会话恢复整写文件产生的重复行
+        var seenIds = Set<String>()  // guards against duplicate lines from session resume rewriting the file
 
         forEachJSONLine(path: path) { root in
             guard messages.count < maxMessages else {
@@ -361,7 +372,7 @@ public enum TranscriptReader {
                     id: messages.count, role: .user, text: message.text,
                     timestamp: message.timestamp))
             case "assistant":
-                // 思考在工具与回答之前：模型是先想再动手
+                // Thinking comes before tools and the answer: the model thinks, then acts
                 for thought in message.thoughts {
                     messages.append(TranscriptMessage(
                         id: messages.count, role: .thinking,
@@ -378,19 +389,20 @@ public enum TranscriptReader {
                         timestamp: message.timestamp))
                 }
             default:
-                break  // system（注入/telemetry）不进对话流
+                break  // system (injection/telemetry) stays out of the conversation stream
             }
             return true
         }
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - Gemini（chats/session-*.jsonl；$set 补丁行与注入的 session_context 跳过）
+    // MARK: - Gemini (chats/session-*.jsonl; $set patch lines and injected session_context skipped)
 
     public static func loadGemini(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
-        // CLI 流式写入会把同一消息行重复写（真实观测）→ 按消息 id 去重
+        // CLI streaming writes the same message line repeatedly (observed in practice) → dedup by
+        // message id
         var seenIds = Set<String>()
 
         forEachJSONLine(path: path) { root in
@@ -416,17 +428,18 @@ public enum TranscriptReader {
                     id: messages.count, role: .error, text: text,
                     timestamp: message.timestamp))
             default:
-                break  // info / session_context 注入不进对话流
+                break  // info / injected session_context stays out of the conversation stream
             }
             return true
         }
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - Antigravity（conversations/<uuid>.db，内容为私有二进制 protobuf）
+    // MARK: - Antigravity (conversations/<uuid>.db; content is proprietary binary protobuf)
 
-    /// Antigravity 会话正文全在 protobuf blob 里（Google 未公开 schema），本项目零依赖无法解码。
-    /// 返回一条说明小注，避免详情页空白误导。
+    /// Antigravity session content lives entirely in protobuf blobs (Google hasn't published the
+    /// schema), which this dependency-free project can't decode. Returns one explanatory note so a
+    /// blank detail page doesn't mislead.
     public static func loadAntigravity() -> Result {
         Result(
             messages: [TranscriptMessage(
@@ -435,19 +448,22 @@ public enum TranscriptReader {
             truncated: false)
     }
 
-    // MARK: - Claude（~/.claude/projects/<encoded>/<session>.jsonl）
+    // MARK: - Claude (~/.claude/projects/<encoded>/<session>.jsonl)
 
     public static func loadClaude(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
-        // 每轮工具轨迹：懒创建在该轮第一个 tool_use 出现的位置，后续步骤原地追加
+        // Per-turn tool trail: created lazily where the turn's first tool_use appears; later steps
+        // are appended in place
         var trailIndex: Int?
-        // tool_use_id → 步骤位置（tool_result is_error 回填用）
+        // tool_use_id → step position (for back-filling tool_result is_error)
         var stepAt: [String: (msg: Int, step: Int)] = [:]
-        // 步数计入截断预算（近似旧口径：旧版每个 tool_use 占一条 toolNote，新版每轮多计 1 条 trail 容器）
+        // Steps count toward the truncation budget (approximates the old accounting: each tool_use
+        // used to take one toolNote; now each turn counts 1 extra for the trail container)
         var stepCount = 0
-        // 批次号：一条 assistant 消息的 content 数组里的 tool_use 是**同一次模型输出**，
-        // 即真正的并行调用；跨消息就是串行。血缘图靠它区分分叉与链。
+        // Batch number: tool_uses in one assistant message's content array are **one model
+        // output**, i.e. truly parallel calls; across messages they are serial. The lineage graph
+        // uses it to tell forks from chains.
         var batch = 0
         func withinBudget() -> Bool { messages.count + stepCount < maxMessages }
 
@@ -464,13 +480,14 @@ public enum TranscriptReader {
                       let message = root["message"] as? [String: Any]
                 else { return true }
                 if let content = message["content"] as? String {
-                    // 真实用户提问 = 新一轮
+                    // A real user prompt = a new turn
                     trailIndex = nil
                     batch = 0
                     messages.append(TranscriptMessage(
                         id: messages.count, role: .user, text: content, timestamp: timestamp))
                 } else if let blocks = message["content"] as? [[String: Any]] {
-                    // 数组 = tool_result：不入正文，仅按 tool_use_id 回填失败标记
+                    // Array = tool_result: not part of the text; only back-fills failure flags
+                    // by tool_use_id
                     for block in blocks where block["type"] as? String == "tool_result" {
                         guard block["is_error"] as? Bool == true,
                               let toolUseId = block["tool_use_id"] as? String,
@@ -486,7 +503,7 @@ public enum TranscriptReader {
                 let isError = root["isApiErrorMessage"] as? Bool == true
                     || message["model"] as? String == "<synthetic>"
                 guard let blocks = message["content"] as? [[String: Any]] else { return true }
-                batch += 1  // 每条 assistant 消息一批
+                batch += 1  // one batch per assistant message
                 for block in blocks {
                     guard withinBudget() else {
                         truncated = true
@@ -519,15 +536,16 @@ public enum TranscriptReader {
                         }
                         stepCount += 1
                     case "thinking":
-                        // 实勘恒为空串（只剩加密 signature）→ 这里等于不触发；
-                        // 写成条件是为了 Claude 哪天不再剥离就自动生效。
+                        // Always an empty string in practice (only the encrypted signature
+                        // remains) → effectively never fires; it's conditional so it takes
+                        // effect automatically if Claude ever stops stripping it.
                         appendThinkingIfPresent(block, timestamp: timestamp, into: &messages)
                     default:
                         break
                     }
                 }
             default:
-                break  // ai-title / system / summary 等跳过
+                break  // ai-title / system / summary etc. skipped
             }
             return true
         }
@@ -536,8 +554,9 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    /// 把 `subagents/agent-*.jsonl` 的步骤挂到对应的 `.agent` 步上（按 `toolUseId` 精确配对）。
-    /// 目录不存在（没派生过子代理）时是零成本 no-op。
+    /// Attaches the steps from `subagents/agent-*.jsonl` to the matching `.agent` step (paired
+    /// exactly by `toolUseId`). A zero-cost no-op when the directory doesn't exist (no subagent
+    /// was spawned).
     static func attachSubagentTrails(
         _ messages: inout [TranscriptMessage], mainTranscriptPath: String
     ) {
@@ -558,41 +577,47 @@ public enum TranscriptReader {
         }
     }
 
-    // MARK: - Codex（~/.codex/sessions/.../rollout-*.jsonl）
+    // MARK: - Codex (~/.codex/sessions/.../rollout-*.jsonl)
 
-    /// 正文有两代格式，必须都认：
-    /// - **当前**（Desktop / TUI / Chrome 扩展，本机 2026 年的 rollout 已全部切过来）：
-    ///   `event_msg/item_completed`，`item.type` 为 `UserMessage` / `AgentMessage`，
-    ///   正文在 `content[]`（用户 `type:text`，助手 `type:Text`）。
-    ///   旧的 `user_message` / `agent_message` 纯字符串在这些文件里出现 0 次，
-    ///   只解析旧字段时，会话详情只剩工具轨迹——筛「用户」或「助手」就是空白。
-    /// - **旧版**：`event_msg` 的 `user_message` / `agent_message` 纯字符串。测试夹具和
-    ///   更早的 rollout 仍走这条，不能删。
+    /// Message text comes in two format generations, and both must be recognized:
+    /// - **Current** (Desktop / TUI / Chrome extension; every local 2026 rollout has switched):
+    ///   `event_msg/item_completed` with `item.type` `UserMessage` / `AgentMessage`, text in
+    ///   `content[]` (user `type:text`, assistant `type:Text`).
+    ///   The old plain-string `user_message` / `agent_message` appear 0 times in these files;
+    ///   parsing only the old fields leaves the session detail with just the tool trail, and
+    ///   filtering to "User" or "Assistant" shows nothing.
+    /// - **Legacy**: plain-string `user_message` / `agent_message` in `event_msg`. Test fixtures
+    ///   and older rollouts still go this way, so it can't be removed.
     ///
-    /// `response_item/message` 与上面两条重复（还有 developer 指令、environment_context），
-    /// 继续跳过。导入的外部会话会把工具调用塞进没有 `phase` 的 `AgentMessage`
-    /// （`[external_agent_tool_call:…]` / `[external_agent_tool_result]`），那不是回复，丢掉。
+    /// `response_item/message` duplicates the two above (plus developer instructions and
+    /// environment_context) and stays skipped. Imported external sessions stuff tool calls into
+    /// an `AgentMessage` with no `phase` (`[external_agent_tool_call:…]` /
+    /// `[external_agent_tool_result]`); those aren't replies and are dropped.
     ///
-    /// 工具轨迹用 response_item（**custom_tool_call** / function_call / web_search_call）
-    /// + event_msg 的 mcp_tool_call_end。
+    /// The tool trail uses response_item (**custom_tool_call** / function_call / web_search_call)
+    /// + event_msg mcp_tool_call_end.
     ///
-    /// 两处与旧注释不同、都是实勘纠正的：
-    ///  1. **`custom_tool_call` 才是当前 Codex 的命令/补丁主通道**（实勘 12 个最大 rollout：
-    ///     `exec` 1334 + `apply_patch` 97）。以前完全没解析 → Codex 轨迹是残缺的。
-    ///  2. **思考明文可得**：加密的是 `response_item/reasoning`（`encrypted_content`），
-    ///     而 `event_msg/agent_reasoning.text` 是明文（实勘 265 条）。
-    ///     新格式的 `item_completed/Reasoning` 在本机样本里 `summary_text` 全空，不另开一条。
+    /// Two points differ from the old comment, both corrected by local inspection:
+    ///  1. **`custom_tool_call` is current Codex's main command/patch channel** (the 12 largest
+    ///     local rollouts: `exec` 1334 + `apply_patch` 97). It used to be ignored entirely → the
+    ///     Codex trail was incomplete.
+    ///  2. **Plaintext thinking is available**: the encrypted one is `response_item/reasoning`
+    ///     (`encrypted_content`), while `event_msg/agent_reasoning.text` is plaintext (265 lines
+    ///     locally). The new format's `item_completed/Reasoning` has an empty `summary_text` in
+    ///     every local sample, so it doesn't get its own message.
     ///
-    /// 轮边界优先用 rollout 自带的真 `turn_id`（覆盖 15 种行类型，实勘单文件 107 个 turn），
-    /// 取不到才退回「用户消息 = 新一轮」。
+    /// Turn boundaries prefer the rollout's own real `turn_id` (present on 15 line types; 107
+    /// turns in a single local file), falling back to "user message = new turn" only when it's
+    /// missing.
     public static func loadCodex(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
         var trailIndex: Int?
-        // call_id → 步骤位置（工具结果行回填失败标记用）
+        // call_id → step position (for back-filling failure flags from tool result lines)
         var stepAt: [String: (msg: Int, step: Int)] = [:]
         var stepCount = 0
-        // 当前 turn_id 与批次号：同一 turn 内的相邻工具调用算同批（并行分叉判据）
+        // Current turn_id and batch number: adjacent tool calls within one turn count as one
+        // batch (the parallel-fork criterion)
         var currentTurnId: String?
         var batch = 0
         func withinBudget() -> Bool { messages.count + stepCount < maxMessages }
@@ -611,7 +636,8 @@ public enum TranscriptReader {
             }
             stepCount += 1
         }
-        /// 结果行回填：失败标记打到对应步骤上（判不出成败就不动）
+        /// Result-line back-fill: marks failure on the matching step (left alone when the outcome
+        /// can't be determined)
         func markOutcome(callId: String?, output: Any?) {
             guard let callId, let pos = stepAt[callId],
                 AuditExtractor.codexOutcome(output)?.isError == true
@@ -626,7 +652,8 @@ public enum TranscriptReader {
             }
             guard let payload = root["payload"] as? [String: Any] else { return true }
             let timestamp = (root["timestamp"] as? String).flatMap(parseTimestamp)
-            // 真 turn_id 换了就是新一轮（比「用户消息」更准：工具续跑不会误判）
+            // A changed real turn_id means a new turn (more accurate than "user message": tool
+            // continuations aren't misjudged)
             if let turnId = codexTurnId(payload), turnId != currentTurnId {
                 currentTurnId = turnId
                 trailIndex = nil
@@ -637,19 +664,19 @@ public enum TranscriptReader {
                 switch payload["type"] as? String {
                 case "user_message":
                     if let text = payload["message"] as? String, !text.isEmpty {
-                        trailIndex = nil  // 用户消息 = 新一轮（turn_id 缺失时的兜底）
+                        trailIndex = nil  // user message = new turn (fallback when turn_id is missing)
                         batch = 0
                         messages.append(TranscriptMessage(
                             id: messages.count, role: .user, text: text, timestamp: timestamp))
                     }
                 case "agent_reasoning":
-                    // 明文思考（加密的是 response_item/reasoning，不是这条）
+                    // Plaintext thinking (the encrypted one is response_item/reasoning, not this)
                     if let text = payload["text"] as? String,
                         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         messages.append(TranscriptMessage(
                             id: messages.count, role: .thinking,
                             text: clipThinking(text), timestamp: timestamp))
-                        batch += 1  // 思考之后是新一批工具调用
+                        batch += 1  // a new batch of tool calls follows thinking
                     }
                 case "agent_message":
                     if let text = payload["message"] as? String, !text.isEmpty {
@@ -663,7 +690,8 @@ public enum TranscriptReader {
                             id: messages.count, role: .error, text: text, timestamp: timestamp))
                     }
                 case "mcp_tool_call_end":
-                    // MCP 干净命名在这里（function_call 里是 "_" 前缀的重复项）；result.Err 判错
+                    // The clean MCP name lives here (function_call holds "_"-prefixed
+                    // duplicates); result.Err marks an error
                     let invocation = payload["invocation"] as? [String: Any]
                     let server = invocation?["server"] as? String ?? "mcp"
                     let tool = invocation?["tool"] as? String ?? "?"
@@ -680,7 +708,7 @@ public enum TranscriptReader {
                     switch item["type"] as? String {
                     case "UserMessage":
                         if let text = codexItemVisibleText(item, userFacing: true) {
-                            trailIndex = nil  // 用户消息 = 新一轮（turn_id 缺失时的兜底）
+                            trailIndex = nil  // user message = new turn (fallback when turn_id is missing)
                             batch = 0
                             messages.append(TranscriptMessage(
                                 id: messages.count, role: .user, text: text, timestamp: timestamp))
@@ -692,7 +720,7 @@ public enum TranscriptReader {
                                 timestamp: timestamp))
                         }
                     default:
-                        break  // CommandExecution / Reasoning 等：轨迹已从 response_item 来
+                        break  // CommandExecution / Reasoning etc.: the trail already comes from response_item
                     }
                 default:
                     break
@@ -700,7 +728,8 @@ public enum TranscriptReader {
             case "response_item":
                 switch payload["type"] as? String {
                 case "custom_tool_call":
-                    // 当前 Codex 的命令/补丁主通道；input 不是 JSON（JS 源码或补丁正文）
+                    // Current Codex's main command/patch channel; input isn't JSON (JS source or
+                    // a patch body)
                     guard let name = payload["name"] as? String, !name.isEmpty
                     else { return true }
                     appendStep(
@@ -711,7 +740,7 @@ public enum TranscriptReader {
                     markOutcome(
                         callId: payload["call_id"] as? String, output: payload["output"])
                 case "function_call":
-                    // "_" 前缀 = MCP 重复项，跳过（同 CodexUsageScanner 口径）
+                    // "_" prefix = MCP duplicate, skipped (same rule as CodexUsageScanner)
                     guard let name = payload["name"] as? String, !name.isEmpty,
                           !name.hasPrefix("_")
                     else { return true }
@@ -720,8 +749,10 @@ public enum TranscriptReader {
                             name: name, argumentsJSON: payload["arguments"] as? String),
                         callId: payload["call_id"] as? String, timestamp: timestamp)
                 case "function_call_output":
-                    // 从输出文本判失败。旧版读 `metadata.exit_code`，但**当前 Codex 已无该字段**
-                    // （实勘 2624 条 function_call_output 中 metadata 出现 0 次）→ 那是死代码。
+                    // Failure is judged from the output text. The old version read
+                    // `metadata.exit_code`, but **current Codex no longer has that field**
+                    // (metadata appeared 0 times in 2624 local function_call_output lines) → that
+                    // was dead code.
                     markOutcome(
                         callId: payload["call_id"] as? String, output: payload["output"])
                 case "web_search_call":
@@ -732,10 +763,10 @@ public enum TranscriptReader {
                             detail: ToolStepExtractor.clip(action?["query"] as? String)),
                         callId: nil, timestamp: timestamp)
                 default:
-                    break  // reasoning（加密）/ message（与 event_msg 重复）等跳过
+                    break  // reasoning (encrypted) / message (duplicates event_msg) etc. skipped
                 }
             default:
-                break  // session_meta / turn_context 等跳过
+                break  // session_meta / turn_context etc. skipped
             }
             return true
         }
@@ -743,12 +774,14 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    /// `item_completed` 的可见正文。
+    /// Visible text of an `item_completed`.
     ///
-    /// 用户侧 Chrome 扩展会把标签页说明和「## My request:」包在真正的输入外面，
-    /// 每轮都重复；会话页只留请求本身。附图没有图片视图，记文件名。
-    /// 助手侧丢掉导入会话的工具协议行——没有 `phase` 的历史回复仍要保留
-    /// （`commentary` / `final_answer` 是后来才加上的）。
+    /// On the user side, the Chrome extension wraps the real input in tab descriptions and
+    /// "## My request:", repeated every turn; the session page keeps only the request itself.
+    /// Attached images have no image view, so their file names are recorded.
+    /// On the assistant side, tool protocol lines from imported sessions are dropped; historical
+    /// replies without a `phase` must still be kept (`commentary` / `final_answer` were added
+    /// later).
     static func codexItemVisibleText(_ item: [String: Any], userFacing: Bool) -> String? {
         let parts: [Any]
         if let content = item["content"] as? [Any] {
@@ -787,8 +820,9 @@ public enum TranscriptReader {
         return joined.isEmpty ? nil : joined
     }
 
-    /// Chrome 扩展 / 粘贴附件把模型指令包在用户输入外。只认这两种已知开头，
-    /// 避免误伤正文里恰好出现「My request」的普通消息。
+    /// The Chrome extension / pasted attachments wrap model instructions around the user input.
+    /// Only these two known prefixes are recognized, so ordinary messages that happen to contain
+    /// "My request" aren't mangled.
     static func unwrapCodexUserEnvelope(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let enveloped = trimmed.hasPrefix("# Chrome tabs:")
@@ -798,7 +832,8 @@ public enum TranscriptReader {
         return body.isEmpty ? trimmed : body
     }
 
-    /// 导入的外部 agent 把工具调用记成 AgentMessage。这些行不是给用户看的回复。
+    /// Imported external agents record tool calls as AgentMessage. These lines aren't replies
+    /// meant for the user.
     static func codexAgentTextIsProtocolNoise(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("[external_agent_tool_call:") { return true }
@@ -807,8 +842,9 @@ public enum TranscriptReader {
         return false
     }
 
-    /// rollout 行里的真 `turn_id`。实勘落在 `internal_chat_message_metadata_passthrough.turn_id`
-    /// 或 payload 顶层（`task_started` / `task_complete` / `turn_aborted` / `item_completed`）。
+    /// The real `turn_id` in a rollout line. Locally it sits in
+    /// `internal_chat_message_metadata_passthrough.turn_id` or at the payload top level
+    /// (`task_started` / `task_complete` / `turn_aborted` / `item_completed`).
     static func codexTurnId(_ payload: [String: Any]) -> String? {
         if let passthrough = payload["internal_chat_message_metadata_passthrough"]
             as? [String: Any], let id = passthrough["turn_id"] as? String, !id.isEmpty {
@@ -818,8 +854,9 @@ public enum TranscriptReader {
         return nil
     }
 
-    /// 思考正文上限：Kimi 单段实测可达 19.5k 字符，整段驻留内存不值当。
-    /// 比工具参数（160）宽松得多——思考的价值就在于能读，但也必须有上界。
+    /// Thinking text limit: a single Kimi segment measured up to 19.5k characters, not worth
+    /// keeping whole in memory. Far looser than tool arguments (160): thinking is only valuable
+    /// if readable, but it still needs an upper bound.
     static let thinkingLimit = 1200
 
     static func clipThinking(_ raw: String) -> String {
@@ -828,11 +865,12 @@ public enum TranscriptReader {
             ? text : String(text.prefix(thinkingLimit)) + "…"
     }
 
-    /// Claude 式 `thinking` 块 → 思考消息，**正文为空就什么都不做**。
+    /// Claude-style `thinking` block → thinking message; **does nothing when the text is empty**.
     ///
-    /// 对 Claude 这是个恒不触发的分支（实勘 377 个 `thinking` 块的 `thinking` 字段全是空串，
-    /// 只剩 9848 字符的加密 `signature`）；写成条件而不是写死「Claude 没有」，
-    /// 是为了它哪天不再剥离就自动生效，也让同构的 Qoder 直接受益。
+    /// For Claude this branch never fires (all 377 local `thinking` blocks had an empty
+    /// `thinking` field, leaving only a 9848-character encrypted `signature`). It's written as a
+    /// condition rather than hardcoding "Claude has none" so it takes effect automatically if
+    /// Claude ever stops stripping, and so the same-shaped Qoder benefits directly.
     static func appendThinkingIfPresent(
         _ block: [String: Any], timestamp: Date?, into messages: inout [TranscriptMessage]
     ) {
@@ -844,14 +882,15 @@ public enum TranscriptReader {
             text: clipThinking(raw), timestamp: timestamp))
     }
 
-    /// 收尾：turnTrail 消息回填纯文本渲染（搜索/导出兜底）
+    /// Final pass: back-fills the plain-text rendering into turnTrail messages (search/export
+    /// fallback)
     private static func backfillTrailText(_ messages: inout [TranscriptMessage]) {
         for index in messages.indices where messages[index].role == .turnTrail {
             messages[index].text = ToolStepExtractor.plainText(messages[index].steps)
         }
     }
 
-    // MARK: - opencode（opencode.db 只读：message 表 role + part 表正文）
+    // MARK: - opencode (opencode.db read-only: role from the message table + text from the part table)
 
     public static func loadOpencode(dbPath: String, sessionId: String, maxMessages: Int) -> Result {
         guard let db = try? SQLiteDB(path: dbPath, readOnly: true) else {
@@ -859,7 +898,7 @@ public enum TranscriptReader {
         }
         var messages: [TranscriptMessage] = []
         var truncated = false
-        // 消息按创建时间排序；role 在 message.data JSON 里
+        // Messages ordered by creation time; role lives in the message.data JSON
         let rows = (try? db.query("""
         SELECT id, data, time_created FROM message
         WHERE session_id = ? ORDER BY time_created, id
@@ -878,7 +917,7 @@ public enum TranscriptReader {
                 (info["role"] as? String) == "user" ? .user : .assistant
             let timestamp = Date(timeIntervalSince1970: createdMs / 1000)
 
-            // 正文 = 该消息全部 text part 拼接；tool part 记小注
+            // Text = all of the message's text parts concatenated; tool parts become notes
             let parts = (try? db.query(
                 "SELECT data FROM part WHERE message_id = ? ORDER BY id",
                 [.text(messageId)]) { $0.text(0) ?? "{}" }) ?? []
@@ -895,7 +934,7 @@ public enum TranscriptReader {
                 case "tool":
                     toolNames.append(part["tool"] as? String ?? L10n.text("Tool", zhHans: "工具"))
                 default:
-                    break  // reasoning / step-start 等跳过
+                    break  // reasoning / step-start etc. skipped
                 }
             }
             for tool in toolNames {
@@ -913,12 +952,13 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - grok（~/.grok/sessions/<enc>/<uuid>/chat_history.jsonl）
+    // MARK: - grok (~/.grok/sessions/<enc>/<uuid>/chat_history.jsonl)
 
-    /// user 的 content 是 [{type:text,text}] 数组；assistant 的 content 是纯字符串。
-    /// reasoning（加密）/ tool_result（冗长）/ backend_tool_call / system 一律跳过。
-    /// chat_history.jsonl 无逐条时间戳 → 用同目录 events.jsonl 的 turn_started 时间按轮次补：
-    /// 每条真实用户提问推进一轮，该轮内所有消息共用该轮开始时间（轮次粒度）。
+    /// user content is a [{type:text,text}] array; assistant content is a plain string.
+    /// reasoning (encrypted) / tool_result (verbose) / backend_tool_call / system are all skipped.
+    /// chat_history.jsonl has no per-message timestamps → fill them per turn from the turn_started
+    /// times in the sibling events.jsonl: each real user prompt advances one turn, and every
+    /// message in that turn shares the turn's start time (turn-level granularity).
     public static func loadGrok(path: String, maxMessages: Int) -> Result {
         let eventsPath = URL(fileURLWithPath: path)
             .deletingLastPathComponent().appendingPathComponent("events.jsonl").path
@@ -935,7 +975,8 @@ public enum TranscriptReader {
             }
             switch root["type"] as? String {
             case "user":
-                // 真实提问（无 synthetic_reason，synthetic 是工具续跑）推进一轮时间
+                // A real prompt (no synthetic_reason; synthetic means a tool continuation)
+                // advances the turn time
                 if root["synthetic_reason"] == nil, !turnTimes.isEmpty {
                     turnIndex += 1
                     currentTime = turnTimes[min(turnIndex, turnTimes.count - 1)]
@@ -963,13 +1004,14 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    // MARK: - kimi（~/.kimi-code/sessions/<ws>/<session>/agents/main/wire.jsonl）
+    // MARK: - kimi (~/.kimi-code/sessions/<ws>/<session>/agents/main/wire.jsonl)
 
-    /// wire.jsonl 为事件溯源日志（epoch-ms `time`，schema 已对真实会话核验）：
-    /// user 正文 = turn.prompt(origin=user) 的 input text 块；
-    /// assistant 正文 = loop 事件 content.part(part.type=text) 整段；
-    /// **think 段是明文思考**（实勘 235 段，最长 19.5k）→ 单独出 `.thinking` 消息；
-    /// tool.call 记 🔧 小注；metadata/config/usage 等跳过。
+    /// wire.jsonl is an event-sourced log (epoch-ms `time`; schema verified against real sessions):
+    /// user text = the input text blocks of turn.prompt(origin=user);
+    /// assistant text = the whole content.part(part.type=text) of loop events;
+    /// **think segments are plaintext thinking** (235 segments locally, longest 19.5k) → emitted
+    /// as separate `.thinking` messages;
+    /// tool.call becomes a 🔧 note; metadata/config/usage etc. are skipped.
     public static func loadKimi(path: String, maxMessages: Int) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
@@ -1000,7 +1042,8 @@ public enum TranscriptReader {
         return Result(messages: messages, truncated: truncated)
     }
 
-    /// 同目录 events.jsonl 按顺序的 turn_started 时间（grok 对话按轮次补时间用）
+    /// turn_started times, in order, from the sibling events.jsonl (used to fill grok message
+    /// times per turn)
     private static func grokTurnTimes(eventsPath: String) -> [Date] {
         var times: [Date] = []
         forEachJSONLine(path: eventsPath) { root in
@@ -1013,15 +1056,17 @@ public enum TranscriptReader {
         return times
     }
 
-    // MARK: - 工具
+    // MARK: - Helpers
 
-    /// 逐行解析 jsonl（坏行/半行容错跳过）；body 返回 false 提前终止。
+    /// Parses jsonl line by line (bad/partial lines tolerantly skipped); body returning false
+    /// stops early.
     ///
-    /// 每行一个 autoreleasepool：JSONSerialization 产出的桥接对象（NSDictionary/
-    /// NSString 树）是 autorelease 的，不排水就要等整个队列块结束才释放 ——
-    /// 全库重扫（迁移后指纹清空）在一个块里连续解析上百个 transcript 时，
-    /// 实测把 app 内存顶到 5.5GB。留在 messages 里的 String 已被数组 retain，
-    /// 不受排水影响。
+    /// One autoreleasepool per line: the bridged objects JSONSerialization produces
+    /// (NSDictionary/NSString trees) are autoreleased, and without draining they aren't freed
+    /// until the whole queue block ends. A full rescan (fingerprints cleared after a migration)
+    /// parsing hundreds of transcripts back to back in one block was measured pushing app memory
+    /// to 5.5GB. Strings kept in messages are already retained by the array and unaffected by
+    /// draining.
     private static func forEachJSONLine(
         path: String, _ body: ([String: Any]) -> Bool
     ) {
@@ -1047,7 +1092,7 @@ public enum TranscriptReader {
     }
 }
 
-/// 把对话记录渲染为 Markdown（会话导出/复制用）。纯函数，可单测。
+/// Renders a transcript as Markdown (for session export/copy). Pure function, unit-testable.
 public enum TranscriptMarkdown {
     public static func render(session: AgentSessionInfo, messages: [TranscriptMessage]) -> String {
         let formatter = DateFormatter()
@@ -1076,7 +1121,7 @@ public enum TranscriptMarkdown {
                     lines.append("  - [\(step.kind.label)] \(step.name)\(flag)\(detail)")
                 }
             case .thinking:
-                // 引用块：思考不是回答，导出时要与正文区分开
+                // Blockquote: thinking isn't the answer and must stay distinct from it in exports
                 lines.append(L10n.format("> 💭 Thinking%@", zhHans: "> 💭 思考%@", String(time)))
                 lines.append(">")
                 for line in message.text.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -1088,7 +1133,7 @@ public enum TranscriptMarkdown {
         return lines.joined(separator: "\n")
     }
 
-    /// 文件名安全化（去掉路径分隔符等）
+    /// Makes a file name safe (strips path separators etc.)
     public static func safeFileName(_ name: String) -> String {
         String(name.map { "/:\\?%*|\"<>".contains($0) ? "-" : $0 }).prefix(80).description
     }

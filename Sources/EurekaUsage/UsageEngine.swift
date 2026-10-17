@@ -1,9 +1,9 @@
 import Foundation
 import EurekaKit
 
-/// 用量引擎入口。M5 实现：
-/// - ClaudeTranscriptScanner（offset 增量 + requestId+message.id 跨文件去重）
-/// - CodexUsageScanner（total_token_usage 相邻差值法）
-/// - PricingTable（家族匹配；未知模型仅显示 token 不算钱）
-/// - UsageAggregator（今日/本周聚合，本地时区，周一起算）
+/// Usage engine entry point. M5 implementation:
+/// - ClaudeTranscriptScanner (offset-incremental + cross-file requestId+message.id dedup)
+/// - CodexUsageScanner (adjacent differences of total_token_usage)
+/// - PricingTable (family matching; unknown models show tokens only, no cost)
+/// - UsageAggregator (today / this-week aggregation, local time zone, weeks start on Monday)
 public enum UsageEngine {}

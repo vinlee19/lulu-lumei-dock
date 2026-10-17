@@ -1,19 +1,21 @@
 import Foundation
 
-/// 界面语言。
+/// Interface language.
 ///
-/// 英文是默认语言，也是新增文案的源语言。没有存过偏好、或存了一个不认识的值，都落在英文。
-/// 简体中文是唯一的翻译。再加一种语言时，给这个枚举加一个 case，并给 `L10n.text` 补一条分支。
+/// English is the default and the source language for new copy. No saved preference, or an
+/// unrecognized saved value, falls back to English. Simplified Chinese is the only translation. To
+/// add a language, add a case to this enum and a branch to `L10n.text`.
 public enum AppLanguage: String, CaseIterable, Sendable, Equatable {
     case english = "en"
     case simplifiedChinese = "zh-Hans"
 
-    /// UserDefaults 键。稳定契约，不要改名。
+    /// UserDefaults key. A stable contract; do not rename.
     public static let defaultsKey = "appLanguage"
 
     public var locale: Locale { Locale(identifier: rawValue) }
 
-    /// 语言在选择器里的自称。不随当前界面语言翻转，否则切到英文后找不到「简体中文」。
+    /// The language's own name in the picker. Does not follow the current UI language, or after
+    /// switching to English nobody could find Simplified Chinese.
     public var endonym: String {
         switch self {
         case .english: return "English"
@@ -28,17 +30,21 @@ public enum AppLanguage: String, CaseIterable, Sendable, Equatable {
 }
 
 public extension Notification.Name {
-    /// `L10n.current` 已切到新语言。主菜单、灵动岛等不在 SwiftUI 设置树里的表面要自己重绘。
+    /// `L10n.current` has switched to the new language. Surfaces outside the SwiftUI settings tree
+    /// (main menu, Dynamic Island) must redraw themselves.
     static let eurekaLanguageDidChange = Notification.Name("eureka.languageDidChange")
 }
 
-/// 界面文案。英文是 key，也是默认显示；`zhHans` 必须是改动前的中文原文，测试套件钉在中文上。
+/// UI copy. English is the key and the default display; `zhHans` must be the original Chinese text
+/// from before the change, which the test suite pins.
 ///
-/// 调用发生在读文案的那一刻，不要把结果存进 `static let`——那会把第一次的语言冻住。
-/// 健康登记的名字是稳定键，展示走 `healthTitle`，不要翻译后再拿去 `register` / `beat`。
+/// Call this at the moment the copy is read; don't store the result in a `static let`, which would
+/// freeze the first language. Health-registry names are stable keys; display them via
+/// `healthTitle`, and never translate one before passing it to `register` / `beat`.
 public enum L10n {
-    // 这台机器的 Command Line Tools SDK 还没有 OSAllocatedUnfairLock。NSLock 够用：
-    // 读文案发生在主线程和少数后台格式化上，临界区只有一次枚举读写。
+    // This machine's Command Line Tools SDK has no OSAllocatedUnfairLock yet. NSLock is enough:
+    // copy is read on the main thread and in a few background formatters, and the critical section
+    // is a single enum read/write.
     private static let lock = NSLock()
     private static var language = AppLanguage.english
 
@@ -55,7 +61,8 @@ public enum L10n {
         }
     }
 
-    /// 读已保存的偏好。没有记录时是英文。GUI 与 CLI 都要在造任何界面文案之前调一次。
+    /// Read the saved preference; English when nothing is recorded. Both GUI and CLI must call this
+    /// once before building any UI copy.
     public static func applyStoredPreference(defaults: UserDefaults = .standard) {
         current = AppLanguage.resolve(defaults.string(forKey: AppLanguage.defaultsKey))
     }
@@ -67,14 +74,16 @@ public enum L10n {
         }
     }
 
-    /// 两个模板的占位符个数、顺序、类型必须一致。数字用 `%@` 传入 `String(n)`，
-    /// 避免 `%d` 和 `Int` 宽度不一致。模板里的字面百分号写成 `%%`。
+    /// Both templates must have the same placeholder count, order, and types. Pass numbers as `%@`
+    /// with `String(n)` to avoid width mismatches between `%d` and `Int`. Write a literal percent
+    /// sign in a template as `%%`.
     public static func format(_ english: String, zhHans: String, _ args: CVarArg...) -> String {
         let template = text(english, zhHans: zhHans)
         return String(format: template, locale: current.locale, arguments: args)
     }
 
-    /// `Text` 的字符串字面量会解析 Markdown；换成运行时字符串后要走这里，星号才不会漏到界面上。
+    /// `Text` parses Markdown in string literals; runtime strings must go through here so asterisks
+    /// don't leak into the UI.
     public static func markdown(_ english: String, zhHans: String) -> AttributedString {
         let value = text(english, zhHans: zhHans)
         return (try? AttributedString(

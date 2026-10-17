@@ -2,8 +2,8 @@ import EurekaKit
 import EurekaStore
 import SwiftUI
 
-/// 活跃时段热力图卡片：周 × 24 小时网格，看什么时段用得最多。
-/// 数据跟随仪表盘当前时间段/来源筛选（"今日"只有一列属预期）。
+/// Active-hours heatmap card: weekday × 24-hour grid showing when usage peaks. Data follows the
+/// dashboard's current period/source filter ("Today" having only one column is expected).
 struct UsageHeatmapView: View {
     let cells: [UsageRepo.HeatmapCell]
 
@@ -21,7 +21,7 @@ struct UsageHeatmapView: View {
         }
     }
 
-    /// 显示行序：周一在上（SQLite %w 语义 0=周日 … 6=周六）
+    /// Display row order: Monday on top (SQLite %w semantics: 0 = Sunday ... 6 = Saturday)
     private static let displayWeekdays = [1, 2, 3, 4, 5, 6, 0]
     private static func weekdayName(_ weekday: Int) -> String {
         switch weekday {
@@ -35,7 +35,7 @@ struct UsageHeatmapView: View {
         }
     }
 
-    /// (weekday*24+hour) → 格子
+    /// (weekday*24+hour) → cell
     private var cellMap: [Int: UsageRepo.HeatmapCell] {
         var map: [Int: UsageRepo.HeatmapCell] = [:]
         for cell in cells where (0..<7).contains(cell.weekday) && (0..<24).contains(cell.hour) {
@@ -82,7 +82,7 @@ struct UsageHeatmapView: View {
         let map = cellMap
         let maxValue = max(1, map.values.map { value($0) }.max() ?? 1)
         return VStack(spacing: 2) {
-            // 顶行小时标签（每 6 小时一个）
+            // Hour labels on the top row (one every 6 hours)
             HStack(spacing: 2) {
                 Text("")
                     .frame(width: 26)
@@ -112,7 +112,8 @@ struct UsageHeatmapView: View {
         }
     }
 
-    /// 单色阶梯度；sqrt 压长尾（个别高峰小时不把其余压成看不出深浅）
+    /// Single-hue gradient; sqrt compresses the long tail (a few peak hours don't flatten the rest
+    /// into indistinguishable shades)
     private func color(_ value: Int, maxValue: Int) -> Color {
         guard value > 0 else { return Color.primary.opacity(0.04) }
         let normalized = (Double(value) / Double(maxValue)).squareRoot()

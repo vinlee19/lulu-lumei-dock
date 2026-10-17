@@ -7,7 +7,7 @@ func limitForecasterTests(_ t: TestRunner) {
 
     let base = Date(timeIntervalSince1970: 1_784_600_000)
 
-    /// 每 5 分钟一个采样点
+    /// One sample every 5 minutes
     func points(_ percents: [Double]) -> [LimitForecaster.Point] {
         percents.enumerated().map { index, percent in
             LimitForecaster.Point(
@@ -16,7 +16,7 @@ func limitForecasterTests(_ t: TestRunner) {
     }
 
     t.test("匀速上升 → 线性外推 ETA 正确") {
-        // 每 5 分钟 +5%：60% → 70%，斜率 1%/min，从 70% 到 100% 还要 30 分钟
+        // +5% every 5 minutes: 60% → 70%, slope 1%/min, so 30 more minutes from 70% to 100%
         let series = points([60, 65, 70])
         let now = base.addingTimeInterval(600)
         let eta = LimitForecaster.forecastFullAt(points: series, now: now)
@@ -38,14 +38,15 @@ func limitForecasterTests(_ t: TestRunner) {
     }
 
     t.test("ETA 超出 90 分钟视距 → 不预测") {
-        // 每 5 分钟 +0.5%：到 100% 需要约 5 小时
+        // +0.5% every 5 minutes: about 5 hours to reach 100%
         let series = points([84, 84.5, 85])
         try expect(LimitForecaster.forecastFullAt(
             points: series, now: base.addingTimeInterval(600)) == nil)
     }
 
     t.test("窗口重置回落 → 只用回落后的尾段拟合") {
-        // 前段冲到 90%，重置回落到 10% 后缓慢爬升 → 尾段不满足资格，不预测
+        // Spikes to 90% early, resets to 10%, then climbs slowly → the tail doesn't qualify, no
+        // forecast
         let series = points([80, 85, 90, 10, 12, 14])
         try expect(LimitForecaster.forecastFullAt(
             points: series, now: base.addingTimeInterval(1500)) == nil,

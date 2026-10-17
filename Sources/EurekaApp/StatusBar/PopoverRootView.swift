@@ -2,12 +2,14 @@ import EurekaKit
 import EurekaUsage
 import SwiftUI
 
-/// popover 页签导航（外部可控，首启引导直达设置页）
+/// Popover tab navigation (externally controllable; first-launch onboarding jumps straight to
+/// Settings)
 @MainActor
 final class PopoverNavigation: ObservableObject {
     @Published var tab: PopoverRootView.Tab = .history
-    /// 设置页当前子页。放这里而不是 SettingsView 的私有 @State：
-    /// 侧栏底部品牌区要能直接跳「设置 → 关于」，跨页跳转本就是本类的职责。
+    /// Current Settings subpage. Lives here rather than as SettingsView's private @State: the
+    /// sidebar's bottom brand area must jump straight to Settings → About, and cross-page jumps are
+    /// this class's job anyway.
     @Published var settingsSection: SettingsView.SettingsSection = .general
 }
 
@@ -30,7 +32,8 @@ struct PopoverRootView: View {
     @ObservedObject var navigation: PopoverNavigation
     @ObservedObject var palette: CommandPaletteService
 
-    /// ⌘K 全局搜索浮层的开关（MainMenu 经通知触发；面板本身不持有导航状态）
+    /// Toggle for the ⌘K global search overlay (MainMenu triggers it via notification; the panel
+    /// itself holds no navigation state)
     @State private var paletteVisible = false
 
     enum Tab: String, CaseIterable {
@@ -38,21 +41,25 @@ struct PopoverRootView: View {
         case sessions = "会话"
         case skills = "Skills"
         case memory = "Memory"
-        /// CLAUDE.md / AGENTS.md 这类持久指令。与 Memory 分开：那是 agent 攒的记忆，
-        /// 这是用户写给 agent 的规则，混在一页会让「记忆有多少」这个数字失去意义。
+        /// Persistent instructions such as CLAUDE.md / AGENTS.md. Kept apart from Memory: that is
+        /// what agents accumulate, this is the rules users write for agents; mixing them on one
+        /// page would make the memory count meaningless.
         case instructions = "指令"
         case plans = "Plans"
         case agents = "Agents"
-        /// MCP server 配置矩阵（只读）：同名 server 折叠一行、按源亮徽章
+        /// MCP server config matrix (read-only): servers with the same name fold into one row, with
+        /// a badge lit per source
         case mcp = "MCP"
-        /// Prompt 库：从会话 transcript 提取的用户提问，统一浏览/搜索/复用
+        /// Prompt library: user prompts extracted from session transcripts, for browsing /
+        /// searching / reuse in one place
         case prompts = "Prompts"
         case usage = "用量"
         case limits = "限额"
         case audit = "审计"
         case settings = "设置"
 
-        /// 侧栏与页签上的名字。rawValue 保持原中文，避免把已有的枚举身份换掉。
+        /// Name shown in the sidebar and on tabs. rawValue keeps its original Chinese text so the
+        /// existing enum identity doesn't change.
         var title: String {
             switch self {
             case .history: return L10n.text("History", zhHans: "历史")
@@ -71,7 +78,7 @@ struct PopoverRootView: View {
             }
         }
 
-        /// 页签图标（SF Symbol）
+        /// Tab icon (SF Symbol)
         var icon: String {
             switch self {
             case .history: return "clock.arrow.circlepath"
@@ -90,13 +97,15 @@ struct PopoverRootView: View {
             }
         }
 
-        /// 侧边栏图标：紫金稿统一单色中性灰（不再用彩色圆角方块）；选中项由紫色胶囊承载强调
+        /// Sidebar icons: the purple-gold mock uses a single neutral gray (no more colored rounded
+        /// squares); the selected item is emphasized by a purple capsule
         var tileColor: Color? { nil }
 
-        /// 侧边栏分组（标签 + 条目）。**每个页签都要属于某一组**：
-        /// 以前 `.settings` 不在任何组里、靠 `Spacer` 之后手写一行沉底，样式与组内项完全一样
-        /// 却没有任何分隔，读起来是个走失的孤项。现在归入「系统」，底部只留品牌脚注。
-        /// 计算属性：分组名随当前语言现取，不能收进 static let。
+        /// Sidebar groups (label + items). **Every tab must belong to a group**: `.settings` used
+        /// to be in no group, hand-placed at the bottom after a `Spacer`, styled exactly like
+        /// grouped items but with no separator, so it read like a stray orphan. It now belongs to
+        /// the System group; only the brand footer stays at the bottom. Computed property: group
+        /// names are read for the current language each time and can't go into a static let.
         static var sidebarGroups: [(label: String, tabs: [Tab])] {
             [
                 (L10n.text("Activity", zhHans: "活动"), [.history, .sessions]),
@@ -137,13 +146,17 @@ struct PopoverRootView: View {
                 .transition(.opacity)
             }
         }
-        // 主窗口可缩放：填满窗口；最小尺寸与 MainWindowController.minSize 对齐（避免两处打架）
+        // The main window is resizable: fill it; the minimum size matches
+        // MainWindowController.minSize (so the two don't fight)
         .frame(minWidth: 840, maxWidth: .infinity, minHeight: 540, maxHeight: .infinity)
-        // 主题底色（classic = 透明沿用系统窗口底；brutal = 奶油）
+        // Theme background (classic = transparent, keeping the system window background; brutal =
+        // cream)
         .background(Theme.windowBackground)
-        // 切换界面风格时整树重建：Theme.* 是静态派发 token，重建才会重新取值
+        // Rebuild the whole tree when the interface style changes: Theme.* are statically
+        // dispatched tokens, only a rebuild re-reads them
         .id("\(settings.themeStyle)|\(settings.appLanguage)")
-        // 用量"按会话"排行 → 会话页签并选中（select 幂等，单实例前提；见 AppDelegate 只建一个 PopoverRootView）
+        // Usage "by session" ranking → Sessions tab with the session selected (select is
+        // idempotent, assuming a single instance; AppDelegate creates only one PopoverRootView)
         .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealSession)) { note in
             guard let sessionId = note.object as? String else { return }
             withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -176,7 +189,8 @@ struct PopoverRootView: View {
             promptsService.revealPrompt(id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .eurekaToggleCommandPalette)) { note in
-            // forceOpen：窗口刚被 ⌘K 唤起时只开不切（残留的 paletteVisible=true 不该反向关闭）
+            // forceOpen: when ⌘K has just brought the window up, only open, never toggle (a
+            // leftover paletteVisible=true must not close it)
             let forceOpen = note.userInfo?["forceOpen"] as? Bool == true
             if paletteVisible && !forceOpen {
                 closePalette()
@@ -186,15 +200,17 @@ struct PopoverRootView: View {
         }
     }
 
-    /// 关闭面板并清空查询/结果，避免下次打开残留上次搜索
+    /// Close the panel and clear the query / results so the next open doesn't show the previous
+    /// search
     private func closePalette() {
         withAnimation(.easeOut(duration: 0.12)) { paletteVisible = false }
         palette.reset()
     }
 
-    // MARK: - 左侧边栏（视图在 SidebarView.swift；这里只算注入它的三个值）
+    // MARK: - Left sidebar (the view lives in SidebarView.swift; this only computes the three values injected into it)
 
-    /// 限额徽标：三源主窗口用量的最大百分比（无数据时不显示）
+    /// Rate-limit badge: the max primary-window usage percentage across the three sources (hidden
+    /// when there is no data)
     private var limitsBadge: (text: String, color: Color)? {
         guard let percent = StatusTitleComposer.maxPrimaryPercent(
             [limitsService.codex, limitsService.grok, limitsService.claude, limitsService.antigravity])
@@ -206,12 +222,13 @@ struct PopoverRootView: View {
         SidebarView(
             selected: navigation.tab,
             limitsBadge: limitsBadge,
-            // 历史徽标 = 当前窗口（近 14 天）条数；0 不显示
+            // History badge = row count in the current window (last 14 days); hidden when 0
             historyBadge: usageService.recentHistory.isEmpty
                 ? nil : "\(usageService.recentHistory.count)",
             appVersion: appVersion,
             onSelect: { tab in
-                // 用户手动导航即视为放弃未消费的跨页 reveal，收敛残留窗口到一次 reveal 生命周期
+                // Manual navigation abandons any unconsumed cross-page reveal, confining leftovers
+                // to a single reveal lifecycle
                 skillMemoryService.focusPath = nil
                 plansService.focusPath = nil
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -226,7 +243,7 @@ struct PopoverRootView: View {
             })
     }
 
-    // MARK: - 内容区
+    // MARK: - Content area
 
     @ViewBuilder
     private var content: some View {
@@ -286,7 +303,7 @@ struct PopoverRootView: View {
     }
 }
 
-// MARK: - 格式化助手
+// MARK: - Formatting helpers
 
 func formatTokens(_ count: Int) -> String {
     switch count {

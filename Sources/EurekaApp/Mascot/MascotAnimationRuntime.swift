@@ -2,7 +2,8 @@ import AppKit
 import EurekaKit
 import SwiftUI
 
-/// 管理桌宠逐帧刷新的生命周期。隐藏或系统休眠时暂停，恢复时重建时间轴。
+/// Manages the lifecycle of the mascot's per-frame refresh. Pauses while hidden or when the system
+/// sleeps, and rebuilds the timeline on resume.
 @MainActor
 final class MascotAnimationRuntime: ObservableObject {
     @Published private(set) var isVisible = false

@@ -5,7 +5,8 @@ import Foundation
 func mcpConfigIndexerTests(_ t: TestRunner) {
     t.suite("MCPConfigIndexer（MCP 配置只读索引）")
 
-    /// 把一条 entry 的全部字段拼成一段文本，供"密钥值绝不出现"断言使用
+    /// Joins every field of an entry into one string for the "secret values never appear"
+    /// assertions
     func flatten(_ entries: [MCPServerEntry]) -> String {
         entries.map {
             [$0.name, $0.transport, $0.commandSummary ?? "", $0.urlSummary ?? "",
@@ -118,7 +119,7 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
     }
 
     t.test("TOML 多行数组：注释行跳过、未闭合 EOF 放弃、段头终止不吞段") {
-        // 数组内整行注释 + 正常闭合
+        // Full-line comment inside an array + normal close
         let commented = """
         [mcp_servers.a]
         command = "npx"
@@ -134,7 +135,7 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
         try expectEqual(entries.map(\.name), ["a", "b"], "注释行不该截断收集")
         try expectEqual(entries[0].commandSummary, "npx -y pkg-a")
 
-        // 未闭合到 EOF：放弃该数组，server 仍在（command 还在）
+        // Unclosed until EOF: give up on the array; the server remains (command is still there)
         let unclosed = """
         [mcp_servers.a]
         command = "npx"
@@ -146,7 +147,7 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
         try expectEqual(entries.map(\.name), ["a"])
         try expectEqual(entries[0].commandSummary, "npx")
 
-        // 收集态遇段头：放弃数组，后续段照常解析
+        // Section header while collecting: give up on the array, later sections parse as usual
         let hijacked = """
         [mcp_servers.a]
         command = "npx"
@@ -159,7 +160,7 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
         try expectEqual(entries.map(\.name), ["a", "b"], "畸形数组不该吞掉下一段")
         try expectEqual(entries[1].commandSummary, "uvx")
 
-        // 引号内的 `]` 不算闭合
+        // A `]` inside quotes doesn't close the array
         let quoted = """
         [mcp_servers.a]
         command = "sh"
@@ -186,7 +187,8 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
             try content.write(to: url, atomically: true, encoding: .utf8)
         }
         try write(".cursor/mcp.json", #"{"mcpServers": {"c1": {"url": "https://c"}}}"#)
-        // 项目级：<repo>/.mcp.json（claude 约定）与 <repo>/.cursor/mcp.json（cursor 约定）
+        // Project level: <repo>/.mcp.json (claude convention) and <repo>/.cursor/mcp.json (cursor
+        // convention)
         let repo = base.appendingPathComponent("repo", isDirectory: true)
         try fm.createDirectory(
             at: repo.appendingPathComponent(".cursor"), withIntermediateDirectories: true)

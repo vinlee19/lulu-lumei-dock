@@ -1,28 +1,32 @@
 import Foundation
 
-/// 一轮的**血缘图**：节点 = 提问/思考/工具/子代理/回答，边 = 因果与数据流。
+/// The **lineage graph** of one turn: nodes = prompt / thinking / tool / subagent / answer,
+/// edges = causality and data flow.
 ///
-/// 纯值类型 + 纯函数构图，放 EurekaKit（照 `IslandGeometry` 的先例）：
-/// 无 IO、无 AppKit、结果可复现 ⇒ 能单测，也能被离屏渲染当作稳定基准。
+/// Pure value types + a pure-function builder, kept in EurekaKit (following `IslandGeometry`):
+/// no IO, no AppKit, reproducible output ⇒ unit-testable, and a stable baseline for offscreen rendering.
 public enum TurnGraph {
-    // MARK: - 节点
+    // MARK: - Nodes
 
     public enum NodeKind: Equatable, Sendable {
         case prompt
-        /// 明文思考（Codex/Kimi/Qwen 有；Claude 落盘被剥离，不会出现）
+        /// Plaintext thinking (Codex/Kimi/Qwen have it; Claude strips it when persisting, so it
+        /// never appears)
         case thinking
-        /// 结构性分叉/汇合点。两种情形插入：
-        /// ①「一个节点 → 多个并行节点」且上游不是思考节点（标出一次看不见的决策）；
-        /// ②「多 → 多」（否则边数是 N×M，插一个点降到 N+M）。
+        /// Structural fork/join point. Inserted in two cases:
+        /// (1) "one node → several parallel nodes" when the upstream is not a thinking node (marks
+        ///     a decision that is otherwise invisible);
+        /// (2) "many → many" (otherwise the edge count is N×M; one inserted point brings it down to
+        ///     N+M).
         case fork
         case tool(ToolKind)
         case subagent
-        /// 同层同类兄弟过多时的聚合节点（`Read ×6`，可展开）
+        /// Aggregate node for too many same-kind siblings in one layer (`Read ×6`, expandable)
         case folded(ToolKind)
         case answer
         case error
 
-        /// 排版用：折叠节点按被折叠的那类工具算宽
+        /// For layout: a folded node is sized by the tool kind it folds
         public var toolKind: ToolKind? {
             switch self {
             case .tool(let kind), .folded(let kind): return kind
@@ -40,20 +44,21 @@ public enum TurnGraph {
     public struct Node: Equatable, Sendable, Identifiable {
         public var id: NodeID
         public var kind: NodeKind
-        /// 主标（Read / Grep / Explore / 回答）
+        /// Main label (Read / Grep / Explore / Answer)
         public var title: String
-        /// 副标（目标摘要：a.swift / validateToken）
+        /// Secondary label (target summary: a.swift / validateToken)
         public var subtitle: String
-        /// 同一操作在本轮出现的次数（去重后的 ×N）
+        /// Times this operation occurs in the turn (the ×N after dedup)
         public var occurrences: Int
         public var isError: Bool
-        /// 首次出现序号。**这是拓扑序**：环打破、分层全靠它单调。
+        /// First-occurrence sequence number. **This is the topological order**: cycle breaking and
+        /// layering both rely on it being monotonic.
         public var seq: Int
-        /// 跳消息锚点
+        /// Anchor for jumping to the message
         public var messageId: Int?
-        /// 命中的原始步骤下标（详情条展开用）
+        /// Indices of the raw steps this node matched (used when the detail bar expands)
         public var stepIndices: [Int]
-        /// 折叠节点的成员
+        /// Members of a folded node
         public var foldedIDs: [NodeID]
         public var subagentType: String?
 
@@ -77,18 +82,19 @@ public enum TurnGraph {
         }
     }
 
-    // MARK: - 边
+    // MARK: - Edges
 
     public enum EdgeRole: String, Equatable, Sendable, CaseIterable {
-        /// 因果推进
+        /// Causal progress
         case causal
-        /// 回读同一文件 / 重复同一检索 —— 「上下文没一次给够」的证据
+        /// Rereading the same file / repeating the same search -- evidence that "context wasn't
+        /// given in one go"
         case dataFlow
-        /// 失败重试环 —— 「需求或验收标准不清」的证据
+        /// Failure retry loop -- evidence that "requirements or acceptance criteria are unclear"
         case retry
-        /// 改完又回去读 —— 「改之前没看清」的证据
+        /// Reading again after editing -- evidence that "it wasn't understood before editing"
         case rework
-        /// 派生子代理
+        /// Spawning a subagent
         case spawn
 
         public var label: String {
@@ -106,10 +112,10 @@ public enum TurnGraph {
         public var from: NodeID
         public var to: NodeID
         public var role: EdgeRole
-        /// 同一条边重复出现的次数（重试 ×3）
+        /// How many times the same edge repeats (retry ×3)
         public var repeatCount: Int
-        /// 回边（指向更早的节点）。**由 `seq` 判定，构图期就定死**，
-        /// 布局器据此把它摘出主图走专用边道。
+        /// Back edge (points to an earlier node). **Decided from `seq`, fixed at build time**;
+        /// the layout engine uses it to pull the edge out of the main graph onto a dedicated lane.
         public var isBack: Bool
 
         public init(
@@ -124,15 +130,16 @@ public enum TurnGraph {
         }
     }
 
-    // MARK: - 图
+    // MARK: - Graph
 
     public struct Graph: Equatable, Sendable {
         public var turnIndex: Int
         public var promptMessageId: Int?
-        /// 按 `seq` 升序
+        /// Ascending by `seq`
         public var nodes: [Node]
         public var edges: [Edge]
-        /// 本轮是否拿得到思考明文（拿不到时 UI 要明说原因，而不是让用户以为没思考）
+        /// Whether this turn's thinking plaintext is available (when it isn't, the UI must say why
+        /// instead of letting the user think there was no thinking)
         public var hasThinking: Bool
 
         public init(
@@ -152,21 +159,22 @@ public enum TurnGraph {
     }
 }
 
-// MARK: - 构图
+// MARK: - Building
 
-/// `TurnInput` → `TurnGraph.Graph`。纯函数、确定性（同输入必得同输出）。
+/// `TurnInput` → `TurnGraph.Graph`. Pure and deterministic (same input, same output).
 public enum TurnGraphBuilder {
     public struct Options: Equatable, Sendable {
-        /// 每层最大列数（由 `TurnGraphLayout.Metrics` 按视口反推后传入）——折叠阈值的来源
+        /// Max columns per layer (derived from the viewport by `TurnGraphLayout.Metrics`) -- the
+        /// source of the folding threshold
         public var maxColumns: Int
-        /// 展开的折叠组
+        /// Expanded fold groups
         public var expandedFolds: Set<TurnGraph.NodeID>
-        /// 展开的子代理（按 `subagent_type + description` 标识）。展开后子代理的内部步骤
-        /// 会**并进同一张图**而不是画成嵌套子图 —— 因为最有价值的那条边
-        /// （子代理去读了主流程已经读过的文件）正好跨越子图边界，
-        /// 画成独立子图会把它剪掉。
+        /// Expanded subagents (keyed by `subagent_type + description`). Once expanded, a subagent's
+        /// inner steps are **merged into the same graph** rather than drawn as a nested subgraph --
+        /// because the most valuable edge (the subagent reading a file the main flow already read)
+        /// crosses exactly that subgraph boundary, and a separate subgraph would cut it.
         public var expandedSubagents: Set<String>
-        /// 节点数硬上限，超了不排版直接降级
+        /// Hard cap on node count; above it, skip layout and degrade
         public var maxNodes: Int
 
         public init(
@@ -189,7 +197,7 @@ public enum TurnGraphBuilder {
         return builder.run()
     }
 
-    // MARK: - 内部状态机
+    // MARK: - Internal state machine
 
     fileprivate struct Builder {
         let turn: TurnInput
@@ -197,12 +205,13 @@ public enum TurnGraphBuilder {
 
         var nodes: [TurnGraph.Node] = []
         var indexByID: [TurnGraph.NodeID: Int] = [:]
-        /// 操作身份 → 节点。**去重的地基**：同一操作在一轮里只有一个节点。
+        /// Operation identity → node. **The foundation of dedup**: one operation has exactly one
+        /// node per turn.
         var nodeByIdentity: [String: TurnGraph.NodeID] = [:]
-        /// canonicalTarget → 节点（回读/返工检测用，按 kind 分桶）
+        /// canonicalTarget → node (for reread/rework detection, bucketed by kind)
         var readNodeByTarget: [String: TurnGraph.NodeID] = [:]
         var editNodeByTarget: [String: TurnGraph.NodeID] = [:]
-        /// (from, to, role) → 边下标，用于合并重复边并累加 repeatCount
+        /// (from, to, role) → edge index, used to merge duplicate edges and accumulate repeatCount
         var edgeIndex: [String: Int] = [:]
         var edges: [TurnGraph.Edge] = []
         var seq = 0
@@ -216,7 +225,8 @@ public enum TurnGraphBuilder {
                     subtitle: summary(turn.promptText), messageId: promptId)]
             }
 
-            // 思考在工具之前：模型先想再动手（Qwen/Kimi/Codex 的落盘顺序也如此）
+            // Thinking comes before tools: the model thinks, then acts (Qwen/Kimi/Codex persist in
+            // this order too)
             for text in turn.thinkingTexts {
                 let node = add(kind: .thinking, title: L10n.text("Thinking", zhHans: "思考"), subtitle: summary(text))
                 connect(frontier, to: [node])
@@ -224,10 +234,11 @@ public enum TurnGraphBuilder {
             }
 
             for stage in stages() {
-                // **先给分叉点预留 seq**：分叉在语义上先于它的分支发生，而
-                // `seq` 单调即拓扑序是分层算法的地基 —— 如果等分支都建完再插分叉，
-                // 分叉的 seq 会大于分支，分层时它的孩子找不到已定层的父节点，
-                // 整层就会被错排到第 0 层。用不上的预留只是留个空号，无害。
+                // **Reserve the fork's seq first**: semantically a fork happens before its
+                // branches, and monotonic `seq` == topological order is the foundation of layering
+                // -- if the fork were inserted after the branches were built, its seq would exceed
+                // theirs, its children would find no already-layered parent, and the whole layer
+                // would be misplaced at layer 0. An unused reservation just leaves a gap; harmless.
                 let forkSeq = reserveSeq()
                 let produced = materialize(stage, frontier: frontier)
                 guard !produced.isEmpty else { continue }
@@ -251,7 +262,7 @@ public enum TurnGraphBuilder {
                 nodes: nodes, edges: edges, hasThinking: !turn.thinkingTexts.isEmpty)
         }
 
-        // MARK: 阶段切分（同 batch = 同一次模型输出 = 真并行）
+        // MARK: Stage splitting (same batch = same model output = truly parallel)
 
         func stages() -> [[TurnInput.Step]] {
             var result: [[TurnInput.Step]] = []
@@ -265,7 +276,8 @@ public enum TurnGraphBuilder {
             return result
         }
 
-        /// 一个阶段 → 节点集合（含去重命中、折叠、以及回读/返工/重试回边）
+        /// One stage → set of nodes (including dedup hits, folding, and reread/rework/retry back
+        /// edges)
         mutating func materialize(
             _ stage: [TurnInput.Step], frontier: [TurnGraph.NodeID]
         ) -> [TurnGraph.NodeID] {
@@ -275,7 +287,8 @@ public enum TurnGraphBuilder {
                 let identity = "\(step.kind.rawValue)|\(step.name)|\(target ?? "#\(step.stepIndex)")"
 
                 if let existing = nodeByIdentity[identity] {
-                    // 命中已有操作：不建新节点，只累计次数并连一条回边
+                    // Hit an existing operation: no new node, just bump the count and add a back
+                    // edge
                     bump(existing, step: step)
                     linkRevisit(existing, step: step, frontier: frontier)
                     produced.append(existing)
@@ -284,7 +297,8 @@ public enum TurnGraphBuilder {
 
                 let kind: TurnGraph.NodeKind = step.kind == .agent ? .subagent : .tool(step.kind)
                 var subtitle = displaySubtitle(step)
-                // 收起态的子代理把内部步数写在副标上：不点开也知道它干了多少活
+                // A collapsed subagent shows its inner step count in the subtitle: you see how much
+                // work it did without expanding it
                 if step.kind == .agent, !step.subSteps.isEmpty,
                     !options.expandedSubagents.contains(subagentKey(step)) {
                     subtitle = subtitle.isEmpty
@@ -307,29 +321,32 @@ public enum TurnGraphBuilder {
                 linkNewStep(node, step: step)
                 produced.append(node)
 
-                // 展开的子代理：内部步骤**并进同一张图**，接在子代理节点之后。
-                // 于是「子代理去读了主流程读过的文件」会自然命中去重、连出一条回读边 ——
-                // 这正是把它做成内联而不是独立子图的理由。
+                // Expanded subagent: inner steps are **merged into the same graph**, after the
+                // subagent node. So "the subagent read a file the main flow already read" naturally
+                // hits dedup and yields a reread edge -- which is exactly why it is inlined instead
+                // of drawn as a separate subgraph.
                 if step.kind == .agent, options.expandedSubagents.contains(subagentKey(step)) {
                     var branch = [node]
                     for stage in subStages(step.subSteps) {
-                        // 与外层同理：分叉的 seq 必须**先**预留。放到分支建完再取，
-                        // 分叉的 seq 会大于它的分支，那条边被判成回边、分支因此失去前向父节点，
-                        // 表现为子代理读的文件被甩到第 0 层。
+                        // Same as the outer loop: the fork's seq must be reserved **first**. Taking
+                        // it after the branch is built makes the fork's seq larger than its branch,
+                        // the edge gets classified as a back edge, the branch loses its forward
+                        // parent, and the files the subagent read get thrown to layer 0.
                         let forkSeq = reserveSeq()
                         let inner = materialize(stage, frontier: branch)
                         guard !inner.isEmpty else { continue }
                         branch = connectStage(branch, to: inner, forkSeq: forkSeq)
                     }
-                    // **内部节点不进 produced**：它们已经从子代理节点连过边了，
-                    // 再让外层 frontier 连一次会把它们错拉到子代理的同一层
-                    // （表现为「子代理读的文件挂到了思考节点下」）。
+                    // **Inner nodes do not go into produced**: they are already connected from the
+                    // subagent node; connecting them again from the outer frontier would wrongly
+                    // pull them into the subagent's layer (showing up as "files the subagent read
+                    // hang under the thinking node").
                 }
             }
             return fold(produced)
         }
 
-        /// 子代理的步骤也按 batch 分阶段（同一批 = 它自己的并行调用）
+        /// Subagent steps are also staged by batch (same batch = its own parallel calls)
         func subStages(_ steps: [TurnInput.Step]) -> [[TurnInput.Step]] {
             var result: [[TurnInput.Step]] = []
             for step in steps {
@@ -342,17 +359,17 @@ public enum TurnGraphBuilder {
             return result
         }
 
-        /// 子代理的稳定标识（类型 + 描述）。不用 callId：那是每次运行都变的。
+        /// Stable subagent key (type + description). Not callId: that changes on every run.
         func subagentKey(_ step: TurnInput.Step) -> String {
             "\(step.name)|\(step.detail)"
         }
 
-        /// 新建节点时的语义回边：返工 / 重试
+        /// Semantic back edges for a newly created node: rework / retry
         mutating func linkNewStep(_ node: TurnGraph.NodeID, step: TurnInput.Step) {
             guard let target = canonicalTarget(step) else { return }
             switch step.kind {
             case .read, .search:
-                // 改完又回去读 ⇒ 改之前没看清
+                // Reading again after editing ⇒ it wasn't understood before editing
                 if let edited = editNodeByTarget[target] {
                     addEdge(from: node, to: edited, role: .rework)
                 }
@@ -363,13 +380,13 @@ public enum TurnGraphBuilder {
             }
         }
 
-        /// 命中已有节点时的语义回边：回读 / 重试
+        /// Semantic back edges when an existing node is hit: reread / retry
         mutating func linkRevisit(
             _ node: TurnGraph.NodeID, step: TurnInput.Step, frontier: [TurnGraph.NodeID]
         ) {
             switch step.kind {
             case .read, .search:
-                // 回读同一文件/检索 ⇒ 上下文没一次给够
+                // Rereading the same file/search ⇒ context wasn't given in one go
                 for source in frontier where source != node {
                     addEdge(from: source, to: node, role: .dataFlow)
                 }
@@ -382,9 +399,11 @@ public enum TurnGraphBuilder {
             }
         }
 
-        /// 失败命令 → 最近一次编辑：构成「改→构建失败→再改」的重试环
+        /// Failed command → most recent edit: forms the "edit → build fails → edit again" retry
+        /// loop
         mutating func addRetryEdge(from node: TurnGraph.NodeID, target: String) {
-            // 同文件优先（命令的 target 通常不是文件路径，退回最近一次编辑）
+            // Same file first (a command's target is usually not a file path, so fall back to the
+            // latest edit)
             let edited = editNodeByTarget[target] ?? lastEditNode()
             guard let edited, edited != node else { return }
             addEdge(from: node, to: edited, role: .retry)
@@ -394,11 +413,11 @@ public enum TurnGraphBuilder {
             nodes.last { $0.kind == .tool(.edit) }?.id
         }
 
-        // MARK: 折叠（层宽有上界的机制保证）
+        // MARK: Folding (the mechanism that bounds layer width)
 
         mutating func fold(_ produced: [TurnGraph.NodeID]) -> [TurnGraph.NodeID] {
             guard produced.count > options.maxColumns else { return produced }
-            // 按工具类别分组，只折同类；数量最多的那一类先折
+            // Group by tool kind and fold only within a kind; the largest kind folds first
             var byKind: [ToolKind: [TurnGraph.NodeID]] = [:]
             var others: [TurnGraph.NodeID] = []
             for id in produced {
@@ -411,7 +430,8 @@ public enum TurnGraphBuilder {
             var result = others
             for kind in byKind.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
                 let group = byKind[kind]!
-                // 只有超过 1 个、且当前仍然超宽才折；展开过的组不再折
+                // Fold only groups of more than 1 while the layer is still too wide; expanded
+                // groups never fold again
                 let foldID = TurnGraph.NodeID("fold.\(kind.rawValue).\(group[0].raw)")
                 if group.count > 1, result.count + group.count > options.maxColumns,
                     !options.expandedFolds.contains(foldID) {
@@ -423,7 +443,8 @@ public enum TurnGraphBuilder {
             return result.sorted { (self[$0]?.seq ?? 0) < (self[$1]?.seq ?? 0) }
         }
 
-        /// 把一组同类节点换成一个聚合节点（成员从 nodes 里摘掉，指向它们的边改指聚合体）
+        /// Replace a group of same-kind nodes with one aggregate node (members are removed from
+        /// nodes, edges pointing at them are redirected to the aggregate)
         mutating func collapse(
             _ group: [TurnGraph.NodeID], kind: ToolKind, id: TurnGraph.NodeID
         ) -> TurnGraph.NodeID {
@@ -445,7 +466,7 @@ public enum TurnGraphBuilder {
             nodes.append(folded)
             nodes.sort { $0.seq < $1.seq }
             reindex()
-            // 边改指聚合体，并去掉自环
+            // Redirect edges to the aggregate and drop self-loops
             for index in edges.indices {
                 if removed.contains(edges[index].from) { edges[index].from = id }
                 if removed.contains(edges[index].to) { edges[index].to = id }
@@ -459,10 +480,10 @@ public enum TurnGraphBuilder {
             return id
         }
 
-        // MARK: 连边
+        // MARK: Edges
 
-        /// 阶段间连边。**多对多时插一个 fork 点**，把 N×M 条边降成 N+M 条 ——
-        /// 这是边数有上界的机制保证，不是美化。
+        /// Edges between stages. **For many-to-many, insert a fork point**, reducing N×M edges to
+        /// N+M -- this is the mechanism that bounds edge count, not cosmetics.
         mutating func connectStage(
             _ from: [TurnGraph.NodeID], to targets: [TurnGraph.NodeID], forkSeq: Int
         ) -> [TurnGraph.NodeID] {
@@ -499,7 +520,8 @@ public enum TurnGraphBuilder {
                 edges[index].repeatCount += 1
                 return
             }
-            // 回边判据：指向 seq 不更大的节点 = 回到已经做过的事
+            // Back-edge test: pointing at a node whose seq is not larger = returning to something
+            // already done
             let isBack = (self[to]?.seq ?? 0) <= (self[from]?.seq ?? 0)
             edgeIndex[key] = edges.count
             edges.append(TurnGraph.Edge(from: from, to: to, role: role, isBack: isBack))
@@ -512,19 +534,20 @@ public enum TurnGraphBuilder {
             }
         }
 
-        // MARK: 节点表维护
+        // MARK: Node table maintenance
 
         subscript(id: TurnGraph.NodeID) -> TurnGraph.Node? {
             indexByID[id].map { nodes[$0] }
         }
 
-        /// 取一个 seq 号（可先占后用；用不上就留个空号，seq 只需单调不需连续）
+        /// Take a seq number (can be reserved before use; an unused one just leaves a gap -- seq
+        /// only needs to be monotonic, not contiguous)
         mutating func reserveSeq() -> Int {
             defer { seq += 1 }
             return seq
         }
 
-        /// `at` = 用预留的 seq（分叉点专用）；nil = 现取一个
+        /// `at` = use a reserved seq (fork points only); nil = take a fresh one
         mutating func add(
             kind: TurnGraph.NodeKind, title: String, subtitle: String,
             isError: Bool = false, messageId: Int? = nil, stepIndices: [Int] = [],
@@ -536,7 +559,8 @@ public enum TurnGraphBuilder {
                 id: id, kind: kind, title: title, subtitle: subtitle,
                 isError: isError, seq: value, messageId: messageId,
                 stepIndices: stepIndices, subagentType: subagentType))
-            // 预留号插进来后要保持 nodes 按 seq 有序（分层与折叠都依赖这个顺序）
+            // After inserting a reserved number, keep nodes sorted by seq (layering and folding
+            // depend on this order)
             if reserved != nil {
                 nodes.sort { $0.seq < $1.seq }
                 reindex()
@@ -560,17 +584,18 @@ public enum TurnGraphBuilder {
     }
 }
 
-// MARK: - 操作身份与展示
+// MARK: - Operation identity and display
 
 extension TurnGraphBuilder {
-    /// 操作的规范化目标：**节点去重的键**。
-    /// 返回 nil = 这一步没有可比较的目标（如 TodoWrite），逐步骤独立成点。
+    /// Canonical target of an operation: **the node dedup key**.
+    /// nil = this step has no comparable target (e.g. TodoWrite), so each step gets its own node.
     static func canonicalTarget(_ step: TurnInput.Step) -> String? {
         let detail = step.detail.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !detail.isEmpty else { return nil }
         switch step.kind {
         case .read, .edit:
-            // 文件路径：去掉尾斜杠与重复分隔，让 `/a/b/` 与 `/a/b` 是同一个目标
+            // File path: strip trailing slashes and repeated separators so `/a/b/` and `/a/b` are
+            // the same target
             return normalizePath(detail)
         case .search, .web, .command, .mcp, .agent, .skill:
             return detail
@@ -585,7 +610,8 @@ extension TurnGraphBuilder {
         return path
     }
 
-    /// 节点副标：文件类只显末段（图里横向很贵），其余显摘要
+    /// Node subtitle: files show only the last path component (horizontal space is expensive in the
+    /// graph), everything else shows a summary
     static func displaySubtitle(_ step: TurnInput.Step) -> String {
         switch step.kind {
         case .read, .edit:

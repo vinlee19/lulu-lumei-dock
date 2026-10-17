@@ -3,26 +3,29 @@ import EurekaIngest
 import EurekaKit
 import Foundation
 
-/// CLI 工具版本检测：本机检测（子进程 --version）+ 手动联网检查 npm 最新版。
-/// 检测经登录 shell（zsh -lc）拿完整 PATH；绝不代替用户执行安装。
+/// CLI tool version detection: local detection (subprocess --version) + a manual online check of
+/// the latest npm version. Detection goes through a login shell (zsh -lc) to get the full PATH;
+/// never runs installs on the user's behalf.
 final class CLIToolsService: ObservableObject {
     struct Tool: Identifiable {
         let id: String
         var name: String
-        var source: AgentSource        // 图标复用 SourceBadge
-        var command: String            // 可执行名
+        var source: AgentSource        // icon reuses SourceBadge
+        var command: String            // executable name
         var npmPackage: String
         var installCommand: String
-        /// 更新命令：优先各 CLI 自带的 update/upgrade 子命令；无自更新的走 npm @latest。
-        /// 空串 = 无法自动更新（仅提供下载指引，如 antigravity 需先装宿主应用）。
+        /// Update command: prefer each CLI's own update/upgrade subcommand; those without
+        /// self-update use npm @latest. Empty string = can't update automatically (download
+        /// guidance only, e.g. antigravity needs its host app installed first).
         var updateCommand: String
-        var localVersion: String?      // nil = 未安装/未检测
+        var localVersion: String?      // nil = not installed / not detected
         var latestVersion: String?
         var detecting = false
         var checkingLatest = false
 
-        /// 关于页展示与复制用。散文提示随当前界面语言现算；
-        /// 纯命令行（npm / curl）两种语言相同，直接用存储值。
+        /// For display and copying on the About page. Prose hints are computed in the current UI
+        /// language; pure command lines (npm / curl) are the same in both languages, so the stored
+        /// value is used directly.
         var displayInstallCommand: String {
             switch id {
             case "antigravity":
@@ -84,8 +87,9 @@ final class CLIToolsService: ObservableObject {
              command: "qwen", npmPackage: "@qwen-code/qwen-code",
              installCommand: "npm install -g @qwen-code/qwen-code",
              updateCommand: "npm install -g @qwen-code/qwen-code@latest"),
-        // Hermes 是 Python + git 安装（~/.hermes/hermes-agent，入口 ~/.local/bin/hermes），
-        // 不在 npm 上 → npmPackage 留空；自带 `hermes update`（会跳过用户改过的内置技能）。
+        // Hermes is a Python + git install (~/.hermes/hermes-agent, entry point
+        // ~/.local/bin/hermes), not on npm → npmPackage left empty; it ships `hermes update` (which
+        // skips built-in skills the user modified).
         Tool(id: "hermes", name: "Hermes Agent", source: .hermes,
              command: "hermes", npmPackage: "",
              installCommand: "curl -fsSL https://hermes.nousresearch.com/install.sh | bash",
@@ -94,30 +98,33 @@ final class CLIToolsService: ObservableObject {
              command: "codebuddy", npmPackage: "@tencent-ai/codebuddy-code",
              installCommand: "npm install -g @tencent-ai/codebuddy-code",
              updateCommand: "npm install -g @tencent-ai/codebuddy-code@latest"),
-        // Qoder CLI（CN）不在 npm 上，二进制在 ~/.qoder-cn/bin/qoderclicn/qoderclicn-<version>
-        // （版本号在文件名里，glob 取最新）→ npmPackage 留空、command 用实际路径；
-        // 无已知自更新命令 → updateCommand 留空，仅提供下载指引。
+        // Qoder CLI (CN) isn't on npm; the binary lives at
+        // ~/.qoder-cn/bin/qoderclicn/qoderclicn-<version> (version in the file name, glob picks the
+        // newest) → npmPackage left empty, command uses the real path; no known self-update command
+        // → updateCommand left empty, download guidance only.
         Tool(id: "qoder", name: "Qoder", source: .qoder,
              command: QoderPaths.cliBinary()?.path ?? "qoderclicn", npmPackage: "",
              installCommand: "Download and install Qoder from https://qoder.com (the CN CLI is bundled with the client)",
              updateCommand: ""),
-        // Cursor 是 IDE，`cursor` 命令行入口要在 IDE 内 Cmd+Shift+P →
-        // "Install 'cursor' command" 才会装到 /usr/local/bin；应用自身走内置更新器。
+        // Cursor is an IDE; the `cursor` command-line entry is only installed to /usr/local/bin via
+        // Cmd+Shift+P → "Install 'cursor' command" inside the IDE; the app itself uses its built-in
+        // updater.
         Tool(id: "cursor", name: "Cursor", source: .cursor,
              command: "cursor", npmPackage: "",
              installCommand: "Download and install Cursor from https://cursor.com (in the IDE, use Cmd+Shift+P → Install 'cursor' command to enable the CLI)",
              updateCommand: ""),
-        // Trae 也是 IDE。命令行入口由客户端自己装到 /usr/local/bin：CN 版是 `trae-cn`、
-        // 国际版是 `trae`（两个都可能装着，这里报已装渠道的第一个，CN 优先）。
-        // 应用自身走内置更新器 → updateCommand 留空。
+        // Trae is an IDE too. The client installs its own command-line entry into /usr/local/bin:
+        // `trae-cn` for CN, `trae` for international (both may be installed; this reports the first
+        // installed channel, CN first). The app itself uses its built-in updater → updateCommand
+        // left empty.
         Tool(id: "trae", name: "Trae", source: .trae,
              command: TraePaths.installedChannels().first?.cliCommand ?? "trae-cn",
              npmPackage: "",
              installCommand: "Download and install Trae from https://trae.cn (China) or https://trae.ai",
              updateCommand: ""),
-        // ZCode CLI 随 /Applications/ZCode.app 分发（PATH 上通常没有 zcode 命令）。
-        // 版本检测读 App Bundle 的 Info.plist（见 detectLocal 的 zcode 分支）；
-        // 应用自身走客户端更新 → updateCommand 留空。
+        // ZCode CLI ships with /Applications/ZCode.app (there's usually no zcode command on PATH).
+        // Version detection reads the app bundle's Info.plist (see the zcode branch of
+        // detectLocal); the app updates through its client → updateCommand left empty.
         Tool(id: "zcode", name: "ZCode", source: .zcode,
              command: "zcode", npmPackage: "",
              installCommand: "Download and install ZCode from https://z.ai (the CLI is bundled with the desktop app)",
@@ -127,7 +134,7 @@ final class CLIToolsService: ObservableObject {
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.clitools", qos: .utility)
 
-    /// 本机版本检测（关于页 onAppear 触发一次，主线程调用）
+    /// Local version detection (triggered once by the About page's onAppear, called on main)
     func detectLocal() {
         guard !detected else { return }
         detected = true
@@ -139,7 +146,8 @@ final class CLIToolsService: ObservableObject {
             for tool in snapshot {
                 let version: String?
                 if tool.id == "zcode" {
-                    // ZCode CLI 随 App 分发，PATH 上没有命令 → 读 ZCode.app 的版本号
+                    // ZCode CLI ships with the app and has no command on PATH → read ZCode.app's
+                    // version
                     version = Self.zcodeBundleVersion()
                 } else {
                     version = Self.localVersion(command: tool.command)
@@ -155,7 +163,7 @@ final class CLIToolsService: ObservableObject {
         }
     }
 
-    /// /Applications/ZCode.app 的 CFBundleShortVersionString（未安装返回 nil）
+    /// CFBundleShortVersionString of /Applications/ZCode.app (nil when not installed)
     private static func zcodeBundleVersion() -> String? {
         let url = URL(fileURLWithPath: "/Applications/ZCode.app/Contents/Info.plist")
         guard let dict = NSDictionary(contentsOf: url) as? [String: Any],
@@ -165,8 +173,9 @@ final class CLIToolsService: ObservableObject {
         return version
     }
 
-    /// 手动「检查更新」：逐个查 npm registry（唯一的联网点，用户主动触发）。
-    /// 非 npm 分发的工具（如 grok 走 curl 安装脚本）无 registry 可查，跳过。
+    /// Manual "Check for updates": queries the npm registry one by one (the only network call,
+    /// user-triggered). Tools not distributed via npm (e.g. grok's curl install script) have no
+    /// registry to query and are skipped.
     func checkLatest() {
         for index in tools.indices where !tools[index].npmPackage.isEmpty {
             tools[index].checkingLatest = true
@@ -192,15 +201,17 @@ final class CLIToolsService: ObservableObject {
         NSPasteboard.general.setString(tool.displayInstallCommand, forType: .string)
     }
 
-    /// 在可见 Terminal 里执行该工具的更新命令（各 CLI 自带 update/upgrade，或 npm @latest）。
-    /// 破坏性/交互式的包操作不在应用内静默跑——交给可见终端，用户能看进度、输密码、确认。
+    /// Run the tool's update command in a visible Terminal (each CLI's own update/upgrade, or npm
+    /// @latest). Destructive/interactive package operations aren't run silently in-app — they go to
+    /// a visible terminal where the user can watch progress, type a password, and confirm.
     func updateTool(_ tool: Tool) {
         let command = tool.updateCommand
         guard !command.isEmpty else { return }
         queue.async { Self.runInTerminal(command) }
     }
 
-    /// osascript → Terminal `do script`：Terminal 自身起登录 shell → 正确 PATH（同 resumeInTerminal）
+    /// osascript → Terminal `do script`: Terminal starts its own login shell → correct PATH (same
+    /// as resumeInTerminal)
     private static func runInTerminal(_ command: String) {
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -220,12 +231,13 @@ final class CLIToolsService: ObservableObject {
         process.waitUntilExit()
     }
 
-    // MARK: - 版本比较
+    // MARK: - Version comparison
 
-    /// 语义化版本比较：a>b→正 / a<b→负 / 相等→0。容忍前导 `v` 与预发布后缀（按核心数字段比）。
+    /// Semantic version comparison: a>b → positive / a<b → negative / equal → 0. Tolerates a
+    /// leading `v` and pre-release suffixes (compares core numeric fields).
     static func compareSemver(_ a: String, _ b: String) -> Int {
         func core(_ s: String) -> [Int] {
-            let trimmed = s.drop(while: { !$0.isNumber })          // 去前导 v 等
+            let trimmed = s.drop(while: { !$0.isNumber })          // strip a leading v etc.
             let head = trimmed.split(separator: "-").first.map(String.init) ?? String(trimmed)
             return head.split(separator: ".").map { Int($0.prefix(while: \.isNumber)) ?? 0 }
         }
@@ -238,15 +250,16 @@ final class CLIToolsService: ObservableObject {
         return 0
     }
 
-    /// 是否有可更新（有本地 + 最新版，且 latest > local）
+    /// Whether an update is available (both local and latest versions known, and latest > local)
     static func hasUpdate(_ tool: Tool) -> Bool {
         guard let local = tool.localVersion, let latest = tool.latestVersion else { return false }
         return compareSemver(latest, local) > 0
     }
 
-    // MARK: - 检测实现
+    // MARK: - Detection implementation
 
-    /// 登录 shell 跑 `<cmd> --version`（GUI app 不继承登录 PATH，走 zsh -lc）
+    /// Run `<cmd> --version` in a login shell (GUI apps don't inherit the login PATH, so use zsh
+    /// -lc)
     private static func localVersion(command: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -265,7 +278,8 @@ final class CLIToolsService: ObservableObject {
         let output = String(decoding: data, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !output.isEmpty else { return nil }
-        // 取输出里第一个形如 1.2.3 的版本号；取不到就整行截断展示
+        // Take the first 1.2.3-style version from the output; if none, show the whole line
+        // truncated
         if let range = output.range(
             of: #"\d+\.\d+(\.\d+)?"#, options: .regularExpression) {
             return String(output[range])
@@ -273,7 +287,7 @@ final class CLIToolsService: ObservableObject {
         return String(output.prefix(24))
     }
 
-    /// npm registry 最新版本（失败静默返回 nil → UI 显示 —）
+    /// Latest version from the npm registry (failures silently return nil → UI shows —)
     private static func npmLatestVersion(package: String) async -> String? {
         let encoded = package.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed) ?? package

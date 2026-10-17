@@ -7,12 +7,13 @@ private func agTemp(_ tag: String) -> URL {
         .appendingPathComponent("eureka-ag-\(tag)-\(UUID().uuidString)", isDirectory: true)
 }
 
-/// 构造一段含 protobuf 短字符串（单字节长度前缀）的 db 字节，内嵌 file:// 工作区 URI
+/// Builds db bytes containing a protobuf short string (one-byte length prefix) that embeds a
+/// file:// workspace URI
 private func makeConversationDB(at url: URL, cwdURI: String, mtime: Date) throws {
-    var bytes: [UInt8] = [0xAA, 0x12, 0x34]          // 前导噪声
-    bytes.append(UInt8(cwdURI.utf8.count))            // protobuf 单字节长度前缀
+    var bytes: [UInt8] = [0xAA, 0x12, 0x34]          // leading noise
+    bytes.append(UInt8(cwdURI.utf8.count))            // protobuf one-byte length prefix
     bytes.append(contentsOf: Array(cwdURI.utf8))
-    bytes.append(contentsOf: [0x7A, 0x00, 0x01])      // 尾随 tag/噪声
+    bytes.append(contentsOf: [0x7A, 0x00, 0x01])      // trailing tag/noise
     try Data(bytes).write(to: url)
     try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
 }
@@ -27,7 +28,7 @@ func antigravityPathsTests(_ t: TestRunner) {
             "EUREKA_ANTIGRAVITY_CONVERSATIONS": "/tmp/agy/conv",
         ]
         try expectEqual(AntigravityPaths.conversationsRoot(environment: env).path, "/tmp/agy/conv")
-        // 无覆盖时 home 落在 gemini 下
+        // Without an override, home falls under gemini
         let roots = AntigravityPaths.skillsRoots(environment: ["EUREKA_GEMINI_HOME": "/tmp/gm"])
         try expectEqual(roots.count, 2)
         try expect(roots[0].path.hasSuffix("/skills"), "用户技能 = ~/.gemini/skills")
@@ -49,8 +50,10 @@ func antigravityPathsTests(_ t: TestRunner) {
 
         try expect(AntigravityPaths.cwd(dbURL: base.appendingPathComponent("nope.db")) == nil)
 
-        // 碎片写入：长度前缀超框把后面的 NUL 圈进来 → 必须退可打印段、绝不返回含控制字符的脏串
-        // （这正是 live db 触发崩溃的场景：脏 cwd 让 URL.appendingPathComponent 抛 NSException）
+        // Fragmented write: the length prefix overruns and swallows the following NULs → must fall
+        // back to the printable run and never return a dirty string containing control characters
+        // (exactly the scenario that crashed on the live db: a dirty cwd made
+        // URL.appendingPathComponent throw an NSException)
         let db3 = base.appendingPathComponent("frag.db")
         var bytes: [UInt8] = [0xAA]
         let uri = "file:///Users/me/frag"
@@ -77,9 +80,9 @@ func antigravitySessionIndexerTests(_ t: TestRunner) {
         try makeConversationDB(
             at: conv.appendingPathComponent("\(uuid).db"),
             cwdURI: "file:///Users/me/work/demo", mtime: Date())
-        // -wal 兄弟文件不应被当成会话
+        // A -wal sibling file must not be treated as a session
         try Data([0x00]).write(to: conv.appendingPathComponent("\(uuid).db-wal"))
-        // 窗口外的老会话
+        // old session outside the window
         try makeConversationDB(
             at: conv.appendingPathComponent("11111111-1111-1111-1111-111111111111.db"),
             cwdURI: "file:///old", mtime: Date().addingTimeInterval(-40 * 86400))
@@ -109,7 +112,7 @@ func antigravityActivityTests(_ t: TestRunner) {
             conversationsRoot: conv, runningWindow: 45, idleThreshold: 45
         ) { event, _ in events.append(event) }
 
-        // 首见（mtime 新）→ taskStarted
+        // First seen (fresh mtime) → taskStarted
         try makeConversationDB(at: db, cwdURI: "file:///Users/me/w", mtime: t0)
         tailer.scanOnce(now: t0.addingTimeInterval(1))
         guard case .taskStarted = events.first?.kind else {
@@ -117,7 +120,7 @@ func antigravityActivityTests(_ t: TestRunner) {
         }
         try expectEqual(events.first?.cwd, "/Users/me/w")
 
-        // 有新写入 → activity
+        // New writes → activity
         events.removeAll()
         try FileManager.default.setAttributes(
             [.modificationDate: t0.addingTimeInterval(2)], ofItemAtPath: db.path)
@@ -126,7 +129,7 @@ func antigravityActivityTests(_ t: TestRunner) {
             throw ExpectationError(description: "新写入应 activity: \(events.map(\.kind))")
         }
 
-        // 静默超 idleThreshold → taskFinished（转空闲）
+        // Quiet past idleThreshold → taskFinished (goes idle)
         events.removeAll()
         tailer.scanOnce(now: t0.addingTimeInterval(100))
         guard case .taskFinished(outcome: .success, _, _) = events.first?.kind else {
@@ -145,7 +148,7 @@ func antigravityActivityTests(_ t: TestRunner) {
 
         var events: [TaskEvent] = []
         let tailer = AntigravityActivityTailer(conversationsRoot: conv) { e, _ in events.append(e) }
-        // now 远晚于 mtime（>runningWindow）→ 空闲登记
+        // now far past mtime (> runningWindow) → registered as idle
         tailer.scanOnce(now: t0.addingTimeInterval(600))
         guard case .sessionStarted = events.first?.kind else {
             throw ExpectationError(description: "旧会话应登记空闲: \(events.map(\.kind))")

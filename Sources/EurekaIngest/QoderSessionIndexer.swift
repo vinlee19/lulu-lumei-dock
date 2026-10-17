@@ -1,12 +1,14 @@
 import EurekaKit
 import Foundation
 
-/// Qoder 会话索引：扫 `~/.qoder-cn/projects/*/*.jsonl` → AgentSessionInfo。
-/// id = 文件名 stem；标题优先级 custom-title > ai-title > last-prompt > 首条真实 user 正文；
-/// cwd 取 workspace-directories 行（缺失回退消息行 cwd）；created/updated 取首/末 ISO
-/// 时间戳（缺失回退文件日期）。subagents/ 子目录不索引（子代理不单列）。
+/// Qoder session index: scans `~/.qoder-cn/projects/*/*.jsonl` → AgentSessionInfo.
+/// id = file name stem; title priority custom-title > ai-title > last-prompt > first real user
+/// body; cwd from the workspace-directories line (falls back to the message-line cwd);
+/// created/updated from the first/last ISO timestamps (falls back to file dates). The
+/// subagents/ subdirectory is not indexed (subagents are not listed separately).
 public enum QoderSessionIndexer {
-    /// 单文件读取上限：标题行（custom/ai/last-prompt）散布全文，读全量才能拿准优先级
+    /// Per-file read cap: title lines (custom/ai/last-prompt) are scattered across the file, so it
+    /// must be read in full to get the priority right
     private static let maxBytes = 8 * 1024 * 1024
 
     public static func index(

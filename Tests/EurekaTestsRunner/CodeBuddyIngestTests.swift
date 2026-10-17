@@ -4,8 +4,8 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-// CodeBuddy 数据层测试。fixture 按本机真实 ~/.codebuddy 行格式内联构造（路径/id 均为假）。
-// 不在 main.swift 注册——由集成方统一接线。
+// CodeBuddy data-layer tests. Fixtures are built inline in the real ~/.codebuddy line format seen
+// on this machine (paths/ids are fake). Not registered in main.swift -- the integrator wires it up.
 
 func codeBuddyPathsTests(_ t: TestRunner) {
     t.suite("CodeBuddyPaths")
@@ -26,7 +26,7 @@ func codeBuddyPathsTests(_ t: TestRunner) {
         try expectEqual(
             CodeBuddyPaths.liveSessionsRoot(environment: ["EUREKA_CODEBUDDY_HOME": "/tmp/cb-home"]).path,
             "/tmp/cb-home/sessions")
-        // 官方拼写就是 memery
+        // The official spelling really is memery
         try expectEqual(
             CodeBuddyPaths.memoryRoot(environment: ["EUREKA_CODEBUDDY_HOME": "/tmp/cb-home"]).path,
             "/tmp/cb-home/memery")
@@ -63,7 +63,7 @@ func codeBuddyTranscriptDecoderTests(_ t: TestRunner) {
         )?.kind else {
             throw ExpectationError(description: "assistant completed 应为 taskFinished(success)")
         }
-        // 非 completed 状态（流式中间态）不收尾
+        // A non-completed status (streaming intermediate state) does not finish the turn
         try expect(decode(
             #"{"id":"a2","timestamp":1784956365000,"type":"message","role":"assistant","status":"streaming","content":[],"sessionId":"s1","cwd":"/w"}"#
         ) == nil)
@@ -100,14 +100,14 @@ func codeBuddyTranscriptDecoderTests(_ t: TestRunner) {
             #"{"type":"function_call","name":"Bash","arguments":"{}","timestamp":1784975923248,"providerData":{"model":"glm-5.2","usage":{"requests":1,"inputTokens":25709,"outputTokens":422,"totalTokens":26131,"inputTokensDetails":[{"cached_tokens":12800}]}}}"#)
         let usage = CodeBuddyTranscriptDecoder.usage(camel)
         try expectEqual(usage?.model, "glm-5.2")
-        try expectEqual(usage?.usage.input, 25709 - 12800)  // camelCase 含缓存读 → 减掉
+        try expectEqual(usage?.usage.input, 25709 - 12800)  // camelCase includes cache reads -> subtract them
         try expectEqual(usage?.usage.output, 422)
         try expectEqual(usage?.usage.cacheRead, 12800)
 
         let snake = try parseCodeBuddyLine(
             #"{"type":"function_call","name":"Bash","arguments":"{}","timestamp":1784975923248,"providerData":{"model":"glm-5.2","usage":{"input_tokens":1000,"output_tokens":50,"total_tokens":1050,"cache_read_input_tokens":200}}}"#)
         let snakeUsage = CodeBuddyTranscriptDecoder.usage(snake)
-        try expectEqual(snakeUsage?.usage.input, 1000)  // snake_case 不含缓存 → 原样
+        try expectEqual(snakeUsage?.usage.input, 1000)  // snake_case excludes cache -> kept as is
         try expectEqual(snakeUsage?.usage.cacheRead, 200)
 
         let call = try parseCodeBuddyLine(
@@ -133,7 +133,7 @@ private func parseCodeBuddyLine(_ json: String) throws -> [String: Any] {
     return root
 }
 
-/// 在临时目录搭一个 codebuddy 会话树：<home>/projects/<slug>/<sessionId>.jsonl
+/// Builds a codebuddy session tree in a temp dir: <home>/projects/<slug>/<sessionId>.jsonl
 private func makeCodeBuddySession(
     slug: String = "-work-demo",
     sessionId: String = "a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"
@@ -157,7 +157,7 @@ private func appendCodeBuddyLines(_ lines: [String], to url: URL) throws {
     }
 }
 
-/// 以"现在"为基准的 codebuddy 行（epoch ms），避免 stale 误判
+/// A codebuddy timestamp based on "now" (epoch ms), so lines are not misjudged as stale
 private func codeBuddyNowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
 func codeBuddyChatTailerTests(_ t: TestRunner) {
@@ -175,14 +175,14 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
         let tailer = CodeBuddyChatTailer(
             projectsRoot: session.home.appendingPathComponent("projects")
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 初见：已完成的会话只恢复 sessionStarted + 标题
+        tailer.scanOnce()  // first sight: a completed session only restores sessionStarted + title
         let initialKinds = events.map(\.0.kind)
         try expect(initialKinds.contains(.sessionStarted),
                    "已完成会话初见应恢复 sessionStarted: \(initialKinds)")
         try expect(!initialKinds.contains { if case .taskFinished = $0 { return true } else { return false } },
                    "初见不应重放 taskFinished: \(initialKinds)")
 
-        // 增量：新一轮 user → function_call → assistant → ai-title
+        // Incremental: a new turn user -> function_call -> assistant -> ai-title
         events.removeAll()
         try appendCodeBuddyLines([
             #"{"id":"u2","timestamp":\#(now - 2000),"type":"message","role":"user","content":[{"type":"input_text","text":"再看看测试"}],"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
@@ -217,17 +217,17 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
         let tailer = CodeBuddyChatTailer(
             projectsRoot: session.home.appendingPathComponent("projects")
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 初见定基线
+        tailer.scanOnce()  // first sight sets the baseline
         events.removeAll()
 
-        // 旧时间戳（1 小时前）→ stale
+        // Old timestamp (1 hour ago) -> stale
         let staleLine = #"{"id":"f0","timestamp":\#(now - 3_600_000),"type":"function_call","callId":"call_0","name":"Read","arguments":"{}","sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#
         try appendCodeBuddyLines([staleLine], to: session.sessionFile)
         tailer.scanOnce()
         try expect(events.count == 1 && events[0].1, "1 小时前的事件应判 stale: \(events)")
         events.removeAll()
 
-        // 半行不消费
+        // A partial line is not consumed
         let finishLine = #"{"id":"a1","timestamp":\#(now),"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"完"}],"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#
         let handle = try FileHandle(forWritingTo: session.sessionFile)
         _ = try handle.seekToEnd()
@@ -259,7 +259,7 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
         let tailer = CodeBuddyChatTailer(
             projectsRoot: session.home.appendingPathComponent("projects")
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 初见定基线（无 usage 行 → 无 ctx%）
+        tailer.scanOnce()  // first sight sets the baseline (no usage line -> no ctx%)
         func contextPercents() -> [Double] {
             events.compactMap { event, _ in
                 if case .contextUpdate(let percent) = event.kind { return percent }
@@ -268,8 +268,8 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
         }
         try expect(contextPercents().isEmpty, "无 usage 不应发 ctx%: \(events.map(\.0.kind))")
 
-        // camelCase：inputTokens 含缓存读 → 上下文 = (inputTokens−cached)+cached = 25709
-        // glm-5.2 无官方确数 → 默认 200k 窗口 → 12.8545%
+        // camelCase: inputTokens includes cache reads -> context = (inputTokens-cached)+cached =
+        // 25709 glm-5.2 has no official figure -> default 200k window -> 12.8545%
         events.removeAll()
         try appendCodeBuddyLines([
             #"{"id":"f1","timestamp":\#(now - 3000),"type":"function_call","callId":"call_1","name":"Bash","arguments":"{}","providerData":{"model":"glm-5.2","usage":{"requests":1,"inputTokens":25709,"outputTokens":422,"totalTokens":26131,"inputTokensDetails":[{"cached_tokens":12800}]}},"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
@@ -283,7 +283,7 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
         try expectEqual(ctxEvent?.0.cwd, "/work/demo")
         try expect(ctxEvent?.1 == false, "ctx% 按发射时刻 fresh 交付，不判 stale")
 
-        // snake_case 兜底：input_tokens 不含缓存 → 上下文 = 1000+200 = 1200 → 0.6%
+        // snake_case fallback: input_tokens excludes cache -> context = 1000+200 = 1200 -> 0.6%
         events.removeAll()
         try appendCodeBuddyLines([
             #"{"id":"f2","timestamp":\#(now - 2000),"type":"function_call","callId":"call_2","name":"Read","arguments":"{}","message":{"usage":{"input_tokens":1000,"output_tokens":50,"total_tokens":1250,"cache_read_input_tokens":200}},"providerData":{"model":"glm-5.2"},"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
@@ -291,7 +291,7 @@ func codeBuddyChatTailerTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expectEqual(contextPercents(), [0.6], "1200/200k 应为 0.6%: \(contextPercents())")
 
-        // 变化 <0.5 不补发（防刷屏）
+        // A change <0.5 is not re-emitted (avoids flooding)
         events.removeAll()
         try appendCodeBuddyLines([
             #"{"id":"f3","timestamp":\#(now - 1000),"type":"function_call","callId":"call_3","name":"Read","arguments":"{}","providerData":{"model":"glm-5.2","usage":{"requests":1,"inputTokens":1300,"outputTokens":10,"totalTokens":1310,"inputTokensDetails":[{"cached_tokens":0}]}},"sessionId":"a0cd6d00-5b4c-4d09-bb14-b80de59f6c26","cwd":"/work/demo"}"#,
@@ -321,13 +321,13 @@ func codeBuddySessionIndexerTests(_ t: TestRunner) {
         let info = sessions[0]
         try expectEqual(info.source, .codebuddy)
         try expectEqual(info.id, "a0cd6d00-5b4c-4d09-bb14-b80de59f6c26")
-        try expectEqual(info.name, "分析仓库结构")  // ai-title 优先
+        try expectEqual(info.name, "分析仓库结构")  // ai-title wins
         try expectEqual(info.cwd, "/work/demo")
         try expectEqual(info.startedAt, Date(timeIntervalSince1970: 1784956350.0))
         try expect(info.lastActiveAt >= Date(timeIntervalSince1970: 1784976315.818),
                    "lastActiveAt 应取末行时间戳")
 
-        // 无 ai-title 时回退 summary
+        // Without an ai-title, fall back to summary
         let fallback = try makeCodeBuddySession(
             sessionId: "b1cd6d00-5b4c-4d09-bb14-b80de59f6c26")
         defer { try? FileManager.default.removeItem(at: fallback.home) }
@@ -373,7 +373,7 @@ func codeBuddyUsageScannerTests(_ t: TestRunner) {
             projectsRoot: session.home.appendingPathComponent("projects"), store: store)
         try expectEqual(try scanner.scanOnce(), 1)
 
-        // 用量行：camelCase 口径 input = inputTokens − cached；model 原样
+        // Usage row: camelCase semantics, input = inputTokens - cached; model kept as is
         let rows = (try store.usage.totalsForSessions(
             ["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"]))["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"] ?? []
         try expectEqual(rows.count, 1)
@@ -383,7 +383,8 @@ func codeBuddyUsageScannerTests(_ t: TestRunner) {
         try expectEqual(rows[0].cacheReadTokens, 12800)
         try expectEqual(rows[0].cacheCreationTokens, 0)
 
-        // tool_calls kind 归类（skill 名取 arguments.skill；mcp 去前缀；agent 取 subagent_type）
+        // tool_calls kind classification (skill name from arguments.skill; mcp prefix stripped;
+        // agent from subagent_type)
         let totals = try store.toolCalls.totals(
             from: Date(timeIntervalSince1970: 0),
             to: Date(timeIntervalSince1970: 4_000_000_000), source: .codebuddy)
@@ -395,13 +396,13 @@ func codeBuddyUsageScannerTests(_ t: TestRunner) {
         try expectEqual(entry("agent")?.name, "reviewer")
         try expectEqual(entry("tool")?.name, "Bash")
 
-        // 提问数：skipRun 不计，真实 user 计 1
+        // Prompt count: skipRun is not counted, a real user message counts 1
         try expectEqual(
             try store.sessionStats.promptCounts(
                 for: ["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"]
             )["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"] ?? 0, 1)
 
-        // 重扫幂等：水位已过，不翻倍
+        // Rescan is idempotent: the watermark is already past, no doubling
         try expectEqual(try scanner.scanOnce(), 0)
         let rows2 = (try store.usage.totalsForSessions(
             ["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"]))["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"] ?? []
@@ -434,12 +435,12 @@ func codeBuddyUsageScannerTests(_ t: TestRunner) {
         let scanner = CodeBuddyUsageScanner(
             projectsRoot: session.home.appendingPathComponent("projects"), store: store)
         try expectEqual(try scanner.scanOnce(), 1)
-        // 子代理 usage 归父会话 id
+        // Subagent usage is attributed to the parent session id
         let rows = (try store.usage.totalsForSessions(
             ["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"]))["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"] ?? []
         try expectEqual(rows.count, 1)
         try expectEqual(rows[0].inputTokens, 1000)
-        // 子代理的 user 消息不计提问；主会话 1 次
+        // The subagent's user messages are not counted as prompts; the main session has 1
         try expectEqual(
             try store.sessionStats.promptCounts(
                 for: ["a0cd6d00-5b4c-4d09-bb14-b80de59f6c26"]

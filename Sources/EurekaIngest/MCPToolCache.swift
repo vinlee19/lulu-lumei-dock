@@ -1,29 +1,33 @@
 import Foundation
 
-/// MCP server 的工具探测缓存：`tools/list` 的结果按 server 名（小写）落盘，
-/// 供两处复用：① MCP 页展示工具清单与上下文开销；② `ContextBreakdownEstimator`
-/// 用真实 schema token 数替换每 server 1500 的拍脑袋常量。
+/// Tool probe cache for MCP servers: `tools/list` results are persisted keyed by server name
+/// (lowercased) and reused in two places: (1) the MCP page showing the tool list and context cost;
+/// (2) `ContextBreakdownEstimator`, which replaces the guessed 1500-per-server constant with real
+/// schema token counts.
 ///
-/// 只存工具**名称/标题/描述（截断）/注解/数量/token 估算/握手元信息**——不存 schema
-/// 正文、不存任何配置值，无密钥暴露面。文件在 App Support（与 pricing.json /
-/// context-windows.json 同级）。
+/// Stores only tool **names/titles/descriptions (truncated)/annotations/counts/token estimates/handshake
+/// metadata**: no schema bodies, no config values, so no secret exposure surface. The file lives in App
+/// Support (alongside pricing.json / context-windows.json).
 public struct MCPToolCacheEntry: Codable, Equatable, Sendable {
     public var toolCount: Int
     public var toolNames: [String]
-    /// tools/list 响应正文的 token 估算 ≈ 该 server 每轮注入上下文的 schema 开销
+    /// Token estimate of the tools/list response body ≈ the schema cost this server injects into
+    /// context each turn
     public var schemaTokens: Int
     public var serverVersion: String?
     public var protocolVersion: String?
     public var capabilities: [String]
-    /// 工具明细（v2.7 加：title/描述/注解；旧缓存无此键照常解码）
+    /// Tool details (added in v2.7: title/description/annotations; old caches without this key
+    /// still decode)
     public var tools: [MCPToolSummary]?
-    /// resources/list 第一页计数（server 未声明该能力则 nil）
+    /// resources/list first-page count (nil if the server does not declare the capability)
     public var resourceCount: Int?
-    /// prompts/list 第一页计数
+    /// prompts/list first-page count
     public var promptCount: Int?
-    /// 提示词清单（v2.8 加：名字+描述，上限由写入方裁；旧缓存无此键照常解码）
+    /// Prompt list (added in v2.8: name + description, capped by the writer; old caches without
+    /// this key still decode)
     public var prompts: [MCPNamedSummary]?
-    /// 资源清单（名字+描述，不存 URI/正文）
+    /// Resource list (name + description; URIs/bodies are not stored)
     public var resources: [MCPNamedSummary]?
     public var measuredAt: Date
 
@@ -50,7 +54,8 @@ public struct MCPToolCacheEntry: Codable, Equatable, Sendable {
     }
 }
 
-/// 单个工具的展示摘要（description 在写入前截断，schema 正文不进缓存）
+/// Display summary for a single tool (description is truncated before writing; schema bodies never
+/// enter the cache)
 public struct MCPToolSummary: Codable, Equatable, Sendable {
     public var name: String
     public var title: String?
@@ -58,7 +63,7 @@ public struct MCPToolSummary: Codable, Equatable, Sendable {
     public var readOnly: Bool?
     public var destructive: Bool?
     public var hasOutputSchema: Bool?
-    /// 参数名（必填带 `*` 后缀；v2.8 加，只有名字没有 schema 正文）
+    /// Parameter names (required ones get a `*` suffix; added in v2.8, names only, no schema body)
     public var params: [String]?
 
     public init(
@@ -76,7 +81,7 @@ public struct MCPToolSummary: Codable, Equatable, Sendable {
     }
 }
 
-/// 提示词/资源的展示摘要（名字 + 截断描述）
+/// Display summary for a prompt/resource (name + truncated description)
 public struct MCPNamedSummary: Codable, Equatable, Sendable {
     public var name: String
     public var description: String?
@@ -92,7 +97,7 @@ public enum MCPToolCache {
         SpoolPaths.root().appendingPathComponent("mcp-tools-cache.json")
     }
 
-    /// 读缓存（缺失/解析失败 → 空表，best-effort）
+    /// Reads the cache (missing / parse failure → empty map, best-effort)
     public static func load(from url: URL = defaultURL()) -> [String: MCPToolCacheEntry] {
         guard let data = FileManager.default.contents(atPath: url.path) else { return [:] }
         let decoder = JSONDecoder()
@@ -112,7 +117,8 @@ public enum MCPToolCache {
         try? data.write(to: url, options: .atomic)
     }
 
-    /// 单条更新（键 = server 名小写；同名 server 跨源共享一份工具清单）
+    /// Updates a single entry (key = lowercased server name; same-named servers across sources
+    /// share one tool list)
     public static func upsert(
         name: String, entry: MCPToolCacheEntry, at url: URL = defaultURL()
     ) {

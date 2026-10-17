@@ -1,35 +1,39 @@
 import Foundation
 
-/// Prompt 的复用价值分类（实勘 2395 条本机数据定的阈值，数据与取舍记在
-/// docs/specs/2026-08-23-prompt-library-design.md 的「修订记录」）。
+/// Reuse-value classification for prompts (thresholds set from 2395 local entries; data and
+/// trade-offs are recorded in the revision log of docs/specs/2026-08-23-prompt-library-design.md).
 ///
-/// 分类是**内存派生**而非入库列：阈值会迭代，加列则每次调参都要刷全库 + 升 schema。
-/// `all()` 本就全量载入内存，几千条量级 O(n) 分类在后台队列一次算完可忽略。
+/// The class is **derived in memory**, not a stored column: thresholds keep changing, and a column
+/// would mean a full-DB refresh + schema bump on every tweak. `all()` already loads everything into
+/// memory; an O(n) pass over a few thousand entries on a background queue is negligible.
 public enum PromptKind: String, Sendable, CaseIterable {
-    /// 伪用户消息：斜杠命令回显 / 本地命令输出 / 任务通知等注入产物，不是人写的
+    /// Pseudo user message: injected artifacts like slash-command echoes / local command output /
+    /// task notifications, not human-written
     case noise
-    /// 琐碎短语（"继续"/"好的"），打字比找快，无复用价值
+    /// Trivial phrase ("continue" / "ok"); faster to type than to find, no reuse value
     case trivial
-    /// 短追问：脱离会话上下文即失效，默认展示但不置顶
+    /// Short follow-up: meaningless outside its session context; shown by default but never pinned
     case followup
-    /// 结构化指令：核心复用资产
+    /// Structured instruction: the core reusable asset
     case instruction
-    /// 长粘贴（日志/SQL/报错），是上下文不是提问
+    /// Long paste (logs / SQL / errors): context, not a question
     case paste
 }
 
 public enum PromptClassifier {
     public struct Thresholds: Sendable {
-        /// ≤ 此字符数视为琐碎（实勘 ≤12 字符的 418 条全是"继续"类）
+        /// At or below this many characters counts as trivial (all 418 local entries of ≤12 chars
+        /// were "continue"-like)
         public var trivialMaxLength = 12
-        /// ≤ 此字符数视为短追问
+        /// At or below this many characters counts as a short follow-up
         public var followupMaxLength = 40
-        /// ≥ 此字符数且无 markdown 结构视为长粘贴
+        /// At or above this many characters with no markdown structure counts as a long paste
         public var pasteMinLength = 2000
         public init() {}
     }
 
-    /// 琐碎词表（长度阈值外的补充：这些即使凑够字符也没有复用价值）
+    /// Trivial-phrase list (supplements the length threshold: these have no reuse value even when
+    /// long enough)
     static let trivialPhrases: Set<String> = [
         "继续", "继续吧", "好的", "好", "可以", "行", "嗯", "对", "对的", "不", "不用",
         "你好", "谢谢", "开始", "开始吧", "试试", "再试试", "重试", "提交", "跑一下",
@@ -37,10 +41,11 @@ public enum PromptClassifier {
         "thanks", "retry", "run", "commit", "continue", "proceed", "done", "next",
     ]
 
-    /// 伪用户消息前缀。**是前缀判定而非剥块**：这里服务的是存量库里未剥标签的原文
-    /// （实勘 296 条噪音全以标签开头）；采集端的剥块走 TurnSlicer.realPrompt。
-    /// 前 7 个与 TurnSlicer.injectedTags 对应，后 4 个是它清单外的
-    /// （bash 桥接与 Codex 注入的环境上下文）。
+    /// Pseudo-user-message prefixes. **Prefix matching, not block stripping**: this serves raw text
+    /// in the existing library with tags not yet stripped (all 296 local noise entries start with a
+    /// tag); capture-side stripping is TurnSlicer.realPrompt. The first 7 mirror
+    /// TurnSlicer.injectedTags; the last 4 are outside its list (the bash bridge and the
+    /// environment context Codex injects).
     static let injectedPrefixes = [
         "<command-name>", "<command-message>", "<command-args>",
         "<local-command-stdout>", "<local-command-caveat>",
@@ -49,13 +54,13 @@ public enum PromptClassifier {
         "<environment_context>", "<user_instructions>",
     ]
 
-    /// 是否为注入产物 / 裸斜杠命令（非人类提问）
+    /// Whether this is an injected artifact / bare slash command (not a human question)
     public static func isInjectedArtifact(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return true }
         for prefix in injectedPrefixes where trimmed.hasPrefix(prefix) { return true }
-        // 裸斜杠命令（"/compact"、"/effort high"）：单行、短、首字符 / 且后续不再含 /
-        // （"/usr/bin/…" 这类路径含第二个 /，不算）
+        // Bare slash command ("/compact", "/effort high"): single line, short, starts with / and
+        // has no further / (paths like "/usr/bin/..." contain a second / and don't count)
         if trimmed.hasPrefix("/"), !trimmed.contains("\n"), trimmed.count <= 64,
            !trimmed.dropFirst().contains("/") {
             return true
@@ -79,8 +84,9 @@ public enum PromptClassifier {
         return .instruction
     }
 
-    /// 长文本是否更像粘贴而非手写指令：手写长 prompt 通常带 markdown 结构
-    /// （标题/列表/引用），日志与 SQL 粘贴没有。只扫前 200 行封顶成本。
+    /// Whether long text looks more like a paste than a hand-written instruction: long hand-written
+    /// prompts usually have markdown structure (headings / lists / quotes); log and SQL pastes
+    /// don't. Scans only the first 200 lines to cap cost.
     static func looksLikePaste(_ text: String) -> Bool {
         let structured = text.split(separator: "\n", omittingEmptySubsequences: true)
             .prefix(200)
@@ -93,8 +99,9 @@ public enum PromptClassifier {
         return structured < 3
     }
 
-    /// 重复聚类指纹：lowercase + 压空白，只取前 512 字符 —— 大粘贴不值得整段扫，
-    /// 且前缀相同的长文本本来就该聚成一组
+    /// Duplicate-clustering fingerprint: lowercase + collapsed whitespace, first 512 chars only.
+    /// Big pastes aren't worth scanning in full, and long texts sharing a prefix should cluster
+    /// together anyway
     public static func normalizedFingerprint(_ text: String) -> String {
         String(text.prefix(512))
             .lowercased()
@@ -102,8 +109,9 @@ public enum PromptClassifier {
             .joined(separator: " ")
     }
 
-    /// 入库截断：按字符计（安全，不切碎合字），尾附标记。
-    /// 实勘最长一条 1.98MB 的日志粘贴 —— 复用库不需要也不该存这种全文。
+    /// Storage truncation: counts characters (safe, never splits grapheme clusters) and appends a
+    /// marker. The longest local entry was a 1.98MB log paste; a reuse library neither needs nor
+    /// should store that in full.
     public static func truncateForStorage(_ text: String, limit: Int = 65536) -> String {
         guard text.count > limit else { return text }
         return String(text.prefix(limit)) + "\n…[已截断]"

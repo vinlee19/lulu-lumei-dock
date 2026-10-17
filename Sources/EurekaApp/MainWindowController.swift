@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// 主应用窗口：承载 PopoverRootView 的侧边栏导航，做成可缩放/可全屏的标准窗口。
-/// 与菜单栏共享同一批服务实例（由 AppDelegate 注入），状态实时一致。
+/// Main app window: hosts PopoverRootView's sidebar navigation as a standard resizable /
+/// full-screen-capable window. Shares the same service instances as the menu bar (injected by
+/// AppDelegate), so state stays in sync live.
 @MainActor
 final class MainWindowController: NSWindowController {
     private let usageService: UsageService
@@ -32,7 +33,8 @@ final class MainWindowController: NSWindowController {
         self.limitsService = limitsService
         self.navigation = navigation
 
-        // 默认尺寸：屏幕可见区域的 75%，上限 1440×900、下限 840×540（= minSize）
+        // Default size: 75% of the screen's visible area, capped at 1440×900, floored at 840×540 (=
+        // minSize)
         let visible = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
         let defaultSize = NSSize(
             width: min(max(visible.width * 0.75, 840), 1440),
@@ -46,7 +48,8 @@ final class MainWindowController: NSWindowController {
         window.title = "lulu-lumei-dock"
         window.minSize = NSSize(width: 840, height: 540)
         window.collectionBehavior.insert(.fullScreenPrimary)
-        // 关窗后不释放：菜单栏/Dock 点击可重新打开同一个窗口（否则 use-after-free）
+        // Not released on close: a menu-bar / Dock click can reopen the same window (otherwise
+        // use-after-free)
         window.isReleasedWhenClosed = false
 
         let hosting = NSHostingController(
@@ -68,18 +71,22 @@ final class MainWindowController: NSWindowController {
                 updateService: updateService,
                 navigation: navigation,
                 palette: palette))
-        // 不让 SwiftUI 理想尺寸反向重设窗口 frame（否则首开被压到最小宽高、内容挤压重叠）
+        // Don't let SwiftUI's ideal size reset the window frame (otherwise the first open is
+        // squashed to the minimum size and content overlaps)
         hosting.sizingOptions = []
         window.contentViewController = hosting
-        // contentViewController 赋值会把窗口缩到内容 fitting 尺寸，这里再钉回默认尺寸
+        // Assigning contentViewController shrinks the window to the content's fitting size; pin it
+        // back to the default size here
         window.setContentSize(defaultSize)
-        // key 带 2：v0.1.8 前的 shrink-bug 会把压缩后的小窗存进旧 key，换名一次性抛弃脏数据
+        // The key carries a 2: the shrink bug before v0.1.8 saved the squashed window under the old
+        // key; renaming discards that bad data once
         window.setFrameAutosaveName("EurekaMainWindow2")
-        // 有已存 frame 则恢复，否则居中首开
+        // Restore the saved frame if there is one, otherwise center on first open
         if !window.setFrameUsingName("EurekaMainWindow2") {
             window.center()
         } else if window.frame.width < 840 || window.frame.height < 540 {
-            // 恢复到低于最小尺寸的 frame 时钳回（防外部写入的异常值）
+            // Clamp a restored frame that is below the minimum size (guards against bad values
+            // written externally)
             var frame = window.frame
             frame.size.width = max(frame.size.width, 840)
             frame.size.height = max(frame.size.height, 540)
@@ -92,8 +99,8 @@ final class MainWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) 未实现") }
 
-    /// 显示/前置主窗口（可选切到指定页签）。激活顺序：先 activate 再 makeKey，
-    /// 否则窗口可能藏在其他应用之后。
+    /// Shows / brings forward the main window (optionally switching to a given tab). Activation
+    /// order: activate first, then makeKey, otherwise the window may stay hidden behind other apps.
     func show(tab: PopoverRootView.Tab? = nil) {
         if let tab { navigation.tab = tab }
         usageService.refreshNow()

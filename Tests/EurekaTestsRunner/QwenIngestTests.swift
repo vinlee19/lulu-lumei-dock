@@ -7,7 +7,7 @@ import Foundation
 func qwenIngestTests(_ t: TestRunner) {
     t.suite("Qwen · 会话/对话/用量采集")
 
-    /// 造最小 ~/.qwen 布局：projects/<encoded>/chats/<uuid>.jsonl + runtime.json
+    /// Builds a minimal ~/.qwen layout: projects/<encoded>/chats/<uuid>.jsonl + runtime.json
     func makeHome() throws -> (home: URL, chat: URL) {
         let fm = FileManager.default
         let home = fm.temporaryDirectory
@@ -25,7 +25,7 @@ func qwenIngestTests(_ t: TestRunner) {
             #"{"uuid":"u1","sessionId":"\#(sessionId)","timestamp":"2026-07-21T14:14:35.000Z","type":"user","cwd":"/work/my-proj","message":{"role":"user","parts":[{"text":"请分析一下语义层模块"}]}}"#,
             #"{"uuid":"u2","sessionId":"\#(sessionId)","timestamp":"2026-07-21T14:15:28.000Z","type":"assistant","cwd":"/work/my-proj","model":"qwen3.7-max","message":{"role":"assistant","parts":[{"text":"内心思考","thought":true},{"functionCall":{"name":"read_file","args":{}}},{"text":"好的,我来分析。"}]}}"#,
             #"{"uuid":"u3","sessionId":"\#(sessionId)","timestamp":"2026-07-21T14:15:28.100Z","type":"system","cwd":"/work/my-proj","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"qwen-code.api_response","event.timestamp":"2026-07-21T14:15:27.979Z","response_id":"chatcmpl-abc","model":"qwen3.7-max","status_code":200,"input_token_count":27532,"output_token_count":310,"cached_content_token_count":100,"thoughts_token_count":36,"total_token_count":27842}}}"#,
-            // 流式重复的 telemetry 行（同 response_id）→ 同批次去重
+            // Streaming duplicates telemetry lines (same response_id) → deduped within the batch
             #"{"uuid":"u4","sessionId":"\#(sessionId)","timestamp":"2026-07-21T14:15:28.200Z","type":"system","cwd":"/work/my-proj","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"qwen-code.api_response","event.timestamp":"2026-07-21T14:15:27.979Z","response_id":"chatcmpl-abc","model":"qwen3.7-max","status_code":200,"input_token_count":27532,"output_token_count":310,"cached_content_token_count":100,"thoughts_token_count":36,"total_token_count":27842}}}"#,
         ]
         try lines.joined(separator: "\n").appending("\n")
@@ -59,8 +59,9 @@ func qwenIngestTests(_ t: TestRunner) {
         try expectEqual(result.messages.count, 4)
         try expectEqual(result.messages[0].role, .user)
         try expectEqual(result.messages[0].text, "请分析一下语义层模块")
-        // `{text, thought:true}` 是**明文思考**（Qwen 不加密不剥离，实机单段 5000+ 字符）：
-        // 与可见回答分开收，排在工具之前（先想再动手）
+        // `{text, thought:true}` is **plaintext thinking** (Qwen neither encrypts nor strips it;
+        // one segment exceeded 5000 characters on a real machine): collected separately from the
+        // visible answer and placed before tools (think, then act)
         try expectEqual(result.messages[1].role, .thinking)
         try expect(result.messages[1].text.contains("内心思考"))
         try expectEqual(result.messages[2].role, .toolNote)
@@ -109,11 +110,11 @@ func qwenIngestTests(_ t: TestRunner) {
             try? fm.removeItem(at: home)
             try? fm.removeItem(at: staging)
         }
-        // <3 项 → 不产文件
+        // <3 items → no file
         try expectEqual(PlanMaterializer.materializeQwen(
             projectsRoot: home.appendingPathComponent("projects"), into: staging), 0)
 
-        // 追加一条含 3 项清单的助手消息 → 产文件
+        // Append an assistant message with a 3-item checklist → file produced
         let plan = "计划如下:\\n- [x] 分析模块\\n- [~] 写方案\\n- [ ] 实施"
         let line = #"{"uuid":"u9","sessionId":"3dbdf6ce-5c3d-483c-b510-50e3e4ac4a6d","timestamp":"2026-07-21T14:20:00.000Z","type":"assistant","cwd":"/work/my-proj","message":{"role":"assistant","parts":[{"text":"\#(plan)"}]}}"#
         let content = try String(contentsOf: chat, encoding: .utf8)
@@ -127,7 +128,7 @@ func qwenIngestTests(_ t: TestRunner) {
         try expect(md.contains("- [x] 分析模块"))
         try expect(md.contains("启发式提取"))
 
-        // 重复运行内容未变 → 0 改动
+        // Repeated run with unchanged content → 0 changes
         try expectEqual(PlanMaterializer.materializeQwen(
             projectsRoot: home.appendingPathComponent("projects"), into: staging), 0)
     }
@@ -154,17 +155,18 @@ func qwenIngestTests(_ t: TestRunner) {
         let sessionId = "9dbdf6ce-0000-483c-b510-50e3e4ac4a6d"
         let chat = chats.appendingPathComponent("\(sessionId).jsonl")
 
-        // 头 = 首条用户消息（cwd/标题/开始时间来源），中间 ~450KB 填充，尾 = 最后状态
+        // Head = first user message (source of cwd/title/start time), ~450KB of padding in the
+        // middle, tail = final state
         var lines = [
             #"{"uuid":"u0","sessionId":"\#(sessionId)","timestamp":"2026-07-21T11:22:00.000Z","type":"user","cwd":"/work/my-proj","message":{"role":"user","parts":[{"text":"头部标题问题"}]}}"#,
             #"{"uuid":"u1","sessionId":"\#(sessionId)","timestamp":"2026-07-21T11:23:00.000Z","type":"assistant","cwd":"/work/my-proj","message":{"role":"assistant","parts":[{"text":"先答头部。"}]}}"#,
         ]
-        let filler = String(repeating: "填", count: 1000)  // UTF-8 每行约 3KB
+        let filler = String(repeating: "填", count: 1000)  // about 3KB per line in UTF-8
         for i in 0..<150 {
             lines.append(
                 #"{"uuid":"f\#(i)","sessionId":"\#(sessionId)","timestamp":"2026-07-21T12:00:00.000Z","type":"assistant","cwd":"/work/my-proj","message":{"role":"assistant","parts":[{"text":"\#(filler)"}]}}"#)
         }
-        // 尾部最后一条 user → 仍在进行中
+        // The tail ends with a user message → still in progress
         lines.append(
             #"{"uuid":"u9","sessionId":"\#(sessionId)","timestamp":"2026-07-21T13:00:00.000Z","type":"user","cwd":"/work/my-proj","message":{"role":"user","parts":[{"text":"尾部新问题"}]}}"#)
         let content = lines.joined(separator: "\n").appending("\n")
@@ -178,7 +180,7 @@ func qwenIngestTests(_ t: TestRunner) {
         ) { events.append(($0, $1)) }
         tailer.scanOnce()
 
-        // 只补发 running + 标题，不重放中间 150 条填充
+        // Only running + title are emitted, the 150 padding lines in between are not replayed
         let kinds = events.map(\.0.kind)
         try expectEqual(events.count, 2, "首扫只发 running + titleUpdate: \(kinds)")
         try expect(kinds.contains { $0 == .taskStarted(title: "尾部新问题") },
@@ -199,7 +201,7 @@ func qwenIngestTests(_ t: TestRunner) {
         let tailer = QwenChatTailer(
             projectsRoot: home.appendingPathComponent("projects")
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 初见：恢复状态 + 尾部遥测折算 ctx%（u3: 27532 / 200k）
+        tailer.scanOnce()  // First sight: restore state + derive ctx% from tail telemetry (u3: 27532 / 200k)
         func kinds() -> [TaskEvent.Kind] { events.map(\.0.kind) }
         func contextPercents() -> [Double] {
             events.compactMap { event, _ in
@@ -213,11 +215,12 @@ func qwenIngestTests(_ t: TestRunner) {
                         "初见应补发一次 ctx%: \(kinds())")
         try expect(abs(contextPercents()[0] - 13.766) < 0.001,
                    "27532/200k 应为 13.766%: \(contextPercents())")
-        // 首扫不重放历史：u2 的 functionCall 不应产出 activity
+        // The first scan doesn't replay history: u2's functionCall must not produce activity
         try expect(!kinds().contains { if case .activity = $0 { return true } else { return false } },
                    "首扫不应补发 activity: \(kinds())")
 
-        // 增量：只有 functionCall 的 assistant 行（此前直接丢弃）→ 每个工具一次心跳
+        // Incremental: an assistant line with only functionCall (previously dropped) → one
+        // heartbeat per tool
         events.removeAll()
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -235,7 +238,7 @@ func qwenIngestTests(_ t: TestRunner) {
         try expectEqual(events.first?.0.sessionId, sessionId)
         try expectEqual(events.first?.0.cwd, "/work/my-proj")
 
-        // 增量遥测：input_token_count 变化 → 补发 ctx%；不变（<0.5）不补发
+        // Incremental telemetry: input_token_count changes → emit ctx%; unchanged (<0.5) → no emit
         events.removeAll()
         try appendLine(
             #"{"uuid":"u6","sessionId":"\#(sessionId)","timestamp":"\#(now)","type":"system","cwd":"/work/my-proj","subtype":"ui_telemetry","systemPayload":{"uiEvent":{"event.name":"qwen-code.api_response","event.timestamp":"\#(now)","response_id":"chatcmpl-def","model":"qwen3.7-max","status_code":200,"input_token_count":100000,"output_token_count":310,"cached_content_token_count":100}}}"#)

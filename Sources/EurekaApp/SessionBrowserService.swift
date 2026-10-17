@@ -5,8 +5,10 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-/// 项目会话浏览：Claude + Codex 双源、按项目分组、搜索、会话级费用。
-/// 自带只读 EurekaStore 连接（WAL 并发读安全；UsageService 先启动负责迁移）。
+/// Project session browser: Claude + Codex sources, grouped by project, searchable,
+/// with per-session cost.
+/// Owns a read-only EurekaStore connection (safe for concurrent WAL reads; UsageService
+/// starts first and runs migrations).
 final class SessionBrowserService: ObservableObject {
     struct SessionCost: Equatable {
         var totalTokens: Int
@@ -20,12 +22,13 @@ final class SessionBrowserService: ObservableObject {
         var totalBytes: UInt64
         var latestActiveAt: Date
         var totalCostUSD: Double?
-        /// 项目总时长 = 组内各会话跨度求和
+        /// Total project duration = sum of the spans of every session in the group
         var totalDuration: TimeInterval
     }
 
-    /// rawValue 为稳定持久化 token；label 为界面展示文案（解耦，改文案不动存档）。
-    /// 前三档为扁平列表排序维度；「项目」为按项目分组视图。
+    /// rawValue is the stable persisted token; label is the display copy (decoupled, so
+    /// copy edits don't touch saved state).
+    /// The first three are sort keys for the flat list; `project` is the grouped-by-project view.
     enum SortMode: String, CaseIterable {
         case time
         case size
@@ -34,14 +37,14 @@ final class SessionBrowserService: ObservableObject {
 
         var label: String {
             switch self {
-            case .time: return L10n.text("Activity", zhHans: "活跃")      // 最近活跃时间
-            case .size: return L10n.text("Size", zhHans: "占用")      // transcript 磁盘占用
-            case .duration: return L10n.text("Duration", zhHans: "耗时")  // 会话首末活动跨度
+            case .time: return L10n.text("Activity", zhHans: "活跃")      // most recent activity
+            case .size: return L10n.text("Size", zhHans: "占用")      // transcript disk usage
+            case .duration: return L10n.text("Duration", zhHans: "耗时")  // span between a session's first and last activity
             case .project: return L10n.text("Project", zhHans: "项目")
             }
         }
 
-        /// 页签图标（SF Symbol，同侧边栏/设置页的胶囊页签风格）
+        /// Tab icon (SF Symbol, same capsule-tab style as the sidebar / Settings page)
         var icon: String {
             switch self {
             case .time: return "clock.fill"
@@ -52,14 +55,14 @@ final class SessionBrowserService: ObservableObject {
         }
     }
 
-    /// 全部会话的账本总览（不受搜索/截断影响）
+    /// Ledger summary across all sessions (unaffected by search / truncation)
     struct Summary: Equatable {
         var totalBytes: UInt64 = 0
         var sessionCount: Int = 0
         var totalCostUSD: Double?
     }
 
-    /// 全文搜索命中（消息级）：snippet 已按查询词就近裁剪
+    /// Full-text search hit (per message); snippet is already trimmed around the query
     struct FullTextHit: Identifiable, Equatable {
         var id: Int64
         var source: AgentSource
@@ -72,25 +75,28 @@ final class SessionBrowserService: ObservableObject {
     }
 
     @Published private(set) var groups: [ProjectGroup] = []
-    /// 扁平列表（time/size/duration 三档；project 档时为空，走 groups）
+    /// Flat list (time/size/duration modes; empty in project mode, which uses groups)
     @Published private(set) var flatSessions: [AgentSessionInfo] = []
-    /// 各来源会话数（全集口径，来源 chips 计数用；不受搜索/筛选影响）
+    /// Session count per source (full set, for the source chip counts; unaffected by
+    /// search / filters)
     @Published private(set) var sourceCounts: [AgentSource: Int] = [:]
     @Published private(set) var summary = Summary()
-    /// id → 会话索引信息（用量"按会话"排行 join 会话名 + 跨页签跳转用），refresh 完成时填充
+    /// id → session index info (joins session names into the usage "by session" ranking
+    /// and drives cross-tab jumps); filled when refresh completes
     @Published private(set) var sessionsById: [String: AgentSessionInfo] = [:]
     @Published private(set) var costs: [String: SessionCost] = [:]
-    /// 每会话对话数
+    /// Prompt count per session
     @Published private(set) var promptCounts: [String: Int] = [:]
-    /// 会话 → 最近一次终端绑定，键为 `AgentTask.key(source:sessionId:)`
+    /// Session → most recent terminal binding, keyed by `AgentTask.key(source:sessionId:)`
     @Published private(set) var terminals: [String: TerminalBinding] = [:]
     @Published private(set) var scanning = false
-    /// 当前选中的会话（详情栏渲染对象）
+    /// Currently selected session (what the detail pane renders)
     @Published private(set) var selected: AgentSessionInfo?
     @Published private(set) var transcript: [TranscriptMessage] = []
     @Published private(set) var transcriptTruncated = false
     @Published private(set) var transcriptLoading = false
-    /// 当前会话的上下文用量分类拆解（transcript 加载完成后异步估算；trae/antigravity 恒 nil）
+    /// Context-usage breakdown by category for the current session (estimated async after
+    /// the transcript loads; always nil for trae/antigravity)
     @Published private(set) var contextBreakdown: ContextBreakdown?
     @Published var sortMode: SortMode = .time {
         didSet { rebuild() }
@@ -101,15 +107,16 @@ final class SessionBrowserService: ObservableObject {
             scheduleFullTextSearch()
         }
     }
-    /// 全文搜索命中（搜索词 ≥2 字符时异步填充）
+    /// Full-text search hits (filled async once the query is ≥2 characters)
     @Published private(set) var fullTextHits: [FullTextHit] = []
-    /// 全文命中点击后待跳转的消息 id（transcript 加载完成后由详情页消费）
+    /// Message id to jump to after a full-text hit is clicked (consumed by the detail page
+    /// once the transcript loads)
     @Published private(set) var pendingJumpMessageId: Int?
-    /// 来源筛选（nil = 全部）
+    /// Source filter (nil = all)
     @Published var sourceFilter: AgentSource? {
         didSet { rebuild() }
     }
-    /// 时间范围：false = 近 30 天（默认）；true = 全部时间（重建索引）
+    /// Time range: false = last 30 days (default); true = all time (re-indexes)
     @Published var rangeAll = false {
         didSet { refresh() }
     }
@@ -117,20 +124,24 @@ final class SessionBrowserService: ObservableObject {
     private let queue = DispatchQueue(label: "com.vinlee.eureka.sessions", qos: .userInitiated)
     private let resolver = ProjectResolver()
     private var sessions: [AgentSessionInfo] = []
-    /// 待跳转的会话 id（索引未就绪时记下，refresh 完成后消费）
+    /// Session id waiting to be revealed (recorded while the index isn't ready, consumed
+    /// after refresh completes)
     private var pendingRevealId: String?
-    /// 扫描进行中又收到刷新请求（典型：切「全部时间」）→ 扫完后自动补一轮。
-    /// 不能静默丢弃——档位状态已变，丢弃后再次点击同一档不会触发 didSet，
-    /// 界面就停在「全部时间」却只有 30 天数据，像永远拉取不到。
+    /// A refresh request arriving mid-scan (typically switching to "All time") → run one
+    /// more pass afterwards.
+    /// It can't be silently dropped: the range state has already changed, so clicking the
+    /// same option again won't fire didSet, and the UI would sit on "All time" with only
+    /// 30 days of data, as if it never finished loading.
     private var refreshPending = false
-    /// 全文搜索防抖
+    /// Full-text search debounce
     private var searchWorkItem: DispatchWorkItem?
-    // 以下仅 queue 上访问
+    // Accessed only on `queue` from here down
     private var store: EurekaStore?
     private var pricing: PricingTable { PricingCatalogStore.shared.current }
     private var storeLoaded = false
 
-    /// 惰性打开只读 store 连接（refresh / 全文搜索共用，仅 queue 上调用）
+    /// Lazily opens the read-only store connection (shared by refresh and full-text search;
+    /// call only on `queue`)
     private func loadStoreIfNeeded() {
         guard !storeLoaded else { return }
         storeLoaded = true
@@ -144,16 +155,18 @@ final class SessionBrowserService: ObservableObject {
             return
         }
         scanning = true
-        // rangeAll 是主线程写的 @Published，派发前先捕获，闭包里不再跨线程读
+        // rangeAll is a main-thread @Published; capture it before dispatching so the closure
+        // never reads it across threads
         let rangeAll = self.rangeAll
         queue.async { [weak self] in
             guard let self else { return }
             self.loadStoreIfNeeded()
-            // 时间范围：默认近 30 天；「全部时间」不设窗口。
-            // 不截断条数——旧上限（300/2000 按 mtime 截尾）会把更早的会话
-            // 静默挤出列表（实勘：300+ 轮的长会话因此"消失"）。head 解析
-            // 每文件只读 64KB 且在后台队列，万级文件也就秒级；下游批量查询
-            // （费用/对话数）已按 500 分块，列表渲染走 LazyVStack。
+            // Time range: last 30 days by default; "All time" sets no window.
+            // No cap on count: the old limits (300/2000, truncated by mtime) silently pushed older
+            // sessions out of the list (observed: long sessions with 300+ turns "disappeared").
+            // Head parsing reads only 64KB per file on a background queue, so even tens of
+            // thousands of files take seconds; downstream batch queries (cost / prompt counts)
+            // are already chunked by 500, and the list renders through LazyVStack.
             let window: TimeInterval = rangeAll ? .greatestFiniteMagnitude : 30 * 86400
             let maxSessions = Int.max
             var indexed = ClaudeSessionIndexer.index(
@@ -176,25 +189,26 @@ final class SessionBrowserService: ObservableObject {
                 window: window, maxSessions: maxSessions)
             indexed += QwenSessionIndexer.index(
                 projectsRoot: QwenPaths.projectsRoot(), window: window, maxSessions: maxSessions)
-            // hermes：会话全在 state.db（含各 profile 的独立库）
+            // hermes: every session lives in state.db (plus a separate DB per profile)
             indexed += HermesSessionIndexer.indexAll(window: window, maxSessions: maxSessions)
             indexed += CodeBuddySessionIndexer.index(
                 projectsRoot: CodeBuddyPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             indexed += QoderSessionIndexer.index(
                 projectsRoot: QoderPaths.projectsRoot(), window: window, maxSessions: maxSessions)
-            // zcode：会话全在 cli/db/db.sqlite（共享库，无 transcript 文件）
+            // zcode: every session lives in cli/db/db.sqlite (shared DB, no transcript files)
             indexed += ZcodeSessionIndexer.index(
                 dbPath: ZcodePaths.db(), window: window, maxSessions: maxSessions)
-            // cursor：会话全在 state.vscdb（IDE 无 transcript 文件）
+            // cursor: every session lives in state.vscdb (the IDE has no transcript files)
             indexed += CursorSessionIndexer.index(window: window, maxSessions: maxSessions)
-            // trae：会话库是 SQLCipher 加密的，标题/时间只能从明文记忆库反推（延迟、可能为空）
+            // trae: the session DB is SQLCipher-encrypted; titles/times can only be inferred from
+            // the plaintext memory library (delayed, possibly empty)
             indexed += TraeSessionIndexer.index(window: window, maxSessions: maxSessions)
-            // 按 id 去重（Claude 嵌套子代理目录等可能重复索引同一会话；
-            // ForEach 重复 id 会导致列表渲染出空白行）
+            // Dedup by id (e.g. Claude's nested subagent dirs can index the same session twice;
+            // duplicate ids in ForEach render blank rows)
             var seenIds = Set<String>()
             indexed = indexed.filter { seenIds.insert($0.id).inserted }
 
-            // 会话级费用：逐会话×模型聚合后按价格表折算
+            // Per-session cost: aggregate per session × model, then price through the pricing table
             var costMap: [String: SessionCost] = [:]
             if let store = self.store,
                let totals = try? store.usage.totalsForSessions(indexed.map(\.id)) {
@@ -215,7 +229,8 @@ final class SessionBrowserService: ObservableObject {
             let prompts = (try? self.store?.sessionStats.promptCounts(
                 for: indexed.map(\.id))) ?? [:]
 
-            // 终端归属：一次查完全表（键 source:sessionId），避免每行一次查询
+            // Terminal ownership: fetch the whole table once (keyed source:sessionId) instead of
+            // one query per row
             let terminals = (try? self.store?.sessionTerminals.latestBySession()) ?? [:]
 
             DispatchQueue.main.async {
@@ -227,15 +242,17 @@ final class SessionBrowserService: ObservableObject {
                 self.terminals = terminals
                 self.scanning = false
                 self.rebuild()
-                // 索引就绪后消费待跳转请求（用量"按会话"排行点击时索引可能还没建）
+                // Consume a pending reveal once the index is ready (the usage "by session" ranking
+                // may be clicked before it's built)
                 if let pending = self.pendingRevealId {
                     self.pendingRevealId = nil
                     if let hit = self.sessionsById[pending] {
                         self.select(hit)
                     }
                 }
-                // 扫描期间收到过刷新请求（如切了时间范围）→ 自动补扫，
-                // 用最新状态重跑而不是让用户点了没反应
+                // A refresh request arrived during the scan (e.g. the time range changed) → rescan
+                // automatically with the latest state rather than leaving the user's click with no
+                // effect
                 if self.refreshPending {
                     self.refreshPending = false
                     self.refresh()
@@ -245,7 +262,7 @@ final class SessionBrowserService: ObservableObject {
     }
 
     private func rebuild() {
-        // 总览：全部会话，不过滤、不截断
+        // Summary: all sessions, no filtering, no truncation
         let allCosts = sessions.compactMap { costs[$0.id]?.costUSD }
         summary = Summary(
             totalBytes: sessions.reduce(0) { $0 + $1.sizeBytes },
@@ -259,7 +276,7 @@ final class SessionBrowserService: ObservableObject {
             visible = visible.filter { $0.source == filter }
         }
         if !query.isEmpty {
-            // 搜索态：全量匹配，不截断
+            // Searching: match everything, no truncation
             visible = visible.filter { session in
                 let haystack = [
                     session.name, session.id, session.cwd,
@@ -268,7 +285,8 @@ final class SessionBrowserService: ObservableObject {
             }
         }
 
-        // 扁平三档：排序，不做项目分组、不按条数截断（范围由索引时的窗口控制）
+        // Flat modes: sort only, no project grouping, no count cap (the range is set by the
+        // indexing window)
         if sortMode != .project {
             switch sortMode {
             case .time: visible.sort { $0.lastActiveAt > $1.lastActiveAt }
@@ -281,7 +299,8 @@ final class SessionBrowserService: ObservableObject {
             return
         }
 
-        // 项目档：按项目分组（组间按最近活跃排，组内按最近活跃排）
+        // Project mode: group by project (groups, and sessions within them, sorted by most
+        // recent activity)
         visible.sort { $0.lastActiveAt > $1.lastActiveAt }
         var byProject: [String: [AgentSessionInfo]] = [:]
         for session in visible {
@@ -308,9 +327,10 @@ final class SessionBrowserService: ObservableObject {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    // MARK: - 全文搜索
+    // MARK: - Full-text search
 
-    /// 防抖 250ms 后在后台查 FTS 索引；查询 <2 字符直接清空结果
+    /// Queries the FTS index on the background queue after a 250ms debounce; queries under
+    /// 2 characters just clear the results
     private func scheduleFullTextSearch() {
         searchWorkItem?.cancel()
         let query = searchText.trimmingCharacters(in: .whitespaces)
@@ -334,7 +354,7 @@ final class SessionBrowserService: ObservableObject {
                     snippet: Self.snippet(around: query, in: hit.text))
             }
             DispatchQueue.main.async {
-                // 结果落地前查询又变了 → 丢弃过期结果
+                // The query changed before results landed → drop the stale results
                 guard self.searchText.trimmingCharacters(in: .whitespaces) == query else { return }
                 self.fullTextHits = mapped.map { hit in
                     var enriched = hit
@@ -347,7 +367,8 @@ final class SessionBrowserService: ObservableObject {
         queue.asyncAfter(deadline: .now() + 0.25, execute: item)
     }
 
-    /// 就近裁剪命中片段：命中词前后各留 radius 字符，越界加省略号
+    /// Trims a hit snippet around the match: keeps `radius` characters on each side, adding
+    /// ellipses when cut
     static func snippet(around query: String, in text: String, radius: Int = 40) -> String {
         let collapsed = text.replacingOccurrences(of: "\n", with: " ")
         guard let range = collapsed.range(of: query, options: [.caseInsensitive]) else {
@@ -365,20 +386,24 @@ final class SessionBrowserService: ObservableObject {
         return result
     }
 
-    /// 全文命中点击：选中会话并记录待跳转消息（transcript 加载完成后由详情页消费）
+    /// Full-text hit clicked: select the session and record the message to jump to
+    /// (consumed by the detail page once the transcript loads)
     func revealMessage(sessionId: String, messageIdx: Int) {
         pendingJumpMessageId = messageIdx
         reveal(sessionId: sessionId)
     }
 
-    /// 详情页 transcript 加载完成后取走待跳转消息 id（取即清）
+    /// Called by the detail page after the transcript loads to take the pending jump
+    /// message id (taking clears it)
     func consumePendingJump() -> Int? {
         defer { pendingJumpMessageId = nil }
         return pendingJumpMessageId
     }
 
-    /// 跨页跳「某会话第 N 轮的血缘图」。与 `revealMessage` 一比一同构：
-    /// 记下目标后走同一条 reveal 链路（索引未就绪的兜底也照旧）。
+    /// Cross-page jump to "turn N's lineage graph of a session". Mirrors `revealMessage`
+    /// one-to-one:
+    /// records the target and goes through the same reveal path (including the fallback
+    /// for an unready index).
     @Published private(set) var pendingTurnIndex: Int?
 
     func revealTurn(sessionId: String, turnIndex: Int) {
@@ -386,20 +411,22 @@ final class SessionBrowserService: ObservableObject {
         reveal(sessionId: sessionId)
     }
 
-    /// transcript 加载完成后取走待跳转轮次（取即清）
+    /// Takes the pending turn after the transcript loads (taking clears it)
     func consumePendingTurn() -> Int? {
         defer { pendingTurnIndex = nil }
         return pendingTurnIndex
     }
 
-    // MARK: - 选中与对话记录
+    // MARK: - Selection and transcript
 
-    /// 会话×模型聚合一行的 token 合计（选窗口模型用，口径同 costs）
+    /// Token total of one session × model aggregate row (used to pick the window model;
+    /// same basis as costs)
     private static func totalTokens(_ row: UsageTotals) -> Int {
         row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheCreationTokens
     }
 
-    /// 跨页签跳转：按 id 选中会话（索引未就绪时记下，refresh 完成后自动选中）
+    /// Cross-tab jump: select a session by id (recorded if the index isn't ready,
+    /// auto-selected after refresh completes)
     func reveal(sessionId: String) {
         if let hit = sessionsById[sessionId] {
             select(hit)
@@ -409,19 +436,21 @@ final class SessionBrowserService: ObservableObject {
         refresh()
     }
 
-    /// 选中会话并在后台加载对话记录
+    /// Selects a session and loads its transcript in the background
     func select(_ session: AgentSessionInfo?) {
         selected = session
         transcript = []
         transcriptTruncated = false
-        contextBreakdown = nil  // 切会话即清空，估算完成后按 id 校验回填
+        contextBreakdown = nil  // cleared on every session switch; filled back after estimation, checked by id
         guard let session else { return }
         loadTranscript(session)
     }
 
-    /// 截断兜底：不设预算整段重载（详情页「加载全部」按钮用）。
-    /// 整文件本来就会读进内存解析，预算只约束消息数组的规模——
-    /// 用户显式要求时放开是安全的。
+    /// Truncation fallback: reload the whole thing with no budget (for the detail page's
+    /// "Load all" button).
+    /// The whole file is read into memory for parsing anyway; the budget only bounds the
+    /// size of the message array,
+    /// so lifting it on explicit user request is safe.
     func loadFullTranscript() {
         guard let session = selected else { return }
         loadTranscript(session, maxMessages: Int.max)
@@ -434,20 +463,23 @@ final class SessionBrowserService: ObservableObject {
         transcriptLoading = true
         queue.async { [weak self] in
             let result = TranscriptReader.load(session: session, maxMessages: maxMessages)
-            // 上下文用量估算：trae/antigravity 正文不可得，直接 nil
+            // Context-usage estimate: trae/antigravity have no readable message bodies, so nil
             var breakdown: ContextBreakdown?
             if session.source != .trae && session.source != .antigravity {
                 self?.loadStoreIfNeeded()
-                // 窗口大小按该会话 token 最多的模型取；无记录则 nil → 默认窗口
+                // Window size comes from the model with the most tokens in this session; no records
+                // → nil → default window
                 let rows = (try? self?.store?.usage.totalsForSessions([session.id]))?[session.id] ?? []
                 let model = rows.max(by: { Self.totalTokens($0) < Self.totalTokens($1) })?.model
-                // 窗口分母优先用会话数据自带的真实值：codex 的 token_count 事件带
-                // model_context_window；kimi 用 config.toml 的 per-model max_context_size，
-                // zcode 用 v2/config.json 的 per-model limit.context（都是应用自己维护的
-                // 真实配置）；其余源回退 ContextWindows 内建表
-                // zcode 的 transcriptPath 是共享 sqlite 库，真实 usage 在逐会话 rollout；
-                // 末条 usage 顺带带回模型名——账本行可能尚未写入（60s tick），
-                // 没有它窗口分母会漏查 config 而落到内建默认值
+                // The window denominator prefers the real value carried by the session's own data:
+                // codex's token_count events carry model_context_window; kimi uses the per-model
+                // max_context_size in config.toml, zcode uses the per-model limit.context in
+                // v2/config.json (both real configs the apps maintain themselves); other sources
+                // fall back to the built-in ContextWindows table. zcode's transcriptPath is the
+                // shared sqlite DB; the real usage is in the per-session rollout. The last usage
+                // entry also carries the model name: the ledger row may not be written yet (60s
+                // tick), and without it the window denominator would skip the config and fall to
+                // the built-in default
                 let zcodeLast = session.source == .zcode
                     ? LastTurnUsageReader.lastZcodeContext(
                         rolloutPath: ZcodePaths.rolloutRoot()
@@ -479,16 +511,17 @@ final class SessionBrowserService: ObservableObject {
         }
     }
 
-    // MARK: - 恢复与删除
+    // MARK: - Resume and delete
 
-    /// 恢复命令（详情栏展示 + 复制 + 终端执行共用）
-    /// 某会话最近所在终端（列表行用；查的是已发布的批量结果，不碰 DB）
+    /// Resume command (shared by the detail pane display, copy, and run-in-terminal) Most recent
+    /// terminal for a session (for list rows; reads the published batch result, not the DB)
     func terminal(for session: AgentSessionInfo) -> TerminalBinding? {
         terminals[AgentTask.key(source: session.source, sessionId: session.id)]
     }
 
-    /// 某会话的**全部**终端绑定（详情页「曾在 N 个终端运行」用）。
-    /// 只在打开详情时按需查一次 —— 列表页不需要历史，只需要最近那条。
+    /// **All** terminal bindings for a session (for the detail page's "ran in N terminals").
+    /// Queried once, on demand, when the detail opens; the list needs only the latest one, not
+    /// history.
     func terminalHistory(
         for session: AgentSessionInfo
     ) -> [(binding: TerminalBinding, firstSeen: Date, lastSeen: Date)] {
@@ -501,7 +534,7 @@ final class SessionBrowserService: ObservableObject {
         switch session.source {
         case .claude: resume = "claude --resume \(session.id)"
         case .codex: resume = "codex resume \(session.id)"
-        case .opencode: resume = "opencode --session \(session.id)"  // 用 --session 重新进入指定会话（opencode 1.17+）
+        case .opencode: resume = "opencode --session \(session.id)"  // --session re-enters the given session (opencode 1.17+)
         case .grok: resume = "grok --resume \(session.id)"
         case .antigravity: resume = "agy --conversation \(session.id)"
         case .kimi: resume = "kimi --session \(session.id)"
@@ -510,32 +543,36 @@ final class SessionBrowserService: ObservableObject {
         case .hermes: resume = "hermes --resume \(session.id)"
         case .codebuddy: resume = "codebuddy --resume \(session.id)"
         case .qoder:
-            // CLI 二进制版本号在文件名里，glob 取最新；找不到回退裸命令名
+            // The CLI binary has its version in the filename; glob for the newest, falling back to
+            // the bare command name
             let binary = QoderPaths.cliBinary()?.path ?? "qoderclicn"
             resume = "\(binary) --resume \(session.id)"
         case .cursor:
-            // Cursor 是 IDE，没有「恢复某个会话」的命令行入口——只能把工作区打开，
-            // 会话在侧栏历史里自己挑。`cursor` 命令要在 IDE 内 Cmd+Shift+P 安装。
+            // Cursor is an IDE with no command-line entry to resume a session; we can only open the
+            // workspace and the user picks the session from the sidebar history. The `cursor`
+            // command is installed via Cmd+Shift+P inside the IDE.
             return session.cwd.map { "cursor '\($0)'" } ?? "cursor"
         case .trae:
-            // Trae 同 Cursor：IDE，无按会话恢复的命令行入口，只能打开工作区。
-            // 会话来自 CN 版的记忆库（国际版没有记忆目录），所以固定用 `trae-cn`。
+            // Trae is like Cursor: an IDE with no per-session resume command, so only open the
+            // workspace. Sessions come from the CN edition's memory library (the international
+            // edition has no memory dir), so always use `trae-cn`.
             return session.cwd.map { "trae-cn '\($0)'" } ?? "trae-cn"
         case .zcode:
-            // ZCode 无已知的按会话恢复命令行参数，只能打开工作区目录
+            // ZCode has no known per-session resume flag, so only open the workspace directory
             return session.cwd.map { "open '\($0)'" } ?? "open ."
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume
     }
 
-    /// 拷贝恢复命令到剪贴板
+    /// Copies the resume command to the clipboard
     func copyResumeCommand(_ session: AgentSessionInfo) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(resumeCommand(for: session), forType: .string)
     }
 
-    /// 在 Terminal 新窗口/标签执行恢复命令（osascript；命令内双引号/反斜杠转义）
+    /// Runs the resume command in a new Terminal window/tab (osascript; double quotes /
+    /// backslashes in the command are escaped)
     func resumeInTerminal(_ session: AgentSessionInfo) {
         let command = resumeCommand(for: session)
         let escaped = command
@@ -558,12 +595,14 @@ final class SessionBrowserService: ObservableObject {
         }
     }
 
-    /// 删除会话（移废纸篓，可恢复）：可删判定见 `AgentSource.supportsSessionDeletion`
-    /// （opencode / hermes 存共享库，不支持）。
-    /// Claude 会话若有嵌套子代理目录（<session>/…）一并清理；grok 是整个 <uuid>/ 目录；
-    /// antigravity 是 <uuid>.db（连 -wal/-shm）；kimi 是整个 session_<uuid>/ 目录。
-    /// codebuddy / qoder 走默认分支：删 <sessionId>.jsonl，顺带清理同名 <sessionId>/
-    /// 伴随目录（subagents 等，与 Claude 嵌套目录同一处逻辑）。
+    /// Deletes sessions (moved to the Trash, recoverable); deletability is
+    /// `AgentSource.supportsSessionDeletion`
+    /// (opencode / hermes live in shared DBs and aren't supported).
+    /// A Claude session's nested subagent dir (<session>/…) is cleaned up too; grok removes
+    /// the whole <uuid>/ dir;
+    /// antigravity removes <uuid>.db (plus -wal/-shm); kimi removes the whole session_<uuid>/ dir.
+    /// codebuddy / qoder take the default branch: delete <sessionId>.jsonl and the same-named
+    /// <sessionId>/ companion dir (subagents etc., same logic as Claude's nested dir).
     func deleteSessions(_ toDelete: [AgentSessionInfo], completion: ((Int) -> Void)? = nil) {
         let deletable = toDelete.filter { $0.source.supportsSessionDeletion }
         guard !deletable.isEmpty else {
@@ -578,7 +617,7 @@ final class SessionBrowserService: ObservableObject {
             var trashed = 0
             for session in deletable {
                 let fileURL = URL(fileURLWithPath: session.transcriptPath)
-                // grok：transcriptPath = <uuid>/chat_history.jsonl，删整个会话目录
+                // grok: transcriptPath = <uuid>/chat_history.jsonl; delete the whole session dir
                 if session.source == .grok {
                     let sessionDir = fileURL.deletingLastPathComponent()
                     if (try? fm.trashItem(at: sessionDir, resultingItemURL: nil)) != nil {
@@ -586,7 +625,8 @@ final class SessionBrowserService: ObservableObject {
                     }
                     continue
                 }
-                // kimi：transcriptPath = session_<uuid>/agents/main/wire.jsonl，上翻三级删整个会话目录
+                // kimi: transcriptPath = session_<uuid>/agents/main/wire.jsonl; go up three levels
+                // and delete the whole session dir
                 if session.source == .kimi {
                     let sessionDir = fileURL
                         .deletingLastPathComponent()   // main/
@@ -597,7 +637,7 @@ final class SessionBrowserService: ObservableObject {
                     }
                     continue
                 }
-                // antigravity：transcriptPath = <uuid>.db，连同 -wal/-shm 一并删
+                // antigravity: transcriptPath = <uuid>.db; delete it together with -wal/-shm
                 if session.source == .antigravity {
                     if (try? fm.trashItem(at: fileURL, resultingItemURL: nil)) != nil {
                         trashed += 1
@@ -613,7 +653,7 @@ final class SessionBrowserService: ObservableObject {
                 if (try? fm.trashItem(at: fileURL, resultingItemURL: nil)) != nil {
                     trashed += 1
                 }
-                // Claude 嵌套目录（subagents 等）：<dir>/<sessionId>/
+                // Claude nested dir (subagents etc.): <dir>/<sessionId>/
                 let nested = fileURL.deletingPathExtension()
                 var isDir: ObjCBool = false
                 if fm.fileExists(atPath: nested.path, isDirectory: &isDir), isDir.boolValue {

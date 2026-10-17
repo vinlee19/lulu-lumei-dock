@@ -1,15 +1,16 @@
 import EurekaKit
 import Foundation
 
-/// 记忆库索引（`MEMORY.md`）漂移的确定性修复：
-/// - **悬空引用** → 删除指向已不存在文件的列表行（agent 按行加载会扑空）；
-/// - **未收录条目** → 在文末追加 `- [标题](文件名.md) — 摘要` 行（agent 读索引决定
-///   加载什么，没被收录的条目等于死记忆）。
+/// Deterministic repair of memory library index (`MEMORY.md`) drift:
+/// - **Dangling references** → delete list lines pointing at files that no longer exist (the
+///   agent loads line by line and would come up empty);
+/// - **Unlisted entries** → append `- [title](file.md) — summary` lines at the end (the agent
+///   reads the index to decide what to load; an unlisted entry is dead memory).
 ///
-/// 纯文本进出、可单测。检测口径与 `MemoryLibrary.unindexedEntries` /
-/// `danglingIndexRefs` 同源（normalizeKey 一致），但基于**全文**重算 ——
-/// 索引器解析带 64KB 头部上限，重写必须以完整文件为准，否则会把没读到的尾部
-/// 误判成漂移、修复时整段截掉。
+/// Pure text in/out, unit-testable. Detection matches `MemoryLibrary.unindexedEntries` /
+/// `danglingIndexRefs` (same normalizeKey), but is recomputed from the **full text** — the
+/// indexer's parse has a 64KB head cap, and a rewrite must work from the complete file, or the
+/// unread tail would be misjudged as drift and cut off wholesale during repair.
 public enum MemoryIndexRepair {
     public struct Outcome: Equatable, Sendable {
         public var text: String
@@ -17,8 +18,9 @@ public enum MemoryIndexRepair {
         public var removedCount: Int
     }
 
-    /// 生成修复后的索引全文；无漂移（无行可删、无条目可补）时返回 nil。
-    /// `entries` 传库里的真实条目（不含索引自身）。
+    /// Produces the repaired full index text; returns nil when there is no drift (no line to
+    /// delete, no entry to add). `entries` are the library's real entries (excluding the index
+    /// itself).
     public static func repair(indexText: String, entries: [MemoryEntry]) -> Outcome? {
         var actualKeys = Set<String>()
         for entry in entries {
@@ -26,8 +28,9 @@ public enum MemoryIndexRepair {
             actualKeys.insert(MemoryGraphBuilder.normalizeKey(entry.title))
         }
 
-        // 1) 删悬空行：只动列表项，且该行**所有** .md 链接目标都不在目录里才删 ——
-        //    标题/正文行、含仍有效链接的行一律保留（保守优先，索引是 agent 的入口文件）
+        // 1) Delete dangling lines: only list items, and only when **every** .md link target on the
+        //    line is missing from the directory — heading/body lines and lines with a still-valid
+        //    link are always kept (conservative first; the index is the agent's entry file)
         var removedCount = 0
         var lines = indexText.components(separatedBy: "\n")
         lines.removeAll { line in
@@ -40,8 +43,9 @@ public enum MemoryIndexRepair {
             return allDangling
         }
 
-        // 2) 补未收录：以清理后的全文重算收录键；文件名或 frontmatter 标题任一命中即算收录
-        //    （与 MemoryLibrary.unindexedEntries 的判据一致）
+        // 2) Add unlisted entries: recompute listed keys from the cleaned full text; a hit on
+        //    either the file name or the frontmatter title counts as listed (same criterion as
+        //    MemoryLibrary.unindexedEntries)
         let indexedKeys = Set(
             SkillMemoryIndexer.extractMarkdownLinks(lines.joined(separator: "\n"))
                 .map { key(forPath: $0) })
@@ -53,7 +57,7 @@ public enum MemoryIndexRepair {
         guard removedCount > 0 || !missing.isEmpty else { return nil }
 
         if !missing.isEmpty {
-            // 尾部空行收干净再追加，最后补一个换行结尾
+            // Trim trailing blank lines before appending, then end with a single newline
             while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
                 lines.removeLast()
             }
@@ -68,8 +72,9 @@ public enum MemoryIndexRepair {
             removedCount: removedCount)
     }
 
-    /// 一条补录行：`- [标题](文件名) — 摘要`（无摘要时省略破折号段）。
-    /// 与 Claude 自己维护的索引行格式一致，写进去它就能继续接手。
+    /// One backfill line: `- [title](file name) — summary` (the dash part is omitted without a
+    /// summary). Same format as the index lines Claude maintains itself, so it can keep taking over
+    /// once written.
     static func indexLine(for entry: MemoryEntry) -> String {
         let file = URL(fileURLWithPath: entry.path).lastPathComponent
         let hook = (entry.summary ?? "")
@@ -80,7 +85,7 @@ public enum MemoryIndexRepair {
             : "- [\(entry.title)](\(file)) — \(hook)"
     }
 
-    /// 路径/链接目标 → 归一化键（去扩展名的文件名，normalizeKey 同源）
+    /// Path/link target → normalized key (file name without extension, same as normalizeKey)
     private static func key(forPath path: String) -> String {
         MemoryGraphBuilder.normalizeKey(
             URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent)

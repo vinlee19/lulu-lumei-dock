@@ -1,24 +1,29 @@
 import Foundation
 import EurekaKit
 
-/// 扫描一个 Kimi 会话的子 agent 现场（纯函数，便于单测）。轻量快照：只读各 agent
-/// wire.jsonl 的头 + 小尾窗，不做增量 tail（主 wire 的 tail 归 KimiWireTailer，
-/// 子 wire 入事件流会造成幻影任务）。
+/// Scans the subagents of one Kimi session (pure function, easy to unit test). Lightweight
+/// snapshot: reads only the head + a small tail window of each agent's wire.jsonl, no incremental
+/// tail (tailing the main wire belongs to KimiWireTailer; feeding subagent wires into the event
+/// stream would create phantom tasks).
 ///
-/// 磁盘约定（实勘 2026-07，~/.kimi-code）：
-/// - `agents/<id>/wire.jsonl`（id != "main"）= 一个子 agent；上级 `state.json` 的
-///   `agents.<id>.type` 给类型（"sub"），`createdAt` 给会话起点。
-/// - 描述取子 wire 头部首个 turn.prompt 正文（剥掉 `<git-context>` 包裹后摘要；
-///   注意子 agent 的 prompt origin.kind 是 system_trigger，不能走 decoder 的用户轮判定）。
-/// - 状态：尾窗里未收尾的轮次/轮内心跳 + wire mtime 活着（默认 30 分钟内有写入）= 运行中，
-///   mtime 已沉寂说明进程死在中途，按完成收尾；终轮 finishReason=error → 失败。
-/// - 当前工具 = 尾窗最后一个 tool.call 名。
+/// On-disk conventions (surveyed 2026-07, ~/.kimi-code):
+/// - `agents/<id>/wire.jsonl` (id != "main") = one subagent; the parent `state.json` gives the
+///   type in `agents.<id>.type` ("sub") and the session start in `createdAt`.
+/// - The description is the body of the first turn.prompt in the subagent wire head (summarized
+///   after stripping the `<git-context>` wrapper; note a subagent prompt's origin.kind is
+///   system_trigger, so the decoder's user-turn check cannot be used).
+/// - Status: an unfinished turn / in-turn heartbeat in the tail window + a live wire mtime (written
+///   within 30 minutes by default) = running; a quiet mtime means the process died midway, so it
+///   is closed out as completed; final-turn finishReason=error → failed.
+/// - Current tool = name of the last tool.call in the tail window.
 public enum KimiSubagentScanner {
-    /// `sessionDir` = `sessions/<ws>/<session>/`（含 state.json 与 agents/ 的目录）。
-    /// `turnStartedAt` = 主会话当前 turn 起点：wire 创建早于它的子 agent 是旧 turn 遗留，过滤。
-    /// `liveWindow` = 判定"还活着"的写入新鲜窗口（死会话的轮次永不收尾，靠它避免永远 running）。
-    /// headBytes 默认 64KB：wire 前奏（config.update 的 systemPrompt 等）单行可达数十 KB，
-    /// 实勘首个 turn.prompt 落在 ~40KB 内。
+    /// `sessionDir` = `sessions/<ws>/<session>/` (the directory holding state.json and agents/).
+    /// `turnStartedAt` = start of the main session's current turn: subagents whose wire was created
+    /// earlier are leftovers from an old turn and are filtered out.
+    /// `liveWindow` = write-freshness window for "still alive" (a dead session's turn never
+    /// finishes, so this keeps it from staying running forever).
+    /// headBytes defaults to 64KB: a single wire prelude line (config.update's systemPrompt etc.)
+    /// can reach tens of KB; surveyed first turn.prompt lines fall within ~40KB.
     public static func scan(
         sessionDir: URL,
         turnStartedAt: Date? = nil,
@@ -47,13 +52,13 @@ public enum KimiSubagentScanner {
                 let mtime = values.contentModificationDate
             else { continue }
             let createdAt = values.creationDate
-            // 只保留本 turn 派生的子 agent（wire 创建于 prompt 之后）
+            // Keep only subagents spawned in this turn (wire created after the prompt)
             if let turnStartedAt, let createdAt, createdAt < turnStartedAt { continue }
 
             let firstPrompt = head(of: wire, bytes: headBytes).flatMap(firstPromptText)
             var lastStarted: Date?
             var lastFinished: (at: Date, isError: Bool)?
-            var lastProgress: Date?  // 轮内心跳（tool.call / 中间步）的最新时刻
+            var lastProgress: Date?  // latest in-turn heartbeat (tool.call / intermediate step)
             var lastTool: String?
             if let data = tail(of: wire, bytes: tailBytes) {
                 for line in data.split(separator: UInt8(ascii: "\n")) {
@@ -83,12 +88,14 @@ public enum KimiSubagentScanner {
             let activeProgress = lastProgress != nil
                 && (lastFinished.map { $0.at < lastProgress! } ?? true)
             if openTurn || activeProgress {
-                // 轮次未收尾：wire 还在写 = 运行中；已沉寂 = 进程死在中途，按完成收尾
+                // Turn not finished: wire still being written = running; quiet = process died
+                // midway, close out as completed
                 status = fresh ? .running : .completed
             } else if let finished = lastFinished {
                 status = finished.isError ? .failed : .completed
             } else {
-                // 尾窗没有任何轮次痕迹：活着 = 刚派生；沉寂 = 老古董按完成
+                // No turn trace in the tail window: alive = just spawned; quiet = ancient, treat as
+                // completed
                 status = fresh ? .running : .completed
             }
 
@@ -99,10 +106,10 @@ public enum KimiSubagentScanner {
                 status: status,
                 currentActivity: status == .running ? lastTool : nil,
                 startedAt: createdAt ?? lastStarted,
-                finishedAt: nil))  // 与 claude 扫描器同例：留 nil 保证快照可去重
+                finishedAt: nil))  // same as the claude scanner: keep nil so snapshots can be deduped
         }
 
-        // 稳定排序：开始时间在前，缺时间者按 agentId 兜底
+        // Stable sort: earlier start first; entries without a time fall back to agentId
         return infos.sorted {
             switch ($0.startedAt, $1.startedAt) {
             case let (l?, r?) where l != r: return l < r
@@ -111,9 +118,10 @@ public enum KimiSubagentScanner {
         }
     }
 
-    // MARK: - 解析
+    // MARK: - Parsing
 
-    /// state.json 的 agents.<id>.type 表（读取失败给空表，调用方兜底 "sub"）
+    /// The agents.<id>.type table from state.json (empty on read failure; the caller falls back to
+    /// "sub")
     private static func agentTypes(sessionDir: URL) -> [String: String] {
         let url = sessionDir.appendingPathComponent("state.json")
         guard
@@ -130,9 +138,9 @@ public enum KimiSubagentScanner {
         return map
     }
 
-    /// wire 头部首个 turn.prompt 的正文（input=[{type:text,text}] 拼接）。
-    /// 注意不能用 KimiWireDecoder.promptText：子 agent 的首轮 origin.kind 是
-    /// system_trigger(name=subagent)，decoder 的用户轮判定会把它过滤掉。
+    /// Body of the first turn.prompt in the wire head (input=[{type:text,text}] joined).
+    /// KimiWireDecoder.promptText cannot be used: a subagent's first turn has origin.kind
+    /// system_trigger(name=subagent), which the decoder's user-turn check filters out.
     private static func firstPromptText(head: Data) -> String? {
         for line in head.split(separator: UInt8(ascii: "\n")) {
             guard
@@ -149,8 +157,9 @@ public enum KimiSubagentScanner {
         return nil
     }
 
-    /// 派生 prompt → 岛上展示的一行描述：剥 `<git-context>…</git-context>` 前缀、
-    /// 剥 Agent 工具模板带的 "Thoroughness: …." 起首句，再取摘要
+    /// Spawn prompt → one-line description shown on the island: strip the
+    /// `<git-context>…</git-context>` prefix and the leading "Thoroughness: …." sentence from the
+    /// Agent tool template, then summarize
     static func descriptionText(_ prompt: String) -> String? {
         var text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("<git-context>"),
@@ -166,7 +175,7 @@ public enum KimiSubagentScanner {
         return summarizeTitle(text)
     }
 
-    /// 读文件头部 bytes（不足则全读）
+    /// Reads the head bytes of a file (the whole file if shorter)
     private static func head(of url: URL, bytes: Int) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: url.path) else { return nil }
         defer { try? handle.close() }
@@ -174,7 +183,8 @@ public enum KimiSubagentScanner {
         return data
     }
 
-    /// 读文件尾部 bytes（不足则全读），与 ClaudeSubagentScanner 一致的尾窗读法
+    /// Reads the tail bytes of a file (the whole file if shorter), same tail-window read as
+    /// ClaudeSubagentScanner
     private static func tail(of url: URL, bytes: Int) -> Data? {
         guard
             let handle = FileHandle(forReadingAtPath: url.path),

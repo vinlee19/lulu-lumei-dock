@@ -2,18 +2,21 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 一轮工具/检索轨迹行：默认折叠一行摘要（步数 + 分类速览），点击展开逐步列表。
+/// One turn's tool/search trail row: collapsed to a one-line summary by default (step count +
+/// category overview), click to expand the step list.
 ///
-/// **思考明文按源分级**（旧注释写的「本地一律不可得」只对 Claude 成立）：
-/// Claude 的 `thinking` 块落盘时正文被剥离（只剩加密签名），轨迹是它「这一轮做了什么」的
-/// 唯一替代；而 Codex / Kimi / Qwen 有真思考正文，走 `ThinkingRowView`。
+/// **Thinking text availability varies by source** (the old comment's "never available locally"
+/// only holds for Claude): Claude's `thinking` blocks have their body stripped when written to disk
+/// (only the encrypted signature remains), so the trail is the only substitute for "what it did
+/// this turn"; Codex / Kimi / Qwen have real thinking text, which goes through `ThinkingRowView`.
 struct TurnTrailRowView: View {
     let message: TranscriptMessage
     var isMatch = false
-    /// 展开态提升到 SessionDetailView（LazyVStack 回收不丢；切会话时清空）
+    /// Expansion state is lifted to SessionDetailView (survives LazyVStack recycling; cleared on
+    /// session switch)
     @Binding var expandedTrails: Set<Int>
 
-    /// 搜索命中时自动展开（命中内容可能藏在步骤里）
+    /// Auto-expands on a search hit (the hit may be hidden inside the steps)
     private var isExpanded: Bool {
         expandedTrails.contains(message.id) || (isMatch && !message.steps.isEmpty)
     }
@@ -29,7 +32,8 @@ struct TurnTrailRowView: View {
                     }
                 }
             } label: {
-                // 金色浅底 pill（设计稿：轨迹折叠条去紫色，与全局强调区分）
+                // Light gold pill (mockup: the trail collapse bar drops purple to stand apart from
+                // the global accent)
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
@@ -107,7 +111,8 @@ struct TurnTrailRowView: View {
         }
     }
 
-    /// 分类速览："读取 5 · 命令 3 · 编辑 2"（按出现顺序，只列非零项）
+    /// Category overview, e.g. "Read 5 · Commands 3 · Edit 2" (in order of appearance, non-zero
+    /// kinds only)
     private var kindSummary: String {
         var order: [ToolStep.Kind] = []
         var counts: [ToolStep.Kind: Int] = [:]
@@ -123,26 +128,28 @@ struct TurnTrailRowView: View {
     }
 }
 
-// MARK: - 思考正文行
+// MARK: - Thinking text row
 
-/// 模型思考正文：默认折叠成一行首句预览，点开看全文。
+/// Model thinking text: collapsed by default to a one-line first-sentence preview; click to see it
+/// all.
 ///
-/// 只有 Codex（`event_msg/agent_reasoning`）/ Kimi（`part.type == "think"`）/
-/// Qwen（`{text, thought:true}`）会产出；Claude 落盘时已剥离，永远不出现。
-/// 刻意做成**默认折叠 + 紫色虚线左脊**：思考不是回答，不该和正文抢视觉权重，
-/// 但要能一眼认出「这一轮它想过什么」。
+/// Only Codex (`event_msg/agent_reasoning`) / Kimi (`part.type == "think"`) /
+/// Qwen (`{text, thought:true}`) produce it; Claude strips it when writing to disk, so it never appears.
+/// Deliberately **collapsed by default + dashed purple left spine**: thinking isn't the answer and shouldn't compete with the body for visual weight,
+/// but "what it thought about this turn" should still be recognizable at a glance.
 struct ThinkingRowView: View {
     let message: TranscriptMessage
     var isMatch = false
-    /// 与轨迹共用一个展开集合（同为 `TranscriptMessage.id`，天然不撞号）
+    /// Shares one expansion set with trails (both keyed by `TranscriptMessage.id`, so they never
+    /// collide)
     @Binding var expanded: Set<Int>
 
-    /// 搜索命中时自动展开（命中内容可能藏在折叠掉的后半段）
+    /// Auto-expands on a search hit (the hit may be hidden in the collapsed second half)
     private var isExpanded: Bool {
         expanded.contains(message.id) || isMatch
     }
 
-    /// 折叠态预览：首句/首行，够看出思路走向即可
+    /// Collapsed preview: first sentence/line, just enough to see where the reasoning is heading
     private var preview: String {
         let firstLine = message.text
             .split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: true)
@@ -152,7 +159,8 @@ struct ThinkingRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            // 虚线脊：与错误消息的实线红脊区分（那是事实，这是过程）
+            // Dashed spine: distinct from error messages' solid red spine (that's fact, this is
+            // process)
             RoundedRectangle(cornerRadius: 1)
                 .fill(Theme.brand.opacity(0.35))
                 .frame(width: 2)
@@ -191,7 +199,8 @@ struct ThinkingRowView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                        // 多行必须锁固有高度，否则会被压回一行（AuditView 踩过）
+                        // Multi-line text must lock its intrinsic height, or it gets squeezed back
+                        // to one line (AuditView hit this)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

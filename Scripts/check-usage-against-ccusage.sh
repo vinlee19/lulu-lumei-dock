@@ -1,9 +1,9 @@
 #!/bin/bash
-# 用 ccusage 作 oracle 对拍 Eureka 的 Claude 今日用量统计。
-# 口径说明：
-# - 两者都按 (requestId, message.id) 去重、本地时区日界
-# - ccusage 20.x 的 daily 聚合包含 codex，对拍只取 modelBreakdowns 中 claude-* 模型
-# - 活跃会话持续写 transcript，两次扫描存在固有漂移 → 先跑 ccusage 后跑 Eureka，容差 3%
+# Uses ccusage as an oracle to cross-check Eureka's Claude usage totals for today.
+# Counting rules:
+# - Both dedup by (requestId, message.id) and split days on the local time zone
+# - ccusage 20.x daily aggregates include codex, so the comparison takes only claude-* models from modelBreakdowns
+# - Active sessions keep writing transcripts, so the two scans drift inherently -> run ccusage first, then Eureka, with a 3% tolerance
 set -e
 cd "$(dirname "$0")/.."
 

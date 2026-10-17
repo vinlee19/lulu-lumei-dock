@@ -2,12 +2,13 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 跨会话全文搜索索引器：发现 transcript → size+mtime 指纹比对 → 变更文件整体重建 docs。
-/// 只索引 user / assistant 文本（工具轨迹噪音大且可从会话页展开查看）；
-/// 共享库来源（opencode / hermes / cursor：全部会话共用一个 .db，指纹无法区分）
-/// 与 antigravity（protobuf 无明文）暂不索引。
+/// Cross-session full-text search indexer: discover transcripts → compare size+mtime fingerprints
+/// → rebuild all docs of changed files.
+/// Only user / assistant text is indexed (tool trails are noisy and can be expanded on the session
+/// page). Shared-database sources (opencode / hermes / cursor: every session shares one .db, so
+/// fingerprints can't tell them apart) and antigravity (protobuf, no plaintext) aren't indexed yet.
 public final class TranscriptSearchIndexer {
-    /// 单条消息入索引的截断上限（字符），防单条超长撑爆索引体积
+    /// Per-message truncation limit (characters) so one huge message can't bloat the index
     static let maxDocChars = 8192
 
     private let store: EurekaStore
@@ -16,19 +17,22 @@ public final class TranscriptSearchIndexer {
         self.store = store
     }
 
-    /// 按默认磁盘根路径发现全部会话并索引一轮；返回本轮重建的文件数。
-    /// 发现走 `AgentSessionDiscovery` 共享（发现是主要成本，见那里的说明）。
+    /// Discovers every session under the default disk roots and runs one index pass; returns the
+    /// number of files rebuilt this pass. Discovery is shared via `AgentSessionDiscovery`
+    /// (discovery is the main cost; see the notes there).
     @discardableResult
     public func indexOnce() -> Int {
         indexOnce(sessions: AgentSessionDiscovery.forIndexing())
     }
 
-    /// 注入会话列表的索引一轮（测试入口；生产走 indexOnce()）
+    /// One index pass over an injected session list (test entry point; production uses
+    /// indexOnce())
     @discardableResult
     public func indexOnce(sessions: [AgentSessionInfo]) -> Int {
-        // 排除 SQLite 型来源（opencode / hermes / cursor）：本索引以 transcriptPath 为主键
-        // （replaceDocs(path:) + prune(keeping:)），而它们所有会话共用同一个 .db 路径，
-        // 后一个会话会把前一个的文档整片覆盖掉。antigravity 无可读 transcript，同样排除。
+        // Exclude SQLite-backed sources (opencode / hermes / cursor): this index is keyed by
+        // transcriptPath (replaceDocs(path:) + prune(keeping:)), but all their sessions share one
+        // .db path, so each session would overwrite the previous one's docs wholesale.
+        // antigravity has no readable transcript and is excluded too.
         let supported = sessions.filter {
             !$0.source.usesSharedSessionDatabase && $0.source != .antigravity
         }
@@ -36,8 +40,9 @@ public final class TranscriptSearchIndexer {
         var rebuilt = 0
         let fm = FileManager.default
         for session in supported {
-            // 每会话一个池（return = continue）：全量重索引（迁移后 transcript_fts
-            // 重建）会在一个队列块里连续解析全部会话，解析瞬态必须逐会话排水
+            // One pool per session (return = continue): a full reindex (transcript_fts rebuilt
+            // after a migration) parses every session back to back in one queue block, so parse
+            // transients must be drained per session
             autoreleasepool {
                 let path = session.transcriptPath
                 guard let attrs = try? fm.attributesOfItem(atPath: path),
@@ -56,15 +61,17 @@ public final class TranscriptSearchIndexer {
                 }
             }
         }
-        // 空集绝不 prune：一次空的发现结果会把整个全文索引删掉，再付一次全量重索引。
-        // 宁可留着可能过时的条目（下轮指纹一变就重建），也不能凭空结果清库。
+        // Never prune on an empty set: one empty discovery result would delete the whole
+        // full-text index and cost another full reindex. Better to keep possibly stale entries
+        // (rebuilt as soon as a fingerprint changes) than wipe the index on an empty result.
         if !supported.isEmpty {
             try? store.search.prune(keeping: Set(supported.map(\.transcriptPath)))
         }
         return rebuilt
     }
 
-    /// 一个会话的可索引文档：与会话详情页同一 TranscriptReader（message.id 天然对齐，命中可直接跳消息）
+    /// A session's indexable docs: same TranscriptReader as the session detail page (message.id
+    /// lines up naturally, so a hit can jump straight to the message)
     static func docs(for session: AgentSessionInfo) -> [TranscriptSearchDoc] {
         TranscriptReader.load(session: session).messages.compactMap { message in
             guard message.role == .user || message.role == .assistant else { return nil }

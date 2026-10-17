@@ -1,22 +1,27 @@
 import Foundation
 import EurekaKit
 
-/// 扫描一个 CodeBuddy 会话的子 agent 现场（纯函数，便于单测）。
+/// Scans the live subagent state of one CodeBuddy session (pure function, easy to unit test).
 ///
-/// 磁盘约定（实勘 2026-07，~/.codebuddy）：CodeBuddy 没有 Claude 式 meta.json，
-/// 派生信息全在父 transcript `<sessionId>.jsonl` 里：
-/// - `function_call` 行 name ∈ {TaskCreate, Agent, AgentSwarm}：`callId` + `arguments`
-///   （JSON 字符串：Agent 带 description/prompt/subagent_type，TaskCreate 带 subject/description）。
-/// - 配对 `function_call_result` 行（同 callId）：`status:"completed"` → 完成，其它 → 失败。
-/// - 子 agent transcript 是 `subagents/agent-<hex>.jsonl`，文件名与 callId 无映射；
-///   运行中 agent 的当前工具靠 prompt 前缀匹配子文件首条 user 消息定位（实勘可一一对应），
-///   取其尾窗最后一个 function_call 名。agent id = callId。
+/// On-disk layout (observed 2026-07, ~/.codebuddy): CodeBuddy has no Claude-style meta.json; all
+/// spawn info lives in the parent transcript `<sessionId>.jsonl`:
+/// - `function_call` lines with name ∈ {TaskCreate, Agent, AgentSwarm}: `callId` + `arguments` (a
+///   JSON string: Agent carries description/prompt/subagent_type, TaskCreate carries
+///   subject/description).
+/// - The paired `function_call_result` line (same callId): `status:"completed"` → completed,
+///   anything else → failed.
+/// - Subagent transcripts are `subagents/agent-<hex>.jsonl`, with no mapping from filename to
+///   callId; a running agent's current tool is found by prefix-matching its prompt against each
+///   subfile's first user message (observed to match one-to-one) and taking the last function_call
+///   name in its tail window. agent id = callId.
 public enum CodeBuddySubagentScanner {
-    /// `sessionDir` = `<slug>/<sessionId>/`（与 `<sessionId>.jsonl` 同级的目录）。
-    /// `parentTranscript` = `<sessionId>.jsonl`（读尾窗找 function_call/result 对）。
-    /// `turnStartedAt` = 当前 turn 起点：只保留本 turn 派生的调用（call 时间 ≥ 它），nil 不过滤。
-    /// tailBytes 默认 1MB：派生调用必须整轮留在窗口内，而 codebuddy 单轮的工具结果
-    /// 常带大段文件内容（实勘一轮可达数百 KB），256KB 窗口会让子 agent 中途掉出列表。
+    /// `sessionDir` = `<slug>/<sessionId>/` (the directory next to `<sessionId>.jsonl`).
+    /// `parentTranscript` = `<sessionId>.jsonl` (its tail window is read for function_call/result
+    /// pairs). `turnStartedAt` = start of the current turn: only calls spawned in this turn are
+    /// kept (call time ≥ it); nil means no filter. tailBytes defaults to 1MB: spawn calls must stay
+    /// inside the window for the whole turn, and codebuddy tool results often carry large file
+    /// contents (observed up to several hundred KB per turn); a 256KB window would drop subagents
+    /// mid-turn.
     public static func scan(
         sessionDir: URL,
         parentTranscript: URL?,
@@ -33,9 +38,9 @@ public enum CodeBuddySubagentScanner {
             var prompt: String?
             var startedAt: Date?
         }
-        var spawns: [String: Spawn] = [:]   // callId → 派生信息
+        var spawns: [String: Spawn] = [:]   // callId → spawn info
         var order: [String] = []
-        var results: [String: Bool] = [:]   // callId → 是否失败（仅已回包的调用）
+        var results: [String: Bool] = [:]   // callId → failed or not (only calls that have returned)
 
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard
@@ -50,12 +55,12 @@ public enum CodeBuddySubagentScanner {
                     let callId = root["callId"] as? String, !callId.isEmpty
                 else { continue }
                 let ts = CodeBuddyTranscriptDecoder.timestamp(root)
-                // 只保留本 turn 派生的子 agent
+                // Keep only subagents spawned in this turn
                 if let turnStartedAt, let ts, ts < turnStartedAt { continue }
                 let args = CodeBuddyTranscriptDecoder.toolCall(root)?.args ?? [:]
                 let description = (args["description"] as? String)
                     ?? (args["subject"] as? String) ?? ""
-                // TaskCreate 无 subagent_type 字段，按工具名兜底
+                // TaskCreate has no subagent_type field; fall back to the tool name
                 let agentType = (args["subagent_type"] as? String)
                     ?? (name == "TaskCreate" ? "task" : "agent")
                 if spawns[callId] == nil { order.append(callId) }
@@ -64,7 +69,8 @@ public enum CodeBuddySubagentScanner {
                     prompt: args["prompt"] as? String, startedAt: ts)
             case "function_call_result":
                 guard let callId = root["callId"] as? String else { continue }
-                // 实勘终态为 "completed"；其它非缺失状态一律按失败
+                // The observed terminal status is "completed"; any other present status counts as
+                // failed
                 if let status = root["status"] as? String {
                     results[callId] = status != "completed"
                 }
@@ -74,7 +80,7 @@ public enum CodeBuddySubagentScanner {
         }
         guard !spawns.isEmpty else { return [] }
 
-        // 有运行中的 agent 才建 prompt→子文件 索引（省 IO）
+        // Build the prompt → subfile index only when an agent is running (saves IO)
         let subagentsDir = sessionDir.appendingPathComponent("subagents", isDirectory: true)
         var transcripts: [(firstPrompt: String, url: URL)]?
         var infos: [SubagentInfo] = []
@@ -103,10 +109,10 @@ public enum CodeBuddySubagentScanner {
                 status: status,
                 currentActivity: currentActivity,
                 startedAt: spawn.startedAt,
-                finishedAt: nil))  // 与 claude 扫描器同例：留 nil 保证快照可去重
+                finishedAt: nil))  // same as the claude scanner: keep nil so snapshots can be deduped
         }
 
-        // 稳定排序：开始时间在前，缺时间者按 agentId 兜底
+        // Stable sort: earlier start time first; entries without a time fall back to agentId
         return infos.sorted {
             switch ($0.startedAt, $1.startedAt) {
             case let (l?, r?) where l != r: return l < r
@@ -115,9 +121,10 @@ public enum CodeBuddySubagentScanner {
         }
     }
 
-    // MARK: - 解析
+    // MARK: - Parsing
 
-    /// subagents/ 下各 agent-*.jsonl 的首条 user 正文（用于 prompt 前缀定位 callId 对应的 transcript）
+    /// First user body of each agent-*.jsonl under subagents/ (used to locate a callId's transcript
+    /// by prompt prefix)
     private static func subagentTranscripts(in dir: URL) -> [(firstPrompt: String, url: URL)] {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil))?
@@ -134,7 +141,7 @@ public enum CodeBuddySubagentScanner {
         return out
     }
 
-    /// 子 agent transcript 尾窗里最后一个 function_call 的工具名
+    /// Tool name of the last function_call in a subagent transcript's tail window
     private static func lastToolUse(in url: URL, tailBytes: Int) -> String? {
         guard let data = tail(of: url, bytes: tailBytes) else { return nil }
         var last: String?
@@ -149,7 +156,7 @@ public enum CodeBuddySubagentScanner {
         return last
     }
 
-    /// 读文件头部 bytes（不足则全读）
+    /// Reads the first bytes of a file (the whole file if shorter)
     private static func head(of url: URL, bytes: Int) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: url.path) else { return nil }
         defer { try? handle.close() }
@@ -157,7 +164,8 @@ public enum CodeBuddySubagentScanner {
         return data
     }
 
-    /// 读文件尾部 bytes（不足则全读），与 ClaudeSubagentScanner 一致的尾窗读法
+    /// Reads the last bytes of a file (the whole file if shorter); same tail-window read as
+    /// ClaudeSubagentScanner
     private static func tail(of url: URL, bytes: Int) -> Data? {
         guard
             let handle = FileHandle(forReadingAtPath: url.path),

@@ -1,19 +1,20 @@
 import Foundation
 import EurekaKit
 
-/// 解析 Kimi Code CLI `wire.jsonl` 单行（`{"type":..., "time":<epoch-ms>}`，事件溯源日志）。
-/// schema 已对着本机真实会话核验（2026-07）：
-/// - `turn.prompt`（origin.kind=user，input=[{type:text,text}]）= 用户新一轮
-/// - `context.append_loop_event` 内嵌 `event.type`：
-///   step.begin / content.part（part.type=think|text）/ tool.call（name+args）/
-///   tool.result / step.end（finishReason: end_turn=终轮、tool_use=中间步）
-/// - `usage.record`：{model, usage:{inputOther,output,inputCacheRead,inputCacheCreation}}
-/// - `llm.request`：{modelAlias, maxTokens=剩余上下文预算}
-/// 未知类型一律忽略不抛错。session id / cwd 由调用方从路径与 state.json 带入。
+/// Parses one line of the Kimi Code CLI `wire.jsonl` (`{"type":..., "time":<epoch-ms>}`, an
+/// event-sourced log). Schema verified against real local sessions (2026-07):
+/// - `turn.prompt` (origin.kind=user, input=[{type:text,text}]) = a new user turn
+/// - `context.append_loop_event` with a nested `event.type`:
+///   step.begin / content.part (part.type=think|text) / tool.call (name+args) /
+///   tool.result / step.end (finishReason: end_turn = final turn, tool_use = intermediate step)
+/// - `usage.record`: {model, usage:{inputOther,output,inputCacheRead,inputCacheCreation}}
+/// - `llm.request`: {modelAlias, maxTokens = remaining context budget}
+/// Unknown types are ignored, never thrown. session id / cwd are supplied by the caller from the
+/// path and state.json.
 public enum KimiWireDecoder {
-    // MARK: - 生命周期解码
+    // MARK: - Lifecycle decoding
 
-    /// 单行解码 → 领域事件（0 或 1 个）
+    /// Decodes one line → domain events (0 or 1)
     public static func decode(
         line: Data, sessionId: String, cwd: String?
     ) -> [TaskEvent] {
@@ -24,7 +25,8 @@ public enum KimiWireDecoder {
         return decode(root: root, sessionId: sessionId, cwd: cwd)
     }
 
-    /// 已解析行的解码（tailer 单次 JSON 解析后与旁路提取共用）
+    /// Decodes an already-parsed line (the tailer shares one JSON parse with side-channel
+    /// extraction)
     public static func decode(
         root: [String: Any], sessionId: String, cwd: String?
     ) -> [TaskEvent] {
@@ -37,7 +39,8 @@ public enum KimiWireDecoder {
 
         switch type {
         case "turn.prompt":
-            // origin.kind=user（或缺失）= 真实新一轮；其它来源（合成/续跑）按心跳
+            // origin.kind=user (or missing) = a real new turn; other origins
+            // (synthetic/continuation) count as heartbeats
             let origin = (root["origin"] as? [String: Any])?["kind"] as? String
             return (origin == nil || origin == "user")
                 ? event(.taskStarted(title: nil))
@@ -57,54 +60,58 @@ public enum KimiWireDecoder {
                 case "error", "failed", "aborted", "cancelled":
                     return event(.taskFinished(outcome: .error, title: nil, detail: nil))
                 default:
-                    // tool_use / 未知 = 中间步，继续跑
+                    // tool_use / unknown = intermediate step, keeps running
                     return event(.activity(tool: nil))
                 }
             default:
-                // step.begin / content.part / tool.result / 未知 loop 事件：轮内心跳
+                // step.begin / content.part / tool.result / unknown loop events: in-turn heartbeat
                 return event(.activity(tool: nil))
             }
 
-        // 轮内其它记录：纯心跳（刷新活跃、等待复位）。
-        // 注意 usage.record 不在此列——它跟在每个 step.end 之后（含终轮），
-        // 若作心跳会把刚结束的任务"复活"成 running（TaskStore 对未知会话的 activity 会登记为运行中）。
+        // Other in-turn records: pure heartbeat (refresh activity, reset waiting). Note
+        // usage.record is not among them — it follows every step.end (including the final turn),
+        // and as a heartbeat it would "revive" a just-finished task as running (TaskStore registers
+        // activity for an unknown session as running).
         case "llm.request", "llm.tools_snapshot", "context.append_message":
             return event(.activity(tool: nil))
 
-        // 记账事件：不影响任务状态（用量由扫描器旁路收取）
+        // Accounting events: do not affect task state (usage is collected by the scanner side
+        // channel)
         case "usage.record":
             return []
 
-        // 授权等待：本机会话未观测到（可能只在 TUI 总线），防御保留
+        // Approval waits: never observed in local sessions (possibly TUI-bus only); kept
+        // defensively
         case "approval.requested":
             return event(.waiting(reason: .permission, message: toolName(root)))
         case "approval.resolved", "approval.expired":
             return event(.activity(tool: nil))
 
         default:
-            // 防御：任何 *.error 类型带文案都按出错结束
+            // Defensive: any *.error type with a message ends as an error
             if type.hasSuffix(".error") {
                 let detail = text(root)
                 return event(.taskFinished(
                     outcome: .error, title: nil, detail: detail.isEmpty ? nil : detail))
             }
-            // metadata / config.update / mcp.* / tools.* / plan_mode.* 等一律忽略
+            // metadata / config.update / mcp.* / tools.* / plan_mode.* and the like are ignored
             return []
         }
     }
 
-    // MARK: - 旁路提取（tailer/scanner/reader 复用；全部容缺）
+    // MARK: - Side-channel extraction (shared by tailer/scanner/reader; tolerant of missing fields)
 
-    /// usage.record 的归一化用量（真实字段：inputOther/output/inputCacheRead/inputCacheCreation）
+    /// Normalized usage from usage.record (real fields:
+    /// inputOther/output/inputCacheRead/inputCacheCreation)
     public struct Usage: Equatable {
-        public var input: Int          // inputOther（非缓存输入）
+        public var input: Int          // inputOther (non-cached input)
         public var output: Int
         public var cacheRead: Int      // inputCacheRead
         public var cacheCreation: Int  // inputCacheCreation
         public var total: Int { input + output + cacheRead + cacheCreation }
     }
 
-    /// type=usage.record 的 (model, usage)；其它类型或全零返回 nil
+    /// (model, usage) for type=usage.record; nil for other types or all zeros
     public static func usageRecord(_ root: [String: Any]) -> (model: String?, usage: Usage)? {
         guard root["type"] as? String == "usage.record",
               let dict = root["usage"] as? [String: Any]
@@ -118,7 +125,8 @@ public enum KimiWireDecoder {
         return (root["model"] as? String, usage)
     }
 
-    /// type=context.append_loop_event 且 event.type=tool.call 的 (工具名, args)；其它返回 nil
+    /// (tool name, args) for type=context.append_loop_event with event.type=tool.call; nil
+    /// otherwise
     public static func toolCall(_ root: [String: Any]) -> (name: String, args: [String: Any])? {
         guard root["type"] as? String == "context.append_loop_event",
               let inner = root["event"] as? [String: Any],
@@ -128,7 +136,7 @@ public enum KimiWireDecoder {
         return (name, inner["args"] as? [String: Any] ?? [:])
     }
 
-    /// type=turn.prompt 的用户正文（input=[{type:text,text}] 拼接）；非用户轮返回 nil
+    /// User body of type=turn.prompt (input=[{type:text,text}] joined); nil for non-user turns
     public static func promptText(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "turn.prompt" else { return nil }
         let origin = (root["origin"] as? [String: Any])?["kind"] as? String
@@ -141,7 +149,8 @@ public enum KimiWireDecoder {
         return text.isEmpty ? nil : text
     }
 
-    /// loop 事件里的 assistant 正文段（event.type=content.part 且 part.type=text）；其它返回 nil
+    /// Assistant body part in a loop event (event.type=content.part and part.type=text); nil
+    /// otherwise
     public static func assistantText(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "context.append_loop_event",
               let inner = root["event"] as? [String: Any],
@@ -155,8 +164,9 @@ public enum KimiWireDecoder {
         return text
     }
 
-    /// loop 事件里的**明文思考**段（event.type=content.part 且 part.type=think）。
-    /// Kimi 不加密也不剥离：实勘单个 wire.jsonl 有 235 段，最长 19.5k 字符。
+    /// **Plaintext thinking** part in a loop event (event.type=content.part and part.type=think).
+    /// Kimi neither encrypts nor strips it: one surveyed wire.jsonl had 235 parts, the longest
+    /// 19.5k chars.
     public static func thinkText(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "context.append_loop_event",
               let inner = root["event"] as? [String: Any],
@@ -170,14 +180,15 @@ public enum KimiWireDecoder {
         return text
     }
 
-    /// config.update / llm.request 的模型别名（如 "kimi-code/k3"）
+    /// Model alias from config.update / llm.request (e.g. "kimi-code/k3")
     public static func modelAlias(_ root: [String: Any]) -> String? {
         if let alias = root["modelAlias"] as? String, !alias.isEmpty { return alias }
         if let model = root["model"] as? String, !model.isEmpty { return model }
         return nil
     }
 
-    /// 事件时间：`time`/`created_at` 的 epoch 毫秒（>1e12 判毫秒，否则按秒），ISO 字符串兜底
+    /// Event time: epoch ms in `time`/`created_at` (>1e12 means ms, otherwise seconds), ISO string
+    /// as fallback
     public static func timestamp(_ root: [String: Any]) -> Date? {
         for key in ["time", "created_at", "createdAt", "ts", "timestamp"] {
             if let number = root[key] as? Double {
@@ -190,7 +201,7 @@ public enum KimiWireDecoder {
         return nil
     }
 
-    /// 工具名（approval.* 防御路径用；多键名探测）
+    /// Tool name (for the defensive approval.* path; probes several key names)
     static func toolName(_ root: [String: Any]) -> String? {
         for key in ["toolName", "tool_name", "name", "tool"] {
             if let string = root[key] as? String, !string.isEmpty { return string }
@@ -203,7 +214,7 @@ public enum KimiWireDecoder {
         return nil
     }
 
-    /// 错误文案（*.error 防御路径用）
+    /// Error message (for the defensive *.error path)
     static func text(_ root: [String: Any]) -> String {
         for key in ["message", "error", "detail", "content", "text"] {
             if let string = root[key] as? String, !string.isEmpty { return string }
@@ -211,7 +222,7 @@ public enum KimiWireDecoder {
         return ""
     }
 
-    // MARK: - 基础工具
+    // MARK: - Basic helpers
 
     private static let isoWithFraction: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -220,7 +231,7 @@ public enum KimiWireDecoder {
     }()
     private static let isoPlain = ISO8601DateFormatter()
 
-    /// state.json 的 ISO 时间（带/不带小数秒都容）
+    /// ISO time in state.json (with or without fractional seconds)
     static func parseISO(_ string: String) -> Date? {
         isoWithFraction.date(from: string) ?? isoPlain.date(from: string)
     }

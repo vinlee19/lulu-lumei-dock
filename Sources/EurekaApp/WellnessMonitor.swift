@@ -1,11 +1,12 @@
 import EurekaKit
 import Foundation
 
-/// 健康提示监控：每 5 分钟采样一次活跃状态，维护"连续活跃段"，
-/// 交给 WellnessAdvisor（纯规则）评估，产出的关怀卡进灵动岛队列。
+/// Wellness monitor: samples activity every 5 minutes, maintains the "continuous active streak",
+/// hands it to WellnessAdvisor (pure rules) for evaluation, and the resulting care cards go into
+/// the Dynamic Island queue.
 @MainActor
 final class WellnessMonitor {
-    /// 活跃中断超过这个间隔视为歇过了，连续段重新计
+    /// An activity gap longer than this counts as a break, and the streak restarts
     private let streakGap: TimeInterval = 30 * 60
     private let sampleInterval: TimeInterval = 5 * 60
 
@@ -30,8 +31,9 @@ final class WellnessMonitor {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.sample() }
         }
-        // 演示钩子：defaults write com.vinlee.eureka wellnessDemo -bool true
-        // → 下次启动 8 秒后弹一张样例关怀卡（看效果用，弹完自动清除标记）
+        // Demo hook: defaults write com.vinlee.eureka wellnessDemo -bool true
+        // → a sample care card pops up 8 seconds after next launch (for previewing; the flag clears
+        // itself afterwards)
         if UserDefaults.standard.bool(forKey: "wellnessDemo") {
             UserDefaults.standard.removeObject(forKey: "wellnessDemo")
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
@@ -50,7 +52,7 @@ final class WellnessMonitor {
         let isActive = !store.sortedActiveTasks.isEmpty
         if isActive {
             if let last = lastActiveAt, now.timeIntervalSince(last) > streakGap {
-                streakStartAt = now  // 歇够了，重新起段
+                streakStartAt = now  // rested enough, start a new streak
             } else if streakStartAt == nil {
                 streakStartAt = now
             }

@@ -5,7 +5,7 @@ import Foundation
 func geometryTests(_ t: TestRunner) {
     t.suite("IslandGeometry")
 
-    // 本机两块屏的真实参数形状
+    // Real parameter shapes of this machine's two screens
     let notched = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
         safeAreaTopInset: 32,
@@ -37,19 +37,21 @@ func geometryTests(_ t: TestRunner) {
         let builtin = CGRect(x: 0, y: 0, width: 1512, height: 982)
         let external = CGRect(x: -1920, y: -124, width: 1920, height: 1080)
 
-        // 完整落在外接屏内 → 可用
+        // Fully inside the external screen -> usable
         try expect(IslandGeometry.positionUsable(
             origin: CGPoint(x: -1200, y: 300), panelSize: panel,
             screens: [builtin, external]))
-        // 真实事故坐标：外接屏拔掉后 X=-462 残留——与内建屏零相交/仅擦边 → 不可用
+        // Real incident coordinates: X=-462 left over after unplugging the external screen -- zero
+        // or edge-only overlap with the built-in screen -> unusable
         try expect(!IslandGeometry.positionUsable(
             origin: CGPoint(x: -462, y: 380.87), panelSize: panel,
             screens: [builtin]))
-        // 擦边一像素（面板右缘刚够到屏）→ 胶囊带不完整在屏内 → 不可用
+        // Overlapping by one pixel (the panel's right edge just reaches the screen) -> the pill
+        // band is not fully on screen -> unusable
         try expect(!IslandGeometry.positionUsable(
             origin: CGPoint(x: -439, y: 300), panelSize: panel,
             screens: [builtin]))
-        // 完全在所有屏之外 → 不可用
+        // Entirely outside every screen -> unusable
         try expect(!IslandGeometry.positionUsable(
             origin: CGPoint(x: 5000, y: 5000), panelSize: panel,
             screens: [builtin, external]))
@@ -58,8 +60,8 @@ func geometryTests(_ t: TestRunner) {
     t.test("刘海屏：内容贴顶、胶囊与刘海融合") {
         try expectEqual(IslandGeometry.contentTopInset(screen: notched), 0)
         let pill = IslandGeometry.pillSize(screen: notched)
-        try expectEqual(pill.height, 32)  // 与刘海等高
-        try expectEqual(pill.width, 196 + 92 * 2)  // 刘海 + 两翼
+        try expectEqual(pill.height, 32)  // same height as the notch
+        try expectEqual(pill.width, 196 + 92 * 2)  // notch + two wings
         try expectEqual(IslandGeometry.pillCenterGap(screen: notched), 196)
     }
 
@@ -74,12 +76,12 @@ func geometryTests(_ t: TestRunner) {
         let rect = IslandGeometry.interactiveRect(
             contentSize: CGSize(width: 328, height: 32), screen: notched, layout: layout)
         try expectEqual(rect.midX, layout.panelSize.width / 2)
-        try expectEqual(rect.maxY, layout.panelSize.height)  // 刘海屏内容贴 panel 顶
+        try expectEqual(rect.maxY, layout.panelSize.height)  // on a notched screen the content hugs the panel top
         try expectEqual(rect.height, 32)
 
         let rect2 = IslandGeometry.interactiveRect(
             contentSize: CGSize(width: 184, height: 30), screen: external4K, layout: layout)
-        try expectEqual(rect2.maxY, layout.panelSize.height - 29)  // 让开菜单栏 24+5
+        try expectEqual(rect2.maxY, layout.panelSize.height - 29)  // clears the menu bar, 24+5
 
         try expectEqual(
             IslandGeometry.interactiveRect(contentSize: .zero, screen: notched, layout: layout),
@@ -88,16 +90,18 @@ func geometryTests(_ t: TestRunner) {
 
     t.test("flippedRect：左下原点 ↔ 左上原点（NSHostingView 命中判断回归）") {
         let layout = IslandGeometry.Layout.standard
-        // 刘海屏 compact 胶囊：左下坐标贴 panel 顶（maxY = panelHeight）
+        // Notched-screen compact pill: bottom-left coordinates hug the panel top (maxY =
+        // panelHeight)
         let bottomLeft = IslandGeometry.interactiveRect(
             contentSize: CGSize(width: 328, height: 32), screen: notched, layout: layout)
         let flipped = IslandGeometry.flippedRect(
             bottomLeft, containerHeight: layout.panelSize.height)
-        // 翻转后应贴视图顶部（flipped 坐标 minY = 0），即用户实际看到/点击的位置
+        // After flipping it should hug the view top (flipped minY = 0), i.e. where the user
+        // actually sees/clicks
         try expectEqual(flipped.minY, 0)
         try expectEqual(flipped.height, 32)
         try expectEqual(flipped.midX, layout.panelSize.width / 2)
-        // 无刘海：翻转后 minY = 菜单栏让位
+        // No notch: after flipping, minY = the menu-bar clearance
         let plain = IslandGeometry.interactiveRect(
             contentSize: CGSize(width: 184, height: 30), screen: external4K, layout: layout)
         let plainFlipped = IslandGeometry.flippedRect(
@@ -114,18 +118,18 @@ func geometryTests(_ t: TestRunner) {
     }
 
     t.test("按屏缩放：内建屏 1.0×、大屏放大、钳制上下限") {
-        // 内建屏（1512 宽）= 基准
+        // Built-in screen (1512 wide) = baseline
         try expectEqual(IslandGeometry.scaleFactor(for: notched), 1.0)
-        // 4K 缩放后逻辑宽 1920 → ~1.27
+        // 4K scaled to a logical width of 1920 -> ~1.27
         let fourK = IslandGeometry.ScreenInfo(
             frame: CGRect(x: 0, y: 0, width: 1920, height: 1080))
         let f4k = IslandGeometry.scaleFactor(for: fourK)
         try expect(f4k > 1.2 && f4k < 1.3, "4K 应放大约 1.27×，实际 \(f4k)")
-        // 超大屏钳到 1.6
+        // Very large screens clamp to 1.6
         let huge = IslandGeometry.ScreenInfo(
             frame: CGRect(x: 0, y: 0, width: 3840, height: 2160))
         try expectEqual(IslandGeometry.scaleFactor(for: huge), 1.6)
-        // 过小屏钳到 0.9
+        // Too-small screens clamp to 0.9
         let tiny = IslandGeometry.ScreenInfo(
             frame: CGRect(x: 0, y: 0, width: 1000, height: 700))
         try expectEqual(IslandGeometry.scaleFactor(for: tiny), 0.9)
@@ -140,7 +144,7 @@ func geometryTests(_ t: TestRunner) {
             frame: CGRect(x: 0, y: 0, width: 1920, height: 1080))
         let big = IslandGeometry.layout(for: fourK)
         try expect(big.expandedCardSize.width > base.expandedCardSize.width, "大屏应更大")
-        // 等比放大：比例不变
+        // Proportional scale-up: the ratio is unchanged
         let bigRatio = big.expandedCardSize.width / big.expandedCardSize.height
         try expect(abs(bigRatio - ratio) < 0.001, "缩放应保持长宽比")
     }
@@ -150,8 +154,8 @@ func geometryTests(_ t: TestRunner) {
         let h1 = IslandGeometry.subagentBoxHeight(count: 1)
         let h3 = IslandGeometry.subagentBoxHeight(count: 3)
         try expect(h1 > 0 && h3 > h1, "应随数量单调增")
-        try expectEqual(h3, 3 * 22 + 2 * 4 + 16)  // 行 + 行距 + 上下内距
-        // 超 6 行加一行"…等 N 个"，7 与更多封顶一致
+        try expectEqual(h3, 3 * 22 + 2 * 4 + 16)  // rows + row spacing + top/bottom padding
+        // Beyond 6 rows one "...and N more" row is added; 7 and above cap identically
         try expectEqual(
             IslandGeometry.subagentBoxHeight(count: 99),
             IslandGeometry.subagentBoxHeight(count: 7))
@@ -189,8 +193,10 @@ func cardQueueTests(_ t: TestRunner) {
     }
 
     t.test("完成/提示卡待显数封顶：超出丢最旧；等待/告警卡不受限也不被挤掉") {
-        // 一次爆发几百个完成事件（实测：opencode 事件表被整表重放）不能把岛按住几分钟：
-        // 每张卡都占满一个收起窗口，队列不封顶 = 岛永远收不回去。历史页有全部记录。
+        // A burst of hundreds of finished events (seen in practice: the opencode event table was
+        // replayed wholesale) must not pin the island open for minutes: every card fills a whole
+        // dismiss window, so an uncapped queue = an island that never collapses. The history page
+        // has every record.
         let cap = IslandCardQueue.maxPendingPassive
         var queue = IslandCardQueue()
         for i in 0..<(cap + 4) { queue.enqueue(finished("f\(i)")) }
@@ -212,10 +218,10 @@ func cardQueueTests(_ t: TestRunner) {
         queue.enqueue(finished("a"))
         queue.enqueue(finished("b"))
         queue.enqueue(waiting("w"))
-        queue.enqueue(waiting("w"))  // 重复等待事件
-        try expectEqual(queue.current, finished("a"))  // 当前卡不被打断
+        queue.enqueue(waiting("w"))  // duplicate waiting event
+        try expectEqual(queue.current, finished("a"))  // the current card is not interrupted
         try expectEqual(queue.pending.first, waiting("w"))
-        try expectEqual(queue.pendingCount, 2)  // w 只一张 + b
+        try expectEqual(queue.pendingCount, 2)  // w only once + b
     }
 
     t.test("removeWaiting 撤当前卡时自动推进") {
@@ -247,10 +253,10 @@ func cardQueueTests(_ t: TestRunner) {
         queue.enqueue(finished("a"))
         queue.enqueue(finished("b"))
         queue.enqueue(alert("op-1"))
-        queue.enqueue(alert("op-1"))  // 同一告警重复
-        try expectEqual(queue.current, finished("a"))   // 当前卡不被打断
-        try expectEqual(queue.pending.first, alert("op-1"))  // 告警插到待显队首
-        try expectEqual(queue.pendingCount, 2)  // alert 只一张 + b
+        queue.enqueue(alert("op-1"))  // same alert repeated
+        try expectEqual(queue.current, finished("a"))   // the current card is not interrupted
+        try expectEqual(queue.pending.first, alert("op-1"))  // the alert jumps to the front of the pending queue
+        try expectEqual(queue.pendingCount, 2)  // alert only once + b
     }
 
     t.test("空队列告警直接成为当前卡") {
@@ -261,7 +267,7 @@ func cardQueueTests(_ t: TestRunner) {
         try expect(queue.isEmpty)
     }
 
-    // MARK: - 自动收起时长（IslandViewModel 的两处计时共用这一份判据）
+    // MARK: - Auto-dismiss duration (both timers in IslandViewModel share this one rule)
 
     t.test("四类卡的自动收起偏移：完成 +0 / 等待 +4 / 提示 +5 / 告警 +6") {
         try expectEqual(finished("a").autoDismissExtraSeconds, 0)
@@ -271,17 +277,19 @@ func cardQueueTests(_ t: TestRunner) {
     }
 
     t.test("等待卡不再常驻 —— 四类卡全都自动收起") {
-        // 曾经 .waiting 返回 nil（常驻到手动点掉）。改成自动收之后，
-        // IslandViewModel.setHovering 那处原本硬列 case 的 switch 会漏掉它，
-        // 表现为「悬停过一次就退回常驻」；判据收进 Card 后两处不可能再漂移。
+        // .waiting used to return nil (stayed until clicked away). After switching it to
+        // auto-dismiss, the switch in IslandViewModel.setHovering that hard-listed cases would have
+        // missed it, showing up as "hovering once makes it sticky again"; with the rule moved into
+        // Card the two places can no longer drift.
         for card in [finished("a"), waiting("a"), notice("n"), alert("op-1")] {
             try expect(card.autoDismisses, "\(card) 应自动收起")
         }
     }
 
     t.test("偏移叠加在用户设置的基准秒数上，而不是写死绝对值") {
-        // 设置页滑块 3–15s 才是用户意图的载体：基准 6 时等待卡 10s，基准调到 12 就是 16s。
-        // 若写死 10s，滑块拉到 15 会出现「等待卡比完成卡收得还快」。
+        // The Settings slider (3-15s) is what carries the user's intent: with a base of 6 the
+        // waiting card gets 10s, with a base of 12 it gets 16s. Hardcoding 10s would make "the
+        // waiting card dismisses faster than the finished card" once the slider is at 15.
         guard let waitingExtra = waiting("a").autoDismissExtraSeconds,
               let finishedExtra = finished("a").autoDismissExtraSeconds
         else { throw ExpectationError(description: "完成卡与等待卡都应有偏移值") }

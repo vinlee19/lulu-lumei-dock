@@ -1,19 +1,24 @@
 import Foundation
 
-/// 「升级为指令」的落点：把一条反复在问的提问沉淀成 agent **每次会话都会加载**的持久指令。
-/// 写到哪、写完落到哪个知识页由这里统一裁定 —— UI 的目标源列表、reveal 的 kind、
-/// 文件说明文案都从这里取，不各写一份。
+/// Destination for "promote to instruction": turns a repeatedly asked prompt into a persistent
+/// instruction the agent **loads every session**. Where it is written and which knowledge page it
+/// lands on afterwards are decided here alone; the UI's target-source list, the reveal kind, and
+/// the file description copy all come from here rather than each keeping its own copy.
 ///
-/// 只开放两个源，且都是"追加一节到共享指令文件"：
-/// - claude → `~/.claude/CLAUDE.md`（用户级指令）。**不是** `~/.claude/memories/`：官方
-///   `.claude` 目录参考（code.claude.com/docs/en/claude-directory）与 memory 页列出的加载项
-///   只有 CLAUDE.md 系列、`.claude/rules/` 与 `projects/<project>/memory/` 自动记忆，
-///   写进 memories/ 的东西 Claude Code 永远读不到（Eureka 自己索引它不等于 Claude 会加载）。
-/// - codex → `~/.codex/AGENTS.md`；存在 `AGENTS.override.md` 时追加到它（Codex 每级目录只加载
-///   两者中第一个存在的，写 AGENTS.md 等于写进黑洞）。
+/// Only two sources are offered, both "append a section to a shared instruction file":
+/// - claude → `~/.claude/CLAUDE.md` (user-level instructions). **Not** `~/.claude/memories/`: the
+///   official `.claude` directory reference (code.claude.com/docs/en/claude-directory) and the
+///   memory page list as loaded only the CLAUDE.md family, `.claude/rules/`, and the
+///   `projects/<project>/memory/` auto memory; anything written to memories/ is never read by
+///   Claude Code (Eureka indexing it doesn't mean Claude loads it).
+/// - codex → `~/.codex/AGENTS.md`; appends to `AGENTS.override.md` when it exists (at each
+///   directory level Codex loads only the first of the two that exists, so writing AGENTS.md would
+///   go into a black hole).
 ///
-/// 其余源不开放：kimi/hermes 是有格式约束的共享单文件（hermes 外部写入会触发它的漂移保护），
-/// cursor/antigravity 没有全局指令文件。两个落点在索引里都是指令类，reveal 落指令页。
+/// Other sources are not offered: kimi/hermes use shared single files with format constraints (an
+/// external write trips hermes's drift protection), and cursor/antigravity have no global
+/// instruction file. Both destinations index as instructions, so reveal lands on the Instructions
+/// page.
 public enum PromptInstructionDestination: Equatable, Sendable, CaseIterable {
     case claudeUserInstructions
     case codexAgentsFile
@@ -26,15 +31,16 @@ public enum PromptInstructionDestination: Equatable, Sendable, CaseIterable {
         }
     }
 
-    /// 支持毕业为指令的源（顺序稳定，供目标选择器用）
+    /// Sources that support graduating to an instruction (stable order, for the target picker)
     public static var supportedSources: [AgentSource] {
         AgentSource.allCases.filter { destination(for: $0) != nil }
     }
 
-    /// `.eurekaRevealKnowledge` 的 kind：两个落点都是指令文件
+    /// Kind for `.eurekaRevealKnowledge`: both destinations are instruction files
     public var knowledgeKind: String { "instruction" }
 
-    /// 给用户看的目标文件（Codex 的 override 分支在写盘时才知道，文案不展开）
+    /// Target file shown to the user (Codex's override branch is only known at write time, so the
+    /// copy doesn't spell it out)
     public var fileLabel: String {
         switch self {
         case .claudeUserInstructions: return "~/.claude/CLAUDE.md"
@@ -42,7 +48,7 @@ public enum PromptInstructionDestination: Equatable, Sendable, CaseIterable {
         }
     }
 
-    /// 目标文件不存在时新建文件的一级标题
+    /// Top-level heading for a newly created target file when it doesn't exist
     public var defaultHeader: String {
         switch self {
         case .claudeUserInstructions: return "# CLAUDE.md"

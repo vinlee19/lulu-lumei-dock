@@ -3,11 +3,12 @@ import EurekaIngest
 import EurekaKit
 import Foundation
 
-/// 一个状态对应的动画素材:PNG 帧循环 或 自播放的 GIF/APNG
+/// Animation asset for one state: a looping PNG frame sequence or a self-playing GIF/APNG
 enum MascotAnimation: Equatable {
     case frames([URL], fps: Double)
     case animatedImage(URL)
-    /// 精灵图中的任意帧序列。网格尺寸随图集携带，兼容 v2 与后续扩展。
+    /// Arbitrary frame sequence within a sprite sheet. Grid size travels with the atlas, compatible
+    /// with v2 and later extensions.
     case spriteSequence(MascotSpriteSheet, cells: [MascotSpriteCell], fps: Double)
 }
 
@@ -21,7 +22,8 @@ struct MascotSpriteCell: Equatable {
     var column: Int
 }
 
-/// 同一状态下的行为变体。动画、标语和轻微肢体语言可以独立组合。
+/// Behavior variant within one state. Animation, caption and subtle body language can be combined
+/// independently.
 struct MascotVariant: Equatable {
     var id: String
     var animation: MascotAnimation
@@ -31,7 +33,8 @@ struct MascotVariant: Equatable {
     var playback: MascotPlaybackMode = .loop
 }
 
-/// 变体级肢体语言。比按状态写死更适合表达眨眼、观察、提醒等微行为。
+/// Per-variant body language. Better than hardcoding per state for micro-behaviors like blinking,
+/// watching and nudging.
 enum MascotMotionProfile: String, Equatable {
     case stateDefault
     case gentle
@@ -45,26 +48,27 @@ enum MascotMotionProfile: String, Equatable {
     case still
 }
 
-/// 一套吉祥物动画包(内置 or 用户导入)
+/// A mascot animation pack (built-in or user-imported)
 struct MascotPack {
     var id: String
     var name: String
     var states: [MascotState: MascotAnimation]
-    /// 贴纸上的英文艺术字标语(按状态)
+    /// English word-art captions on the sticker (per state)
     var captions: [MascotState: String] = [:]
-    /// 高频状态可拥有多个行为变体；旧动画包不提供时自动包成一个默认变体。
+    /// High-frequency states may have several behavior variants; older packs without them are
+    /// wrapped into one default variant.
     var variants: [MascotState: [MascotVariant]] = [:]
-    /// v2 资源提供的 16 向视线，顺时针从 000°(上)开始。
+    /// 16-direction gaze provided by v2 assets, clockwise starting at 000° (up).
     var lookDirections: [MascotAnimation] = []
 
-    /// 内置默认英文标语(动画包可在 manifest "captions" 覆盖)
+    /// Built-in default English captions (a pack can override them via the manifest's "captions")
     static var defaultCaptions: [MascotState: String] { [
         .idle: L10n.text("HELLO", zhHans: "你好"), .working: L10n.text("FOCUS", zhHans: "专注"), .waiting: L10n.text("HEY!", zhHans: "嘿！"), .success: L10n.text("DONE!", zhHans: "完成！"),
         .error: L10n.text("OOPS", zhHans: "哎呀"), .sleeping: L10n.text("ZZZ", zhHans: "呼呼"), .relax: L10n.text("RELAX", zhHans: "放松"), .night: L10n.text("SLEEPY", zhHans: "困了"),
         .poke: L10n.text("HEHE~", zhHans: "嘿嘿～"), .wake: L10n.text("MORNING!", zhHans: "早上好！"),
     ] }
 
-    /// 空闲时轮换的姿势集。保留给旧调用方；新逻辑使用 variants(for:)。
+    /// Pose set rotated while idle. Kept for older callers; new logic uses variants(for:).
     var idlePoses: [MascotAnimation] {
         var result: [MascotAnimation] = []
         for variant in variants(for: .idle) where !result.contains(variant.animation) {
@@ -73,7 +77,8 @@ struct MascotPack {
         return result
     }
 
-    /// 返回状态的全部变体。缺失时沿原回退链寻找，最终包成一个默认变体。
+    /// Returns all variants for a state. If missing, follows the usual fallback chain and finally
+    /// wraps one default variant.
     func variants(for state: MascotState) -> [MascotVariant] {
         var current = state
         for _ in 0..<MascotState.allCases.count {
@@ -97,14 +102,14 @@ struct MascotPack {
         return lookDirections[direction]
     }
 
-    /// 取某状态的动画,缺失沿回退链找,最终回到 idle
+    /// Animation for a state; if missing, follow the fallback chain, ending at idle
     func animation(for state: MascotState) -> MascotAnimation? {
         if let direct = states[state] { return direct }
         var current = state
         for _ in 0..<MascotState.allCases.count {
             let next = current.fallback
             if let found = states[next] { return found }
-            if next == current { break }  // idle.fallback == idle,到底
+            if next == current { break }  // idle.fallback == idle, end of chain
             current = next
         }
         return states[.idle]
@@ -115,17 +120,19 @@ enum MascotPackLoader {
     static let builtInID = "built-in"
     static var builtInName: String { L10n.text("Lulu & Lumei (Built-in)", zhHans: "噜噜 & 噜妹（内置）") }
 
-    /// 用户自定义包根目录:~/Library/Application Support/Eureka/mascots
+    /// Root directory for user custom packs: ~/Library/Application Support/Eureka/mascots
     static func customRoot() -> URL {
         SpoolPaths.root().appendingPathComponent("mascots", isDirectory: true)
     }
 
-    /// 确保 mascots/ 存在并放一份说明 + 示例 manifest(首次),再在 Finder 打开
+    /// Ensure mascots/ exists and drop a readme + sample manifest (first time), then open it in
+    /// Finder
     static func revealCustomFolder() {
         let root = customRoot()
         let fm = FileManager.default
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
-        // 文件名随当前语言。已存在的另一语言说明留在原处，不覆盖用户改过的文件。
+        // The file name follows the current language. An existing readme in the other language
+        // stays put; user-edited files are never overwritten.
         let readme = root.appendingPathComponent(L10n.text(
             "how-to-make-an-animation-pack.txt",
             zhHans: "如何制作动画包.txt"))
@@ -213,7 +220,8 @@ enum MascotPackLoader {
     """
     }
 
-    /// 内置包：场景贴纸与 v2 双人精灵图共同提供状态变体。
+    /// Built-in pack: scene stickers and the v2 two-character sprite sheet together provide state
+    /// variants.
     static func builtIn() -> MascotPack {
         func frames(_ names: [String]) -> MascotAnimation {
             let urls = names.compactMap {
@@ -223,11 +231,11 @@ enum MascotPackLoader {
             return .frames(urls, fps: 2)
         }
         let legacyStates: [MascotState: MascotAnimation] = [
-            .idle: frames(["idle-1"]),            // 噜噜托腮沉思
+            .idle: frames(["idle-1"]),            // Lulu pondering, chin in hand
             .working: frames(["working-1", "working-2"]),
-            .waiting: frames(["waiting-1"]),      // 噜噜竖手指招呼
+            .waiting: frames(["waiting-1"]),      // Lulu raising a finger to call out
             .success: frames(["success-1", "success-2"]),
-            .error: frames(["error-1"]),          // 噜妹流汗沮丧
+            .error: frames(["error-1"]),          // Lumei sweating, dejected
             .sleeping: frames(["sleeping-1", "sleeping-2", "sleeping-3"]),
             .relax: frames(["relax-1", "relax-2", "relax-3"]),
             .night: frames(["night-1", "night-2"]),
@@ -238,7 +246,8 @@ enum MascotPackLoader {
             id: builtInID, name: builtInName,
             states: legacyStates, captions: MascotPack.defaultCaptions)
 
-        // 即使扩展精灵图缺失，旧场景也有 12 个高频变体，避免退回单一贴纸循环。
+        // Even if the extended sprite sheet is missing, the old scenes provide 12 high-frequency
+        // variants instead of falling back to a single sticker loop.
         pack.variants = [
             .idle: [
                 MascotVariant(id: "lulu-thinking", animation: legacyStates[.idle]!,
@@ -284,7 +293,8 @@ enum MascotPackLoader {
                     fps: fps)
             }
 
-            // v2 行提供真正的双人动画；旧 3D 场景继续作为交替出现的单人变体。
+            // v2 rows provide the real two-character animation; the old 3D scenes stay as
+            // alternating single-character variants.
             pack.variants[.idle]?.insert(contentsOf: [
                 MascotVariant(id: "duo-breathing", animation: sprite(
                     row: 0, columns: [0, 1, 2, 3, 4, 5], fps: 3),
@@ -473,7 +483,7 @@ enum MascotPackLoader {
         return pack
     }
 
-    /// 已安装的包(内置 + customRoot 下含 manifest.json 的目录)
+    /// Installed packs (built-in + directories under customRoot containing manifest.json)
     static func availablePacks() -> [(id: String, name: String)] {
         var result = [(id: builtInID, name: builtInName)]
         let dirs = (try? FileManager.default.contentsOfDirectory(
@@ -488,13 +498,13 @@ enum MascotPackLoader {
         return result
     }
 
-    /// 按 id 加载;非法/缺失回退内置
+    /// Load by id; invalid/missing falls back to the built-in pack
     static func load(packID: String) -> MascotPack {
         guard packID != builtInID, !packID.isEmpty else { return builtIn() }
         return custom(dirName: packID) ?? builtIn()
     }
 
-    /// 解析自定义包的 manifest.json(state→ 文件名字符串 或 帧数组)
+    /// Parse a custom pack's manifest.json (state → file name string or frame array)
     static func custom(dirName: String) -> MascotPack? {
         let dir = customRoot().appendingPathComponent(dirName, isDirectory: true)
         let manifestURL = dir.appendingPathComponent("manifest.json")
@@ -555,7 +565,7 @@ enum MascotPackLoader {
                 }
             }
         }
-        // idle 素材或 idle 变体至少要有一个，否则包无效。
+        // At least one idle asset or idle variant is required, otherwise the pack is invalid.
         guard states[.idle] != nil || variants[.idle]?.isEmpty == false else { return nil }
 
         var captions = MascotPack.defaultCaptions

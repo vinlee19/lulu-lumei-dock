@@ -1,7 +1,7 @@
 import Foundation
 
-/// 按 offset 增量读取 JSONL：只消费完整行，返回新 offset。
-/// 文件被截断/换 inode 由调用方判定后传 offset=0 重读。
+/// Reads JSONL incrementally from an offset: consumes only complete lines, returns the new offset.
+/// Truncation / inode change is detected by the caller, which then passes offset=0 to reread.
 enum JSONLinesReader {
     struct Chunk {
         var lines: [Data]
@@ -26,7 +26,8 @@ enum JSONLinesReader {
 
     static func fileInfo(path: String) -> (inode: Int64, size: UInt64)? {
         var info = Darwin.stat()
-        // 同名 C 函数被 struct 遮蔽，用 lstat（transcript/rollout 不是符号链接）
+        // The C function of the same name is shadowed by the struct; use lstat
+        // (transcripts/rollouts are not symlinks)
         guard lstat(path, &info) == 0 else { return nil }
         return (Int64(info.st_ino), UInt64(info.st_size))
     }

@@ -4,8 +4,8 @@ import Foundation
 func skillPropagatorTests(_ t: TestRunner) {
     t.suite("SkillPropagator（技能跨源传播）")
 
-    /// 在临时目录里搭一个带素材的技能：SKILL.md + references/ + scripts/ +
-    /// 剪枝目录 node_modules/ + 隐藏文件 .DS_Store
+    /// Builds a skill with assets in a temp dir: SKILL.md + references/ + scripts/ +
+    /// the pruned directory node_modules/ + the hidden file .DS_Store
     func makeFixtureSkill(in base: URL) throws -> URL {
         let fm = FileManager.default
         let dir = base.appendingPathComponent("commit-helper", isDirectory: true)
@@ -171,7 +171,8 @@ func skillPropagatorTests(_ t: TestRunner) {
         try expect(!fm.fileExists(atPath: dest.appendingPathComponent("stale.md").path),
             "整体替换：旧版独有文件不能残留")
         try expect(fm.fileExists(atPath: dest.appendingPathComponent("references/rules.md").path))
-        // 暂存目录必须清理干净（隐藏目录留下会在下次覆盖时被误当残骸）
+        // The staging directory must be cleaned up completely (a leftover hidden directory would be
+        // mistaken for debris on the next overwrite)
         try expect(!fm.fileExists(
             atPath: targetRoot.appendingPathComponent(".commit-helper.eureka-staging").path),
             "暂存目录不能残留")

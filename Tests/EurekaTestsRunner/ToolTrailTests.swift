@@ -29,7 +29,7 @@ func toolTrailTests(_ t: TestRunner) {
         let bash = ToolStepExtractor.claude(
             name: "Bash", input: ["command": "swift test\ncd /tmp"])
         try expectEqual(bash.kind, .command)
-        try expectEqual(bash.detail, "swift test …")  // 多行只取首行
+        try expectEqual(bash.detail, "swift test …")  // Multi-line: first line only
 
         let edit = ToolStepExtractor.claude(
             name: "Edit", input: ["file_path": "/a/c.swift", "old_string": "x", "new_string": "y"])
@@ -52,10 +52,11 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(todo.detail, "")
     }
 
-    // MARK: - Codex custom_tool_call（当前 Codex 的命令/补丁主通道）
+    // MARK: - Codex custom_tool_call (current Codex's main channel for commands/patches)
 
     t.test("custom_tool_call exec：从 JS 源码里抽 cmd，含转义与多行") {
-        // 形态照实勘：input 是 JS 源码而不是 JSON（12 个最大 rollout 里 exec 1334 条）
+        // Shape as observed: input is JS source, not JSON (1334 exec calls across the 12 largest
+        // rollouts)
         let exec = ToolStepExtractor.codexCustomTool(name: "exec", input: """
         const r = await tools.exec_command({
           cmd: "wc -l /a/b.md && sed -n '1,240p' /a/c.md",
@@ -66,12 +67,13 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(exec.name, "exec_command")
         try expectEqual(exec.detail, "wc -l /a/b.md && sed -n '1,240p' /a/c.md")
 
-        // 转义序列要还原；命令类只取首行（ToolStep 口径）
+        // Escape sequences must be restored; commands take only the first line (ToolStep
+        // convention)
         let escaped = ToolStepExtractor.codexCustomTool(
             name: "exec", input: #"await tools.exec_command({cmd: "echo \"hi\"\nls -la"})"#)
         try expectEqual(escaped.detail, #"echo "hi" …"#)
 
-        // 相近 key 不能误命中（`foo_cmd:` 不是 `cmd:`）
+        // Similar keys must not match by mistake (`foo_cmd:` is not `cmd:`)
         let nearMiss = ToolStepExtractor.codexCustomTool(
             name: "exec", input: #"await tools.exec_command({foo_cmd: "假的", cmd: "真的"})"#)
         try expectEqual(nearMiss.detail, "真的")
@@ -90,7 +92,7 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(bare.name, "apply_patch")
         try expectEqual(bare.detail, "/w/Sources/A.swift")
 
-        // exec 里塞裸补丁正文（实勘 97 条）
+        // A raw patch body stuffed into exec (97 observed)
         let viaExec = ToolStepExtractor.codexCustomTool(name: "exec", input: """
         *** Begin Patch
         *** Add File: /w/Sources/B.swift
@@ -99,7 +101,7 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(viaExec.kind, .edit)
         try expectEqual(viaExec.detail, "/w/Sources/B.swift")
 
-        // exec 里 patch 变量（实勘 110 条）
+        // A patch variable inside exec (110 observed)
         let viaVar = ToolStepExtractor.codexCustomTool(
             name: "exec",
             input: #"const patch = "*** Begin Patch\n*** Delete File: /w/C.swift\n*** End Patch";"#)
@@ -129,20 +131,21 @@ func toolTrailTests(_ t: TestRunner) {
             name: "exec", input: #"await tools.web__run({q: "swiftpm"})"#)
         try expectEqual(web.kind, .web)
 
-        // 认不出的形态兜底当命令，保真不丢
+        // Unrecognized shapes fall back to a command, preserved faithfully rather than dropped
         let unknown = ToolStepExtractor.codexCustomTool(name: "exec", input: "// 无法识别")
         try expectEqual(unknown.kind, .command)
         try expectEqual(unknown.detail, "// 无法识别")
     }
 
     t.test("Codex 工具结果：两代格式都判成败，判不出返回 nil") {
-        // 老 rollout：结构化 exit_code（磁盘上还有近 1GB 这种文件，不能只认新格式）
+        // Old rollouts: structured exit_code (nearly 1GB of such files still on disk, so the new
+        // format can't be the only one recognized)
         let legacyFail = AuditExtractor.codexOutcome(#"{"metadata":{"exit_code":1}}"#)
         try expectEqual(legacyFail?.isError, true)
         try expectEqual(legacyFail?.exitCode, 1)
         try expectEqual(AuditExtractor.codexOutcome(#"{"metadata":{"exit_code":0}}"#)?.isError, false)
 
-        // 当前 Codex：metadata 已消失，只能看输出文本
+        // Current Codex: metadata is gone, only the output text is available
         let failed: [[String: Any]] = [["type": "input_text", "text": "Script failed\nWall time 0.9 seconds"]]
         try expectEqual(AuditExtractor.codexOutcome(failed)?.isError, true)
         let ok: [[String: Any]] = [["type": "input_text", "text": "Script completed\nWall time 0.1 seconds"]]
@@ -150,7 +153,8 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(AuditExtractor.codexOutcome("Exit code: 2\nOutput:\n")?.exitCode, 2)
         try expectEqual(AuditExtractor.codexOutcome("Exit code: 0\n")?.isError, false)
 
-        // 判不出就说不知道，别假装成功（否则失败步会被静默标成正常）
+        // If it can't be determined, say unknown rather than pretend success (otherwise failed
+        // steps get silently marked normal)
         try expect(AuditExtractor.codexOutcome("Plan updated") == nil)
         try expect(AuditExtractor.codexOutcome(nil) == nil)
     }
@@ -183,7 +187,7 @@ func toolTrailTests(_ t: TestRunner) {
         let shell = ToolStepExtractor.codex(
             name: "shell", argumentsJSON: #"{"command":["bash","-lc","git status"]}"#)
         try expectEqual(shell.kind, .command)
-        try expectEqual(shell.detail, "git status")  // 去 bash -lc 头
+        try expectEqual(shell.detail, "git status")  // strip the bash -lc prefix
 
         let shellNoWrap = ToolStepExtractor.codex(
             name: "shell", argumentsJSON: #"{"command":["ls","-la"]}"#)
@@ -247,7 +251,7 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(roles, [.user, .assistant, .turnTrail, .assistant, .user, .turnTrail])
         try expect(!roles.contains(.toolNote), "Claude 不应再产出 toolNote")
 
-        // 轮 1：7 步（sidechain 的 Read 不计入）
+        // Turn 1: 7 steps (the sidechain Read isn't counted)
         let trail1 = result.messages[2]
         try expectEqual(trail1.steps.count, 7)
         try expectEqual(trail1.steps[0].kind, .read)
@@ -265,11 +269,11 @@ func toolTrailTests(_ t: TestRunner) {
         try expectEqual(trail1.steps[5].name, "Explore")
         try expectEqual(trail1.steps[6].kind, .skill)
         try expectEqual(trail1.steps[6].name, "code-review")
-        // text 含步骤明文（会话内搜索可命中）
+        // text includes the step plaintext (in-session search can hit it)
         try expect(trail1.text.contains("本轮轨迹（7 步）"))
         try expect(trail1.text.contains("/w/Sources/Auth/Login.swift"))
 
-        // 轮 2：独立 trail
+        // Turn 2: separate trail
         let trail2 = result.messages[5]
         try expectEqual(trail2.steps.count, 1)
         try expectEqual(trail2.steps[0].detail, "/w/Sources/Auth/Register.swift")
@@ -279,7 +283,7 @@ func toolTrailTests(_ t: TestRunner) {
         let path = try fixtureURL("claude-transcript-trail.jsonl").path
         let result = TranscriptReader.loadClaude(path: path, maxMessages: 4)
         try expect(result.truncated)
-        // user + assistant(text) + trail(1 步) 后预算耗尽
+        // Budget exhausted after user + assistant(text) + trail(1 step)
         try expectEqual(result.messages.count, 3)
         try expectEqual(result.messages[2].role, .turnTrail)
         try expectEqual(result.messages[2].steps.count, 1)
@@ -308,6 +312,6 @@ func toolTrailTests(_ t: TestRunner) {
 
         let trail2 = result.messages[4]
         try expectEqual(trail2.steps.count, 1)
-        try expectEqual(trail2.steps[0].detail, "swift test")  // shell 数组去 bash -lc 头
+        try expectEqual(trail2.steps[0].detail, "swift test")  // shell array: strip the bash -lc prefix
     }
 }

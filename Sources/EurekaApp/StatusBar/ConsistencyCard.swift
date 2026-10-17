@@ -2,33 +2,43 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 跨源配置一致性卡（审计页顶部）。
+/// Cross-source config consistency card (top of the audit page).
 ///
-/// 这是「本地 agent CLI 管理助手」最该干、也最没人干的一件事：12 个 CLI 各有一套技能 / 指令 /
-/// 记忆，横向对不上账的地方全靠人肉记。这里只报**三类能自动判定、且用户确实在意**的缺口：
-///  1. 项目指令文件配了一半（本机实勘：一个仓库完全没配、两个各缺一种）
-///  2. 某个源缺了已在其它源配置的技能 —— **按源聚合**，不按技能逐条列
-///     （25 个同名技能全都是"5 源有、codex/grok 无"，逐条列会刷出 25 行说同一件事）
-///  3. 记忆库索引漂移（未被 MEMORY.md 收录的死记忆）
+/// This is the thing a "local agent CLI management assistant" should do most and nobody does:
+/// 12 CLIs each have their own skills / instructions /
+/// memory, and where they don't line up across sources is tracked purely by memory. Only **three
+/// kinds of gaps that can be judged automatically and that users really care about** are reported:
+///  1. Project instruction files half configured (observed on this machine: one repo with none at
+///     all, two each missing one kind)
+///  2. A source is missing skills already configured in other sources: **aggregated per source**,
+///     not listed per skill
+///     (all 25 same-named skills were "present in 5 sources, missing in codex/grok"; listing them
+///     one by one would spew 25 rows saying the same thing)
+///  3. Memory library index drift (dead memories not listed in MEMORY.md)
 ///
-/// 口径都是**自适应**的：拿用户自己已有的约定去对账，不照理想清单挑刺 ——
-/// 否则就会报「你没配 Gemini 的指令文件」这类纯噪声。判据与阈值见 `ConsistencyChecker`（有单测）。
+/// The criteria are all **adaptive**: they reconcile against conventions the user already has,
+/// rather than nitpicking against an ideal checklist;
+/// otherwise it would report pure noise like "you haven't configured Gemini's instruction file".
+/// Rules and thresholds are in `ConsistencyChecker` (unit tested).
 struct ConsistencyCard: View {
     @ObservedObject var service: SkillMemoryService
-    /// MCP 同名异义（同一 server 名在多源定义冲突；AuditView 传入，默认空）
+    /// MCP same-name conflicts (one server name defined differently across sources; passed in by
+    /// AuditView, empty by default)
     var mcpDrifts: [ConsistencyChecker.MCPDrift] = []
 
     @State private var expanded = false
-    /// 待确认的"补齐"目标（点了某条技能缺口的补齐按钮）
+    /// Pending "fill in" target (the fill-in button on a skill-gap row was tapped)
     @State private var fixGap: ConsistencyReportAlias.SkillSourceGap?
-    /// 补齐结果反馈（短暂显示；重扫后缺口条目自然消失）
+    /// Fill-in result feedback (shown briefly; the gap rows disappear on their own after the
+    /// rescan)
     @State private var fixNote: String?
 
     var body: some View {
         let report = service.consistencyReport
         let clean = report.isClean && mcpDrifts.isEmpty
         let issueCount = report.issueCount + mcpDrifts.count
-        // 还没扫完就不占版面（此时全是空的，报"一切正常"是假的）
+        // Take no space until the scan finishes (everything is empty then, so reporting "all good"
+        // would be a lie)
         if service.lastScanAt != nil {
             VStack(alignment: .leading, spacing: expanded ? 10 : 0) {
                 header(report, clean: clean, issueCount: issueCount)
@@ -217,7 +227,8 @@ struct ConsistencyCard: View {
         }
     }
 
-    /// 执行"补齐"（confirmationDialog 确认后）：批量复制 + 单次重扫；结果短暂显示在卡内
+    /// Runs "fill in" (after confirmationDialog confirms): batch copy + a single rescan; the result
+    /// is shown briefly inside the card
     private func runFix() {
         guard let gap = fixGap else { return }
         fixGap = nil
@@ -257,5 +268,6 @@ struct ConsistencyCard: View {
     }
 }
 
-/// `ConsistencyChecker.Report` 的短别名（嵌套类型名太长，视图里到处写不好读）
+/// Short alias for `ConsistencyChecker.Report` (the nested type name is too long to read well
+/// when written all over the view)
 typealias ConsistencyReportAlias = ConsistencyChecker.Report

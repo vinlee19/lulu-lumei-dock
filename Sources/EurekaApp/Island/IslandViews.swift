@@ -1,7 +1,8 @@
 import EurekaKit
 import SwiftUI
 
-/// 灵动岛根视图：单一黑色圆角形随状态弹簧变形，内容随状态切换
+/// Dynamic Island root view: a single black rounded shape that spring-morphs with state; content
+/// switches with state
 struct IslandRootView: View {
     @ObservedObject var viewModel: IslandViewModel
 
@@ -18,13 +19,14 @@ struct IslandRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.38, dampingFraction: 0.8), value: viewModel.display)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isFloating)
-        // 语言切换时整棵岛重建，已投影的文案才会换成新语言
+        // Rebuild the whole island on language change so already-projected copy picks up the new
+        // language
         .id(viewModel.language)
     }
 
     private func island(size: CGSize) -> some View {
-        // 拖拽在 IslandHostingView（performDrag）；点按回到 SwiftUI——
-        // 内部按钮优先消费，背景 tap 才走 islandTapped
+        // Drag lives in IslandHostingView (performDrag); taps go back to SwiftUI --
+        // inner buttons consume first, only background taps reach islandTapped
         UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
             .fill(Color.black)
             .frame(width: size.width, height: size.height)
@@ -34,7 +36,7 @@ struct IslandRootView: View {
             .onTapGesture { viewModel.islandTapped() }
     }
 
-    /// 刘海融合：上沿直角；浮动/普通屏：四角全圆
+    /// Notch-merged: square top edge; floating / regular screen: all four corners rounded
     private var cornerRadii: RectangleCornerRadii {
         let fused = viewModel.fuseWithNotch
         switch viewModel.display {
@@ -80,7 +82,8 @@ struct IslandRootView: View {
     }
 }
 
-/// compact 胶囊：左翼状态 + 数量，右翼最早任务计时/开始时间；中部为物理刘海留空
+/// Compact capsule: left wing state + count, right wing earliest task's timer / start time; middle
+/// left empty for the physical notch
 struct CompactPillView: View {
     let tasks: [AgentTask]
     let hasWaiting: Bool
@@ -116,7 +119,7 @@ struct CompactPillView: View {
         .padding(.horizontal, 14 * scale)
     }
 
-    /// 左翼：等待标记 + 在场来源 + 数量
+    /// Left wing: waiting marker + present sources + count
     private func leftWing(showSourceLabel: Bool, spacing: CGFloat) -> some View {
         HStack(spacing: spacing) {
             if hasWaiting {
@@ -124,7 +127,7 @@ struct CompactPillView: View {
                     .font(.system(size: 14 * scale, weight: .semibold))
                     .foregroundStyle(.orange)
             }
-            // 在场来源各一枚「logo + claude/codex」标签
+            // One "logo + claude/codex" label per present source
             PulsingSourceBadges(
                 sources: distinctSources, scale: scale, showLabel: showSourceLabel)
             Text("\(tasks.count)")
@@ -135,10 +138,10 @@ struct CompactPillView: View {
         }
     }
 
-    /// 右翼：子 agent 聚合标识 + 最早任务的计时 / 开始时间
+    /// Right wing: aggregated subagent marker + earliest task's timer / start time
     private func rightWing(showSubagents: Bool) -> some View {
         HStack(spacing: 5 * scale) {
-            // 子 agent 聚合标识（有就显示总数，无则不占位）
+            // Aggregated subagent marker (shows the total if any, takes no space otherwise)
             if showSubagents, subagentTotal > 0 {
                 HStack(spacing: 2 * scale) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
@@ -152,7 +155,8 @@ struct CompactPillView: View {
             if let earliest = tasks.first {
                 Group {
                     if showStartTime {
-                        // 会话最初创建的时间（跨 turn/resume），缺数据退当前 turn 开始
+                        // When the session was first created (across turns/resume); falls back to
+                        // the current turn start if missing
                         Text(formatStartTime(earliest.sessionStartedAt ?? earliest.startedAt))
                     } else {
                         Text(timerInterval: earliest.startedAt...Date.distantFuture, countsDown: false)
@@ -166,20 +170,20 @@ struct CompactPillView: View {
         }
     }
 
-    /// 在场来源（保持稳定顺序：claude 前 codex 后）
+    /// Present sources (stable order: claude before codex)
     private var distinctSources: [AgentSource] {
         var seen = Set<AgentSource>()
         for task in tasks { seen.insert(task.source) }
         return AgentSource.allCases.filter { seen.contains($0) }
     }
 
-    /// 在场子 agent 总数（compact 胶囊聚合标识）
+    /// Total present subagents (compact capsule aggregated marker)
     private var subagentTotal: Int {
         tasks.reduce(0) { $0 + $1.subagents.count }
     }
 }
 
-/// 运行中呼吸点
+/// Breathing dot while running
 struct PulsingDot: View {
     var color: Color = .cyan
     var size: CGFloat = 7
@@ -195,46 +199,50 @@ struct PulsingDot: View {
     }
 }
 
-// MARK: - 来源标识（全岛统一语言）
+// MARK: - Source badges (one visual language across the island)
 
 extension AgentSource {
     var brandColor: Color {
         switch self {
-        case .claude: return Color(red: 0.855, green: 0.467, blue: 0.337)  // Anthropic 橙 #DA7756
-        case .codex: return Color(red: 0.08, green: 0.62, blue: 0.56)      // OpenAI 青绿
-        // OpenCode 官方 logo 为黑白单色 → 动态色：浅色模式近黑 #211E1E，深色模式浅灰（岛上可见）
+        case .claude: return Color(red: 0.855, green: 0.467, blue: 0.337)  // Anthropic orange #DA7756
+        case .codex: return Color(red: 0.08, green: 0.62, blue: 0.56)      // OpenAI teal
+        // OpenCode's official logo is black-and-white → dynamic color: near-black #211E1E in light
+        // mode, light grey in dark mode (visible on the island)
         case .opencode: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? NSColor(srgbRed: 0.85, green: 0.85, blue: 0.85, alpha: 1)
                 : NSColor(srgbRed: 0.129, green: 0.118, blue: 0.118, alpha: 1)
         }))
-        case .grok: return Color(red: 0.129, green: 0.588, blue: 0.953)    // xAI Dodger 蓝 #2196F3
-        case .antigravity: return Color(red: 0.898, green: 0.298, blue: 0.612)  // 品红/玫 #E54C9C
-        case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot 蔚蓝 #1783FF
-        case .gemini: return Color(red: 0.259, green: 0.522, blue: 0.957)  // Google 蓝 #4285F4
-        case .qwen: return Color(red: 0.38, green: 0.36, blue: 0.93)       // 通义紫 #615CED
-        // Hermes（Nous Research）官方素材是黑白线稿 → 同 OpenCode 走动态墨色：
-        // 浅色近黑 #1A1A1E，深色浅灰 #E4E4E8（岛上恒深底也要看得见）。要换成有色只改这一处。
+        case .grok: return Color(red: 0.129, green: 0.588, blue: 0.953)    // xAI Dodger blue #2196F3
+        case .antigravity: return Color(red: 0.898, green: 0.298, blue: 0.612)  // magenta/rose #E54C9C
+        case .kimi: return Color(red: 0.090, green: 0.514, blue: 1.0)      // Moonshot azure #1783FF
+        case .gemini: return Color(red: 0.259, green: 0.522, blue: 0.957)  // Google blue #4285F4
+        case .qwen: return Color(red: 0.38, green: 0.36, blue: 0.93)       // Tongyi purple #615CED
+        // Hermes (Nous Research) official artwork is black-and-white line art → dynamic ink like
+        // OpenCode: near-black #1A1A1E in light, light grey #E4E4E8 in dark (must stay visible on
+        // the always-dark island). To make it colored, change only this spot.
         case .hermes: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? NSColor(srgbRed: 0.894, green: 0.894, blue: 0.909, alpha: 1)
                 : NSColor(srgbRed: 0.102, green: 0.102, blue: 0.118, alpha: 1)
         }))
-        // CodeBuddy 官方 logo 是青→紫径向渐变（#2EA99D → #6C4DFF）→ 取主色紫
-        case .codebuddy: return Color(red: 0.424, green: 0.302, blue: 1.0)  // CodeBuddy 紫 #6C4DFF
-        case .qoder: return Color(red: 0.165, green: 0.859, blue: 0.361)    // Qoder 绿 #2ADB5C
-        // Cursor 官方标是纯黑白立方 → 同 OpenCode / Hermes 走动态墨色，
-        // 硬编码黑在恒深底的岛上会整块看不见
+        // CodeBuddy's official logo is a teal→purple radial gradient (#2EA99D → #6C4DFF) → use the
+        // dominant purple
+        case .codebuddy: return Color(red: 0.424, green: 0.302, blue: 1.0)  // CodeBuddy purple #6C4DFF
+        case .qoder: return Color(red: 0.165, green: 0.859, blue: 0.361)    // Qoder green #2ADB5C
+        // Cursor's official mark is a pure black-and-white cube → dynamic ink like OpenCode /
+        // Hermes; hardcoded black would vanish entirely on the always-dark island
         case .cursor: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? NSColor(srgbRed: 0.92, green: 0.92, blue: 0.94, alpha: 1)
                 : NSColor(srgbRed: 0.07, green: 0.07, blue: 0.08, alpha: 1)
         }))
-        // TRAE 官方标是薄荷绿方括号。与 Qoder 的 #2ADB5C 同为绿系但更偏青，
-        // 排在一起要能分开 —— 改这里之后务必 `--render-badges` 看图核对。
-        case .trae: return Color(red: 0.196, green: 0.941, blue: 0.549)      // TRAE 绿 #32F08C
-        // ZCode（Z.ai）官方标是单色 currentColor 的 Z 标 → 同 OpenCode/Cursor 走动态墨色，
-        // 配 logo-zcode{,-dark}.svg 双版本资产
+        // TRAE's official mark is mint-green brackets. Same green family as Qoder's #2ADB5C but
+        // more cyan; the two must stay distinguishable side by side -- after changing this, check
+        // visually with `--render-badges`.
+        case .trae: return Color(red: 0.196, green: 0.941, blue: 0.549)      // TRAE green #32F08C
+        // ZCode (Z.ai) official mark is a monochrome currentColor Z → dynamic ink like
+        // OpenCode/Cursor, paired with the two-variant logo-zcode{,-dark}.svg assets
         case .zcode: return Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? NSColor(srgbRed: 0.894, green: 0.894, blue: 0.909, alpha: 1)
@@ -244,8 +252,9 @@ extension AgentSource {
     }
 }
 
-/// Claude 标记：8 根宽短花瓣，近似 Anthropic/Claude 品牌八芒星
-/// 相比初版加宽了辐条（0.34）、缩短了内半径（0.28），花瓣更粗圆
+/// Claude mark: 8 wide, short petals approximating the Anthropic/Claude eight-pointed star.
+/// Compared with the first version the spokes are wider (0.34) and the inner radius shorter (0.28),
+/// so petals are fuller
 struct ClaudeMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
@@ -268,8 +277,9 @@ struct ClaudeMarkShape: Shape {
     }
 }
 
-/// Codex 标记：5 根细叶片 + 切向偏移，近似 OpenAI 品牌五瓣风车形
-/// 每个叶片在其局部坐标系内向右偏移（切向），5 个叶片旋转后形成风车视觉
+/// Codex mark: 5 thin blades with tangential offset, approximating OpenAI's five-blade pinwheel.
+/// Each blade is offset rightward (tangentially) in its local frame; rotating 5 blades yields the
+/// pinwheel look
 struct CodexMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
@@ -277,7 +287,7 @@ struct CodexMarkShape: Shape {
         let outer = R * 0.96
         let inner = R * 0.20
         let width = R * 0.26
-        // 切向偏移：叶片基线不穿过圆心，产生风车叶片感
+        // Tangential offset: the blade baseline misses the center, giving a pinwheel-blade feel
         let tangentOffset = R * 0.20
         var path = Path()
         for index in 0..<5 {
@@ -295,21 +305,22 @@ struct CodexMarkShape: Shape {
     }
 }
 
-/// OpenCode 标记：官方 logo——竖长实心方框内挖窗口（32×40 视箱），窗口下 2/3 由
-/// OpencodeWindowShape 以半透明补上，单色演绎黑框灰窗的原版配色。eoFill 填充。
+/// OpenCode mark: official logo -- a tall solid frame with a window cut out (32×40 viewbox); the
+/// lower 2/3 of the window is filled back semi-transparently by OpencodeWindowShape, a monochrome
+/// take on the original black frame / grey window. eoFill.
 struct OpencodeMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let box = Self.logoBox(in: rect)
         var path = Path()
         path.addRect(box)
-        // 窗口洞：x 8→24 / 32，y 8→32 / 40
+        // Window hole: x 8→24 / 32, y 8→32 / 40
         path.addRect(CGRect(
             x: box.minX + box.width * 0.25, y: box.minY + box.height * 0.2,
             width: box.width * 0.5, height: box.height * 0.6))
         return path
     }
 
-    /// 32×40 视箱按比例内接居中
+    /// Fit the 32×40 viewbox proportionally, centered
     static func logoBox(in rect: CGRect) -> CGRect {
         let height = min(rect.height, rect.width / 0.8)
         let width = height * 0.8
@@ -319,7 +330,7 @@ struct OpencodeMarkShape: Shape {
     }
 }
 
-/// OpenCode 窗口下半格（原版 #BCBBBB 灰）：y 16→32 / 40
+/// Lower half of the OpenCode window (original #BCBBBB grey): y 16→32 / 40
 struct OpencodeWindowShape: Shape {
     func path(in rect: CGRect) -> Path {
         let box = OpencodeMarkShape.logoBox(in: rect)
@@ -329,16 +340,18 @@ struct OpencodeWindowShape: Shape {
     }
 }
 
-/// Grok 标记：圆角方内挖一道对角斜杠，呼应 xAI/Grok 的「方块 + 斜杠」品牌符号
+/// Grok mark: rounded square with a diagonal slash cut out, echoing xAI/Grok's "square + slash"
+/// brand symbol
 struct GrokMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
         let box = CGRect(
             x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
         var path = Path()
-        // 实心圆角方
+        // Solid rounded square
         path.addRoundedRect(in: box, cornerSize: CGSize(width: side * 0.26, height: side * 0.26))
-        // 对角斜杠「/」：一根粗圆角竖条绕中心顺时针旋转 ~36°，eoFill 挖空成透空斜杠
+        // Diagonal slash "/": a thick rounded vertical bar rotated ~36° clockwise about the center,
+        // eoFill cuts it out as a see-through slash
         let bar = Path(
             roundedRect: CGRect(
                 x: box.midX - side * 0.10, y: box.midY - side * 0.44,
@@ -352,8 +365,9 @@ struct GrokMarkShape: Shape {
     }
 }
 
-/// Kimi 标记：几何「K」三笔（竖杆 + 上臂 + 下腿，圆头）+ 右上圆点，
-/// 呼应 Moonshot/Kimi 官方字标（K 向上伸展、蓝点收顶）。与 Grok 蓝接近，靠 K 字形状区分。
+/// Kimi mark: geometric "K" in three strokes (stem + upper arm + lower leg, round caps) + top-right
+/// dot, echoing the Moonshot/Kimi wordmark (K reaching up, blue dot on top). Close to Grok's blue,
+/// so the K shape tells them apart.
 struct KimiMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
@@ -363,18 +377,18 @@ struct KimiMarkShape: Shape {
             CGPoint(x: x0 + fx * side, y: y0 + fy * side)
         }
         var strokes = Path()
-        // 竖杆
+        // Stem
         strokes.move(to: point(0.19, 0.17))
         strokes.addLine(to: point(0.19, 0.83))
-        // 上臂（从杆中部伸向右上）
+        // Upper arm (from mid-stem toward the upper right)
         strokes.move(to: point(0.19, 0.50))
         strokes.addLine(to: point(0.72, 0.20))
-        // 下腿（从杆中部伸向右下）
+        // Lower leg (from mid-stem toward the lower right)
         strokes.move(to: point(0.19, 0.50))
         strokes.addLine(to: point(0.71, 0.83))
         var path = strokes.strokedPath(
             .init(lineWidth: side * 0.13, lineCap: .round, lineJoin: .round))
-        // 右上圆点（K 的"探月"收顶）
+        // Top-right dot (the K's "moon" on top)
         let r = side * 0.075
         let nub = point(0.87, 0.11)
         path.addEllipse(in: CGRect(x: nub.x - r, y: nub.y - r, width: r * 2, height: r * 2))
@@ -382,31 +396,35 @@ struct KimiMarkShape: Shape {
     }
 }
 
-/// Hermes 标记：带翼头盔（赫尔墨斯的 petasos）——实心圆顶 + 帽檐 + 两侧后掠翼。
-/// Nous 官方素材是 512px 黑白插画（不透明白底 + 黑框），缩到徽标实际尺寸 9–15pt 只会糊成深色方块，
-/// 故与 OpenCode 同策略按比例代码绘制。**走实心剪影而非细描边**：本组里 9pt 下仍清楚的
-/// （Claude 星芒 / Gemini 四角星 / Kimi K）都是实心，细线在 18px 上会糊成波浪。
+/// Hermes mark: winged helmet (Hermes' petasos) -- solid dome + brim + swept-back wings on both
+/// sides. Nous' official artwork is a 512px black-and-white illustration (opaque white background +
+/// black outline); shrunk to the badge's real 9-15pt it blurs into a dark square, so like OpenCode
+/// it is drawn proportionally in code. **Solid silhouette, not thin strokes**: the marks in this
+/// set that stay clear at 9pt (Claude star / Gemini four-point star / Kimi K) are all solid; thin
+/// lines blur into waves at 18px.
 struct HermesMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
-        /// 归一化取点：以 rect 中心为基准，非正方形也居中
+        /// Normalized point: relative to the rect center, centered even when not square
         func point(_ fx: CGFloat, _ fy: CGFloat) -> CGPoint {
             CGPoint(x: rect.midX + side * (fx - 0.5), y: rect.midY + side * (fy - 0.5))
         }
         var path = Path()
-        // 圆顶：上半弧 + 底边闭合 = 实心半圆（y 向下，180°→360° 经 270° 即正上方）
+        // Dome: upper arc + bottom edge closed = solid semicircle (y points down; 180°→360° via
+        // 270° is straight up)
         path.move(to: point(0.27, 0.62))
         path.addArc(
             center: point(0.50, 0.62), radius: side * 0.23,
             startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
         path.closeSubpath()
-        // 帽檐：略宽于圆顶的圆角横条
+        // Brim: rounded bar slightly wider than the dome
         let brimOrigin = point(0.20, 0.62)
         path.addRoundedRect(
             in: CGRect(x: brimOrigin.x, y: brimOrigin.y,
                        width: side * 0.60, height: side * 0.09),
             cornerSize: CGSize(width: side * 0.045, height: side * 0.045))
-        // 两侧后掠翼：自帽檐两端向外上挑，翼尖要明显高过帽檐才读得出「翼」
+        // Swept-back wings: flare outward and up from both brim ends; wingtips must clear the brim
+        // clearly to read as "wings"
         for direction in [CGFloat(-1), 1] {
             let inner = 0.5 + direction * 0.27
             let tip = 0.5 + direction * 0.50
@@ -419,7 +437,7 @@ struct HermesMarkShape: Shape {
     }
 }
 
-/// Antigravity 标记：双层上升人字（⌃⌃），呼应「反重力 / 上升」
+/// Antigravity mark: double rising chevrons (⌃⌃), echoing "anti-gravity / rising"
 struct AntigravityMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
@@ -436,10 +454,11 @@ struct AntigravityMarkShape: Shape {
     }
 }
 
-/// 官方 logo 资产（Resources/source-logos/*，macOS 14 NSImage 原生渲染矢量）。
-/// Grok / Qoder / Cursor 官方标为纯黑（或 currentColor）→ 深色环境用白色变体；
-/// OpenCode 用代码绘制（见 OpencodeMarkShape）。
-/// Hermes 官方只发了位图（无矢量版）→ 按扩展名区分加载，PNG 与 SVG 同一条 NSImage 解码路径。
+/// Official logo assets (Resources/source-logos/*, vectors rendered natively by NSImage on macOS
+/// 14). Grok / Qoder / Cursor official marks are pure black (or currentColor) → use the white
+/// variant in dark appearance; OpenCode is drawn in code (see OpencodeMarkShape). Hermes only ships
+/// a bitmap officially (no vector) → load by extension; PNG and SVG share the same NSImage decode
+/// path.
 enum SourceLogo {
     private static var cache: [String: NSImage] = [:]
     private static let lock = NSLock()
@@ -457,15 +476,17 @@ enum SourceLogo {
         case .qwen: name = "logo-qwen"
         case .hermes:
             name = "logo-hermes"
-            ext = "png"  // Nous 官方素材是 512×512 位图
+            ext = "png"  // Nous' official artwork is a 512×512 bitmap
         case .codebuddy: name = "logo-codebuddy"
         case .qoder: name = dark ? "logo-qoder-dark" : "logo-qoder"
         case .cursor: name = dark ? "logo-cursor-dark" : "logo-cursor"
-        // TRAE 官方标本身是薄荷绿（#32F08C），浅底深底都看得见 → 不需要 -dark 变体
+        // TRAE's official mark is itself mint green (#32F08C), visible on light and dark → no -dark
+        // variant needed
         case .trae: name = "logo-trae"
-        // ZCode（Z.ai）官方标是单色 currentColor → 双版本：浅色用深墨、深色用浅灰
+        // ZCode (Z.ai) official mark is monochrome currentColor → two variants: dark ink for light,
+        // light grey for dark
         case .zcode: name = dark ? "logo-zcode-dark" : "logo-zcode"
-        case .opencode: return nil  // 无资产：由 SourceBadge 走代码绘制分支
+        case .opencode: return nil  // No asset: SourceBadge takes the code-drawn branch
         }
         lock.lock()
         defer { lock.unlock() }
@@ -479,13 +500,15 @@ enum SourceLogo {
     }
 }
 
-/// 来源徽标：官方 logo（SVG 矢量）；OpenCode 为官方几何形状的代码绘制；
-/// 资产缺失时回退旧的品牌色形状。旧注释：Claude = 橙色八芒星；Codex = 青绿五瓣风车；
-/// Grok = 蓝色斜杠方；Antigravity = 品红上升人字
+/// Source badge: official logo (SVG vector); OpenCode is a code drawing of the official geometry;
+/// falls back to the old brand-color shapes when an asset is missing. Old notes: Claude = orange
+/// eight-pointed star; Codex = teal five-blade pinwheel; Grok = blue slashed square; Antigravity =
+/// magenta rising chevrons
 struct SourceBadge: View {
     let source: AgentSource
     var size: CGFloat = 12
-    /// 强制按深色环境取 logo 变体（灵动岛永远深底，不跟系统外观走）
+    /// Force the dark-appearance logo variant (the Dynamic Island is always dark, regardless of
+    /// system appearance)
     var onDark: Bool?
 
     @Environment(\.colorScheme) private var colorScheme
@@ -512,7 +535,7 @@ struct SourceBadge: View {
         }
     }
 
-    /// 资产缺失兜底：沿用旧的品牌色几何标记
+    /// Fallback when an asset is missing: keep the old brand-color geometric marks
     @ViewBuilder
     private var fallbackShape: some View {
         switch source {
@@ -529,23 +552,26 @@ struct SourceBadge: View {
         case .gemini:
             GeminiMarkShape().fill(source.brandColor)
         case .qwen:
-            GeminiMarkShape().fill(source.brandColor)  // 兜底同用四角星（仅资产缺失时）
+            GeminiMarkShape().fill(source.brandColor)  // Fallback also uses the four-point star (only when the asset is missing)
         case .hermes:
-            HermesMarkShape().fill(source.brandColor)  // 仅 logo-hermes.png 缺失时兜底
+            HermesMarkShape().fill(source.brandColor)  // Fallback only when logo-hermes.png is missing
         case .codebuddy:
-            // 兜底圆角方块（近官方圆角矩形底，仅资产缺失时）
+            // Fallback rounded square (close to the official rounded-rectangle base; only when the
+            // asset is missing)
             RoundedRectangle(cornerRadius: size * 0.28).fill(source.brandColor)
         case .qoder:
-            Circle().fill(source.brandColor)  // 兜底圆点（仅资产缺失时）
+            Circle().fill(source.brandColor)  // Fallback dot (only when the asset is missing)
         case .cursor:
-            // 兜底实心六边形（官方是等距立方，9pt 下细描边会糊，故走实心剪影）
+            // Fallback solid hexagon (the official mark is an isometric cube; thin strokes blur at
+            // 9pt, so use a solid silhouette)
             CursorMarkShape().fill(source.brandColor)
         case .trae:
-            // 兜底方块（官方标是方括号取景框，同 CursorMarkShape 的规矩走实心而非描边，
-            // 仅 logo-trae.svg 缺失时才会走到这里）
+            // Fallback square (the official mark is a bracket viewfinder; like CursorMarkShape,
+            // solid rather than stroked; only reached when logo-trae.svg is missing)
             RoundedRectangle(cornerRadius: size * 0.18).fill(source.brandColor)
         case .zcode:
-            // 兜底 Z 字剪影（官方标的 Z 由三段人字带构成，9pt 下走实心剪影）
+            // Fallback Z silhouette (the official Z is built from three chevron bands; solid
+            // silhouette at 9pt)
             ZcodeMarkShape().fill(source.brandColor)
         case .opencode:
             EmptyView()
@@ -553,22 +579,23 @@ struct SourceBadge: View {
     }
 }
 
-/// ZCode 兜底标记：粗 Z 剪影（仅 logo-zcode{,-dark}.svg 缺失时使用）。
-/// 官方 Z.ai 标由三条人字带拼成 Z，这里用两横杠 + 一斜杠近似；实心而非描边。
+/// ZCode fallback mark: thick Z silhouette (used only when logo-zcode{,-dark}.svg is missing). The
+/// official Z.ai mark forms a Z from three chevron bands; approximated here by two bars + one
+/// slash; solid, not stroked.
 struct ZcodeMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
         let bar = side * 0.22
         let inset = side * 0.1
         var path = Path()
-        // 上横杠 / 下横杠（直角矩形，9pt 下圆角无意义）
+        // Top bar / bottom bar (square-cornered rectangles; rounded corners are pointless at 9pt)
         path.addRect(CGRect(
             x: rect.minX + inset, y: rect.minY + inset,
             width: side - inset * 2, height: bar))
         path.addRect(CGRect(
             x: rect.minX + inset, y: rect.maxY - inset - bar,
             width: side - inset * 2, height: bar))
-        // 斜杠（平行四边形，连接右上到左下）
+        // Slash (parallelogram joining top right to bottom left)
         let skew = side * 0.14
         var diagonal = Path()
         diagonal.move(to: CGPoint(x: rect.maxX - inset - skew, y: rect.minY + inset + bar))
@@ -581,8 +608,9 @@ struct ZcodeMarkShape: Shape {
     }
 }
 
-/// Cursor 兜底标记：实心正六边形（官方等距立方的正投影轮廓，仅资产缺失时使用）。
-/// 同 HermesMarkShape 的规矩走实心而非细描边——9pt 下细线会糊成一团。
+/// Cursor fallback mark: solid regular hexagon (orthographic outline of the official isometric
+/// cube; used only when the asset is missing). Like HermesMarkShape, solid rather than thin strokes
+/// -- thin lines blur into a blob at 9pt.
 struct CursorMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
@@ -590,7 +618,7 @@ struct CursorMarkShape: Shape {
         let r = side / 2
         var path = Path()
         for index in 0..<6 {
-            // 从正上方起顺时针，顶点朝上（与官方立方的站位一致）
+            // Clockwise from straight up, vertex on top (matching the official cube's stance)
             let angle: Double = Double(index) / 6 * 2 * Double.pi - Double.pi / 2
             let point = CGPoint(
                 x: cx + r * CGFloat(Foundation.cos(angle)),
@@ -602,7 +630,8 @@ struct CursorMarkShape: Shape {
     }
 }
 
-/// Gemini 兜底标记：四角星（官方 spark 的极简几何近似，仅资产缺失时使用）
+/// Gemini fallback mark: four-point star (minimal geometric approximation of the official spark;
+/// used only when the asset is missing)
 struct GeminiMarkShape: Shape {
     func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
@@ -624,7 +653,7 @@ struct GeminiMarkShape: Shape {
     }
 }
 
-/// logo + 小写来源名（claude / codex），全岛统一来源语言
+/// logo + lowercase source name (claude / codex), one source language across the island
 struct SourceLabelBadge: View {
     let source: AgentSource
     var size: CGFloat = 11
@@ -632,7 +661,7 @@ struct SourceLabelBadge: View {
     var body: some View {
         HStack(spacing: 3) {
             SourceBadge(source: source, size: size, onDark: true)
-            Text(source.rawValue)  // rawValue 即 "claude"/"codex"
+            Text(source.rawValue)  // rawValue is "claude"/"codex"
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(source.brandColor)
                 .lineLimit(1)
@@ -641,7 +670,7 @@ struct SourceLabelBadge: View {
     }
 }
 
-/// 胶囊左翼：呼吸的来源标签（在场来源各一枚 logo + 文字）
+/// Capsule left wing: breathing source labels (one logo + text per present source)
 struct PulsingSourceBadges: View {
     let sources: [AgentSource]
     var scale: CGFloat = 1
@@ -652,8 +681,9 @@ struct PulsingSourceBadges: View {
     var body: some View {
         HStack(spacing: 5 * scale) {
             ForEach(sources, id: \.self) { source in
-                // 单来源：logo + 文字（胶囊够宽）；多来源并存：只放 logo（刘海两翼放不下两组文字，
-                // 完整 claude/codex 文字在展开任务列表里每行都有）
+                // Single source: logo + text (capsule is wide enough); multiple sources: logos only
+                // (the notch wings can't fit two sets of text; the full claude/codex text appears
+                // on every row of the expanded task list)
                 if sources.count == 1, showLabel {
                     SourceLabelBadge(source: source, size: 13 * scale)
                 } else {
@@ -667,8 +697,8 @@ struct PulsingSourceBadges: View {
     }
 }
 
-/// 展开卡片：完成/出错/中断/等待确认。
-/// φ 黄金比竖式：图标 + 来源标签在上，文字居中在下。
+/// Expanded card: finished / error / interrupted / awaiting confirmation.
+/// φ golden-ratio vertical layout: icon + source label on top, text centered below.
 struct ExpandedCardView: View {
     let card: IslandState.Card
     let queuedCount: Int
@@ -685,7 +715,7 @@ struct ExpandedCardView: View {
                     .foregroundStyle(iconColor)
             }
 
-            // 来源标识：logo + claude/codex（notice 无来源）
+            // Source marker: logo + claude/codex (notices have no source)
             if let source = cardSource {
                 SourceLabelBadge(source: source, size: 12 * scale)
             }
@@ -737,7 +767,7 @@ struct ExpandedCardView: View {
         case .alert:
             return "exclamationmark.shield.fill"
         case .notice:
-            return "heart.fill"  // 不会走到（notice 渲染 emoji），兜底
+            return "heart.fill"  // Never reached (notices render an emoji); fallback
         }
     }
 
@@ -782,9 +812,11 @@ struct ExpandedCardView: View {
         switch card {
         case .finished(let task): return task.title ?? task.projectName
         case .waiting(let task):
-            // 等待授权时最该看见的是"在请求什么"（PreToolUse 带来的工具 + 对象），
-            // 会话身份交给 subtitle 的项目 + #会话号 —— 与高危操作卡同一口径。
-            // 没有对象串（未装 PreToolUse hook / 工具无参数）时退回会话名，不会变空。
+            // While awaiting permission, what matters most is "what is being requested" (the tool +
+            // target from PreToolUse); session identity goes to the subtitle's project + #session
+            // id -- same convention as the high-risk operation card. With no target string
+            // (PreToolUse hook not installed / tool has no args) fall back to the session name,
+            // never empty.
             if case .waiting(.permission, _) = task.phase, let tool = task.currentActivity {
                 return task.currentToolDetail.map { L10n.format("%@: %@", zhHans: "%@：%@", String(tool), String($0)) } ?? tool
             }
@@ -798,7 +830,8 @@ struct ExpandedCardView: View {
     }
 
     private var subtitle: String {
-        // 来源已由 SourceLabelBadge 表达，副标题只给项目 / 会话号 / 排队数
+        // The source is already shown by SourceLabelBadge; the subtitle only carries project /
+        // session id / queue count
         let project: String?
         let sessionId: String
         switch card {
@@ -820,24 +853,24 @@ struct ExpandedCardView: View {
         }
         var parts: [String] = []
         if let project { parts.append(project) }
-        parts.append("#\(sessionId.prefix(6))")  // 多会话同项目时靠它区分
+        parts.append("#\(sessionId.prefix(6))")  // Tells sessions apart when several share a project
         if queuedCount > 0 { parts.append(L10n.format("%@ more notifications", zhHans: "还有 %@ 条通知", String(queuedCount))) }
         return parts.joined(separator: " · ")
     }
 }
 
-/// 任务标识：标题 → 项目名 → 短会话号，永远能认出是哪个会话
+/// Task identity: title → project name → short session id, so the session is always recognizable
 func taskDisplayName(_ task: AgentTask) -> String {
     task.title ?? task.projectName ?? L10n.format("Session %@", zhHans: "会话 %@", String(task.sessionId.prefix(8)))
 }
 
-/// 点击胶囊展开的进行中任务列表（含空闲会话分组）
+/// In-progress task list shown when the capsule is clicked (including the idle-session group)
 struct TaskListCardView: View {
     let tasks: [AgentTask]
     var idleTasks: [AgentTask] = []
     var showStartTime = false
     var scale: CGFloat = 1
-    /// 当前展开子 agent 框的任务 id（nil = 全收起）
+    /// Task id whose subagent box is expanded (nil = all collapsed)
     var expandedTaskId: String? = nil
     var onToggleTimeMode: () -> Void = {}
     var onToggleSubagents: (String) -> Void = { _ in }
@@ -849,7 +882,7 @@ struct TaskListCardView: View {
                     .font(.system(size: 11 * scale, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
                 Spacer()
-                // 切换右侧时间显示：已持续时长 ↔ 开始时间
+                // Toggle the right-hand time display: elapsed duration ↔ start time
                 Button(action: onToggleTimeMode) {
                     HStack(spacing: 3 * scale) {
                         Image(systemName: showStartTime ? "calendar.badge.clock" : "stopwatch")
@@ -878,23 +911,27 @@ struct TaskListCardView: View {
                             .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                         Spacer(minLength: 8 * scale)
-                        // 跳到会话所在终端（只在知道终端且它还在运行时出现）
+                        // Jump to the session's terminal (only shown when the terminal is known and
+                        // still running)
                         if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
                             terminalJumpButton(terminal)
                         }
-                        // 子 agent 数量徽标（可点开/收起；无子 agent 不显示）
+                        // Subagent count badge (click to expand/collapse; hidden when there are no
+                        // subagents)
                         if !task.subagents.isEmpty {
                             subagentBadge(task)
                         }
                         if task.isCompacting {
-                            // 压缩期间没有别的事件，不标出来就像卡死了
+                            // No other events arrive during compaction; without a marker it looks
+                            // frozen
                             Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
                                 .font(.system(size: 9.5 * scale))
                                 .foregroundStyle(Theme.gold.opacity(0.85))
                                 .lineLimit(1)
                                 .fixedSize()
                         } else if let activity = task.currentActivity {
-                            // 有具体对象就一起显示：「Edit main.swift」比光「Edit」有用得多
+                            // Show the target when there is one: "Edit main.swift" is far more
+                            // useful than just "Edit"
                             Text(compactToolLabel(
                                 tool: activity, detail: task.currentToolDetail))
                                 .font(.system(size: 9.5 * scale).monospaced())
@@ -908,8 +945,9 @@ struct TaskListCardView: View {
                                 .foregroundStyle(contextColor(context))
                                 .fixedSize()
                         }
-                        // 尾部必须 fixedSize：否则中间的工具标签会把它挤到换行
-                        // （Plans 行踩过同一个坑 —— 该固定的是尾部，让中间去让位）
+                        // The trailing part must be fixedSize, or the middle tool label pushes it
+                        // onto a new line (the Plans row hit the same pitfall -- pin the trailing
+                        // part and let the middle yield)
                         if showStartTime {
                             Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
                                 .font(.system(size: 11 * scale).monospacedDigit())
@@ -984,8 +1022,9 @@ struct TaskListCardView: View {
         }
     }
 
-    /// 行尾跳转徽标：把会话所在终端应用带到前台（内层按钮消费点击，不触发整岛展开/收起）。
-    /// 只激活应用、不选标签页 —— 见 TerminalActivator 的取舍说明。
+    /// Trailing jump badge: brings the session's terminal app to the front (inner button consumes
+    /// the click, so the island doesn't expand/collapse). Only activates the app, does not select
+    /// the tab -- see TerminalActivator for the trade-off.
     private func terminalJumpButton(_ terminal: TerminalBinding) -> some View {
         Button(action: { TerminalActivator.activate(terminal) }) {
             Image(systemName: "arrow.up.forward.app")
@@ -999,7 +1038,8 @@ struct TaskListCardView: View {
         .help(L10n.format("Switch to %@", zhHans: "切到 %@", String(terminal.displayName)))
     }
 
-    /// 行尾子 agent 徽标：chevron + 数量，点击展开/收起（内层按钮消费点击）
+    /// Trailing subagent badge: chevron + count, click to expand/collapse (inner button consumes
+    /// the click)
     private func subagentBadge(_ task: AgentTask) -> some View {
         Button(action: { onToggleSubagents(task.id) }) {
             HStack(spacing: 2 * scale) {
@@ -1018,7 +1058,7 @@ struct TaskListCardView: View {
         .buttonStyle(.plain)
     }
 
-    /// 展开的子 agent 嵌套框：每行 类型 + 描述 + 状态点 + 当前工具
+    /// Expanded nested subagent box: each row is type + description + status dot + current tool
     private func subagentBox(_ task: AgentTask) -> some View {
         VStack(alignment: .leading, spacing: 4 * scale) {
             ForEach(task.subagents.prefix(6)) { sub in
@@ -1090,7 +1130,7 @@ private let startTimeFullFormatter: DateFormatter = {
     return formatter
 }()
 
-/// 任务开始的日期时间：今天只显时刻，跨天带日期
+/// Task start date-time: time only for today, with the date across days
 func formatStartTime(_ date: Date) -> String {
     Calendar.current.isDateInToday(date)
         ? startTimeTodayFormatter.string(from: date)

@@ -5,13 +5,15 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// ⌘K 全局搜索：内存元数据匹配（即时）+ FTS 正文命中（knowledge_fts / transcript_fts），
-/// 250ms 防抖、≥2 字符起搜（沿用会话全文搜索惯例）。FTS 打不开时静默降级为纯元数据。
-/// 线程模型与其它 service 一致：主线程读发布数据、私有队列跑 FTS、回主线程发布（不用 @MainActor）。
+/// ⌘K global search: in-memory metadata matching (instant) + FTS body hits (knowledge_fts /
+/// transcript_fts), 250ms debounce, searching from ≥2 characters (following the session full-text
+/// search convention). Silently degrades to metadata-only when FTS can't open. Threading matches
+/// the other services: read published data on main, run FTS on a private queue, publish back on
+/// main (no @MainActor).
 ///
-/// `Kind`/`Hit` 与 `merge`/`snippet` 两个纯函数实际定义在 `EurekaKit.CommandPalette`
-/// （见该文件顶部注释）：eureka-tests 链不到这个 app 壳目标的目标码，纯逻辑得放低一层
-/// 才能被测——这里用 typealias 转发，调用方写法不变。
+/// `Kind`/`Hit` and the two pure functions `merge`/`snippet` are actually defined in `EurekaKit.CommandPalette`
+/// (see that file's header comment): eureka-tests can't link this app-shell target's object code, so pure logic must live one layer down
+/// to be testable — typealiases forward them here so call sites stay unchanged.
 final class CommandPaletteService: ObservableObject {
     typealias Kind = CommandPalette.Kind
     typealias Hit = CommandPalette.Hit
@@ -63,14 +65,16 @@ final class CommandPaletteService: ObservableObject {
     }
 
     private func perform(_ query: String) {
-        // 1) 主线程取元数据命中（services 的发布数据只能主线程读）
+        // 1) Collect metadata hits on main (services' published data can only be read on main)
         let lowered = query.lowercased()
         var metadata: [Hit] = []
-        // sessionsById 是字典迭代序（无序）；merge 按到达顺序给每组截 perKindCap 条，不先排序的话
-        // 随机哪几个会话能进前 6 名额，可能把 FTS 那边带 messageIdx 的正文命中活活饿死。按
-        // lastActiveAt 降序排，既保证截断留下最近会话，也让同一份数据每次结果稳定、可复现。
-        // id 匹配收紧为 hasPrefix（保留"贴 id 前缀"场景，消除两字符子串命中一堆 UUID 的噪音）；
-        // displayName 是人读的标题，contains 更符合直觉，维持不变。
+        // sessionsById iterates in dictionary order (unordered); merge cuts perKindCap per group in
+        // arrival order, so without sorting first which sessions land in the top 6 slots is random,
+        // which can starve FTS body hits carrying messageIdx. Sorting by lastActiveAt descending
+        // keeps the most recent sessions after truncation and makes results stable and reproducible
+        // for the same data. id matching is tightened to hasPrefix (keeps the "paste an id prefix"
+        // case, removes the noise of two-character substrings matching piles of UUIDs); displayName
+        // is a human-readable title, where contains is more intuitive, so it stays unchanged.
         let sortedSessions = sessionBrowser.sessionsById.values.sorted { $0.lastActiveAt > $1.lastActiveAt }
         for session in sortedSessions
         where session.displayName.lowercased().contains(lowered)
@@ -104,19 +108,23 @@ final class CommandPaletteService: ObservableObject {
                 kind: .plan, key: plan.path, title: plan.title,
                 subtitle: plan.project, snippet: nil, sessionId: nil, messageIdx: nil))
         }
-        // prompt 元数据只匹配标题（与 skills 按名字、memory 按标题同一口径）——
-        // 全文 contains 在主线程对上万条提问逐条小写化会卡输入；
-        // 正文命中交给下方 FTS 通道（后台队列，kind = "prompt" 已映射）
+        // Prompt metadata matches titles only (same rule as skills by name and memory by title) — a
+        // full-text contains that lowercases tens of thousands of prompts one by one on main would
+        // stall typing; body hits go to the FTS channel below (background queue, kind = "prompt"
+        // already mapped)
         for prompt in prompts.knowledgeSnapshot()
         where prompt.title.lowercased().contains(lowered) {
             metadata.append(Hit(
                 kind: .prompt, key: prompt.id, title: prompt.title,
                 subtitle: prompt.source.displayName, snippet: nil, sessionId: nil, messageIdx: nil))
         }
-        // 2) FTS 下队列（正文命中），回主线程合并。transcript FTS 受设置页「跨会话全文搜索索引」
-        // 开关约束（会话侧索引惯例）；knowledge FTS 是知识面扫描的伴生索引，不受该开关管。
-        // AppSettings 整体 @MainActor；perform 靠调用方保证跑在主线程（同 WellnessMonitor 的
-        // MainActor.assumeIsolated 用法），下队列前先取好，避免把 MainActor 值带进私有队列闭包。
+        // 2) FTS goes to the queue (body hits) and merges back on main. transcript FTS is gated by
+        //    the Settings "cross-session full-text search index"
+        // toggle (session-side indexing convention); knowledge FTS is the companion index of the
+        // knowledge-surface scan and isn't governed by that toggle. AppSettings is @MainActor as a
+        // whole; perform relies on the caller to run on main (same as WellnessMonitor's
+        // MainActor.assumeIsolated usage), so read the values before hopping to the queue to avoid
+        // carrying MainActor values into the private-queue closure.
         let transcriptSearchEnabled = MainActor.assumeIsolated { settings.fullTextSearchEnabled }
         queue.async { [weak self] in
             guard let self else { return }
@@ -152,9 +160,9 @@ final class CommandPaletteService: ObservableObject {
             }
             DispatchQueue.main.async {
                 guard self.query.trimmingCharacters(in: .whitespacesAndNewlines) == query
-                else { return }  // 查询已变，丢弃过期结果
+                else { return }  // query has changed; drop stale results
                 var merged = CommandPalette.merge(metadata + content, perKindCap: 6)
-                // 会话命中补真实名字
+                // fill in real names for session hits
                 merged = merged.map { hit in
                     var hit = hit
                     if hit.kind == .session, let id = hit.sessionId,

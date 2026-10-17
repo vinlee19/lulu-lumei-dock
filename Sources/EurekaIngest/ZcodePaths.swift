@@ -1,18 +1,18 @@
 import Foundation
 
-/// ZCode CLI 的本地数据路径（`~/.zcode`，CLI 随 /Applications/ZCode.app 分发）。
-/// env `EUREKA_ZCODE_*` 覆盖，便于单测。
+/// ZCode CLI local data paths (`~/.zcode`; the CLI ships with /Applications/ZCode.app).
+/// Overridable via env `EUREKA_ZCODE_*` for unit tests.
 ///
-/// 磁盘约定（实勘 2026-08，~/.zcode/cli）：
-/// - `db/db.sqlite`：会话库（session/message/part/todo 表，schema 与 opencode 同源）
-/// - `rollout/model-io-sess_<id>.jsonl`：模型 IO 流水（append-only，含 per-request usage）
-/// - `agents/<sess>/agent_<id>/`：子代理目录（metadata.json + transcript.jsonl）
-/// - 技能根是共享的 `~/.agents/skills`（非 ~/.zcode 内）
-/// ⚠️ `~/.zcode/v2`（含 credentials.json）绝不能进同步/扫描白名单。
+/// On-disk layout (observed 2026-08, ~/.zcode/cli):
+/// - `db/db.sqlite`: session DB (session/message/part/todo tables, schema shared with opencode)
+/// - `rollout/model-io-sess_<id>.jsonl`: model IO log (append-only, with per-request usage)
+/// - `agents/<sess>/agent_<id>/`: subagent dirs (metadata.json + transcript.jsonl)
+/// - the skills root is the shared `~/.agents/skills` (not inside ~/.zcode)
+/// ⚠️ `~/.zcode/v2` (contains credentials.json) must never enter the sync/scan whitelist.
 public enum ZcodePaths {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
-    /// 主目录 `~/.zcode`（env `EUREKA_ZCODE_HOME`）
+    /// Home `~/.zcode` (env `EUREKA_ZCODE_HOME`)
     public static func root(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -22,7 +22,7 @@ public enum ZcodePaths {
         return home().appendingPathComponent(".zcode", isDirectory: true)
     }
 
-    /// CLI 数据根 `~/.zcode/cli`（env `EUREKA_ZCODE_CLI_ROOT`）
+    /// CLI data root `~/.zcode/cli` (env `EUREKA_ZCODE_CLI_ROOT`)
     public static func cliRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -32,7 +32,7 @@ public enum ZcodePaths {
         return root(environment: environment).appendingPathComponent("cli", isDirectory: true)
     }
 
-    /// 会话库 `~/.zcode/cli/db/db.sqlite`（env `EUREKA_ZCODE_DB`）
+    /// Session DB `~/.zcode/cli/db/db.sqlite` (env `EUREKA_ZCODE_DB`)
     public static func db(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -43,7 +43,7 @@ public enum ZcodePaths {
             .appendingPathComponent("db/db.sqlite")
     }
 
-    /// 模型 IO 流水根 `~/.zcode/cli/rollout`（env `EUREKA_ZCODE_ROLLOUT`）
+    /// Model IO log root `~/.zcode/cli/rollout` (env `EUREKA_ZCODE_ROLLOUT`)
     public static func rolloutRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -54,7 +54,7 @@ public enum ZcodePaths {
             .appendingPathComponent("rollout", isDirectory: true)
     }
 
-    /// 子代理根 `~/.zcode/cli/agents`（env `EUREKA_ZCODE_AGENTS`）
+    /// Subagent root `~/.zcode/cli/agents` (env `EUREKA_ZCODE_AGENTS`)
     public static func agentsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -65,8 +65,9 @@ public enum ZcodePaths {
             .appendingPathComponent("agents", isDirectory: true)
     }
 
-    /// 系统级技能根 `~/.agents/skills`（env `EUREKA_ZCODE_SKILLS`）。
-    /// ZCode 的技能装在共享的 ~/.agents 下（与 ZCode CLI 桌面版共用），不在 ~/.zcode 内。
+    /// System-level skills root `~/.agents/skills` (env `EUREKA_ZCODE_SKILLS`).
+    /// ZCode installs skills under the shared ~/.agents (shared with the ZCode CLI desktop
+    /// app), not inside ~/.zcode.
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -76,22 +77,25 @@ public enum ZcodePaths {
         return home().appendingPathComponent(".agents/skills", isDirectory: true)
     }
 
-    /// 项目级计划目录 `<repo>/.zcode/plans`：plan mode 写 `plan-sess_<会话id>.md`，
-    /// 真 markdown → 同 Hermes 一样直接索引、不物化（无全局 plans 目录）。
+    /// Project-level plans dir `<repo>/.zcode/plans`: plan mode writes
+    /// `plan-sess_<sessionId>.md`, real markdown → indexed in place like Hermes, not
+    /// materialized (there is no global plans dir).
     public static func projectPlansDir(repoRoot: URL) -> URL {
         repoRoot.appendingPathComponent(".zcode/plans", isDirectory: true)
     }
 
-    /// 项目级技能根：ZCode 官方约定 `<repo>/.zcode/skills` 与共享的 `<repo>/.agents/skills` 都认
+    /// Project-level skills roots: both ZCode's official `<repo>/.zcode/skills` and the shared
+    /// `<repo>/.agents/skills` count
     public static func projectSkillsRoots(repoRoot: URL) -> [URL] {
         [repoRoot.appendingPathComponent(".zcode/skills", isDirectory: true),
          repoRoot.appendingPathComponent(".agents/skills", isDirectory: true)]
     }
 
-    /// 模型目录 `~/.zcode/v2/config.json`（env `EUREKA_ZCODE_MODEL_CONFIG`）。
-    /// 每个 provider 的 models.<型号>.limit.context 是 ctx% 分母的权威来源
-    /// （GLM-5.3/5.2 = 1M、GLM-5-Turbo = 200K，随版本更新由 ZCode 自己维护）。
-    /// ⚠️ v2 目录整体含凭证、绝不进同步白名单——这里只**读**这一个具名文件。
+    /// Model catalog `~/.zcode/v2/config.json` (env `EUREKA_ZCODE_MODEL_CONFIG`).
+    /// Each provider's models.<model>.limit.context is the authoritative ctx% denominator
+    /// (GLM-5.3/5.2 = 1M, GLM-5-Turbo = 200K; ZCode maintains these itself across versions).
+    /// ⚠️ The v2 dir as a whole holds credentials and never enters the sync whitelist - only
+    /// this one named file is **read** here.
     public static func modelConfig(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

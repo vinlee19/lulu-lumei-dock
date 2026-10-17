@@ -5,27 +5,30 @@ import EurekaKit
 import EurekaUsage
 import Foundation
 
-/// Agent 配置管理：Claude agent 定义文件（`~/.claude/agents/*.md` + 项目级）
-/// 与 Codex profiles（`~/.codex/config.toml` 的 `[profiles.*]`）。双源特点不同：
-/// Claude 是逐文件的 markdown（frontmatter + 正文），Codex 是 TOML 段（键值预设）。
+/// Agent config management: Claude agent definition files (`~/.claude/agents/*.md` + project level)
+/// and Codex profiles (`[profiles.*]` in `~/.codex/config.toml`). The two sources differ:
+/// Claude is per-file markdown (frontmatter + body), Codex is TOML tables (key-value presets).
 final class AgentConfigService: ObservableObject {
     @Published private(set) var claudeAgents: [AgentDefinition] = []
     @Published private(set) var opencodeAgents: [AgentDefinition] = []
     @Published private(set) var grokAgents: [AgentDefinition] = []
     @Published private(set) var cursorAgents: [AgentDefinition] = []
-    /// 已安装插件提供的 agent（`~/.claude/plugins`），按 pluginName 分组展示
+    /// Agents provided by installed plugins (`~/.claude/plugins`), shown grouped by pluginName
     @Published private(set) var pluginAgents: [AgentDefinition] = []
-    /// Claude Code 内置 agent（静态清单，只读）
+    /// Claude Code built-in agents (static list, read-only)
     @Published private(set) var builtinAgents: [AgentDefinition] = []
-    /// Kimi Code 内置 subagent profile（编译内嵌，只读；磁盘无用户自定义约定）
+    /// Kimi Code built-in subagent profiles (compiled in, read-only; no on-disk user customization
+    /// convention)
     @Published private(set) var kimiBuiltinAgents: [AgentDefinition] = []
-    /// ZCode 子代理 profile（运行记录 profileSnapshot 聚合，只读；磁盘无定义文件）
+    /// ZCode subagent profiles (aggregated from run records' profileSnapshot, read-only; no
+    /// definition files on disk)
     @Published private(set) var zcodeAgents: [AgentDefinition] = []
     @Published private(set) var codexProfiles: [CodexProfile] = []
     @Published private(set) var scanning = false
-    /// 扫描中的阶段文案；扫完置 nil（列表已有数据时搜索框的小 spinner 太不显眼）
+    /// Phase text while scanning; set to nil when done (the search field's small spinner is too
+    /// inconspicuous once the list has data)
     @Published private(set) var scanPhase: String?
-    /// 上次扫完的时间。nil = 从未扫过（refresh 的判据）
+    /// When the last scan finished. nil = never scanned (the criterion `refresh` uses)
     @Published private(set) var lastScanAt: Date?
     @Published private(set) var lastError: String?
     @Published var searchText = "" {
@@ -46,10 +49,11 @@ final class AgentConfigService: ObservableObject {
 
     private var codexConfigURL: URL { EurekaCLI.codexConfigURL }
 
-    // MARK: - 扫描
+    // MARK: - Scanning
 
-    /// force = false：只在「从未扫过」时扫（启动预热 + onAppear 兜底共用，幂等）。
-    /// force = true：无条件全量重扫，仅刷新按钮使用。
+    /// force = false: scan only if never scanned (shared by launch warm-up and the onAppear
+    /// fallback; idempotent). force = true: unconditional full rescan, used only by the refresh
+    /// button.
     func refresh(force: Bool = false) {
         guard force || lastScanAt == nil else { return }
         guard !scanning else { return }
@@ -58,7 +62,8 @@ final class AgentConfigService: ObservableObject {
         scanPhase = L10n.text("Scanning subagents…", zhHans: "正在扫描子代理…")
         queue.async { [weak self] in
             guard let self else { return }
-            // 项目级 agent 根：各项目仓库根下的 .claude/agents、.opencode/agents 与 .grok/agents
+            // Project-level agent roots: .claude/agents, .opencode/agents and .grok/agents under
+            // each project repo root
             var claudeProjectRoots: [ProjectScopedRoot] = []
             var opencodeProjectRoots: [ProjectScopedRoot] = []
             var grokProjectRoots: [ProjectScopedRoot] = []
@@ -149,13 +154,13 @@ final class AgentConfigService: ObservableObject {
 
     var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    // MARK: - Claude agent 读/写
+    // MARK: - Claude agent read/write
 
     func readContent(path: String) -> String? {
         try? String(contentsOfFile: path, encoding: .utf8)
     }
 
-    /// 原子写入：写前留 .bak.eureka.<ts> 备份
+    /// Atomic write: leaves a .bak.eureka.<ts> backup before writing
     func save(path: String, content: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             var ok = false
@@ -175,7 +180,7 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    /// 新建全局 Claude agent（`~/.claude/agents/<slug>.md`），带 frontmatter 模板
+    /// Create a global Claude agent (`~/.claude/agents/<slug>.md`) with a frontmatter template
     func createClaudeAgent(name: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             let slug = Self.slugify(name)
@@ -204,7 +209,8 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    /// 新建全局 opencode agent（`~/.config/opencode/agents/<slug>.md`），带 opencode frontmatter 模板
+    /// Create a global opencode agent (`~/.config/opencode/agents/<slug>.md`) with an opencode
+    /// frontmatter template
     func createOpencodeAgent(name: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             let slug = Self.slugify(name)
@@ -233,7 +239,7 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    /// 新建全局 grok agent（`~/.grok/agents/<slug>.md`），带 grok frontmatter 模板
+    /// Create a global grok agent (`~/.grok/agents/<slug>.md`) with a grok frontmatter template
     func createGrokAgent(name: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             let slug = Self.slugify(name)
@@ -262,8 +268,8 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    /// 新建 Cursor 子代理 `~/.cursor/agents/<slug>.md`
-    /// （约定见 Cursor 自带的 create-subagent 技能：YAML frontmatter + 正文即系统提示）
+    /// Create a Cursor subagent `~/.cursor/agents/<slug>.md` (convention per Cursor's bundled
+    /// create-subagent skill: YAML frontmatter + body as the system prompt)
     func createCursorAgent(name: String, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             let slug = Self.slugify(name)
@@ -284,7 +290,7 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    /// 删除 agent 文件 → 废纸篓
+    /// Delete the agent file → Trash
     func deleteAgent(_ agent: AgentDefinition, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             var ok = false
@@ -299,7 +305,8 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    /// 启用/停用 agent：在启用区 ↔ <root>.eureka-disabled 间移动 .md 文件（可逆、非破坏）
+    /// Enable/disable an agent: moves the .md file between the enabled area ↔
+    /// <root>.eureka-disabled (reversible, non-destructive)
     func setAgentEnabled(_ agent: AgentDefinition, _ enabled: Bool, completion: ((Bool) -> Void)? = nil) {
         guard agent.enabled != enabled else { completion?(true); return }
         queue.async { [weak self] in
@@ -323,7 +330,7 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    // MARK: - Codex profile 读/写（config.toml 段编辑，经 ConfigFile 备份+原子写）
+    // MARK: - Codex profile read/write (config.toml table edits, backed up + atomically written via ConfigFile)
 
     func saveProfile(_ profile: CodexProfile, completion: ((Bool) -> Void)? = nil) {
         queue.async { [weak self] in
@@ -357,7 +364,7 @@ final class AgentConfigService: ObservableObject {
         }
     }
 
-    // MARK: - 外部打开（主线程）
+    // MARK: - External open (main thread)
 
     func reveal(path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
@@ -367,7 +374,7 @@ final class AgentConfigService: ObservableObject {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
-    // MARK: - 工具
+    // MARK: - Utilities
 
     private func report(_ error: Error) {
         let message = error.localizedDescription

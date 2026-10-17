@@ -1,9 +1,10 @@
 import EurekaKit
 import Foundation
 
-/// Gemini CLI 会话行解析（chats/session-*.jsonl，v0.51 实勘格式）。
-/// 首行 header；消息行 {id, timestamp, type: user|gemini|info|error, content, tokens?, model?}；
-/// `{"$set":{...}}` 补丁行（lastUpdated/summary 状态同步）一律跳过。
+/// Gemini CLI session line parsing (chats/session-*.jsonl, format surveyed on v0.51).
+/// First line is the header; message lines are {id, timestamp, type: user|gemini|info|error,
+/// content, tokens?, model?}; `{"$set":{...}}` patch lines (lastUpdated/summary state sync)
+/// are always skipped.
 enum GeminiChatDecoder {
     struct Header {
         var sessionId: String
@@ -33,7 +34,7 @@ enum GeminiChatDecoder {
         return Header(sessionId: sessionId, startTime: start)
     }
 
-    /// 消息行 → Message；header/$set/无 type 行返回 nil
+    /// Message line → Message; header/$set/lines without type return nil
     static func parseMessage(_ root: [String: Any]) -> Message? {
         guard root["$set"] == nil, let type = root["type"] as? String else { return nil }
         var tokens: Tokens?
@@ -53,7 +54,8 @@ enum GeminiChatDecoder {
             model: root["model"] as? String)
     }
 
-    /// content 兼容两种形态：纯字符串（gemini 行）或 [{text}] 数组（user/info 行）
+    /// content comes in two shapes: a plain string (gemini lines) or a [{text}] array (user/info
+    /// lines)
     static func text(from content: Any?) -> String {
         if let string = content as? String { return string }
         if let parts = content as? [[String: Any]] {
@@ -62,16 +64,18 @@ enum GeminiChatDecoder {
         return ""
     }
 
-    /// CLI 启动时注入的环境说明（不是用户真实输入）
+    /// Environment note the CLI injects at startup (not real user input)
     static func isSessionContext(_ text: String) -> Bool {
         text.hasPrefix("<session_context>")
     }
 }
 
-/// Gemini 会话索引：扫 `tmp/<slug>/chats/session-*.jsonl` → AgentSessionInfo。
-/// cwd 由 projects.json 的 slug 反查；名字取首条真实用户消息摘要（跳过 session_context 注入）。
+/// Gemini session index: scans `tmp/<slug>/chats/session-*.jsonl` → AgentSessionInfo.
+/// cwd is resolved from the slug via projects.json; the name is a summary of the first real
+/// user message (session_context injections are skipped).
 public enum GeminiSessionIndexer {
-    /// 提名字/头部只读文件头部（session_context 含目录树，可能数十 KB）
+    /// Name/head extraction reads only the file head (session_context includes a directory tree,
+    /// possibly tens of KB)
     private static let headBytes = 512 * 1024
 
     public static func index(
@@ -94,7 +98,8 @@ public enum GeminiSessionIndexer {
             for file in files
             where file.lastPathComponent.hasPrefix("session-")
                 && file.pathExtension.lowercased() == "jsonl" {
-                // mtime 窗口先过滤再读内容：超窗文件连 512KB 头读都省掉
+                // Filter by the mtime window before reading content: out-of-window files skip even
+                // the 512KB head read
                 guard let mtime = (try? file.resourceValues(
                     forKeys: [.contentModificationDateKey]))?.contentModificationDate,
                     now.timeIntervalSince(mtime) < window
@@ -134,7 +139,7 @@ public enum GeminiSessionIndexer {
             }
         }
         guard let header else { return nil }
-        // 只有注入上下文、没有任何真实用户输入的空会话不进列表
+        // Empty sessions with only injected context and no real user input stay out of the list
         guard name != nil else { return nil }
 
         return AgentSessionInfo(

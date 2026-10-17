@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 刷新随包价格目录快照 Sources/EurekaApp/Resources/pricing-catalog.json。
-# 发版前运行（make pricing-catalog）：保证用户首次启动且离线时也有发版当天的价格。
-# 解析 / 校验与 app 运行时同一套代码（eureka --build-pricing-catalog）。
+# Refreshes the bundled pricing catalog snapshot Sources/EurekaApp/Resources/pricing-catalog.json.
+# Run before each release (make pricing-catalog) so a first launch while offline still has prices as of release day.
+# Parsing / validation use the same code as the app at runtime (eureka --build-pricing-catalog).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

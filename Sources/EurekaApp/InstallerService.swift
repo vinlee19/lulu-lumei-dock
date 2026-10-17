@@ -2,19 +2,24 @@ import EurekaInstall
 import EurekaKit
 import Foundation
 
-/// 设置页的 hooks/notify 装卸（与 CLI 共用 EurekaInstall 纯逻辑 + ConfigFile）。
+/// Settings-page install/uninstall of hooks/notify (shares EurekaInstall's pure logic + ConfigFile
+/// with the CLI).
 ///
-/// 安全约定（用户明确要求「不要乱改用户配置 / 检测到异常要告知」）：
-/// - **永不主动安装**用户没点过的集成，且一次只碰一个集成的配置文件（见文件末尾说明）。
-/// - 只增删 command 含 `lululumei-relay`（或旧名 `eureka-relay`）的自有条目，他人 hook 逐字不动。
-/// - Codex 的顶层 notify 只能有一个：被他人占用时串联（relay 先转发给原程序再记录），
-///   卸载时恢复原值；解析不了的值仍然拒绝改写。
-/// - 写前一律经 `ConfigFile.backupThenWrite` 留 `*.bak.eureka.<时间戳>`。
-/// - 诊断出 `blocksAutomaticWrite` 的异常（路径被手改 / 配置解析不了 / 他人占用）时，
-///   自动更新整体跳过并把原因显示出来 —— 看不懂的配置绝不猜着改。
+/// Safety contract (the user explicitly asked: "don't mess with user configs / report anomalies when detected"):
+/// - **Never proactively install** an integration the user hasn't clicked, and touch only one
+///   integration's config file at a time (see the note at the end of the file).
+/// - Only add/remove our own entries whose command contains `lululumei-relay` (or the legacy
+///   `eureka-relay`); others' hooks stay byte-for-byte.
+/// - Codex allows only one top-level notify: when someone else holds it, chain (the relay forwards
+///   to the original program first, then records), and restore the original value on uninstall; a
+///   value that can't be parsed is still never rewritten.
+/// - Every write goes through `ConfigFile.backupThenWrite`, leaving `*.bak.eureka.<timestamp>`.
+/// - When diagnostics find a `blocksAutomaticWrite` anomaly (path hand-edited / config unparseable
+///   / held by someone else), auto-update is skipped entirely and the reason is shown; a config we
+///   don't understand is never edited on a guess.
 @MainActor
 final class InstallerService: ObservableObject {
-    /// 可独立开关的集成项
+    /// Integrations that can be toggled independently
     enum Integration: String, CaseIterable, Identifiable {
         case claudeHooks
         case codexNotify
@@ -32,13 +37,14 @@ final class InstallerService: ObservableObject {
             }
         }
 
-        /// 会被改写的文件（安装前要明确告诉用户）
+        /// Files that will be rewritten (the user must be told explicitly before installing)
         var configURL: URL {
             switch self {
             case .claudeHooks: return EurekaCLI.claudeSettingsURL
             case .codexNotify: return EurekaCLI.codexConfigURL
             case .codexHooks: return EurekaCLI.codexHooksURL
-            // 只有 CN 版有 hooks（国际版的 ai-agent 里没有 hooks 模块）
+            // Only the CN edition has hooks (the international edition's ai-agent has no hooks
+            // module)
             case .traeHooks: return EurekaCLI.traeHooksURL
             }
         }
@@ -52,7 +58,7 @@ final class InstallerService: ObservableObject {
             }
         }
 
-        /// 装上之后多了什么能力
+        /// What capabilities installing it adds
         var benefit: String {
             switch self {
             case .claudeHooks:
@@ -60,31 +66,33 @@ final class InstallerService: ObservableObject {
             case .codexNotify:
                 return L10n.text("Turn completion notifications and the session terminal", zhHans: "回合完成通知、会话所在终端")
             case .codexHooks:
-                // 装它的主要理由就是等待授权：Codex 的 rollout 不落授权事件，
-                // 不装 hooks 这个状态对 Codex 永远不可见
+                // The main reason to install it is waiting-for-permission: Codex's rollout doesn't
+                // record permission events, so without hooks this state is never visible for Codex
                 return L10n.text("Permission reminders, live task cards, and the exact session terminal", zhHans: "等待授权提醒、实时任务卡、精确的会话所在终端")
             case .traeHooks:
-                // Trae 的会话库是 SQLCipher 加密的、也没有明文转录 → **不装 hooks，
-                // 灵动岛就完全看不见 Trae**（这是唯一破了「不装 hooks 也能看见」惯例的源）。
-                // 刻意不写"等待授权提醒"：Trae 没有权限请求类 hook 事件。
+                // Trae's session DB is SQLCipher-encrypted and has no plaintext transcript ->
+                // **without hooks the Dynamic Island can't see Trae at all** (the only source that
+                // breaks the "visible even without hooks" convention). Deliberately no
+                // "waiting-for-permission reminder": Trae has no permission-request hook event.
                 //
-                // ⚠️ Trae 的 hooks 是**按账号灰度**的服务端开关（见 `TraeHooksInstaller` 的说明），
-                // 没放开时装了也不会触发 —— 文案必须把这件事说在前面，否则用户会以为是我们坏了。
+                // ⚠️ Trae's hooks are a **per-account, gradually rolled out** server-side switch (see `TraeHooksInstaller`'s notes);
+                // until it's enabled, installing won't fire anything. The copy must say this up front, or users will think we're broken.
                 return L10n.text("Live task cards (Trae’s only live channel), tool-call auditing, and the session terminal; requires hooks to be enabled for your Trae account (a Hooks page in Settings means they are enabled)", zhHans: "实时任务卡（Trae 唯一的实时通道）、工具调用审计、会话所在终端；需 Trae 已对你的账号开放 hooks（设置里能看到 Hooks 页即已开放）")
             }
         }
     }
 
     @Published private(set) var diagnoses: [Integration: HookDiagnosis] = [:]
-    /// 同一份配置里他人的 hook（只告知，不据此改动）
+    /// Other parties' hooks in the same config (informational only; never acted on)
     @Published private(set) var foreignHooks = ForeignHookReport()
     /// Short name of the program our Codex notify forwards to, when it is chained.
     @Published private(set) var codexNotifyChainedTo: String?
     @Published private(set) var message: String?
-    /// 最近一次自动更新是否因异常被跳过（跳过原因要让用户看见，不能静悄悄）
+    /// Whether the last auto-update was skipped due to an anomaly (the reason must be visible to
+    /// the user, not silent)
     @Published private(set) var autoUpdateSkipped: [Integration] = []
 
-    /// 兼容旧调用点（AuditView 判断 Claude hooks 是否可用）
+    /// Compatibility for an old call site (AuditView checks whether Claude hooks are available)
     var claudeStatus: InstallStatus {
         switch diagnoses[.claudeHooks] {
         case .installed: return .installed
@@ -99,10 +107,10 @@ final class InstallerService: ObservableObject {
     var codexHooksURL: URL { EurekaCLI.codexHooksURL }
     var traeHooksURL: URL { EurekaCLI.traeHooksURL }
 
-    /// relay 稳定路径。hooks/notify 配置永远只该引用这里。
+    /// The relay's stable path. hooks/notify configs should only ever reference this.
     var stableRelayPath: String { RelaySyncer.stableRelayURL.path }
 
-    /// relay 是否真的可执行 —— 诊断 `.relayMissing` 的依据
+    /// Whether the relay is actually executable; the basis for diagnosing `.relayMissing`
     private func relayIsExecutable(_ path: String) -> Bool {
         FileManager.default.isExecutableFile(atPath: path)
     }
@@ -127,7 +135,8 @@ final class InstallerService: ObservableObject {
         diagnoses[.traeHooks] = TraeHooksInstaller.diagnose(
             json: traeHooksJSON, expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
-        // 三份配置里他人的条目合并展示（本机 ~/.codex/hooks.json 正被 Otty 占用）
+        // Merge others' entries from all three configs for display (locally ~/.codex/hooks.json is
+        // held by Otty)
         foreignHooks = ClaudeHooksInstaller.foreignHooks(in: claudeJSON)
             .merging(CodexHooksInstaller.foreignHooks(in: codexHooksJSON))
             .merging(TraeHooksInstaller.foreignHooks(in: traeHooksJSON))
@@ -137,18 +146,20 @@ final class InstallerService: ObservableObject {
         diagnoses[integration] ?? .notInstalled
     }
 
-    // MARK: - 逐项装卸（设置页唯一入口）
+    // MARK: - Per-item install/uninstall (the only entry point is the Settings page)
 
-    /// 安装/更新单项。调用方须已向用户展示「会改哪个文件 + 会先备份」。
+    /// Installs/updates a single item. The caller must already have shown the user "which file will
+    /// change + it is backed up first".
     ///
-    /// `repairDriftedPath` 只由「改为稳定路径」那个按钮传 true：路径被手改过时默认**拒绝**改写，
-    /// 否则任何一个"安装"按钮都会静默覆盖用户自己编辑过的路径。
+    /// `repairDriftedPath` is passed true only by the "switch to stable path" button: when the path was hand-edited the default is to **refuse** the rewrite,
+    /// otherwise any "Install" button would silently overwrite a path the user edited themselves.
     func install(_ integration: Integration, repairDriftedPath: Bool = false) {
         guard let relay = RelaySyncer.sync() else {
             message = L10n.text("eureka-relay was not found (expected beside the app); no changes made", zhHans: "找不到 eureka-relay（应与应用同目录），未做任何改动")
             return
         }
-        // 解析不了 / 他人占用 / 路径被手改 → 拒绝写入，把原因告诉用户
+        // Unparseable / held by someone else / path hand-edited -> refuse to write and tell the
+        // user why
         let diagnosis = diagnosis(for: integration)
         if case .unparseable = diagnosis {
             message = L10n.format("%@: %@", zhHans: "%@：%@", String(integration.title), String(diagnosis.detail ?? L10n.text("Unable to parse configuration", zhHans: "配置无法解析")))
@@ -218,14 +229,17 @@ final class InstallerService: ObservableObject {
         try ConfigFile.backupThenWrite(path: url, newContent: updated)
     }
 
-    // MARK: - 自动更新（只碰已经装过的）
+    // MARK: - Auto-update (only touches what is already installed)
 
-    /// app 升级后把**已安装**的集成刷到当前版本。
+    /// After an app upgrade, refreshes **already installed** integrations to the current version.
     ///
-    /// 三条硬约束：
-    /// 1. 只处理 `isInstalledInSomeForm` 的项 —— 绝不因为"顺手"就装上用户没同意的；
-    /// 2. `blocksAutomaticWrite` 的异常整体跳过并记进 `autoUpdateSkipped`（UI 要显示出来）；
-    /// 3. 已经 `.installed` 的不重复写盘，免得每次启动都生成一份备份文件。
+    /// Three hard constraints:
+    /// 1. Only handle items that are `isInstalledInSomeForm`; never install something the user
+    ///    didn't agree to just "while we're at it";
+    /// 2. `blocksAutomaticWrite` anomalies are skipped entirely and recorded in `autoUpdateSkipped`
+    ///    (the UI must show them);
+    /// 3. Items already `.installed` aren't rewritten, so a backup file isn't generated on every
+    ///    launch.
     func autoUpdateInstalled(enabled: Bool) {
         guard enabled else { return }
         refresh()
@@ -254,6 +268,7 @@ final class InstallerService: ObservableObject {
 
 }
 
-// 刻意不提供 installAll()/uninstallAll()：一个按钮同时改写多个 agent 的配置文件，
-// 必然会给「只用其中一个」的用户凭空造出别的 agent 的配置（审计页那个横幅就这样
-// 给纯 Claude 用户建过 ~/.codex/config.toml）。要装哪项就调哪项。
+// Deliberately no installAll()/uninstallAll(): one button rewriting several agents' config files at
+// once inevitably conjures up other agents' configs for users who use only one of them (the audit
+// page's banner did exactly that, creating ~/.codex/config.toml for a Claude-only user). Call the
+// one you want to install.

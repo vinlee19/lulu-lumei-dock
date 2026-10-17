@@ -1,38 +1,41 @@
 import Foundation
 
-/// Trae 的**两套安装**：CN 版与国际版是各自独立的应用，数据目录完全不互通，
-/// 但在 Eureka 里合并成同一个来源 `.trae`（同一个品牌、两个渠道）。
+/// Trae's **two installs**: CN and international are independent apps whose data dirs never
+/// share anything, but Eureka merges them into one source `.trae` (one brand, two channels).
 ///
-/// | | dotfile 目录 | Application Support |
+/// | | dotfile dir | Application Support |
 /// |---|---|---|
-/// | CN（实勘 3.3.84） | `~/.trae-cn` | `~/Library/Application Support/Trae CN` |
-/// | 国际版（实勘 3.5.35） | `~/.trae` | `~/Library/Application Support/Trae` |
+/// | CN (observed 3.3.84) | `~/.trae-cn` | `~/Library/Application Support/Trae CN` |
+/// | International (observed 3.5.35) | `~/.trae` | `~/Library/Application Support/Trae` |
 ///
-/// 名字来自各自 `product.json` 的 `dataFolderName` / `nameShort`，不是猜的。
+/// The names come from each `product.json`'s `dataFolderName` / `nameShort`, not guesswork.
 ///
-/// **能力差异**（本机实勘，不要想当然两版对称）：
-/// - hooks：**只有 CN 有** —— 只有 CN 的 `libai_agent.dylib` 里有
-///   `src/domain/hooks/{config/parser,executor/*,instance/trigger}.rs`；
-/// - 记忆库：**只有 CN 有**（`~/.trae-cn/memory`）；
-/// - 技能 / 规则 / 计划：两版都有。
+/// **Capability differences** (observed on this machine; don't assume the two are symmetric):
+/// - hooks: **CN only** - only CN's `libai_agent.dylib` contains
+///   `src/domain/hooks/{config/parser,executor/*,instance/trigger}.rs`;
+/// - memory library: **CN only** (`~/.trae-cn/memory`);
+/// - skills / rules / plans: both.
 ///
-/// ⚠️ **会话正文、token、限额一律拿不到。** 会话全部在
-/// `<appSupport>/ModularData/ai-agent/database.db` 一个库里，而那个库是 SQLCipher
-/// 加密的（文件头 16 字节是随机 salt，`sqlite3` 直接报 "file is not a database"），
-/// 全机也没有任何明文转录。会话的标题/时间只能从明文记忆库反推（见
-/// `TraeSessionIndexer`），实时活动只能靠 hooks（见 `TraeHooksInstaller`）。
+/// ⚠️ **Session bodies, tokens and rate limits are never available.** Every session lives in
+/// a single database `<appSupport>/ModularData/ai-agent/database.db`, which is SQLCipher
+/// encrypted (the first 16 bytes are a random salt; `sqlite3` reports "file is not a
+/// database"), and there is no plaintext transcript anywhere on the machine. Session
+/// titles/times can only be inferred from the plaintext memory library (see
+/// `TraeSessionIndexer`); live activity comes only from hooks (see `TraeHooksInstaller`).
 ///
-/// ⚠️ **凭据红线。** `<dataFolder>/trae-jwt-token` 是 JWT，`<dataFolder>/mcp.json`
-/// 可能带 API key，`<appSupport>/{Cookies,ModularData/ai-agent/database.db}` 含鉴权与
-/// 会话内容。**任何遍历都只准走本文件明确给出的子根，绝不遍历 `dataFolder` 或
-/// `appSupport` 本身**（同 CLAUDE.md 里 Cursor `state.vscdb` 那条的性质）。
+/// ⚠️ **Credential red line.** `<dataFolder>/trae-jwt-token` is a JWT, `<dataFolder>/mcp.json`
+/// may carry API keys, and `<appSupport>/{Cookies,ModularData/ai-agent/database.db}` hold auth
+/// and session content. **Any walk may only enter the sub-roots this file spells out; never
+/// walk `dataFolder` or `appSupport` itself** (same nature as the Cursor `state.vscdb` rule
+/// in CLAUDE.md).
 public enum TraePaths {
-    /// 两个发行渠道。CN 在前：它是功能更全的那个（hooks + 记忆库都只有它有）。
+    /// The two release channels. CN comes first: it is the more capable one (hooks and the
+    /// memory library exist only there).
     public enum Channel: String, CaseIterable, Sendable {
         case cn
         case intl
 
-        /// home 下的 dotfile 目录名（= product.json 的 `dataFolderName`）
+        /// Dotfile dir name under home (= product.json's `dataFolderName`)
         var dotDirName: String {
             switch self {
             case .cn: return ".trae-cn"
@@ -40,7 +43,7 @@ public enum TraePaths {
             }
         }
 
-        /// Application Support 下的目录名（= product.json 的 `nameShort`）
+        /// Dir name under Application Support (= product.json's `nameShort`)
         var appSupportDirName: String {
             switch self {
             case .cn: return "Trae CN"
@@ -48,7 +51,7 @@ public enum TraePaths {
             }
         }
 
-        /// 命令行启动器（两个都在 `/usr/local/bin`，由客户端自己装）
+        /// Command-line launcher (both live in `/usr/local/bin`, installed by the client itself)
         public var cliCommand: String {
             switch self {
             case .cn: return "trae-cn"
@@ -71,9 +74,9 @@ public enum TraePaths {
         }
     }
 
-    // MARK: - 两个根
+    // MARK: - The two roots
 
-    /// dotfile 主目录（env `EUREKA_TRAE_HOME` / `EUREKA_TRAE_INTL_HOME` > `~/.trae-cn` / `~/.trae`）
+    /// Dotfile home (env `EUREKA_TRAE_HOME` / `EUREKA_TRAE_INTL_HOME` > `~/.trae-cn` / `~/.trae`)
     public static func configHome(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -85,7 +88,7 @@ public enum TraePaths {
             .appendingPathComponent(channel.dotDirName, isDirectory: true)
     }
 
-    /// Application Support 主目录（IDE 状态与加密会话库都在这下面）
+    /// Application Support home (IDE state and the encrypted session DB live under it)
     public static func appSupportHome(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -98,8 +101,9 @@ public enum TraePaths {
                 "Library/Application Support/\(channel.appSupportDirName)", isDirectory: true)
     }
 
-    /// 本机实际装了哪些渠道。判据是 dotfile 目录存在；env 覆盖过的渠道**无条件算装了**
-    /// （测试全靠临时目录，不能因为目录名不像就被过滤掉）。
+    /// Which channels are actually installed. The test is that the dotfile dir exists; a
+    /// channel overridden via env **always counts as installed** (tests run entirely in temp
+    /// dirs and must not be filtered out because the dir name looks wrong).
     public static func installedChannels(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
@@ -111,12 +115,11 @@ public enum TraePaths {
         }
     }
 
-    // MARK: - hooks（只有 CN 支持）
+    // MARK: - hooks (CN only)
 
-    /// 全局 hooks 配置 `~/.trae-cn/hooks.json`。
-    /// 路径出处：Trae 前端资产表 `{assetType:"hook",projectRelPath:".trae/hooks.json",
-    /// globalRelPath:"hooks.json"}`，其中 global 根 = `pathService.userHome` +
-    /// `productService.dataFolderName`（= `.trae-cn`）。
+    /// Global hooks config `~/.trae-cn/hooks.json`. Path source: Trae's frontend asset table
+    /// `{assetType:"hook",projectRelPath:".trae/hooks.json", globalRelPath:"hooks.json"}`, where
+    /// the global root = `pathService.userHome` + `productService.dataFolderName` (= `.trae-cn`).
     public static func hooksConfig(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -124,15 +127,16 @@ public enum TraePaths {
             .appendingPathComponent("hooks.json", isDirectory: false)
     }
 
-    /// 项目级 hooks 配置 `<repo>/.trae/hooks.json`（本 app 只读它做诊断，从不改）
+    /// Project-level hooks config `<repo>/.trae/hooks.json` (this app only reads it for
+    /// diagnostics, never edits it)
     public static func projectHooksConfig(repoRoot: URL) -> URL {
         repoRoot.appendingPathComponent(".trae/hooks.json", isDirectory: false)
     }
 
-    // MARK: - 技能
+    // MARK: - Skills
 
-    /// 用户技能根 `<dataFolder>/skills/<name>/SKILL.md`（标准 Claude 式布局：
-    /// YAML frontmatter 的 `name` / `description` + 正文）
+    /// User skills root `<dataFolder>/skills/<name>/SKILL.md` (standard Claude-style layout:
+    /// YAML frontmatter `name` / `description` + body)
     public static func skillsRoot(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -141,7 +145,8 @@ public enum TraePaths {
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 内置技能根 `<dataFolder>/builtin_skills`（`TRAE-code-review` 等，随客户端分发 → 只读）
+    /// Built-in skills root `<dataFolder>/builtin_skills` (`TRAE-code-review` etc., shipped with
+    /// the client → read-only)
     public static func builtinSkillsRoot(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -150,8 +155,9 @@ public enum TraePaths {
             .appendingPathComponent("builtin_skills", isDirectory: true)
     }
 
-    /// 另一处内置技能根 `<dataFolder>/builtin/global/skills`（`TRAE-computer-use` 等，
-    /// 与 `builtin_skills` 并存且内容不同 —— 两处都要扫，只扫一处会漏一半）
+    /// A second built-in skills root `<dataFolder>/builtin/global/skills` (`TRAE-computer-use`
+    /// etc.; coexists with `builtin_skills` with different contents - scan both, scanning only
+    /// one misses half)
     public static func builtinGlobalSkillsRoot(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -160,12 +166,12 @@ public enum TraePaths {
             .appendingPathComponent("builtin/global/skills", isDirectory: true)
     }
 
-    /// 项目级技能根 `<repo>/.trae/skills`
+    /// Project-level skills root `<repo>/.trae/skills`
     public static func projectSkillsRoot(repoRoot: URL) -> URL {
         repoRoot.appendingPathComponent(".trae/skills", isDirectory: true)
     }
 
-    /// 全部已装渠道的**可写**用户技能根（新建技能落这里）
+    /// **Writable** user skills roots across all installed channels (new skills go here)
     public static func userSkillsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
@@ -174,7 +180,8 @@ public enum TraePaths {
             .map { skillsRoot($0, environment: environment) }
     }
 
-    /// 全部已装渠道的**只读**内置技能根（两种 builtin 布局都收）
+    /// **Read-only** built-in skills roots across all installed channels (both builtin
+    /// layouts included)
     public static func bundledSkillsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
@@ -188,9 +195,9 @@ public enum TraePaths {
             }
     }
 
-    // MARK: - 记忆库（只有 CN 有）
+    // MARK: - Memory library (CN only)
 
-    /// 记忆库根 `~/.trae-cn/memory`
+    /// Memory library root `~/.trae-cn/memory`
     public static func memoryRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -198,7 +205,8 @@ public enum TraePaths {
             .appendingPathComponent("memory", isDirectory: true)
     }
 
-    /// 全局用户画像 `~/.trae-cn/memory/user_profile.md`（Trae 自己写的 → 记忆，不是指令）
+    /// Global user profile `~/.trae-cn/memory/user_profile.md` (written by Trae itself →
+    /// memory, not instructions)
     public static func userProfileFile(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -206,10 +214,11 @@ public enum TraePaths {
             .appendingPathComponent("user_profile.md", isDirectory: false)
     }
 
-    /// 项目记忆根 `~/.trae-cn/memory/projects`。
-    /// 子目录名形如 `-Users-wl-xiao-vinlee-workspace-lerobot--p2-832ae42141a2828b9304`
-    /// —— 正斜杠编码 + `--p<N>-<hash>` 后缀，**同 Claude 一样不可逆**（`-` 既可能来自
-    /// `/` 也可能来自 `.`/`_`/原有连字符），只能正向编码已知仓库根再匹配。
+    /// Project memory root `~/.trae-cn/memory/projects`.
+    /// Subdir names look like `-Users-wl-xiao-vinlee-workspace-lerobot--p2-832ae42141a2828b9304`
+    /// - slash encoding + a `--p<N>-<hash>` suffix, **lossy just like Claude's** (a `-` may come
+    /// from `/`, `.`/`_`, or an original hyphen), so the only way is to encode known repo roots
+    /// forward and match.
     public static func memoryProjectsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -217,9 +226,10 @@ public enum TraePaths {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
-    // MARK: - 指令（用户手写规则）
+    // MARK: - Instructions (user-written rules)
 
-    /// 全局用户规则单文件 `<dataFolder>/user_rules.md`（Trae 前端叫 `legacyUserRuleFilePath`）
+    /// Global user rules single file `<dataFolder>/user_rules.md` (Trae's frontend calls it
+    /// `legacyUserRuleFilePath`)
     public static func userRulesFile(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -228,7 +238,8 @@ public enum TraePaths {
             .appendingPathComponent("user_rules.md", isDirectory: false)
     }
 
-    /// 全局用户规则目录 `<dataFolder>/user_rules/*.md`（新版布局，与单文件并存）
+    /// Global user rules dir `<dataFolder>/user_rules/*.md` (newer layout, coexists with the
+    /// single file)
     public static func userRulesDir(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -237,22 +248,24 @@ public enum TraePaths {
             .appendingPathComponent("user_rules", isDirectory: true)
     }
 
-    /// 项目规则目录 `<repo>/.trae/rules/*.md`（含旧的单文件名 `project_rules.md`）
+    /// Project rules dir `<repo>/.trae/rules/*.md` (includes the old single-file name
+    /// `project_rules.md`)
     public static func projectRulesRoot(repoRoot: URL) -> URL {
         repoRoot.appendingPathComponent(".trae/rules", isDirectory: true)
     }
 
-    // MARK: - 计划
+    // MARK: - Plans
 
-    /// 计划文档目录 `<repo>/.trae/documents`（`plan_<yyyyMMdd>_<HHmmss>.md`，本就是 markdown）
+    /// Plan documents dir `<repo>/.trae/documents` (`plan_<yyyyMMdd>_<HHmmss>.md`, already
+    /// markdown)
     public static func projectDocumentsRoot(repoRoot: URL) -> URL {
         repoRoot.appendingPathComponent(".trae/documents", isDirectory: true)
     }
 
-    // MARK: - IDE 状态（只用来反查 cwd，绝不进备份）
+    // MARK: - IDE state (only used to resolve cwd, never backed up)
 
-    /// 工作区存储根 `<appSupport>/User/workspaceStorage`
-    /// （每 workspace 一个 hash 目录，`workspace.json` 的 `folder` 字段 = cwd）
+    /// Workspace storage root `<appSupport>/User/workspaceStorage`
+    /// (one hash dir per workspace; the `folder` field of `workspace.json` = cwd)
     public static func workspaceStorageRoot(
         _ channel: Channel,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -261,8 +274,9 @@ public enum TraePaths {
             .appendingPathComponent("User/workspaceStorage", isDirectory: true)
     }
 
-    /// 全部已装渠道的工作区存储根。**只读 `workspace.json` 一个字段**（cwd 反查），
-    /// 同目录下的 `state.vscdb` 不碰、也绝不进备份。
+    /// Workspace storage roots across all installed channels. **Reads only one field of
+    /// `workspace.json`** (cwd lookup); the sibling `state.vscdb` is never touched and never
+    /// backed up.
     public static func workspaceStorageRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
@@ -271,11 +285,15 @@ public enum TraePaths {
             .map { workspaceStorageRoot($0, environment: environment) }
     }
 
-    // 刻意不提供的路径，省得后人以为漏了：
-    // - `<dataFolder>/commands`（斜杠命令）：本 app 对**任何**来源都不索引斜杠命令
-    //   （Claude 的 `~/.claude/commands` 也没索引），单给 Trae 开一个面会不一致。
-    // - `<dataFolder>/mcp.json`、`<dataFolder>/trae-jwt-token`：凭据，见文件头红线。
-    // - `<appSupport>/ModularData/ai-agent/database.db`：加密会话库，读不了也不能备份。
-    // - `<appSupport>/logs/*/Modular/ai-agent_*_stdout.log`：内部 Rust tracing 日志，
-    //   100MB/1.5h、目录名每次启动变、格式随版本改 —— 明确不作为数据源。
+    // Paths deliberately not provided, so nobody later thinks they were missed:
+    // - `<dataFolder>/commands` (slash commands): this app indexes slash commands for **no**
+    //   source (Claude's `~/.claude/commands` isn't indexed either); a Trae-only surface would
+    //   be inconsistent.
+    // - `<dataFolder>/mcp.json`, `<dataFolder>/trae-jwt-token`: credentials, see the red line
+    //   in the file header.
+    // - `<appSupport>/ModularData/ai-agent/database.db`: encrypted session DB, unreadable and
+    //   must not be backed up.
+    // - `<appSupport>/logs/*/Modular/ai-agent_*_stdout.log`: internal Rust tracing logs,
+    //   100MB/1.5h, dir name changes every launch, format changes between versions -
+    //   explicitly not a data source.
 }

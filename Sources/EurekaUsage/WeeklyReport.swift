@@ -2,7 +2,8 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// vibe coding 周报：一周用量/花费/任务/技能的聚合快照（全部来自本地库，只读）。
+/// Vibe-coding weekly report: an aggregate snapshot of a week's usage/cost/tasks/skills (all from
+/// the local DB, read-only).
 public struct WeeklyReport: Equatable {
     public struct Entry: Equatable, Identifiable {
         public var id: String { name }
@@ -19,10 +20,11 @@ public struct WeeklyReport: Equatable {
         public var costUSD: Double?
     }
 
-    /// 提问节（Prompt 库）：窗口内新提的问 + 复用榜。nil = 该周无提问数据。
+    /// Prompts section (Prompt library): prompts newly asked in the window + reuse leaderboard. nil
+    /// = no prompt data for the week.
     public struct PromptSection: Equatable {
         public var askedCount: Int
-        /// 窗口内复用过的提问（标题 + 累计次数，按次数降序）
+        /// Prompts reused in the window (title + cumulative count, sorted by count descending)
         public var topReused: [(name: String, count: Int)]
 
         public init(askedCount: Int, topReused: [(name: String, count: Int)]) {
@@ -39,9 +41,9 @@ public struct WeeklyReport: Equatable {
 
     public var weekStart: Date
     public var weekEnd: Date
-    /// 有请求的（日期, 小时）桶数 ≈ 活跃小时数
+    /// Number of (date, hour) buckets with requests ≈ active hours
     public var activeHours: Int
-    /// 深夜（23 点后或凌晨 5 点前）有活动的天数
+    /// Days with late-night activity (after 23:00 or before 05:00)
     public var lateNightDays: Int
     public var totalTokens: Int
     public var totalCostUSD: Double?
@@ -54,7 +56,7 @@ public struct WeeklyReport: Equatable {
     public var errorCount: Int
     public var interruptedCount: Int
     public var topSkills: [(name: String, count: Int)]
-    /// 提问节（Prompt 库数据；默认 nil 兼容旧构造点）
+    /// Prompts section (Prompt library data; defaults to nil for older call sites)
     public var promptSection: PromptSection? = nil
 
     public static func == (lhs: WeeklyReport, rhs: WeeklyReport) -> Bool {
@@ -69,7 +71,8 @@ public struct WeeklyReport: Equatable {
 }
 
 public enum WeeklyReportBuilder {
-    /// 聚合一周（[weekStart, weekEnd)）。查询全部走现有仓库，不写库。
+    /// Aggregates one week ([weekStart, weekEnd)). All queries go through existing repos; nothing
+    /// is written.
     public static func build(
         store: EurekaStore, pricing: PricingTable, weekStart: Date, weekEnd: Date
     ) throws -> WeeklyReport {
@@ -78,14 +81,16 @@ public enum WeeklyReportBuilder {
                 + totals.cacheCreationTokens + totals.cacheReadTokens
         }
 
-        // 按模型（同时滚出总量与按源聚合；成本逐模型算——价格表按模型前缀匹配）
+        // By model (rolls up totals and per-source aggregates at once; cost is computed per model —
+        // the price table matches by model prefix)
         let byModelTotals = try store.usage.totalsByModel(from: weekStart, to: weekEnd)
         var totalTokens = 0
         var totalCost: Double?
         var requestCount = 0
         var sourceAgg: [String: (tokens: Int, cost: Double?)] = [:]
         var modelEntries: [WeeklyReport.Entry] = []
-        // 同 (来源, 模型) 可能按 provider 拆成多行，合并回一条（口径同改动前）
+        // The same (source, model) may be split into several rows by provider; merge them back into
+        // one (same accounting as before the change)
         var modelIndex: [String: Int] = [:]
         for totals in byModelTotals {
             let tokenCount = tokens(totals)
@@ -108,7 +113,8 @@ public enum WeeklyReportBuilder {
         }
         modelEntries.sort { ($0.costUSD ?? 0, $0.tokens) > ($1.costUSD ?? 0, $1.tokens) }
 
-        // 按项目（totalsByProject 的 UsageTotals 逐行带模型，可直接计价）
+        // By project (each UsageTotals row from totalsByProject carries its model, so it can be
+        // priced directly)
         var projectAgg: [String: (tokens: Int, cost: Double?)] = [:]
         for (project, totals) in try store.usage.totalsByProject(from: weekStart, to: weekEnd) {
             let name = project?.isEmpty == false ? project! : L10n.text("(Unknown project)", zhHans: "（未知项目）")
@@ -118,7 +124,7 @@ public enum WeeklyReportBuilder {
             projectAgg[name] = slot
         }
 
-        // 最贵会话 Top 3
+        // Top 3 most expensive sessions
         var sessionAgg: [String: WeeklyReport.SessionEntry] = [:]
         for row in try store.usage.totalsBySession(from: weekStart, to: weekEnd) {
             var entry = sessionAgg[row.sessionId] ?? .init(
@@ -133,14 +139,14 @@ public enum WeeklyReportBuilder {
             .sorted { ($0.costUSD ?? 0, $0.tokens) > ($1.costUSD ?? 0, $1.tokens) }
             .prefix(3)
 
-        // 活跃小时 / 深夜天数
+        // Active hours / late-night days
         let buckets = try store.usage.activeHourBuckets(from: weekStart, to: weekEnd)
         let lateNightDays = Set(buckets.filter { $0.hour >= 23 || $0.hour < 5 }.map(\.day)).count
 
-        // 任务结局
+        // Task outcomes
         let outcomes = try store.history.outcomeCounts(from: weekStart, to: weekEnd)
 
-        // 技能榜（kind == skill）
+        // Skill leaderboard (kind == skill)
         let skillTotals = try store.toolCalls.totals(from: weekStart, to: weekEnd)
             .filter { $0.kind == "skill" }
         var skillAgg: [String: Int] = [:]
@@ -148,7 +154,8 @@ public enum WeeklyReportBuilder {
         let topSkills = skillAgg.sorted { $0.value > $1.value }.prefix(5)
             .map { (name: $0.key, count: $0.value) }
 
-        // 提问节（Prompt 库）：窗口内新提的问 + 复用榜；两者皆空则整节省略
+        // Prompts section (Prompt library): prompts newly asked in the window + reuse leaderboard;
+        // omit the whole section when both are empty
         let promptStats = try store.prompts.weeklyStats(from: weekStart, to: weekEnd)
         let promptSection: WeeklyReport.PromptSection? =
             (promptStats.askedCount > 0 || !promptStats.topReused.isEmpty)
@@ -181,7 +188,8 @@ public enum WeeklyReportBuilder {
             promptSection: promptSection)
     }
 
-    /// 导出 Markdown（sessionNames：sessionId → 展示名，UI 层从会话索引补充）
+    /// Exports Markdown (sessionNames: sessionId → display name, filled in by the UI layer from the
+    /// session index)
     public static func markdown(
         _ report: WeeklyReport, sessionNames: [String: String] = [:]
     ) -> String {

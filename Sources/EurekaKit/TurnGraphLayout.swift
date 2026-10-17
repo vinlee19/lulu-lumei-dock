@@ -1,36 +1,43 @@
 import CoreGraphics
 import Foundation
 
-/// 血缘图布局引擎：`TurnGraph.Graph` → 节点矩形 + 边折线。
+/// Lineage-graph layout engine: `TurnGraph.Graph` → node rects + edge polylines.
 ///
-/// 纯函数、无 AppKit（照 `IslandGeometry` 的先例），所以能单测「边不穿节点」这类不变量，
-/// 也能让离屏渲染拿到**可复现**的基准图 —— 力导向布局做不到这两点，所以没选。
+/// Pure functions, no AppKit (following `IslandGeometry`), so invariants like "edges never cross nodes"
+/// are unit-testable and offscreen rendering gets a **reproducible** baseline -- force-directed layout
+/// can do neither, which is why it wasn't chosen.
 ///
-/// 四步（全 O(V+E) 单遍，无递归）：
-///  1. **环打破**：`seq` 单调即拓扑序，回边 = 指向不更晚的节点。构图期就判好了，
-///     这里只是把回边摘出主图走专用边道，**不反向塞回 DAG**。
-///  2. **分层**：longest-path，按 `seq` 升序一遍扫（前驱必已定层）。跨层 >1 的边插
-///     dummy 占位 —— 这是「边不穿节点」的**结构性**保证，不是事后避让。
-///  3. **层内排序**：4 趟中位数扫描降交叉。趟数固定 ⇒ 代价有上界，不会退化。
-///  4. **坐标**：每层最大列数由视口反推（层宽因此有上界，横向永不裁剪）。
+/// Four steps (all single-pass O(V+E), no recursion):
+///  1. **Cycle breaking**: monotonic `seq` is the topological order; a back edge points to a node
+///     that is not later. That is decided at build time; here back edges are only pulled out of the
+///     main graph onto dedicated lanes, **never reversed back into the DAG**.
+///  2. **Layering**: longest-path, one pass in ascending `seq` (predecessors are always layered
+///     already). Edges spanning >1 layer get dummy placeholders -- the **structural** guarantee
+///     that edges never cross nodes, not after-the-fact avoidance.
+///  3. **In-layer ordering**: 4 median sweeps to reduce crossings. A fixed sweep count ⇒ bounded
+///     cost, no degeneration.
+///  4. **Coordinates**: max columns per layer are derived from the viewport (so layer width is
+///     bounded and nothing is ever clipped horizontally).
 ///
-/// 边一律走**正交折线**：水平段只走层间 gutter 的正中，那里按定义没有节点，
-/// 于是「不穿节点」是可证的；贝塞尔的控制点靠启发式，只能事后检测再重试。
+/// Every edge is an **orthogonal polyline**: horizontal segments run only along the middle of the gutter
+/// between layers, which by definition holds no nodes, so "never crosses a node" is provable; Bezier
+/// control points rely on heuristics and can only be detected and retried after the fact.
 public enum TurnGraphLayout {
-    // MARK: - 度量
+    // MARK: - Metrics
 
     public struct Metrics: Equatable, Sendable {
-        /// 视口宽度（由 GeometryReader 给）
+        /// Viewport width (from GeometryReader)
         public var canvasWidth: CGFloat
         public var nodeHeight: CGFloat = 30
         public var layerGap: CGFloat = 34
         public var columnGap: CGFloat = 14
         public var minNodeWidth: CGFloat = 92
         public var maxNodeWidth: CGFloat = 156
-        /// 半角字符步进（10.5pt SF ≈ 5.8）。EurekaKit 不能用 CoreText，只能按字宽估。
+        /// Half-width character advance (10.5pt SF ≈ 5.8). EurekaKit can't use CoreText, so widths
+        /// are estimated.
         public var charWidth: CGFloat = 5.8
         public var nodePadding: CGFloat = 18
-        /// 回边道间距
+        /// Spacing between back-edge lanes
         public var backLaneGap: CGFloat = 11
         public var maxLanesPerSide: Int = 3
         public var orderingSweeps: Int = 4
@@ -41,7 +48,8 @@ public enum TurnGraphLayout {
 
         public static func standard(width: CGFloat) -> Metrics { Metrics(canvasWidth: width) }
 
-        /// 紧凑档：同样的图塞进更窄的视口（节点更矮更窄，列数因此更多）
+        /// Compact preset: the same graph in a narrower viewport (shorter, narrower nodes, hence
+        /// more columns)
         public static func compact(width: CGFloat) -> Metrics {
             var metrics = Metrics(canvasWidth: width)
             metrics.nodeHeight = 24
@@ -53,10 +61,11 @@ public enum TurnGraphLayout {
             return metrics
         }
 
-        /// 两侧回边道占用的总宽
+        /// Total width taken by the back-edge lanes on both sides
         public var laneReserve: CGFloat { backLaneGap * CGFloat(maxLanesPerSide) * 2 }
 
-        /// **每层最大列数**：折叠阈值的唯一来源。层宽因此有上界 ⇒ 横向永不裁剪。
+        /// **Max columns per layer**: the sole source of the folding threshold. Layer width is
+        /// therefore bounded ⇒ never clipped horizontally.
         public var maxColumns: Int {
             let usable = canvasWidth - laneReserve - margin * 2
             let perColumn = maxNodeWidth + columnGap
@@ -65,10 +74,10 @@ public enum TurnGraphLayout {
         }
     }
 
-    // MARK: - 输出
+    // MARK: - Output
 
     public struct PlacedNode: Equatable, Sendable, Identifiable {
-        /// 原点左上，与 SwiftUI 坐标系一致
+        /// Origin at top-left, matching SwiftUI's coordinate system
         public var frame: CGRect
         public var layer: Int
         public var column: Int
@@ -79,23 +88,24 @@ public enum TurnGraphLayout {
     public struct RoutedEdge: Equatable, Sendable {
         public var from: TurnGraph.NodeID
         public var to: TurnGraph.NodeID
-        /// 折线顶点（≥2 个，含贴边起止点）
+        /// Polyline vertices (≥2, including the start/end points on the node edges)
         public var points: [CGPoint]
         public var arrowTip: CGPoint
-        /// 箭头朝向（单位向量）
+        /// Arrow direction (unit vector)
         public var arrowDirection: CGVector
         public var role: TurnGraph.EdgeRole
         public var isBack: Bool
-        /// 回边道号；nil = 走 gutter
+        /// Back-edge lane index; nil = routed through the gutter
         public var laneIndex: Int?
-        /// 边上的角标（"×3"）
+        /// Badge on the edge ("×3")
         public var badge: String?
     }
 
     public enum Degradation: Equatable, Sendable {
-        /// 节点太多，不排版（调用方退回步骤列表）
+        /// Too many nodes, no layout (the caller falls back to the step list)
         case tooManyNodes(count: Int, limit: Int)
-        /// 折叠后层宽仍超列数上限（调用方退回分层时间轴）
+        /// Layer width still exceeds the column cap after folding (the caller falls back to a
+        /// layered timeline)
         case tooWide(maxLayerWidth: Int, columns: Int)
     }
 
@@ -107,7 +117,7 @@ public enum TurnGraphLayout {
         public var maxLayerWidth: Int
         public var crossings: Int
         public var degraded: Degradation?
-        /// 边道用尽而降级成角标的回边：目标节点 → 角标文案
+        /// Back edges degraded to badges because lanes ran out: target node → badge text
         public var overflowBadges: [TurnGraph.NodeID: [String]]
 
         public init(
@@ -127,7 +137,7 @@ public enum TurnGraphLayout {
         }
     }
 
-    // MARK: - 入口
+    // MARK: - Entry point
 
     public static func layout(_ graph: TurnGraph.Graph, metrics: Metrics) -> Result {
         guard !graph.nodes.isEmpty else { return Result() }
@@ -139,13 +149,14 @@ public enum TurnGraphLayout {
         return engine.run()
     }
 
-    // MARK: - 引擎
+    // MARK: - Engine
 
     private struct Engine {
         let graph: TurnGraph.Graph
         let metrics: Metrics
 
-        /// 排版单元：真实节点或占位 dummy（dummy 只为「边不穿节点」占一个列位）
+        /// Layout unit: a real node or a dummy placeholder (a dummy only reserves a column slot so
+        /// edges never cross nodes)
         struct Cell {
             var id: TurnGraph.NodeID
             var isDummy: Bool
@@ -153,16 +164,16 @@ public enum TurnGraphLayout {
             var order: Int = 0
             var width: CGFloat
             var x: CGFloat = 0
-            /// dummy 属于哪条边（路由时按序串起来）
+            /// Which edge a dummy belongs to (chained in order during routing)
             var edgeKey: String?
         }
 
         var cells: [Cell] = []
         var indexByID: [TurnGraph.NodeID: Int] = [:]
         var layerOf: [TurnGraph.NodeID: Int] = [:]
-        /// 分层图上的边（含被 dummy 拆开的段）
+        /// Edges of the layered graph (including segments split by dummies)
         var segments: [(from: TurnGraph.NodeID, to: TurnGraph.NodeID)] = []
-        /// 原始前向边 → 它被拆成的 dummy 链
+        /// Original forward edge → the dummy chain it was split into
         var dummyChain: [String: [TurnGraph.NodeID]] = [:]
 
         init(graph: TurnGraph.Graph, metrics: Metrics) {
@@ -183,8 +194,8 @@ public enum TurnGraphLayout {
             let canvas = CGSize(
                 width: metrics.canvasWidth,
                 height: max(metrics.nodeHeight, height) + metrics.margin * 2)
-            // **只数真实节点**：dummy 只是为「边不穿节点」占位，
-            // 把它算进层宽会在明明放得下的时候误判成「太宽」。
+            // **Count real nodes only**: dummies are just placeholders so edges never cross nodes;
+            // counting them in layer width would report "too wide" when everything actually fits.
             let realWidths = layerBuckets().map { bucket in
                 bucket.filter { self[$0]?.isDummy == false }.count
             }
@@ -199,7 +210,7 @@ public enum TurnGraphLayout {
                 overflowBadges: overflow)
         }
 
-        // MARK: 步骤 1+2 · 分层（seq 升序一遍扫，前驱必已定层）
+        // MARK: Steps 1+2 · Layering (one pass in ascending seq; predecessors are always layered already)
 
         mutating func assignLayers() {
             var incoming: [TurnGraph.NodeID: [TurnGraph.NodeID]] = [:]
@@ -219,7 +230,8 @@ public enum TurnGraphLayout {
             reindex()
         }
 
-        /// 跨层 >1 的前向边拆成逐层的段，中间每层插一个 dummy 占位
+        /// Split forward edges spanning >1 layer into per-layer segments, with one dummy in each
+        /// layer between
         mutating func insertDummies() {
             var counter = 0
             for edge in graph.forwardEdges {
@@ -248,10 +260,10 @@ public enum TurnGraphLayout {
             reindex()
         }
 
-        // MARK: 步骤 3 · 层内排序（固定 4 趟中位数，代价有上界）
+        // MARK: Step 3 · In-layer ordering (fixed 4 median sweeps, bounded cost)
 
         mutating func orderLayers() {
-            // 初始序 = seq 序（时间序，在这类拓扑上已经很好）
+            // Initial order = seq order (chronological, already very good on this kind of topology)
             for bucket in layerBuckets() {
                 for (order, id) in bucket.enumerated() { setOrder(id, order) }
             }
@@ -288,7 +300,7 @@ public enum TurnGraphLayout {
                         : Double(orders[middle - 1] + orders[middle]) / 2
                     return (id, median)
                 }
-                // 稳定排序：中位数相同则保持原序（保证确定性）
+                // Stable sort: equal medians keep their original order (guarantees determinism)
                 let sorted = medians.enumerated()
                     .sorted { lhs, rhs in
                         lhs.element.1 == rhs.element.1
@@ -299,7 +311,7 @@ public enum TurnGraphLayout {
             }
         }
 
-        // MARK: 步骤 4 · 坐标
+        // MARK: Step 4 · Coordinates
 
         mutating func assignCoordinates() {
             let laneReserve = metrics.backLaneGap * CGFloat(metrics.maxLanesPerSide)
@@ -307,7 +319,7 @@ public enum TurnGraphLayout {
             let right = metrics.canvasWidth - metrics.margin - laneReserve
 
             for bucket in layerBuckets() {
-                // 先按最小间距铺开，再整体居中
+                // Lay out at minimum spacing first, then center the whole layer
                 var total: CGFloat = 0
                 for id in bucket { total += (self[id]?.width ?? 0) + metrics.columnGap }
                 total -= metrics.columnGap
@@ -317,7 +329,7 @@ public enum TurnGraphLayout {
                     cursor += (self[id]?.width ?? 0) + metrics.columnGap
                 }
             }
-            // 2 趟「向邻居中位 x 靠拢」，受不重叠约束
+            // 2 passes of "move toward the neighbours' median x", subject to no overlap
             for _ in 0..<2 { alignToNeighbours(left: left, right: right) }
         }
 
@@ -337,7 +349,7 @@ public enum TurnGraphLayout {
                     let target = centers.reduce(0, +) / CGFloat(centers.count) - cell.width / 2
                     desired.append((id, target))
                 }
-                // 左→右扫一遍，保证不重叠且不越界
+                // One left-to-right sweep guarantees no overlap and no overflow past the bounds
                 var cursor = left
                 for (id, target) in desired {
                     guard let cell = self[id] else { continue }
@@ -345,13 +357,15 @@ public enum TurnGraphLayout {
                     setX(id, max(x, cursor))
                     cursor = max(x, cursor) + cell.width + metrics.columnGap
                 }
-                // 非重叠扫描是**左锚**的：3 个兄弟想挤在父节点中线时，第一个占住中线、
-                // 其余被推到右边，整层就偏了。所以扫完再把整层平移回目标中心。
+                // The non-overlap sweep is **left-anchored**: when 3 siblings all want the parent's
+                // center line, the first takes it and the rest are pushed right, skewing the whole
+                // layer. So after the sweep, shift the layer back to the target center.
                 recenter(bucket, desired: desired, left: left, right: right)
             }
         }
 
-        /// 把一层整体平移，使其包围盒中心对齐「各节点期望中心的均值」（受左右边界钳制）
+        /// Shift a whole layer so its bounding-box center matches the mean of the nodes' desired
+        /// centers (clamped to the left/right bounds)
         mutating func recenter(
             _ bucket: [TurnGraph.NodeID], desired: [(TurnGraph.NodeID, CGFloat)],
             left: CGFloat, right: CGFloat
@@ -380,7 +394,7 @@ public enum TurnGraphLayout {
             }
         }
 
-        // MARK: 产出
+        // MARK: Output
 
         func placedNodes() -> [PlacedNode] {
             cells.filter { !$0.isDummy }.compactMap { cell in
@@ -393,9 +407,10 @@ public enum TurnGraphLayout {
             }
         }
 
-        /// 有没有哪一层**真的**摆不下（所需宽度超过可用宽度）。
-        /// 直接量宽度而不是数列数：列数只是折叠阈值的代理指标，
-        /// 真正会伤到用户的是节点被横向裁掉。返回那一层的真实节点数。
+        /// Whether any layer **really** doesn't fit (required width exceeds the usable width).
+        /// Measure width directly instead of counting columns: column count is only a proxy for the
+        /// folding threshold; what actually hurts the user is nodes being clipped horizontally.
+        /// Returns that layer's real node count.
         func overflowingLayer() -> Int? {
             let laneReserve = metrics.backLaneGap * CGFloat(metrics.maxLanesPerSide)
             let usable = metrics.canvasWidth - metrics.margin * 2 - laneReserve * 2
@@ -413,7 +428,8 @@ public enum TurnGraphLayout {
             metrics.margin + CGFloat(layer) * (metrics.nodeHeight + metrics.layerGap)
         }
 
-        /// 层间 gutter 的正中：**水平段只走这条线**，那里按定义没有节点 ⇒ 不穿节点可证
+        /// Middle of the gutter between layers: **horizontal segments run only along this line**,
+        /// which by definition holds no nodes ⇒ never crossing a node is provable
         func gutterY(below layer: Int) -> CGFloat {
             layerY(layer) + metrics.nodeHeight + metrics.layerGap / 2
         }
@@ -425,7 +441,7 @@ public enum TurnGraphLayout {
                 width: cell.width, height: metrics.nodeHeight)
         }
 
-        // MARK: 边路由
+        // MARK: Edge routing
 
         func routeEdges(
             _ placed: [PlacedNode]
@@ -436,13 +452,15 @@ public enum TurnGraphLayout {
                 routed.append(makeEdge(edge, points: points, lane: nil))
             }
 
-            // 回边道贴着**节点包围盒**外侧，而不是画布最外沿 ——
-            // 贴边沿会让每个环都画成横跨整幅图的大矩形，反而看不出它连的是谁。
+            // Back-edge lanes hug the outside of the **node bounding box**, not the outermost
+            // canvas edge -- hugging the canvas edge would draw every loop as a big rectangle
+            // across the whole graph, hiding what it actually connects.
             let bounds = (
                 minX: placed.map(\.frame.minX).min() ?? metrics.margin,
                 maxX: placed.map(\.frame.maxX).max() ?? metrics.canvasWidth - metrics.margin)
 
-            // 按 y 区间贪心分道（重叠的分到不同道），道用尽降级成角标
+            // Greedy lane assignment by y interval (overlapping ones get different lanes); when
+            // lanes run out, degrade to a badge
             var overflow: [TurnGraph.NodeID: [String]] = [:]
             var laneEnds: [CGFloat] = []
             let backEdges = graph.backEdges.sorted { lhs, rhs in
@@ -487,7 +505,8 @@ public enum TurnGraphLayout {
                 badge: edge.repeatCount > 1 ? "×\(edge.repeatCount)" : nil)
         }
 
-        /// 前向边：下到 gutter 正中 → 水平 → 下到目标顶边（经过 dummy 时逐段串起来）
+        /// Forward edge: down to the gutter middle → horizontal → down to the target's top edge
+        /// (chained segment by segment through dummies)
         func forwardPoints(_ edge: TurnGraph.Edge) -> [CGPoint]? {
             let chain = dummyChain[edgeKey(edge)] ?? []
             let ids = [edge.from] + chain + [edge.to]
@@ -500,9 +519,10 @@ public enum TurnGraphLayout {
                 let start = CGPoint(x: from.midX, y: from.maxY)
                 let end = CGPoint(x: to.midX, y: to.minY)
                 if points.isEmpty { points.append(start) }
-                // **无条件走 gutter**：不按「x 够接近就直连」判，否则亚像素偏差会产生斜线，
-                // 而斜线一出现，「水平段只在 gutter 里 ⇒ 不穿节点」这个证明就不成立了。
-                // 多余的共线点由 simplify 合掉。
+                // **Always route through the gutter**: don't connect directly when x is "close
+                // enough", or sub-pixel drift produces diagonal lines, and once a diagonal appears
+                // the proof "horizontal segments only in the gutter ⇒ never crosses a node" no
+                // longer holds. Redundant collinear points are merged by simplify.
                 points.append(CGPoint(x: start.x, y: gutter))
                 points.append(CGPoint(x: end.x, y: gutter))
                 points.append(end)
@@ -511,7 +531,8 @@ public enum TurnGraphLayout {
             return cleaned.count >= 2 ? cleaned : nil
         }
 
-        /// 去掉重合点并合并共线段（保证每一段都严格水平或竖直）
+        /// Drop duplicate points and merge collinear segments (guarantees every segment is strictly
+        /// horizontal or vertical)
         static func simplify(_ raw: [CGPoint]) -> [CGPoint] {
             var points: [CGPoint] = []
             for point in raw {
@@ -519,7 +540,7 @@ public enum TurnGraphLayout {
                     abs(last.x - point.x) < 0.001, abs(last.y - point.y) < 0.001 {
                     continue
                 }
-                // 与前两点共线则替换掉中间那个
+                // If collinear with the previous two points, replace the middle one
                 if points.count >= 2 {
                     let a = points[points.count - 2]
                     let b = points[points.count - 1]
@@ -532,22 +553,26 @@ public enum TurnGraphLayout {
             return points
         }
 
-        /// 回边：下到 gutter → 横到边道 → 沿边道竖走 → 横到目标上方 gutter → 下进目标。
-        /// 水平段全在 gutter 里、竖直段在节点 x 区间之外 ⇒ 同样不穿节点。
+        /// Back edge: down to the gutter → across to the lane → vertically along the lane → across
+        /// to the gutter above the target → down into the target. Horizontal segments are all in
+        /// gutters and vertical segments lie outside the nodes' x range ⇒ likewise never crosses a
+        /// node.
         func backPoints(
             _ edge: TurnGraph.Edge, lane: Int, bounds: (minX: CGFloat, maxX: CGFloat)
         ) -> [CGPoint]? {
             guard let from = rect(edge.from), let to = rect(edge.to),
                 let fromLayer = layerOf[edge.from], let toLayer = layerOf[edge.to]
             else { return nil }
-            // 左道 = 数据回读，右道 = 重试/返工：两种失效模式左右分开，一眼能分辨
+            // Left lane = data reread, right lane = retry/rework: the two failure modes are split
+            // left/right so they are distinguishable at a glance
             let onLeft = edge.role == .dataFlow
             let offset = metrics.backLaneGap * CGFloat(lane + 1)
             let laneX = onLeft
                 ? max(metrics.margin, bounds.minX - offset)
                 : min(metrics.canvasWidth - metrics.margin, bounds.maxX + offset)
             let exitY = gutterY(below: fromLayer)
-            // 目标在上方：从它上一层的 gutter 进；目标在第 0 层则从它下方 gutter 绕进
+            // Target above: enter from the gutter of the layer above it; a target in layer 0 is
+            // entered from the gutter under it
             let enterY = toLayer > 0
                 ? gutterY(below: toLayer - 1) : layerY(0) - metrics.layerGap / 2
             return Engine.simplify([
@@ -565,7 +590,7 @@ public enum TurnGraphLayout {
             return (min(from.minY, to.minY), max(from.maxY, to.maxY))
         }
 
-        // MARK: 交叉数（排序质量的可断言指标）
+        // MARK: Crossing count (an assertable measure of ordering quality)
 
         func countCrossings() -> Int {
             var total = 0
@@ -591,7 +616,7 @@ public enum TurnGraphLayout {
             return total
         }
 
-        // MARK: 表维护
+        // MARK: Table maintenance
 
         subscript(id: TurnGraph.NodeID) -> Cell? {
             indexByID[id].map { cells[$0] }
@@ -622,7 +647,7 @@ public enum TurnGraphLayout {
             }
         }
 
-        /// 每层按 order 排好的节点 id
+        /// Node ids of each layer, sorted by order
         func layerBuckets() -> [[TurnGraph.NodeID]] {
             let maxLayer = cells.map(\.layer).max() ?? 0
             var buckets: [[Cell]] = Array(repeating: [], count: maxLayer + 1)
@@ -641,20 +666,20 @@ public enum TurnGraphLayout {
             segments.filter { $0.from == id }.map(\.to)
         }
 
-        /// 节点宽 = 内边距 + 图标槽 + 文字 + 尾部角标。
-        /// 角标（`×N` / 失败点）必须计进来：漏掉的话它们会挤走正文，
-        /// `swift build` 会被截成 `swi…uild`。
+        /// Node width = padding + icon slot + text + trailing badges.
+        /// Badges (`×N` / failure dot) must be counted: if they're left out they squeeze the text,
+        /// and `swift build` gets truncated to `swi…uild`.
         func nodeWidth(_ node: TurnGraph.Node) -> CGFloat {
-            // 标题与副标题上下两行，取较宽的一行
+            // Title and subtitle are stacked on two lines; take the wider one
             let halfWidths = max(halfWidth(node.title), halfWidth(node.subtitle))
-            var raw = metrics.nodePadding + 17  // 17 = 左侧图标槽 + 间距
+            var raw = metrics.nodePadding + 17  // 17 = left icon slot + spacing
                 + metrics.charWidth * CGFloat(halfWidths)
             if node.occurrences > 1 { raw += 22 }
             if node.isError { raw += 14 }
             return min(metrics.maxNodeWidth, max(metrics.minNodeWidth, raw))
         }
 
-        /// CJK 记 2 个半角位（EurekaKit 不能用 CoreText，只能按字宽估）
+        /// CJK counts as 2 half-width slots (EurekaKit can't use CoreText, so widths are estimated)
         func halfWidth(_ text: String) -> Int {
             text.unicodeScalars.reduce(0) { $0 + ($1.value > 0x2E80 ? 2 : 1) }
         }

@@ -1,14 +1,18 @@
 import Foundation
 import EurekaKit
 
-/// 增量 tail Kimi 会话事件（~/.kimi-code/sessions/<ws>/<session>/agents/main/wire.jsonl）。
-/// Kimi 无 hook/notify 回调，这是实时通道（与 grok/opencode tailer 同理）：
-/// 轮询近期有写入的主 agent wire.jsonl，按 offset 续读、半行不消费；新发现文件只做
-/// 尾部状态恢复，不重放历史。会话 id/cwd/标题从上级 state.json 带入（mtime 变了就重读——
-/// Kimi 首轮后才生成标题）；上下文占用从 usage.record 累计 ÷ config.toml 的 max_context_size 估算。
-/// 只 tail main agent 的事件流（子代理 wire 逐行入岛会造成幻影任务；用量扫描器单独收其 token）。
-/// 子 agent 现场由 KimiSubagentScanner 做轻量快照（各 agents/<id>/wire.jsonl 头+尾窗），
-/// 在运行中会话上随轮询以 .subagentsUpdated 发出。
+/// Incrementally tails Kimi session events
+/// (~/.kimi-code/sessions/<ws>/<session>/agents/main/wire.jsonl). Kimi has no hook/notify callback,
+/// so this is the live channel (same as the grok/opencode tailers): poll recently written
+/// main-agent wire.jsonl files, resume at the saved offset, never consume a partial line; newly
+/// discovered files only restore their tail state without replaying history. Session id/cwd/title
+/// come from the parent state.json (re-read when its mtime changes — Kimi only generates the title
+/// after the first turn); context usage is estimated from the accumulated usage.record ÷
+/// max_context_size in config.toml. Only the main agent's event stream is tailed (feeding subagent
+/// wires line by line into the island would create phantom tasks; the usage scanner collects their
+/// tokens separately). Subagents get a lightweight snapshot from KimiSubagentScanner (head + tail
+/// window of each agents/<id>/wire.jsonl), emitted as .subagentsUpdated for running sessions on
+/// each poll.
 public final class KimiWireTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -28,15 +32,16 @@ public final class KimiWireTailer {
         var title: String?
         var modelAlias: String?
         var stateMtime: Date?
-        /// 当前是否有未收尾的 turn（子 agent 快照只在运行中扫描）
+        /// Whether a turn is currently open (subagent snapshots are only scanned while running)
         var running = false
-        /// 当前 turn 起点（taskStarted 时间）：子 agent 快照按它裁到本 turn
+        /// Current turn start (taskStarted time): subagent snapshots are trimmed to this turn by it
         var turnStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
-    private var contextWindows: [String: Int]?  // config.toml max_context_size，懒加载
-    /// 各会话上次发出的子 agent 快照（变化才重发；TaskStore 还会再去重）
+    private var contextWindows: [String: Int]?  // config.toml max_context_size, lazily loaded
+    /// Last subagent snapshot emitted per session (re-emitted only on change; TaskStore dedups
+    /// again)
     private var lastSubagents: [String: [SubagentInfo]] = [:]
 
     static let healthName = "kimi 事件监视"
@@ -58,7 +63,8 @@ public final class KimiWireTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must stay below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -72,7 +78,7 @@ public final class KimiWireTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public so tests and launch can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentWireFiles() {
@@ -81,9 +87,9 @@ public final class KimiWireTailer {
         emitSubagentUpdates()
     }
 
-    // MARK: - 文件发现
+    // MARK: - File discovery
 
-    /// sessions/<ws>/<session>/agents/main/wire.jsonl 中近期（recentWindow 内）有写入的
+    /// sessions/<ws>/<session>/agents/main/wire.jsonl files written recently (within recentWindow)
     private func recentWireFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -109,7 +115,7 @@ public final class KimiWireTailer {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
     }
 
-    // MARK: - 增量读取
+    // MARK: - Incremental reading
 
     private func tail(_ url: URL) {
         let path = url.path
@@ -119,8 +125,9 @@ public final class KimiWireTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 文件被截断/重写
-        // 即使没有新字节也要刷 state.json（标题在首轮后才生成，且写在 wire 追加之后）
+        if size < offset { offset = 0 }  // file was truncated/rewritten
+        // Refresh state.json even without new bytes (the title is generated after the first turn
+        // and written after the wire append)
         refreshContextIfStateChanged(url)
         guard size > offset else { return }
 
@@ -134,8 +141,9 @@ public final class KimiWireTailer {
         offsets[path] = offset + UInt64(consumed)
     }
 
-    /// 处理完整行（最后的半行不消费），返回消费字节数。
-    /// 单次 JSON 解析同时喂生命周期解码与旁路（modelAlias / usage → ctx%）。
+    /// Processes complete lines (the trailing partial line is not consumed); returns bytes
+    /// consumed. One JSON parse feeds both the lifecycle decoder and the side channel (modelAlias /
+    /// usage → ctx%).
     private func processLines(_ data: Data, url: URL) -> Int {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
         let complete = data[data.startIndex...lastNewline]
@@ -150,7 +158,7 @@ public final class KimiWireTailer {
                   let object = try? JSONSerialization.jsonObject(with: Data(line)),
                   let root = object as? [String: Any]
             else { continue }
-            // 旁路：模型别名跟踪（config.update / llm.request）+ 最近一次用量
+            // Side channel: model alias tracking (config.update / llm.request) + the latest usage
             if let alias = KimiWireDecoder.modelAlias(root) { ctx.modelAlias = alias }
             if let record = KimiWireDecoder.usageRecord(root) { lastUsage = record }
             let events = KimiWireDecoder.decode(root: root, sessionId: ctx.sessionId, cwd: ctx.cwd)
@@ -183,10 +191,10 @@ public final class KimiWireTailer {
         }
     }
 
-    /// 新发现文件：从尾部恢复"最后状态"——
-    /// - 仍在进行中（最后 turn.prompt 晚于最后 step.end 终轮）：补发 running
-    /// - 已结束（或无轮次记录）：以 sessionStarted 注册为空闲
-    /// 两种情况都补发 state.json 的标题，让会话卡带名字。
+    /// Newly discovered file: restore the "last state" from the tail —
+    /// - still in progress (last turn.prompt later than the last final-turn step.end): emit running
+    /// - finished (or no turn records): register as idle via sessionStarted
+    /// Both cases also emit the state.json title so the session card has a name.
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         var ctx = context(for: url)
@@ -217,7 +225,8 @@ public final class KimiWireTailer {
             }
         }
 
-        // 运行状态与 turn 起点：子 agent 快照按 turn 裁剪、只在运行中扫描
+        // Running state and turn start: subagent snapshots are trimmed per turn and only scanned
+        // while running
         ctx.running = lastStarted != nil
             && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
         ctx.turnStartedAt = lastStarted?.timestamp
@@ -232,13 +241,14 @@ public final class KimiWireTailer {
 
         if let started = lastStarted,
            lastFinished.map({ $0.timestamp < started.timestamp }) ?? true {
-            // 仍在进行中：补发 running（真实开始时间，不按 stale 抑制）
+            // Still in progress: emit running (real start time, not suppressed as stale)
             var event = started
             event.sessionStartedAt = ctx.sessionStartedAt
             handler(event, false)
             titleEvent(from: event)
         } else {
-            // 已结束 / 无轮次记录：注册为空闲会话（避免直接发 finished 造成竞态）
+            // Finished / no turn records: register as an idle session (emitting finished directly
+            // would race)
             let base = lastFinished ?? lastStarted ?? TaskEvent(
                 source: .kimi, sessionId: ctx.sessionId, kind: .sessionStarted,
                 timestamp: Date(), cwd: ctx.cwd)
@@ -253,10 +263,11 @@ public final class KimiWireTailer {
         }
     }
 
-    // MARK: - 子 agent 快照（agents/<id>/wire.jsonl 头+尾窗，轻量）
+    // MARK: - Subagent snapshots (head + tail window of agents/<id>/wire.jsonl, lightweight)
 
-    /// 只对已跟踪且运行中的会话扫描（幻影任务不变式：不为未跟踪会话发事件）；
-    /// 快照变化才发（TaskStore 还会再去重）；转空闲后清缓存，下一 turn 重新发。
+    /// Scans only tracked, running sessions (phantom-task invariant: never emit for an untracked
+    /// session); emits only when the snapshot changes (TaskStore dedups again); clears the cache
+    /// once idle so the next turn emits afresh.
     private func emitSubagentUpdates() {
         for (path, ctx) in contexts {
             guard ctx.running else {
@@ -278,7 +289,7 @@ public final class KimiWireTailer {
         }
     }
 
-    // MARK: - 上下文占用（usage.record 累计 ÷ config.toml max_context_size）
+    // MARK: - Context usage (accumulated usage.record ÷ config.toml max_context_size)
 
     private func emitContext(
         for wireURL: URL, context ctx: FileContext,
@@ -287,7 +298,7 @@ public final class KimiWireTailer {
         let alias = usage.model ?? ctx.modelAlias
         guard let window = contextWindow(for: alias), window > 0 else { return }
         let percent = min(100, Double(usage.usage.total) / Double(window) * 100)
-        // 只在变化时补发，避免刷屏
+        // Only re-emit on change, to avoid flooding
         if let last = lastContextPercent[wireURL.path], abs(last - percent) < 0.5 { return }
         lastContextPercent[wireURL.path] = percent
         handler(TaskEvent(
@@ -303,14 +314,14 @@ public final class KimiWireTailer {
         return contextWindows?[modelAlias] ?? contextWindows?["*default*"]
     }
 
-    /// config.toml → { "kimi-code/k3": max_context_size }（解析逻辑已抽至 KimiConfigWindows）
+    /// config.toml → { "kimi-code/k3": max_context_size } (parsing lives in KimiConfigWindows)
     private func loadContextWindows() -> [String: Int] {
         KimiConfigWindows.parse(configURL: configTomlURL)
     }
 
-    // MARK: - 会话上下文（上级 state.json，mtime 变了重读 → 标题事件）
+    // MARK: - Session context (parent state.json, re-read on mtime change → title event)
 
-    /// wire.jsonl → session 目录（wire.jsonl ← main ← agents ← session_<uuid>）
+    /// wire.jsonl → session directory (wire.jsonl ← main ← agents ← session_<uuid>)
     private static func sessionDir(of wireURL: URL) -> URL {
         wireURL
             .deletingLastPathComponent()  // main/
@@ -326,7 +337,8 @@ public final class KimiWireTailer {
         return ctx
     }
 
-    /// state.json mtime 变化 → 重读；标题变了（且非默认）补发 titleUpdate
+    /// state.json mtime changed → re-read; if the title changed (and is not the default) emit
+    /// titleUpdate
     private func refreshContextIfStateChanged(_ wireURL: URL) {
         let path = wireURL.path
         guard let cached = contexts[path] else { return }
@@ -368,7 +380,8 @@ public final class KimiWireTailer {
             .flatMap(KimiWireDecoder.parseISO) ?? ctx.sessionStartedAt
         let rawTitle = (root["title"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // 默认标题 "New Session" 不当名字（首轮后 Kimi 会替换为真标题）
+        // The default title "New Session" is not a name (Kimi replaces it with a real title after
+        // the first turn)
         if let rawTitle, !rawTitle.isEmpty, rawTitle != "New Session" {
             ctx.title = rawTitle
         }

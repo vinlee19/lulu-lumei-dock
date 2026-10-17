@@ -1,6 +1,7 @@
 import Foundation
 
-/// 一条待发的系统通知文案（EurekaApp 侧交给 UNUserNotificationCenter 展示）
+/// Copy for one pending system notification (EurekaApp hands it to UNUserNotificationCenter for
+/// display)
 public struct SystemEventNotification: Equatable, Sendable {
     public let identifier: String
     public let title: String
@@ -13,11 +14,13 @@ public struct SystemEventNotification: Equatable, Sendable {
     }
 }
 
-/// 关键岛事件（完成/出错/等待）→ 系统通知的纯决策与文案组装。
-/// 与岛上卡片同一口径：来源 displayName、任务标题、项目名。
-/// 只在状态转换处调用（taskFinished / taskWaiting 效果），心跳永远不会走到这里。
+/// Key island events (finished/error/waiting) → pure decision and copy assembly for system
+/// notifications. Same conventions as the island cards: source displayName, task title, project
+/// name. Called only at state transitions (taskFinished / taskWaiting effects); heartbeats never
+/// reach here.
 public enum SystemEventNotifications {
-    /// 任务完成/出错/中断：主开关 + 对应类型开关都开才发
+    /// Task finished/error/interrupted: sent only when both the master switch and the matching type
+    /// switch are on
     public static func forFinished(
         _ task: FinishedTask, master: Bool, completion: Bool, error: Bool
     ) -> SystemEventNotification? {
@@ -41,8 +44,9 @@ public enum SystemEventNotifications {
                        projectName: task.projectName, sessionId: task.sessionId))
     }
 
-    /// 等待确认/等待输入：主开关 + 等待开关都开才发。
-    /// identifier 用会话 id：同会话重复等待会覆盖旧横幅，不堆叠。
+    /// Waiting for confirmation/input: sent only when both the master switch and the waiting switch
+    /// are on. The identifier is the session id: a repeated wait in the same session replaces the
+    /// old banner instead of stacking.
     public static func forWaiting(
         _ task: AgentTask, master: Bool, waiting: Bool
     ) -> SystemEventNotification? {
@@ -51,7 +55,7 @@ public enum SystemEventNotifications {
         if case .waiting(let reason, _) = task.phase {
             verb = reason.displayName
         } else {
-            return nil  // 防御：非等待态不该走到这里
+            return nil  // Defensive: non-waiting states should never reach here
         }
         return SystemEventNotification(
             identifier: "eureka-event-waiting-\(task.id)",
@@ -60,7 +64,8 @@ public enum SystemEventNotifications {
                        projectName: task.projectName, sessionId: task.sessionId))
     }
 
-    /// 正文：来源 · 标题（· 项目）；无标题时退回项目名，再退回会话号
+    /// Body: source · title (· project); without a title, falls back to the project name, then the
+    /// session number
     private static func body(
         source: AgentSource, title: String?, projectName: String?, sessionId: String
     ) -> String {

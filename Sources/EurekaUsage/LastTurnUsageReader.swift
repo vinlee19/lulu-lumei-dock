@@ -1,22 +1,24 @@
 import EurekaKit
 import Foundation
 
-/// 最后一轮真实 context 总量读取器：只读 transcript 文件尾部（默认 64KB），
-/// 按源提取最后一条 usage 的输入侧 token（≈触发该轮时的上下文规模）。
-/// 全程 best-effort：任何格式不符/解析失败一律返回 nil，**永不抛错**。
+/// Reads the real context size of the last turn: reads only the transcript tail (64KB by default)
+/// and extracts, per source, the input-side tokens of the last usage entry (~ the context size that
+/// triggered that turn). Best-effort throughout: any format mismatch or parse failure returns nil;
+/// **never throws**.
 public enum LastTurnUsageReader {
-    /// 尾部扫描字节数：单行 usage 很小，64KB 足够覆盖末尾多轮
+    /// Bytes scanned from the tail: a usage line is small, so 64KB covers several trailing turns
     public static let tailBytes = 65_536
 
-    /// 读取该会话最后一轮的 context 总量；拿不到（源不支持/文件无 usage）返回 nil。
-    /// opencode / cursor / hermes（SQLite 源）与 trae / antigravity（正文不可得）直接 nil。
-    /// 入参为基本类型而非 AgentSessionInfo：EurekaUsage 不依赖 EurekaIngest。
+    /// Reads this session's last-turn context size; nil when unavailable (unsupported source / no
+    /// usage in the file). opencode / cursor / hermes (SQLite sources) and trae / antigravity (no
+    /// message bodies) return nil outright. Takes primitive parameters rather than
+    /// AgentSessionInfo: EurekaUsage does not depend on EurekaIngest.
     public static func lastContextTokens(source: AgentSource, transcriptPath: String) -> Int? {
         switch source {
         case .opencode, .cursor, .hermes, .trae, .antigravity:
             return nil
         case .claude, .qoder:
-            // qoder 是 Claude 式信封，usage 格式相同（若有）
+            // qoder uses a Claude-style envelope; its usage format is the same (when present)
             return lastClaudeUsage(path: transcriptPath)
         case .kimi:
             return lastKimiUsage(path: transcriptPath)
@@ -29,26 +31,30 @@ public enum LastTurnUsageReader {
         case .codebuddy:
             return lastCodeBuddyUsage(path: transcriptPath)
         case .grok:
-            // grok 的 updates.jsonl 只有每轮汇总（一轮内多次模型调用之和），不是单次上下文规模
+            // grok's updates.jsonl only has per-turn totals (the sum of several model calls in a
+            // turn), not the context size of a single call
             return nil
         case .zcode:
-            // zcode 的 transcriptPath 是共享 sqlite 库；真实 usage 在逐会话 rollout 文件里，
-            // 调用方改用 lastZcodeContext(rolloutPath:)（顺带带回模型名给窗口分母查询）
+            // zcode's transcriptPath is a shared sqlite DB; the real usage lives in per-session
+            // rollout files, so callers use lastZcodeContext(rolloutPath:) instead (which also
+            // returns the model name for the window-denominator lookup)
             return nil
         }
     }
 
-    /// zcode：rollout（`model-io-sess_<id>.jsonl`）末条 `response.usage` 的
-    /// inputTokens + outputTokens（OpenAI 口径：inputTokens 已含缓存读，两者之和
-    /// = 文件自带 totalTokens = 官方「上下文容量」分子）。模型名一并带回
-    /// （model.modelId 与 response.modelId 值等价、统一小写），供 v2/config.json
-    /// 查窗口分母——不依赖账本行，账本 60s tick 未到时分母也能查对。
+    /// zcode: inputTokens + outputTokens of the last `response.usage` in the rollout
+    /// (`model-io-sess_<id>.jsonl`) (OpenAI semantics: inputTokens already includes cache reads;
+    /// the sum = the file's own totalTokens = the numerator of the official "context capacity").
+    /// Also returns the model name (model.modelId and response.modelId are equivalent, normalized
+    /// to lowercase) for looking up the window denominator in v2/config.json -- independent of
+    /// ledger rows, so the denominator is right even before the 60s ledger tick.
     ///
-    /// ⚠️ 不能走 readTail/逐行 JSON：zcode 每行内嵌完整 `request.body.messages`
-    /// （实测单行 25 万~47 万字节，64KB 尾窗连一根完整行都盖不住）。改为从尾部
-    /// 按块回退（256KB 起、×4 递增、上限 16MB），字节级找最后一个结构性
-    /// `"usage":{"inputTokens":` 片段——JSON 字符串里的引号必被转义，裸片段
-    /// 只可能是真实结构，不会误中对话正文。
+    /// WARNING: can't use readTail / per-line JSON: every zcode line embeds the full
+    /// `request.body.messages` (measured 250k-470k bytes per line; a 64KB tail window can't hold
+    /// even one whole line). Instead it walks back from the tail in chunks (starting at 256KB, x4
+    /// each step, capped at 16MB) and finds, at the byte level, the last structural
+    /// `"usage":{"inputTokens":` fragment -- quotes inside JSON strings are always escaped, so a
+    /// bare fragment can only be real structure and never matches conversation text.
     public static func lastZcodeContext(rolloutPath: String) -> (model: String?, tokens: Int)? {
         guard let handle = FileHandle(forReadingAtPath: rolloutPath) else { return nil }
         defer { try? handle.close() }
@@ -66,7 +72,8 @@ public enum LastTurnUsageReader {
         }
     }
 
-    /// 字节块里从后往前找 usage 片段并解析（平铺对象，到第一个 `}` 截断）
+    /// Searches the byte chunk backwards for the usage fragment and parses it (flat object, cut at
+    /// the first `}`)
     static func lastZcodeUsageSnippet(in data: Data) -> (model: String?, tokens: Int)? {
         let marker = Data("\"usage\":{\"inputTokens\":".utf8)
         var searchUpper = data.endIndex
@@ -74,7 +81,7 @@ public enum LastTurnUsageReader {
               let range = data.range(
                 of: marker, options: .backwards, in: data.startIndex..<searchUpper) {
             searchUpper = range.lowerBound
-            let objectStart = range.lowerBound + "\"usage\":".utf8.count  // 落在 `{`
+            let objectStart = range.lowerBound + "\"usage\":".utf8.count  // lands on `{`
             guard let close = data[objectStart...].firstIndex(of: UInt8(ascii: "}")),
                   let dict = (try? JSONSerialization.jsonObject(
                     with: data[objectStart...close])) as? [String: Any],
@@ -86,8 +93,9 @@ public enum LastTurnUsageReader {
         return nil
     }
 
-    /// 块内最后一个 `"modelId":"…"`（model.modelId 大写 / response.modelId 小写，
-    /// 值等价，取哪个都一样；进行中的新行无 usage 但有 model，同会话同模型，无害）
+    /// Last `"modelId":"..."` in the chunk (model.modelId is uppercase / response.modelId
+    /// lowercase; the values are equivalent, so either works; an in-progress new line has a model
+    /// but no usage -- same session, same model, harmless)
     private static func lastZcodeModelId(in data: Data) -> String? {
         let marker = Data("\"modelId\":\"".utf8)
         guard let range = data.range(of: marker, options: .backwards),
@@ -97,9 +105,10 @@ public enum LastTurnUsageReader {
         return String(decoding: data[range.upperBound..<quote], as: UTF8.self).lowercased()
     }
 
-    /// 读取该会话模型上下文窗口的**真实值**（会话数据里自带的参数）。
-    /// 目前只有 codex 的 token_count 事件带 `model_context_window`；其余源一律 nil，
-    /// 调用方应回退到 Kimi config.toml（kimi）或 ContextWindows 内建表。
+    /// Reads the **real value** of this session's model context window (a parameter carried in the
+    /// session data). Currently only codex's token_count events carry `model_context_window`; every
+    /// other source returns nil, and callers should fall back to Kimi config.toml (kimi) or the
+    /// built-in ContextWindows table.
     public static func lastContextWindow(source: AgentSource, transcriptPath: String) -> Int? {
         guard source == .codex else { return nil }
         return lastMatch(path: transcriptPath) { root in
@@ -113,9 +122,9 @@ public enum LastTurnUsageReader {
         }
     }
 
-    // MARK: - 各源解析（复用对应 UsageScanner 的行格式口径，只取输入侧）
+    // MARK: - Per-source parsing (reuses each UsageScanner's line-format semantics, input side only)
 
-    /// Claude：assistant 行 message.usage 的 input + cache_read + cache_creation
+    /// Claude: input + cache_read + cache_creation from message.usage on assistant lines
     private static func lastClaudeUsage(path: String) -> Int? {
         lastMatch(path: path) { root in
             guard root["type"] as? String == "assistant",
@@ -130,7 +139,7 @@ public enum LastTurnUsageReader {
         }
     }
 
-    /// Kimi：usage.record 行的 inputOther + inputCacheRead + inputCacheCreation
+    /// Kimi: inputOther + inputCacheRead + inputCacheCreation on usage.record lines
     private static func lastKimiUsage(path: String) -> Int? {
         lastMatch(path: path) { root in
             guard root["type"] as? String == "usage.record",
@@ -143,8 +152,8 @@ public enum LastTurnUsageReader {
         }
     }
 
-    /// Codex：token_count 事件 info.last_token_usage.input_tokens
-    /// （OpenAI 口径 cached 是 input 的子集，input 即整轮上下文规模）
+    /// Codex: info.last_token_usage.input_tokens on token_count events
+    /// (OpenAI semantics: cached is a subset of input, so input is the whole turn's context size)
     private static func lastCodexUsage(path: String) -> Int? {
         lastMatch(path: path) { root in
             guard root["type"] as? String == "event_msg",
@@ -158,7 +167,7 @@ public enum LastTurnUsageReader {
         }
     }
 
-    /// Gemini：gemini 行 tokens.input（scanner 口径：rawInput 含 cached）
+    /// Gemini: tokens.input on gemini lines (scanner semantics: rawInput includes cached)
     private static func lastGeminiUsage(path: String) -> Int? {
         lastMatch(path: path) { root in
             guard root["type"] as? String == "gemini",
@@ -169,7 +178,7 @@ public enum LastTurnUsageReader {
         }
     }
 
-    /// Qwen：ui_telemetry 的 api_response 事件 input_token_count（含 cached）
+    /// Qwen: input_token_count of ui_telemetry api_response events (includes cached)
     private static func lastQwenUsage(path: String) -> Int? {
         lastMatch(path: path) { root in
             guard root["type"] as? String == "system",
@@ -183,8 +192,8 @@ public enum LastTurnUsageReader {
         }
     }
 
-    /// CodeBuddy：providerData.usage / message.usage 的 inputTokens（camel 含缓存读）
-    /// 或 snake 兜底 input_tokens + cache_read_input_tokens
+    /// CodeBuddy: inputTokens from providerData.usage / message.usage (camelCase includes cache
+    /// reads) or, as the snake_case fallback, input_tokens + cache_read_input_tokens
     private static func lastCodeBuddyUsage(path: String) -> Int? {
         lastMatch(path: path) { root in
             let providerData = root["providerData"] as? [String: Any]
@@ -199,9 +208,9 @@ public enum LastTurnUsageReader {
         }
     }
 
-    // MARK: - 工具
+    // MARK: - Helpers
 
-    /// 从文件尾部逐行（倒序）找第一个命中的解析结果
+    /// Walks the file tail line by line (newest first) and returns the first successful parse
     private static func lastMatch(
         path: String, parse: ([String: Any]) -> Int?
     ) -> Int? {
@@ -217,7 +226,8 @@ public enum LastTurnUsageReader {
         return nil
     }
 
-    /// 读文件末尾 tailBytes 字节并按行切开（首行可能残缺，丢弃）
+    /// Reads the last tailBytes bytes of the file and splits them into lines (the first line may be
+    /// truncated and is dropped)
     private static func readTail(path: String) -> [Data]? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
@@ -227,7 +237,7 @@ public enum LastTurnUsageReader {
         handle.seek(toFileOffset: offset)
         let data = handle.readDataToEndOfFile()
         var lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
-        if offset > 0, !lines.isEmpty { lines.removeFirst() }  // 丢弃残缺的半行
+        if offset > 0, !lines.isEmpty { lines.removeFirst() }  // drop the truncated partial line
         return lines.map { Data($0) }
     }
 }

@@ -1,15 +1,16 @@
 import EurekaKit
 import SwiftUI
 
-/// 一轮的血缘图「板」：诊断条 + 画布 + 图例 + 选中节点详情。
+/// One turn's lineage graph "board": diagnostics strip + canvas + legend + selected-node detail.
 ///
-/// 独立成一个固定尺寸、无 ScrollView / 无 Lazy 容器的视图，是为了**离屏渲染风险最低** ——
-/// `PreviewRenderer.renderLineage` 直接 snap 它，拿到可复现的验收基准图。
-/// 外层页面（`TurnLineageView`）再给它套滚动与页头。
+/// Kept as a fixed-size view with no ScrollView / no Lazy containers for the **lowest offscreen-rendering risk** --
+/// `PreviewRenderer.renderLineage` snaps it directly to get a reproducible baseline image for verification.
+/// The outer page (`TurnLineageView`) adds scrolling and the header around it.
 struct TurnLineageBoardView: View {
     let result: TurnGraphLayout.Result
     let diagnostics: TurnDiagnostics
-    /// 本轮拿不拿得到思考明文（拿不到要明说原因，别让用户以为它没思考）
+    /// Whether this turn's thinking text is available (if not, state the reason so users don't
+    /// think it didn't think)
     var hasThinking: Bool = false
     var onJumpToMessage: ((Int) -> Void)?
     var onToggleSubagent: ((TurnGraph.Node) -> Void)?
@@ -37,7 +38,7 @@ struct TurnLineageBoardView: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: - 诊断条（图上面那一行「这一轮出了什么问题」）
+    // MARK: - Diagnostics strip (the "what went wrong in this turn" row above the graph)
 
     private var diagnosticsStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -57,7 +58,8 @@ struct TurnLineageBoardView: View {
                 }
                 Spacer(minLength: 0)
                 if !hasThinking {
-                    // 说清「为什么没有思考」，否则用户会以为是我们没抓到
+                    // Explain "why there's no thinking", otherwise users will assume we failed to
+                    // capture it
                     Text(L10n.text("Thinking text was stripped by this CLI", zhHans: "思考明文被该 CLI 剥离"))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
@@ -76,7 +78,7 @@ struct TurnLineageBoardView: View {
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(severityColor(signal.severity))
                         .fixedSize()
-                    // 这句才是用户要的：告诉他下次提示词怎么写
+                    // This line is what users actually want: how to write the prompt next time
                     Text(signal.advice)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
@@ -106,7 +108,7 @@ struct TurnLineageBoardView: View {
         }
     }
 
-    // MARK: - 图例（不解释就看不懂虚线在说什么）
+    // MARK: - Legend (without it the dashed lines are unreadable)
 
     private var legend: some View {
         FlowLayout(spacing: 12, lineSpacing: 5) {
@@ -138,7 +140,7 @@ struct TurnLineageBoardView: View {
         .fixedSize()
     }
 
-    // MARK: - 选中节点详情（内联条，不用 popover：popover 离屏渲不出来）
+    // MARK: - Selected node detail (inline strip, not a popover: popovers don't render offscreen)
 
     private func detailBar(_ placed: TurnGraphLayout.PlacedNode) -> some View {
         let node = placed.node
@@ -165,7 +167,8 @@ struct TurnLineageBoardView: View {
                         .font(.system(size: 10.5).monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                        // 多行必须锁固有高度，否则会被压回一行
+                        // Multi-line text must lock its intrinsic height, or it gets squeezed back
+                        // to one line
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if node.stepIndices.count > 1 {
@@ -185,7 +188,7 @@ struct TurnLineageBoardView: View {
                 .fill(Theme.surfaceSecondary))
     }
 
-    // MARK: - 降级
+    // MARK: - Degraded
 
     private func degradedNotice(_ degraded: TurnGraphLayout.Degradation) -> some View {
         let text: String

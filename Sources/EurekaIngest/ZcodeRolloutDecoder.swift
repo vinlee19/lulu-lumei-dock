@@ -1,27 +1,31 @@
 import Foundation
 import EurekaKit
 
-/// 解析 ZCode CLI `model-io-sess_<id>.jsonl` 单行 -> 领域事件 / 用量。
-/// schema 已对着本机真实会话核验（2026-08，~/.zcode/cli/rollout）：
-/// - 每行 `type:"model_io"`，一次模型请求一条；`querySource` 有 main_turn / subagent 等
-/// - `startedAt`/`completedAt`：ISO8601；`completedAt` 为 null = 请求仍在进行
-/// - `model.modelId`：如 "glm-5.3"（response.modelId 是小写版）
-/// - `response.finishReason`：tool-calls=中间步、stop=终轮
-/// - `response.usage`：{inputTokens,outputTokens,totalTokens,cacheReadTokens,cacheWriteTokens}
-///   （error 行可能是空对象 {}）。**OpenAI 口径**（实测全部 55 条 usage 行验证）：
-///   `cacheReadTokens ⊆ inputTokens`（inputTokens 是完整输入侧、已含缓存读），
-///   `totalTokens = inputTokens + outputTokens`，cacheWriteTokens 恒 0。
-/// - `error` 非空 = 该请求出错（如 "v4 session stopped"）
-/// 会话 id 从文件名解出（`model-io-sess_<id>.jsonl` -> `sess_<id>`）；
-/// cwd 由调用方从 db 的 session 表带入。未知形状一律忽略不抛错。
+/// Decodes one line of ZCode CLI `model-io-sess_<id>.jsonl` -> domain events / usage.
+/// Schema verified against real local sessions (2026-08, ~/.zcode/cli/rollout):
+/// - each line is `type:"model_io"`, one per model request; `querySource` includes
+///   main_turn / subagent etc.
+/// - `startedAt`/`completedAt`: ISO8601; `completedAt` null = request still in flight
+/// - `model.modelId`: e.g. "glm-5.3" (response.modelId is the lowercase form)
+/// - `response.finishReason`: tool-calls = intermediate step, stop = final turn
+/// - `response.usage`: {inputTokens,outputTokens,totalTokens,cacheReadTokens,cacheWriteTokens}
+///   (error lines may carry an empty object {}). **OpenAI semantics** (verified against all
+///   55 observed usage lines): `cacheReadTokens ⊆ inputTokens` (inputTokens is the full input
+///   side, cache reads included), `totalTokens = inputTokens + outputTokens`,
+///   cacheWriteTokens is always 0.
+/// - non-empty `error` = the request failed (e.g. "v4 session stopped")
+/// The session id comes from the file name (`model-io-sess_<id>.jsonl` -> `sess_<id>`);
+/// cwd is passed in by the caller from the db's session table. Unknown shapes are ignored,
+/// never thrown.
 public enum ZcodeRolloutDecoder {
-    /// 归一化用量（response.usage 的真实字段）
+    /// Normalized usage (the real fields of response.usage)
     public struct Usage: Equatable {
-        public var input: Int          // inputTokens（完整输入侧，已含 cacheRead——OpenAI 口径）
+        public var input: Int          // inputTokens (full input side, cacheRead included - OpenAI semantics)
         public var output: Int         // outputTokens
-        public var cacheRead: Int      // cacheReadTokens（input 的子集，不能与 input 相加）
-        public var cacheWrite: Int     // cacheWriteTokens（实测恒 0）
-        /// = 文件自带 totalTokens；ctx% 的分子（官方「上下文容量」同口径）
+        public var cacheRead: Int      // cacheReadTokens (subset of input; never add it to input)
+        public var cacheWrite: Int     // cacheWriteTokens (always 0 in practice)
+        /// = the file's own totalTokens; numerator of ctx% (same basis as the official
+        /// "context capacity")
         public var total: Int { input + output }
 
         public init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int) {
@@ -32,16 +36,17 @@ public enum ZcodeRolloutDecoder {
         }
     }
 
-    /// 从 rollout 文件名解会话 id：`model-io-sess_xxx.jsonl` -> `sess_xxx`；
-    /// 不匹配（防御）返回 nil
+    /// Session id from a rollout file name: `model-io-sess_xxx.jsonl` -> `sess_xxx`;
+    /// returns nil on no match (defensive)
     public static func sessionId(fileName: String) -> String? {
         guard fileName.hasPrefix("model-io-"), fileName.hasSuffix(".jsonl") else { return nil }
         let body = String(fileName.dropFirst("model-io-".count).dropLast(".jsonl".count))
         return body.isEmpty ? nil : body
     }
 
-    /// 顶层 usage 与模型名（response.usage + response.modelId，缺后者回退 model.modelId 小写化）。
-    /// 全零/空对象返回 nil（error 行与进行中行没有可计用量）。
+    /// Top-level usage and model name (response.usage + response.modelId; without the latter,
+    /// falls back to model.modelId lowercased).
+    /// All-zero / empty objects return nil (error lines and in-flight lines carry no usage).
     public static func usageRecord(_ root: [String: Any]) -> (model: String?, usage: Usage)? {
         guard root["type"] as? String == "model_io",
               let response = root["response"] as? [String: Any],
@@ -58,14 +63,15 @@ public enum ZcodeRolloutDecoder {
         return (model?.lowercased(), usage)
     }
 
-    /// 请求是否已完成（completedAt 非空）。
+    /// Whether the request has completed (completedAt non-null).
     public static func isCompleted(_ root: [String: Any]) -> Bool {
         root["completedAt"] != nil
     }
 
-    /// 单行解码 -> 领域事件（0 或多个）。
-    /// 已完成的请求：finishReason=stop -> taskFinished；tool-calls -> activity（中间步）；
-    /// error 非空 -> 出错收尾。进行中的请求不发事件（等活动/收尾）。
+    /// Decodes one line -> domain events (zero or more).
+    /// Completed requests: finishReason=stop -> taskFinished; tool-calls -> activity
+    /// (intermediate step); non-empty error -> finish with failure. In-flight requests emit
+    /// nothing (wait for activity / finish).
     public static func decode(
         root: [String: Any], sessionId: String, cwd: String?
     ) -> [TaskEvent] {
@@ -79,8 +85,8 @@ public enum ZcodeRolloutDecoder {
             [TaskEvent(source: .zcode, sessionId: sessionId, kind: kind, timestamp: ts, cwd: cwd)]
         }
 
-        // error 非空：该请求异常终止（如用户停止 "v4 session stopped"）。
-        // 顶层 error 与 response.error 两种形状都探测。
+        // Non-empty error: the request ended abnormally (e.g. user stop, "v4 session stopped").
+        // Probe both shapes: top-level error and response.error.
         let errorObject = root["error"] as? [String: Any]
             ?? (root["response"] as? [String: Any])?["error"] as? [String: Any]
         if let errorObject {
@@ -93,15 +99,16 @@ public enum ZcodeRolloutDecoder {
         case "stop", "end_turn", "stop_sequence":
             return event(.taskFinished(outcome: .success, title: nil, detail: nil))
         case "tool-calls", "tool_use", "length":
-            // 中间步：带上刚调的工具名（岛上显示「Bash」「Edit …」）
+            // Intermediate step: carry the tool just called (the island shows "Bash", "Edit …")
             return event(.activity(tool: toolNames.last))
         default:
-            // finishReason 缺失（写盘竞争）按中间步，等终轮收尾
+            // Missing finishReason (write race) counts as an intermediate step; wait for the
+            // final turn to finish
             return event(.activity(tool: toolNames.last))
         }
     }
 
-    /// response.toolCalls 的工具名列表（[{name,input}]）
+    /// Tool names from response.toolCalls ([{name,input}])
     static func toolCalls(_ root: [String: Any]) -> [String] {
         guard let response = root["response"] as? [String: Any],
               let calls = response["toolCalls"] as? [[String: Any]]
@@ -109,7 +116,8 @@ public enum ZcodeRolloutDecoder {
         return calls.compactMap { $0["name"] as? String }
     }
 
-    /// 用户新一轮的标题素材：请求 messages 里首条 user 文本（供 tailer 发 taskStarted）
+    /// Title material for a new user turn: the first user text in the request messages (used
+    /// by the tailer to emit taskStarted)
     public static func userPromptText(_ root: [String: Any]) -> String? {
         guard let request = root["request"] as? [String: Any],
               let body = request["body"] as? [String: Any],
@@ -132,9 +140,9 @@ public enum ZcodeRolloutDecoder {
         return nil
     }
 
-    // MARK: - 基础工具
+    // MARK: - Basic helpers
 
-    /// ISO8601（带毫秒小数）-> Date
+    /// ISO8601 (with fractional milliseconds) -> Date
     public static func parseISO(_ string: String?) -> Date? {
         guard let string, !string.isEmpty else { return nil }
         if let date = isoWithFraction.date(from: string) { return date }

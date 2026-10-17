@@ -3,14 +3,15 @@ import EurekaInstall
 import EurekaKit
 import Foundation
 
-/// Codex hooks（`~/.codex/hooks.json`，Codex 0.145.0 实勘）：安装器 + 解码器。
-/// fixture 照抄本机真实文件的形状 —— 该文件正被 Otty 占用，所以「共存」是首要测点。
+/// Codex hooks (`~/.codex/hooks.json`, observed in Codex 0.145.0): installer + decoder.
+/// Fixtures copy the shape of the real local file - that file is occupied by Otty, so coexistence
+/// is the primary thing under test.
 func codexHooksTests(_ t: TestRunner) {
     codexHooksInstallerTests(t)
     codexHookDecoderTests(t)
 }
 
-/// 本机真实 hooks.json 的骨架（Otty 占着 4 个事件；`_otty` 是它自己的标记字段）
+/// Skeleton of the real local hooks.json (Otty holds 4 events; `_otty` is its own marker field)
 private let ottyOccupied = """
 {
   "hooks": {
@@ -34,12 +35,13 @@ private func codexHooksInstallerTests(_ t: TestRunner) {
             (try? JSONSerialization.jsonObject(with: Data(updated.utf8))) as? [String: Any])
         let hooks = try expectSome(root["hooks"] as? [String: Any])
 
-        // 4 个事件全装上
+        // All 4 events installed
         try expectEqual(
             Set(hooks.keys), Set(CodexHooksInstaller.managedEvents),
             "实得 \(hooks.keys.sorted())")
 
-        // Otty 原有的两个事件里，它自己的条目仍在（这是最容易踩坏的地方）
+        // In Otty's two existing events, its own entries are still there (the easiest thing to
+        // break)
         for event in ["PermissionRequest", "SessionStart"] {
             let entries = try expectSome(hooks[event] as? [[String: Any]])
             let otty = entries.filter { $0["_otty"] as? Bool == true }
@@ -52,7 +54,8 @@ private func codexHooksInstallerTests(_ t: TestRunner) {
             try expectEqual(ours.count, 1, "\(event) 应恰好有我们一条")
         }
 
-        // 命令行必须带事件名（Codex 载荷不含事件名，只能靠这个区分）
+        // The command line must carry the event name (the Codex payload has none; this is the only
+        // way to tell events apart)
         let permission = try expectSome(hooks["PermissionRequest"] as? [[String: Any]])
         let command = permission
             .flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
@@ -95,7 +98,8 @@ private func codexHooksInstallerTests(_ t: TestRunner) {
     }
 
     t.test("认不出的结构一律拒写，绝不覆盖看不懂的内容") {
-        // 事件值不是条目数组 → 必须抛错。若当成空数组处理，会把这段直接删掉。
+        // An event value that isn't an entry array → must throw. Treating it as empty would delete
+        // that section outright.
         let weird = #"{"hooks":{"Stop":"some-command-string"}}"#
         var threw = false
         do { _ = try CodexHooksInstaller.install(into: weird, relayPath: "/r/eureka-relay") }
@@ -113,13 +117,14 @@ private func codexHooksInstallerTests(_ t: TestRunner) {
                 json: full, expectedRelayPath: relay, relayIsExecutable: { _ in true }),
             .installed)
 
-        // relay 不可执行 → 配置没问题但事件全静默丢，必须单独报出来
+        // relay not executable → the config is fine but every event is silently dropped, so it must
+        // be reported separately
         try expectEqual(
             CodexHooksInstaller.diagnose(
                 json: full, expectedRelayPath: relay, relayIsExecutable: { _ in false }),
             .relayMissing(path: relay))
 
-        // 路径被手改过 → driftedPath（安装按钮默认拒绝覆盖）
+        // Path edited by hand → driftedPath (the install button refuses to overwrite by default)
         let drifted = full.replacingOccurrences(of: "/stable/", with: "/hand-edited/")
         guard case .driftedPath = CodexHooksInstaller.diagnose(
             json: drifted, expectedRelayPath: relay, relayIsExecutable: { _ in true })
@@ -138,7 +143,7 @@ private func codexHooksInstallerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 解码器
+// MARK: - Decoder
 
 private func codexHookDecoderTests(_ t: TestRunner) {
     t.suite("CodexHookDecoder · Codex hook 载荷")
@@ -160,7 +165,8 @@ private func codexHookDecoderTests(_ t: TestRunner) {
         try expectEqual(event.source, .codex)
         try expectEqual(event.cwd, "/w")
 
-        // 取不到工具名也要照样出等待卡（"在等你确认"本身就是要传达的信息）
+        // Even without a tool name, still emit the waiting card ("waiting for your confirmation" is
+        // itself the message to convey)
         let bare = try expectSome(decode([
             "hook_event_name": "PermissionRequest", "session_id": "s1",
         ]))
@@ -188,7 +194,8 @@ private func codexHookDecoderTests(_ t: TestRunner) {
     }
 
     t.test("session id 两种落法都认；缺事件名/会话 id 一律返回 nil 不抛错") {
-        // 实勘旁证：同机 Otty 的 codex 钩子脚本同时兼容顶层 session_id 与 payload.id
+        // Corroborating evidence: Otty's codex hook script on the same machine accepts both a
+        // top-level session_id and payload.id
         let nested = try expectSome(decode([
             "hook_event_name": "Stop", "payload": ["id": "nested-1"],
         ]))
@@ -202,7 +209,8 @@ private func codexHookDecoderTests(_ t: TestRunner) {
     }
 
     t.test("codex-hook 通道接进 EventRouter") {
-        // RawEvent 只有 init?(data:)：照 relay 写进 spool 的信封形状构造
+        // RawEvent only has init?(data:): build it in the envelope shape the relay writes into the
+        // spool
         let envelope: [String: Any] = [
             "channel": "codex-hook",
             "receivedAtMs": Date().timeIntervalSince1970 * 1000,

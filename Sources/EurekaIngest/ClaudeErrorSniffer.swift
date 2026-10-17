@@ -1,8 +1,9 @@
 import Foundation
 
-/// Stop 事件后的 transcript 尾部嗅探：
-/// - 最后一条 assistant 是 API 错误行（model=="<synthetic>" / isApiErrorMessage）→ 升级为出错
-/// - 顺手取 ai-title 行升级任务标题
+/// Transcript tail sniffing after a Stop event:
+/// - Last assistant is an API error line (model=="<synthetic>" / isApiErrorMessage) → escalate to
+///   error
+/// - Also picks up the ai-title line to upgrade the task title
 public enum ClaudeErrorSniffer {
     public struct Findings: Equatable {
         public var isError = false
@@ -30,7 +31,8 @@ public enum ClaudeErrorSniffer {
 
         var findings = Findings()
         var sawLatestAssistant = false
-        // 从后往前：最新的 assistant 行决定是否出错；最新的 ai-title 作标题
+        // Back to front: the newest assistant line decides whether it errored; the newest ai-title
+        // becomes the title
         for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
             guard
                 let object = try? JSONSerialization.jsonObject(with: Data(line)),
@@ -43,7 +45,7 @@ public enum ClaudeErrorSniffer {
             }
 
             if type == "assistant", !sawLatestAssistant {
-                // 子代理（sidechain）的错误不算主任务出错
+                // Subagent (sidechain) errors don't count as the main task erroring
                 if root["isSidechain"] as? Bool == true { continue }
                 sawLatestAssistant = true
                 let message = root["message"] as? [String: Any]

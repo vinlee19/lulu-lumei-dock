@@ -5,7 +5,7 @@ import Foundation
 func eurekaDBSnapshotTests(_ t: TestRunner) {
     t.suite("EurekaDBSnapshot（分析快照）")
 
-    /// 建一个带三张事实表的最小源库
+    /// Builds a minimal source database with the three fact tables
     func makeSourceDB(at url: URL) throws -> SQLiteDB {
         let db = try SQLiteDB(path: url.path)
         try db.execute("""

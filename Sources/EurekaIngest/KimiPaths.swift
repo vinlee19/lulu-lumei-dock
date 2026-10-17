@@ -1,15 +1,16 @@
 import Foundation
 
-/// Kimi Code CLI 的本地数据路径（默认 `~/.kimi-code`）。
-/// Kimi 官方允许用 `KIMI_CODE_HOME` 迁移数据目录（文档明言"never assume ~/.kimi-code"），
-/// 故解析优先级：`EUREKA_KIMI_HOME`（单测/显式覆盖）> `KIMI_CODE_HOME`（跟随 CLI 迁移）> 默认。
-/// 注意 GUI 应用不继承 shell env——用户若在 shell 里迁了 KIMI_CODE_HOME，需用 EUREKA_KIMI_HOME 显式告知。
-/// 会话布局：`sessions/<wd_名_12hex>/<session_uuid>/{state.json, agents/<agentId>/wire.jsonl}`；
-/// 旧版 python CLI 的 `~/.kimi` 已废弃（官方自动迁移），不做回退。
+/// Kimi Code CLI local data paths (default `~/.kimi-code`). Kimi officially allows relocating the
+/// data directory via `KIMI_CODE_HOME` (the docs say "never assume ~/.kimi-code"), so resolution
+/// order is: `EUREKA_KIMI_HOME` (unit tests / explicit override) > `KIMI_CODE_HOME` (follows a CLI
+/// relocation) > default. The GUI app does not inherit the shell env — users who relocated
+/// KIMI_CODE_HOME in their shell must say so explicitly with EUREKA_KIMI_HOME. Session layout:
+/// `sessions/<wd_name_12hex>/<session_uuid>/{state.json, agents/<agentId>/wire.jsonl}`; the old
+/// python CLI's `~/.kimi` is obsolete (migrated automatically upstream), so there is no fallback.
 public enum KimiPaths {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
-    /// 配置主目录（env `EUREKA_KIMI_HOME` > `KIMI_CODE_HOME` > `~/.kimi-code`）
+    /// Config home (env `EUREKA_KIMI_HOME` > `KIMI_CODE_HOME` > `~/.kimi-code`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -22,7 +23,7 @@ public enum KimiPaths {
         return home().appendingPathComponent(".kimi-code", isDirectory: true)
     }
 
-    /// 会话根 `<home>/sessions`（env `EUREKA_KIMI_SESSIONS` 覆盖）
+    /// Session root `<home>/sessions` (overridden by env `EUREKA_KIMI_SESSIONS`)
     public static func sessionsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -33,21 +34,24 @@ public enum KimiPaths {
             .appendingPathComponent("sessions", isDirectory: true)
     }
 
-    /// 主配置 `<home>/config.toml`（default_model + per-model max_context_size，ctx% 分母来源）
+    /// Main config `<home>/config.toml` (default_model + per-model max_context_size, source of the
+    /// ctx% denominator)
     public static func configToml(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("config.toml")
     }
 
-    /// 全局记忆 `<home>/AGENTS.md`（Kimi 唯一的全局记忆文件；二进制 collect() 证实会读取）
+    /// Global memory `<home>/AGENTS.md` (Kimi's only global memory file; the binary's collect()
+    /// confirms it is read)
     public static func globalAgentsMd(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("AGENTS.md")
     }
 
-    /// 系统级技能根 `<home>/skills`（env `EUREKA_KIMI_SKILLS` 覆盖；SKILL.md 格式与 Claude 同构）
+    /// System-level skill root `<home>/skills` (overridden by env `EUREKA_KIMI_SKILLS`; SKILL.md
+    /// format same as Claude)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

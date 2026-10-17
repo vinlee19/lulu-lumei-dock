@@ -1,10 +1,11 @@
 import Foundation
 import EurekaKit
 
-/// 解析 grok `events.jsonl` 单行（`{"ts":ISO8601,"type":...}`）。
-/// events.jsonl 是 grok 的主生命周期源：turn_started/turn_ended、phase_changed 心跳、
-/// tool_started、permission_requested/resolved（→ 等待权限）齐全。
-/// session id / cwd 由调用方（tailer）从同目录 summary.json / 目录名带入。
+/// Parses one line of grok `events.jsonl` (`{"ts":ISO8601,"type":...}`).
+/// events.jsonl is grok's primary lifecycle source: turn_started/turn_ended, phase_changed
+/// heartbeats, tool_started and permission_requested/resolved (→ waiting for permission) are
+/// all present. session id / cwd are supplied by the caller (the tailer) from the sibling
+/// summary.json / directory name.
 public enum GrokEventDecoder {
     private static let isoWithFraction: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -18,7 +19,7 @@ public enum GrokEventDecoder {
         return isoWithFraction.date(from: string) ?? isoPlain.date(from: string)
     }
 
-    /// 单行解码 → 领域事件（0 或 1 个）
+    /// Decodes one line → domain events (0 or 1)
     public static func decode(
         line: Data, sessionId: String, cwd: String?
     ) -> [TaskEvent] {
@@ -49,9 +50,10 @@ public enum GrokEventDecoder {
                 title: nil,
                 detail: nil))
 
-        // 权限：请求 → 等待用户确认；解决 → 复位为运行（心跳）
-        // 自动放行（yolo/规则命中）时两者相邻到达，等待态转瞬即逝；
-        // 真正阻塞在用户时 permission_resolved 会晚若干轮询才来，等待卡如实停留。
+        // Permission: requested → waiting for user confirmation; resolved → back to running
+        // (heartbeat). On auto-approval (yolo / rule match) the two arrive back to back and the
+        // waiting state is momentary; when truly blocked on the user, permission_resolved arrives
+        // several polls later and the waiting card stays up accordingly.
         case "permission_requested":
             return event(.waiting(reason: .permission, message: root["tool_name"] as? String))
 
@@ -61,12 +63,13 @@ public enum GrokEventDecoder {
         case "tool_started":
             return event(.activity(tool: root["tool_name"] as? String))
 
-        // 流式/推理阶段与首 token：纯心跳，刷新活跃时间、把等待复位
+        // Streaming/reasoning phases and first token: pure heartbeat, refreshes activity time and
+        // resets waiting
         case "phase_changed", "first_token", "loop_started", "tool_completed":
             return event(.activity(tool: nil))
 
         default:
-            return []  // mcp_* / yolo_toggled 等不影响任务状态
+            return []  // mcp_* / yolo_toggled etc. do not affect task state
         }
     }
 
@@ -78,7 +81,7 @@ public enum GrokEventDecoder {
         case "error", "failed":
             return .error
         default:
-            return .success  // "completed" 及未知都按成功
+            return .success  // "completed" and anything unknown count as success
         }
     }
 }

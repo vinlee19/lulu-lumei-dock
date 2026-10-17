@@ -2,26 +2,29 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 计划浏览：卡片网格 + 来源筛选。「项目计划」（仓库内 plan 文档）与各工具来源分区平级展示。
-/// Claude 计划来自 ~/.claude/plans；Codex/opencode 等由 PlanMaterializer 从会话/库物化而来。
+/// Plan browser: card grid + source filter. "Project plans" (plan docs inside repos) sit at the
+/// same level as each tool's source section.
+/// Claude plans come from ~/.claude/plans; Codex/opencode etc. are materialized from sessions/
+/// databases by PlanMaterializer.
 struct PlansView: View {
     @ObservedObject var service: PlansService
 
-    /// 内嵌详情页当前展示的计划（nil = 列表）
+    /// Plan shown in the embedded detail page (nil = list)
     @State private var detail: PlanMaterializer.PlanEntry?
     @State private var deleting: PlanMaterializer.PlanEntry?
-    /// 来源筛选（nil = 全部）
+    /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
-    /// 管理区布局：列表 / 图标网格（默认列表，对齐设计稿）
+    /// Management area layout: list / icon grid (list by default, matching the design mock)
     @State private var layout: KnowledgeLayout = .list
 
-    /// 离屏渲染/预览专用：指定初始布局（交互时由 LayoutToggle 切换）
+    /// Offscreen rendering/preview only: sets the initial layout (LayoutToggle switches it
+    /// interactively)
     init(service: PlansService, initialLayout: KnowledgeLayout = .list) {
         self._service = ObservedObject(wrappedValue: service)
         self._layout = State(initialValue: initialLayout)
     }
 
-    /// 搜索 + 来源筛选后的扁平列表（按最近修改降序）
+    /// Flat list after search + source filtering (sorted by most recently modified first)
     private var filtered: [PlanMaterializer.PlanEntry] {
         service.plans
             .filter { selectedSource == nil || $0.source == selectedSource }
@@ -66,7 +69,7 @@ struct PlansView: View {
         }
     }
 
-    // MARK: - 顶部栏（标题 + 搜索 + 刷新 + 布局切换）
+    // MARK: - Top bar (title + search + refresh + layout toggle)
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -85,7 +88,7 @@ struct PlansView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - 主体（统计概览卡 + 来源 chips + 扁平列表/网格）
+    // MARK: - Body (stats overview card + source chips + flat list/grid)
 
     private let gridColumns = [GridItem(.flexible(), spacing: 14),
                                GridItem(.flexible(), spacing: 14),
@@ -152,7 +155,8 @@ struct PlansView: View {
         withAnimation(.easeOut(duration: 0.15)) { detail = plan }
     }
 
-    /// 跨页直达落点：按路径找到计划并打开详情（找不到不清空——扫描可能还没跑到）
+    /// Cross-page landing: find the plan by path and open its detail (don't clear when not found;
+    /// the scan may not have reached it yet)
     private func consumeFocus() {
         guard let path = service.focusPath, let entry = service.entry(atPath: path) else { return }
         withAnimation(.easeOut(duration: 0.15)) { detail = entry }
@@ -187,12 +191,14 @@ struct PlansView: View {
     }
 }
 
-/// 计划状态点 / 状态字颜色：草稿用可读灰（区别于分布条里的浅灰段）。
+/// Plan status dot / status text color: drafts use a readable gray (distinct from the light gray
+/// segment in the distribution bar).
 private func planAccentColor(_ status: PlanMaterializer.PlanStatus) -> Color {
     status == .draft ? Color(hex: "9A9AA0") : Theme.planStatusColor(status)
 }
 
-/// 真实文件（Claude 计划 / 项目文档）可编辑可删除；物化副本只读
+/// Real files (Claude plans / project docs) are editable and deletable; materialized copies are
+/// read-only
 private func planIsRealFile(_ plan: PlanMaterializer.PlanEntry) -> Bool {
     plan.source == .claude || plan.kind == .projectDocument
 }
@@ -224,8 +230,10 @@ private func planMenu(
     }
 }
 
-/// 计划图标卡：与技能卡同一套骨架——紫底方块 logo + 标题 + 摘要 + 状态/项目/时间。
-/// 不放进度环：卡面只交代「是什么、什么状态」，完成度留给列表视图。
+/// Plan icon card: same skeleton as the skill card: purple square logo + title + summary + status/
+/// project/time.
+/// No progress ring: the card face only says "what it is and what state it's in"; completion is
+/// left to the list view.
 private struct PlanCard: View {
     let plan: PlanMaterializer.PlanEntry
     let service: PlansService
@@ -240,7 +248,8 @@ private struct PlanCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     SourceLogoTile(source: plan.source, size: 28)
-                    // 计划标题比技能名长，留 2 行并恒占位（网格等高）
+                    // Plan titles are longer than skill names: allow 2 lines and always reserve the
+                    // space (equal-height grid)
                     Text(plan.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(2, reservesSpace: true)
@@ -270,7 +279,8 @@ private struct PlanCard: View {
     }
 }
 
-/// 计划列表行：状态点 + 来源 logo + 标题/项目·摘要 + 状态字 + 进度条% + 步数 + 时间 + 大小
+/// Plan list row: status dot + source logo + title/project·summary + status text + progress bar % +
+/// step count + time + size
 private struct PlanRow: View {
     let plan: PlanMaterializer.PlanEntry
     let service: PlansService
@@ -283,7 +293,8 @@ private struct PlanRow: View {
         ) {
             HStack(spacing: 10) {
                 Circle().fill(planAccentColor(plan.status)).frame(width: 8, height: 8)
-                // 与技能 / 记忆 / 代理列表行同款方块（紫底浅框 28pt）
+                // Same square as the skill / memory / agent list rows (purple background, light
+                // border, 28pt)
                 SourceLogoTile(source: plan.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plan.title)
@@ -335,7 +346,7 @@ private struct PlanRow: View {
     }
 }
 
-/// 计划卡片 / 详情工具条的金色图标小块（项目文档 = folder，其他 = doc.text）
+/// Gold icon tile for the plan card / detail toolbar (project doc = folder, others = doc.text)
 private struct PlanIconTile: View {
     let kind: PlanMaterializer.PlanKind
     var size: CGFloat = 26
@@ -354,7 +365,7 @@ private struct PlanIconTile: View {
     }
 }
 
-// MARK: - 内嵌详情页（专业 Markdown 文档渲染；真实文件可编辑）
+// MARK: - Embedded detail page (polished Markdown document rendering; real files are editable)
 
 private struct PlanDetailView: View {
     let plan: PlanMaterializer.PlanEntry
@@ -374,7 +385,8 @@ private struct PlanDetailView: View {
         self.service = service
         self.onBack = onBack
         self.onDelete = onDelete
-        // init 即加载：避免首帧空白（计划文档均为小文件，主线程读取无感）
+        // Load in init to avoid a blank first frame (plan docs are all small files, so reading them
+        // on the main thread is imperceptible)
         _text = State(initialValue: service.readContent(path: plan.path) ?? "")
     }
 
@@ -420,7 +432,7 @@ private struct PlanDetailView: View {
             }
             Spacer(minLength: 8)
             if editable {
-                // 分段「预览 / 编辑」：选中紫底白字
+                // Segmented "Preview / Edit": selected = white text on purple
                 CapsuleTabTray {
                     CapsuleTabButton(
                         title: L10n.text("Preview", zhHans: "预览"), fillWidth: false,

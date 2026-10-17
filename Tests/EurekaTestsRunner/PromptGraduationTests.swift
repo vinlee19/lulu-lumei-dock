@@ -6,9 +6,10 @@ func promptGraduationTests(_ t: TestRunner) {
     t.suite("PromptInstructionDestination · 记忆毕业落点")
 
     t.test("落点：claude 追加 ~/.claude/CLAUDE.md、codex 追加 AGENTS.md，都落指令页；其余源不开放") {
-        // 官方文档（code.claude.com/docs/en/memory 与 /claude-directory）里 Claude Code 加载的
-        // 只有 CLAUDE.md 系列、.claude/rules/ 与 projects/<project>/memory/ 自动记忆 ——
-        // 没有 ~/.claude/memories/，写进去 Claude 永远读不到，所以 claude 分支必须走 CLAUDE.md
+        // Per the official docs (code.claude.com/docs/en/memory and /claude-directory), Claude Code
+        // loads only the CLAUDE.md family, .claude/rules/ and the projects/<project>/memory/ auto
+        // memory — there is no ~/.claude/memories/; Claude never reads what's written there, so the
+        // claude branch must go to CLAUDE.md
         try expectEqual(
             PromptInstructionDestination.destination(for: .claude), .claudeUserInstructions)
         try expectEqual(PromptInstructionDestination.destination(for: .codex), .codexAgentsFile)

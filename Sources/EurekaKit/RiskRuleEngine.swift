@@ -1,13 +1,14 @@
 import Foundation
 
-/// 一条风险规则：对某几类操作的 detail 正则匹配，命中则标记对应等级。
-/// 数据化（非闭包）→ 天然可 JSON 序列化，后续可走 audit-rules.json override（本期只内置）。
+/// One risk rule: a regex matched against the detail of certain operation kinds; a match flags the
+/// given level. Data, not closures → naturally JSON-serializable, so an audit-rules.json override
+/// can come later (built-in only for now).
 public struct RiskRule: Codable, Sendable, Equatable {
     public var id: String          // "sudo" / "rm-rf" / "curl-pipe-sh"…
-    public var title: String       // 中文标题（「sudo 提权执行」）
+    public var title: String       // Localized display title (e.g. "sudo privilege escalation")
     public var level: RiskLevel
-    public var kinds: Set<ToolKind> // 域限定：命令规则只扫 command，路径规则只扫 edit/read
-    public var pattern: String     // 逐行正则（caseInsensitive）
+    public var kinds: Set<ToolKind> // Domain scoping: command rules scan only command, path rules only edit/read
+    public var pattern: String     // Per-line regex (caseInsensitive)
 
     public init(id: String, title: String, level: RiskLevel, kinds: Set<ToolKind>, pattern: String) {
         self.id = id
@@ -18,9 +19,11 @@ public struct RiskRule: Codable, Sendable, Equatable {
     }
 }
 
-/// 内置风险规则引擎。规则编译一次缓存，按 level 降序、数组序返回首个命中。
+/// Built-in risk rule engine. Rules are compiled once and cached; returns the first match by
+/// descending level, then array order.
 public enum RiskRuleEngine {
-    /// 内置规则集（首发）。顺序即同级优先级：更具体的规则排在前。
+    /// Built-in rule set (initial release). Order is the priority within a level: more specific
+    /// rules come first.
     public static var builtinRules: [RiskRule] { [
         // ── high ─────────────────────────────────────────────
         RiskRule(id: "rm-rf", title: L10n.text("Recursive deletion of an absolute or home path", zhHans: "递归删除绝对/家目录路径"), level: .high, kinds: [.command],
@@ -60,7 +63,8 @@ public enum RiskRuleEngine {
                  pattern: #"\bsudo\b"#),
     ] }
 
-    /// 编译缓存：(规则下标, 编译好的正则)，按 level 降序稳定排序（数组序为二级键）。
+    /// Compile cache: (rule index, compiled regex), stably sorted by descending level (array order
+    /// is the secondary key).
     private static let compiled: [(ruleIndex: Int, regex: NSRegularExpression)] = {
         builtinRules
             .enumerated()
@@ -70,7 +74,7 @@ public enum RiskRuleEngine {
                 else { return nil }
                 return (index, rule, regex)
             }
-            // level 降序（high 先），同级按原数组序
+            // Descending level (high first); within a level, original array order
             .sorted { lhs, rhs in
                 if lhs.1.level != rhs.1.level { return lhs.1.level > rhs.1.level }
                 return lhs.0 < rhs.0
@@ -78,7 +82,8 @@ public enum RiskRuleEngine {
             .map { ($0.0, $0.2) }
     }()
 
-    /// 对一次操作求风险。返回首个（最高级、数组序最前）命中，无命中返回 nil。
+    /// Assess one operation's risk. Returns the first match (highest level, earliest in array
+    /// order), or nil if none.
     public static func evaluate(kind: ToolKind, tool: String, detail: String) -> RiskHit? {
         guard !detail.isEmpty else { return nil }
         let range = NSRange(detail.startIndex..., in: detail)
@@ -94,8 +99,8 @@ public enum RiskRuleEngine {
     }
 }
 
-/// 告警节流：同一 (会话, 规则) 在冷却期内只放行一次，避免反复 sudo 刷屏。
-/// 纯逻辑（now 外部注入），可单测。
+/// Alert throttling: the same (session, rule) passes only once per cooldown, so repeated sudo
+/// doesn't flood the screen. Pure logic (now is injected), unit-testable.
 public struct RiskAlertThrottle: Sendable {
     private let cooldown: TimeInterval
     private let maxEntries: Int
@@ -111,7 +116,7 @@ public struct RiskAlertThrottle: Sendable {
         if let last = lastFired[key], now.timeIntervalSince(last) < cooldown {
             return false
         }
-        // 简单防膨胀：超上限清空（键极少，重置成本可忽略）
+        // Simple growth guard: clear everything past the cap (very few keys, so resetting is cheap)
         if lastFired.count >= maxEntries {
             lastFired.removeAll(keepingCapacity: true)
         }

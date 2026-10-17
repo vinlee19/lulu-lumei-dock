@@ -2,14 +2,15 @@ import EurekaKit
 import Foundation
 import UserNotifications
 
-/// 系统通知（UNUserNotificationCenter）封装：高危审计告警在锁屏/其他桌面也可见。
-/// 关键守卫：非 .app 进程（swift run 开发态）下 bundleProxyForCurrentProcess 为 nil，
-/// 一旦触碰 UNUserNotificationCenter.current() 会直接崩溃 → 此时完全不调用，降级为仅岛内红卡。
+/// System notification (UNUserNotificationCenter) wrapper: high-risk audit alerts stay visible on
+/// the lock screen / other desktops. Key guard: in a non-.app process (`swift run` dev mode)
+/// bundleProxyForCurrentProcess is nil, and touching UNUserNotificationCenter.current() crashes
+/// outright -> never call it then; fall back to the in-island red card only.
 @MainActor
 final class NotificationService: NSObject, ObservableObject {
     enum Availability: Equatable {
         case unknown
-        case unavailableNotBundled   // 开发态（swift run）：系统通知不可用
+        case unavailableNotBundled   // dev mode (swift run): system notifications unavailable
         case authorized
         case denied
     }
@@ -17,14 +18,15 @@ final class NotificationService: NSObject, ObservableObject {
     @Published private(set) var availability: Availability =
         NotificationService.isBundled ? .unknown : .unavailableNotBundled
 
-    /// 只有 .app 包内进程才能安全触碰 UNUserNotificationCenter
+    /// Only a process inside an .app bundle can safely touch UNUserNotificationCenter
     static var isBundled: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
     private var center: UNUserNotificationCenter? {
         Self.isBundled ? UNUserNotificationCenter.current() : nil
     }
 
-    /// 打开系统通知开关时调用：请求授权（首次弹系统弹窗），更新 availability
+    /// Called when the system-notification toggle is turned on: requests authorization (the first
+    /// time shows the system prompt) and updates availability
     func enable() {
         guard let center else {
             availability = .unavailableNotBundled
@@ -38,7 +40,7 @@ final class NotificationService: NSObject, ObservableObject {
         }
     }
 
-    /// 刷新当前授权状态（设置页出现时）
+    /// Refreshes the current authorization status (when the Settings page appears)
     func refresh() {
         guard let center else {
             availability = .unavailableNotBundled
@@ -55,7 +57,8 @@ final class NotificationService: NSObject, ObservableObject {
         }
     }
 
-    /// 推送一条高危告警（identifier 用 opId 去重，避免同操作重复通知）
+    /// Posts a high-risk alert (identifier is the opId for dedup, so the same operation isn't
+    /// notified twice)
     func postRiskAlert(_ alert: RiskAlert) {
         guard let center else { return }
         let content = UNMutableNotificationContent()
@@ -68,7 +71,8 @@ final class NotificationService: NSObject, ObservableObject {
             identifier: "eureka-audit-\(alert.opId)", content: content, trigger: nil))
     }
 
-    /// 推送一条关键事件通知（完成/等待/出错；identifier 去重，同事件不重复弹）
+    /// Posts a key-event notification (finished / waiting / error; identifier dedups so the same
+    /// event doesn't pop twice)
     func postEvent(_ note: SystemEventNotification) {
         guard let center else { return }
         let content = UNMutableNotificationContent()
@@ -81,7 +85,8 @@ final class NotificationService: NSObject, ObservableObject {
 }
 
 extension NotificationService: UNUserNotificationCenterDelegate {
-    /// app 前台时也横幅 + 声音展示（否则前台通知会被静默）
+    /// Show banner + sound even while the app is frontmost (otherwise foreground notifications are
+    /// silenced)
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

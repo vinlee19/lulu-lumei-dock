@@ -1,7 +1,8 @@
 import Foundation
 
-/// 限额打满预测：对最近的用量百分比采样做线性外推，估算窗口打满时刻。
-/// 纯函数、无 IO——采样持久化与告警节流由调用层负责。
+/// Rate-limit exhaustion forecast: linear extrapolation over recent usage-percentage samples to
+/// estimate when the window fills. Pure function, no IO; sample persistence and alert throttling
+/// belong to the caller.
 public enum LimitForecaster {
     public struct Point: Equatable, Sendable {
         public var ts: Date
@@ -13,23 +14,26 @@ public enum LimitForecaster {
         }
     }
 
-    /// 告警资格线：当前用量低于此值不预测（低位噪声大、且没有行动价值）
+    /// Alert eligibility floor: no forecast while current usage is below this (low values are noisy
+    /// and not actionable)
     public static let minPercent: Double = 50
-    /// 只对"这个视距内会打满"发出预测（太远没有行动价值）
+    /// Only forecast "will fill within this horizon" (anything further out isn't actionable)
     public static let horizon: TimeInterval = 90 * 60
-    /// 拟合样本最少数量与最短时间跨度（数据太少斜率不可信）
+    /// Minimum sample count and time span for the fit (too little data makes the slope
+    /// untrustworthy)
     static let minPoints = 3
     static let minSpan: TimeInterval = 10 * 60
 
-    /// 线性外推打满时刻。不满足资格（样本不足 / 斜率非正 / 当前 < minPercent /
-    /// 打满时刻超出视距）返回 nil。窗口重置（百分比回落）自动只取回落后的尾段拟合。
+    /// Linearly extrapolate the fill time. Returns nil when not eligible (too few samples /
+    /// non-positive slope / current < minPercent / fill time beyond the horizon). A window reset
+    /// (percentage drops) automatically fits only the tail after the drop.
     public static func forecastFullAt(
         points: [Point], now: Date,
         minPercent: Double = LimitForecaster.minPercent,
         horizon: TimeInterval = LimitForecaster.horizon
     ) -> Date? {
         let sorted = points.sorted { $0.ts < $1.ts }
-        // 截取最后一次明显回落（窗口重置）之后的尾段
+        // keep only the tail after the last significant drop (window reset)
         var tail: [Point] = []
         for point in sorted {
             if let last = tail.last, point.percent < last.percent - 1 {
@@ -44,7 +48,8 @@ public enum LimitForecaster {
               last.percent >= minPercent, last.percent < 100
         else { return nil }
 
-        // 最小二乘线性拟合 percent = a + b·t（t 取相对秒，数值稳定）
+        // least-squares linear fit percent = a + b·t (t in relative seconds for numerical
+        // stability)
         let t0 = first.ts.timeIntervalSince1970
         let xs = tail.map { $0.ts.timeIntervalSince1970 - t0 }
         let ys = tail.map(\.percent)
@@ -56,7 +61,7 @@ public enum LimitForecaster {
         let denominator = n * sumXX - sumX * sumX
         guard denominator > 0 else { return nil }
         let slope = (n * sumXY - sumX * sumY) / denominator
-        // 斜率下限：每分钟 0.01% 以下视为平稳，不预测
+        // slope floor: below 0.01% per minute counts as flat; no forecast
         guard slope > 0.01 / 60 else { return nil }
         let intercept = (sumY - slope * sumX) / n
 

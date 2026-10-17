@@ -1,22 +1,23 @@
 import EurekaKit
 import Foundation
 
-/// 一个**记忆库**：某个项目的 `memory/` 目录 —— 一份索引（MEMORY.md）+ 若干条目。
+/// A **memory library**: one project's `memory/` directory — an index (MEMORY.md) + some entries.
 ///
-/// 这是 Claude（以及同构的 Qwen）真正的记忆形态：条目由 agent 自己增删，索引里一行一条钩子。
-/// 记忆页把整库折叠成一行、点进去看条目，就是照这个结构来的 —— 否则单个项目 73 条
-/// 会把「全局记忆」那几条彻底冲掉。
+/// This is the real shape of Claude's (and the identically structured Qwen's) memory: the agent
+/// adds and removes entries itself, one hook line per entry in the index. The Memory tab folds a
+/// whole library into one row that opens to its entries, following this structure — otherwise a
+/// single project's 73 entries would completely drown out the few global-memory entries.
 public struct MemoryLibrary: Equatable, Sendable, Identifiable {
     public var id: String { key }
-    /// `"<source>:<encoded-project-dir>"`，与 `MemoryEntry.libraryKey` 同源
+    /// `"<source>:<encoded-project-dir>"`, same origin as `MemoryEntry.libraryKey`
     public var key: String
     public var source: AgentSource
     public var projectName: String
-    /// 库目录（`~/.claude/projects/<encoded>/memory`）
+    /// Library directory (`~/.claude/projects/<encoded>/memory`)
     public var directory: String
-    /// 索引文件；nil = 这个库还没有 MEMORY.md
+    /// Index file; nil = this library has no MEMORY.md yet
     public var index: MemoryEntry?
-    /// 条目（索引除外），最近修改在前
+    /// Entries (excluding the index), most recently modified first
     public var entries: [MemoryEntry]
 
     public init(
@@ -31,10 +32,10 @@ public struct MemoryLibrary: Equatable, Sendable, Identifiable {
         self.entries = entries
     }
 
-    /// 条目数（**不含**索引：索引是目录不是记忆）
+    /// Entry count (**excluding** the index: the index is a directory, not a memory)
     public var count: Int { entries.count }
 
-    /// 体积含索引：用户在「记忆占了多少盘」这个问题上不会把索引排除在外
+    /// Size includes the index: users asking "how much disk does memory take" wouldn't exclude it
     public var sizeBytes: UInt64 {
         entries.reduce(index?.sizeBytes ?? 0) { $0 + $1.sizeBytes }
     }
@@ -49,14 +50,15 @@ public struct MemoryLibrary: Equatable, Sendable, Identifiable {
         return counts
     }
 
-    /// 有来源会话且 transcript 还在的条目数（图谱里可跳转的那些）
+    /// Number of entries with an origin session whose transcript still exists (the navigable ones
+    /// in the graph)
     public var linkedSessionCount: Int {
         Set(entries.compactMap { $0.originSessionPath == nil ? nil : $0.originSessionId }).count
     }
 
-    // MARK: - 索引漂移（`MEMORY.md` 与目录实际内容对账）
+    // MARK: - Index drift (reconciling `MEMORY.md` with the directory's actual contents)
 
-    /// 索引正文收录的条目键（归一化后，用于与实际文件比对）
+    /// Entry keys listed in the index body (normalized, for comparison with actual files)
     private var indexedKeys: Set<String> {
         Set((index?.indexedTargets ?? []).map {
             MemoryGraphBuilder.normalizeKey(
@@ -64,22 +66,24 @@ public struct MemoryLibrary: Equatable, Sendable, Identifiable {
         })
     }
 
-    /// **未被 `MEMORY.md` 收录的条目**。agent 是读索引决定加载什么的 ——
-    /// 文件躺在目录里但索引没列，等于**死记忆**（实勘 semantic-layer 库 72 条里有 2 条如此）。
-    /// 没有索引文件时返回空：那种库压根没有"收录"这回事，不该把全部条目报成异常。
+    /// **Entries not listed in `MEMORY.md`**. The agent reads the index to decide what to load —
+    /// a file sitting in the directory but missing from the index is **dead memory** (2 of the 72
+    /// entries in the surveyed semantic-layer library were like this).
+    /// Returns empty when there is no index file: such a library has no notion of "listed" at all,
+    /// so reporting every entry as an anomaly would be wrong.
     public var unindexedEntries: [MemoryEntry] {
         guard index != nil else { return [] }
         let keys = indexedKeys
         return entries.filter { entry in
             let basename = URL(fileURLWithPath: entry.path)
                 .deletingPathExtension().lastPathComponent
-            // 文件名或 frontmatter name 任一被收录即算收录
+            // Listed if either the file name or the frontmatter name is listed
             return !keys.contains(MemoryGraphBuilder.normalizeKey(basename))
                 && !keys.contains(MemoryGraphBuilder.normalizeKey(entry.title))
         }
     }
 
-    /// 索引里列了、目录里却没有的条目（指向空气的引用）
+    /// Entries listed in the index but missing from the directory (references pointing at nothing)
     public var danglingIndexRefs: [String] {
         guard let index else { return [] }
         var actual = Set<String>()
@@ -96,12 +100,13 @@ public struct MemoryLibrary: Equatable, Sendable, Identifiable {
         }
     }
 
-    /// 这个库有没有需要提醒的健康问题
+    /// Whether this library has a health issue worth flagging
     public var hasDrift: Bool { !unindexedEntries.isEmpty || !danglingIndexRefs.isEmpty }
 
     public var allFiles: [MemoryEntry] { (index.map { [$0] } ?? []) + entries }
 
-    /// 按 `libraryKey` 归组。纯函数，输入次序无关（内部自排），便于单测。
+    /// Groups by `libraryKey`. Pure function, independent of input order (sorts internally), easy
+    /// to unit test.
     public static func group(_ all: [MemoryEntry]) -> [MemoryLibrary] {
         var buckets: [String: [MemoryEntry]] = [:]
         for entry in all {
@@ -125,7 +130,8 @@ public struct MemoryLibrary: Equatable, Sendable, Identifiable {
                     .deletingLastPathComponent().path,
                 index: index, entries: entries))
         }
-        // 条目多的在前、同数按项目名：库行顺序不能随字典遍历漂移
+        // Larger libraries first, ties by project name: library row order must not drift with
+        // dictionary iteration
         return libraries.sorted {
             $0.count == $1.count
                 ? $0.projectName.lowercased() < $1.projectName.lowercased()
@@ -133,7 +139,8 @@ public struct MemoryLibrary: Equatable, Sendable, Identifiable {
         }
     }
 
-    /// 映射成 EurekaKit 的图谱输入（模块方向要求：EurekaKit 不能反向依赖 EurekaIngest）
+    /// Maps to EurekaKit's graph input (module direction: EurekaKit must not depend back on
+    /// EurekaIngest)
     public func graphInput() -> MemoryGraphInput {
         let unindexed = Set(unindexedEntries.map(\.path))
         return MemoryGraphInput(

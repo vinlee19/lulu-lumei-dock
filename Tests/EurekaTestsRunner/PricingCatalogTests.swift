@@ -3,7 +3,8 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-/// 用样本（从真实 LiteLLM / models.dev 裁出的子集）构建目录；样本条目少，下限调低
+/// Builds the catalog from samples (subsets trimmed from real LiteLLM / models.dev); samples are
+/// small, so the floor is lowered
 private func sampleCatalog() throws -> PriceCatalog {
     let litellm = try PriceCatalogParser.parseLiteLLM(
         fixtureData("pricing/litellm-sample.json"), minEntries: 10)
@@ -16,7 +17,7 @@ private func sampleCatalog() throws -> PriceCatalog {
         modelsDevMeta: .init(fetchedAt: now, entryCount: modelsDev.count))
 }
 
-/// 随包手写表的关键条目（软 unknown + 硬 unknown + 旧前缀）
+/// Key entries of the bundled handwritten table (soft unknown + hard unknown + legacy prefix)
 private let bundledSample: [ModelPrice] = [
     ModelPrice(match: "gpt-5", inputPerM: 1.25, outputPerM: 10, cacheReadPerM: 0.125),
     ModelPrice(match: "claude-opus", inputPerM: 15, outputPerM: 75),
@@ -71,7 +72,7 @@ func pricingCatalogTests(_ t: TestRunner) {
     t.test("校验：条目过少 / 骤减一半 / 超体积 均拒收") {
         let data = try fixtureData("pricing/litellm-sample.json")
         do {
-            _ = try PriceCatalogParser.parseLiteLLM(data)  // 默认下限 1000
+            _ = try PriceCatalogParser.parseLiteLLM(data)  // default floor 1000
             throw ExpectationError(description: "样本仅几十条，应因条目过少被拒")
         } catch is CatalogValidationError {}
         do {
@@ -155,7 +156,7 @@ func pricingCatalogTests(_ t: TestRunner) {
         let plan = table.resolution(for: "glm-5.3", provider: "zhipuai-coding-plan")
         try expectEqual(plan.price?.inputPerM, 1.4)
         try expectEqual(plan.subscription, true)
-        // 用户自定义名里带 plan 也视为订阅
+        // A user-defined name containing "plan" also counts as a subscription
         try expectEqual(table.resolution(for: "glm-5.2", provider: "coding-plan").subscription, true)
     }
 
@@ -202,7 +203,7 @@ func pricingCatalogTests(_ t: TestRunner) {
 
     t.test("黄金表：本地账本里的真实模型名") {
         let table = try makeTable()
-        // (模型, provider, 期望输入价；nil = 未定价)
+        // (model, provider, expected input price; nil = unpriced)
         let golden: [(String, String?, Double?)] = [
             ("claude-fable-5", nil, 10), ("claude-fable-5-1", nil, 10),
             ("claude-haiku-4-5-20251001", nil, 1), ("claude-opus-4-7", nil, 5),

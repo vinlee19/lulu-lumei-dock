@@ -2,10 +2,11 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// ZCode 会话索引：只读 `~/.zcode/cli/db/db.sqlite` 的 `session` 表 -> `AgentSessionInfo`。
-/// 只取顶层会话（parent_id 空）；`sess_subagent_*` 子会话是子 agent，不进浏览列表。
-/// schema 与 opencode 同源（time_created/time_updated 为 epoch 毫秒）；
-/// zcode 无逐会话 transcript 文件，故 sizeBytes 记 0（与 opencode 同例）。
+/// ZCode session index: reads only the `session` table of `~/.zcode/cli/db/db.sqlite` ->
+/// `AgentSessionInfo`. Top-level sessions only (empty parent_id); `sess_subagent_*` child
+/// sessions are subagents and stay out of the browse list.
+/// Schema shared with opencode (time_created/time_updated are epoch millis); zcode has no
+/// per-session transcript file, so sizeBytes is 0 (same as opencode).
 public enum ZcodeSessionIndexer {
     public static func index(
         dbPath: URL,
@@ -37,7 +38,7 @@ public enum ZcodeSessionIndexer {
         return rows.filter { !$0.id.isEmpty }
     }
 
-    /// 顶层会话目录集合（供项目级技能发现并入）
+    /// Dirs of top-level sessions (merged into project-level skill discovery)
     public static func recentDirectories(dbPath: URL, maxSessions: Int = 300) -> [String] {
         index(dbPath: dbPath, maxSessions: maxSessions).compactMap(\.cwd)
     }

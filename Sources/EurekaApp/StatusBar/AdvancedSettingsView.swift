@@ -5,8 +5,9 @@ import EurekaStore
 import EurekaUsage
 import SwiftUI
 
-/// 设置→高级：折叠卡片组（仿参考设计：图标+标题+描述+chevron）
-/// 接入状态 / 配置文件目录 / 数据管理 / 数据健康
+/// Settings → Advanced: a group of collapsible cards (modeled on the reference design:
+/// icon + title + description + chevron)
+/// Integration status / config file directories / data management / data health
 struct AdvancedSettingsView: View {
     @ObservedObject var installer: InstallerService
     @ObservedObject var usageService: UsageService
@@ -48,7 +49,7 @@ struct AdvancedSettingsView: View {
         .onAppear { installer.refresh() }
     }
 
-    // MARK: - 配置文件目录
+    // MARK: - Config file directories
 
     @ViewBuilder
     private var pathsContent: some View {
@@ -62,7 +63,8 @@ struct AdvancedSettingsView: View {
         pathRow("CodeBuddy", home.appendingPathComponent(".codebuddy"))
         pathRow("Qoder", home.appendingPathComponent(".qoder-cn"))
         pathRow("Cursor", home.appendingPathComponent(".cursor"))
-        // Trae 是两个独立应用：CN 版与国际版各自一套目录，数据不互通
+        // Trae is two independent apps: the CN and international editions each have their own
+        // directories and share no data
         pathRow("Trae", home.appendingPathComponent(".trae-cn"))
         pathRow(L10n.text("Trae (international)", zhHans: "Trae（国际版）"), home.appendingPathComponent(".trae"))
         pathRow(L10n.text("lulu-lumei-dock data", zhHans: "lulu-lumei-dock 数据"), SpoolPaths.root())
@@ -91,7 +93,7 @@ struct AdvancedSettingsView: View {
         }
     }
 
-    // MARK: - 数据管理
+    // MARK: - Data management
 
     @ViewBuilder
     private var dataContent: some View {
@@ -124,7 +126,7 @@ struct AdvancedSettingsView: View {
             .font(.system(size: 9.5))
             .foregroundStyle(.tertiary)
         // Destructive and slow to rebuild (a full rescan of every transcript): confirm first,
-        // same as the audit page's 清空.
+        // same as the audit page's Clear.
         Button(L10n.text("Clear Full-Text Index", zhHans: "清空全文索引")) { confirmingClearIndex = true }
             .controlSize(.small)
             .confirmationDialog(
@@ -137,9 +139,10 @@ struct AdvancedSettingsView: View {
     }
 }
 
-// MARK: - 模型价格
+// MARK: - Model pricing
 
-/// 价格目录状态 + 联网开关 + 未定价/估算模型清单（一键复制覆盖模板）
+/// Price catalog status + network toggle + list of unpriced/estimated models (one-click copy of
+/// an override template)
 private struct PricingSection: View {
     @ObservedObject var usageService: UsageService
     @ObservedObject var settings: AppSettings
@@ -239,10 +242,11 @@ private struct PricingSection: View {
     }
 }
 
-// MARK: - 数据健康（自 SettingsView 迁入）
+// MARK: - Data health (moved here from SettingsView)
 
-/// 各数据源的心跳/产出/失败一览（每 5 秒刷新）。
-/// 轮询型数据源停摆（定时器死掉）会直接红灯，不用再"感觉不对"。
+/// Heartbeat / output / failure overview for each data source (refreshed every 5 seconds).
+/// A stalled polling source (dead timer) goes straight to red, so nobody has to "sense something
+/// is off" anymore.
 private struct HealthSection: View {
     @State private var rows: [(name: String, entry: HealthRegistry.Entry)] = []
     private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
@@ -308,9 +312,10 @@ private struct HealthSection: View {
     }
 }
 
-// MARK: - 折叠卡片组件
+// MARK: - Collapsible card component
 
-/// 高级页折叠卡：图标 + 标题 + 描述 + chevron，点击展开内容（默认收起）
+/// Collapsible card for the Advanced page: icon + title + description + chevron; tap to expand
+/// the content (collapsed by default)
 struct CollapsibleCard<Content: View>: View {
     let icon: String
     let tint: Color

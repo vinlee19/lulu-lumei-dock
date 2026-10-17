@@ -1,10 +1,11 @@
 import Foundation
 
-/// 一条记忆的用途分类：取自 markdown frontmatter 里的 `metadata.type`
-/// （Claude 的记忆写手约定四类：user / feedback / project / reference）。
+/// What a memory is for: taken from `metadata.type` in the markdown frontmatter (Claude's
+/// memory-writing convention defines four: user / feedback / project / reference).
 ///
-/// `other` 承接**没写 type 的旧记忆**（本机 97 个文件里 29 个如此）——
-/// 不去猜类别：猜错会把「用户偏好」混进「项目进展」，比空着更误导。
+/// `other` takes **old memories without a type** (29 of 97 local files): no guessing, since a wrong
+/// guess mixes "user preferences" into "project progress", which misleads more than leaving it
+/// blank.
 public enum MemoryType: String, Codable, Sendable, CaseIterable {
     case user
     case feedback
@@ -12,7 +13,8 @@ public enum MemoryType: String, Codable, Sendable, CaseIterable {
     case reference
     case other
 
-    /// 宽松解析：大小写与前后空白无关；不认识的值一律归 `other`（不丢条目）。
+    /// Lenient parsing: case- and surrounding-whitespace-insensitive; unknown values all map to
+    /// `other` (no entries dropped).
     public init(loose raw: String?) {
         let key = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self = MemoryType(rawValue: key) ?? .other
@@ -28,8 +30,9 @@ public enum MemoryType: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// 图谱泳道的**固定**左右顺序。写死而不按条数排：同一个记忆库两次打开
-    /// 泳道位置必须一致，否则用户建立的空间记忆每次刷新都作废。
+    /// **Fixed** left-to-right order of the graph swimlanes. Hardcoded rather than sorted by count:
+    /// opening the same memory library twice must give the same lane positions, or the spatial
+    /// memory the user built up is wiped on every refresh.
     public var laneOrder: Int {
         switch self {
         case .feedback: return 0
@@ -40,7 +43,7 @@ public enum MemoryType: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// SF Symbol（图谱节点与列表 chip 共用）
+    /// SF Symbol (shared by graph nodes and list chips)
     public var icon: String {
         switch self {
         case .user: return "person.crop.circle"

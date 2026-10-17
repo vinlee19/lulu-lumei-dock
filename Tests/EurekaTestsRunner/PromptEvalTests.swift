@@ -48,28 +48,29 @@ func promptEvalTests(_ t: TestRunner) {
     }
 
     t.test("重述消歧：逐字重发/换词打转=挣扎；加词展开=探索；新话题/超短句=none") {
-        // 逐字重发 = 挣扎（removed=added=0，替换主导判据含等号）
+        // Verbatim resend = struggle (removed=added=0; the replacement-dominance criterion includes
+        // equality)
         try expectEqual(
             PromptFollowupSignal.reformulation(
                 prev: "把分页逻辑改成游标式的实现", next: "把分页逻辑改成游标式的实现"),
             .struggle)
-        // 换词绕同一目标 = 挣扎
+        // Rewording around the same goal = struggle
         try expectEqual(
             PromptFollowupSignal.reformulation(
                 prev: "把分页逻辑改成游标式的实现方式", next: "把分页逻辑换成游标式的写法实现"),
             .struggle)
-        // 原话上加约束展开 = 探索
+        // Expanding the original with constraints = exploration
         try expectEqual(
             PromptFollowupSignal.reformulation(
                 prev: "把分页逻辑改成游标式",
                 next: "把分页逻辑改成游标式，注意保持越界回退与空页语义兼容"),
             .explore)
-        // 完全新话题 = none
+        // Entirely new topic = none
         try expectEqual(
             PromptFollowupSignal.reformulation(
                 prev: "把分页逻辑改成游标式", next: "帮我写一份周报的模板"),
             PromptFollowupSignal.Reformulation.none)
-        // 超短句不判
+        // Very short sentences are not judged
         try expectEqual(
             PromptFollowupSignal.reformulation(prev: "继续", next: "继续"),
             PromptFollowupSignal.Reformulation.none)
@@ -109,13 +110,13 @@ func promptEvalTests(_ t: TestRunner) {
         try expectEqual(severity(next: nil), .clean)
         try expectEqual(severity(next: "写一份周报模板"), .clean)
         try expectEqual(severity(next: "不对，你理解错了"), .notice)
-        // 挣扎重述（换词重问同一件事）
+        // Struggling restatement (re-asking the same thing in other words)
         try expectEqual(severity(next: "把分页逻辑换成游标式的完整写法"), .notice)
-        // 纠偏 + 挣扎同现 → bad
+        // Correction + struggle together → bad
         try expectEqual(severity(next: "不对，把分页逻辑换成游标式的完整写法"), .bad)
-        // 纠偏 + 报错结局 → bad
+        // Correction + error outcome → bad
         try expectEqual(severity(next: "不对，你理解错了", errors: ["API error"]), .bad)
-        // 探索展开不升级
+        // Exploratory expansion doesn't escalate
         try expectEqual(
             severity(next: "把分页逻辑改成游标式的完整实现，另外注意越界回退语义与空页兼容测试"),
             .clean)
@@ -174,7 +175,7 @@ func promptEvalTests(_ t: TestRunner) {
             structureFlags: [.acceptance, .filePath])
         try store.prompts.upsertEval([eval])
         try expectEqual(try store.prompts.evalMap()["claude:s:1"], eval)
-        // 覆盖更新（纯派生，无用户列要保）
+        // Overwrite on update (purely derived, no user columns to preserve)
         var updated = eval
         updated.severity = .clean
         updated.ruleIds = []
@@ -232,7 +233,7 @@ func promptEvalTests(_ t: TestRunner) {
 
         let turns = TurnSlicer.slice(messages)
         try expectEqual(turns.compactMap(\.promptMessageId), [0, 2])
-        // 第一轮的下一条提问是纠偏 → notice
+        // The prompt after the first turn is a correction → notice
         let first = PromptEvaluator.evaluate(
             promptId: entries[0].id, turn: turns[0], diagnostics: nil,
             nextPromptText: turns[1].promptText, capability: .full)

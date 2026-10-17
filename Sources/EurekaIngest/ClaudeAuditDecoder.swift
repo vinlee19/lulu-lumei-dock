@@ -2,11 +2,12 @@ import CryptoKit
 import Foundation
 import EurekaKit
 
-/// 把 Claude Code PostToolUse hook payload 解码为审计事件。
-/// 只认 PostToolUse；tool_response/tool_output 正文丢弃，仅嗅探 is_error 布尔。
+/// Decodes a Claude Code PostToolUse hook payload into an audit event. Only PostToolUse is
+/// recognised; the tool_response/tool_output body is dropped and only the is_error boolean is
+/// sniffed.
 ///
-/// Trae CN 复用同一条路径（`source: .trae`）：它的 hook 载荷与 Claude 同形，
-/// 连 `tool_response` 都在（见 `ClaudeHookDecoder` 的说明）。
+/// Trae CN reuses the same path (`source: .trae`): its hook payload has Claude's shape, down to
+/// `tool_response` (see the notes on `ClaudeHookDecoder`).
 public enum ClaudeAuditDecoder {
     public static func decode(
         payload: [String: Any], receivedAt: Date, source: AgentSource = .claude
@@ -18,8 +19,9 @@ public enum ClaudeAuditDecoder {
 
         let input = payload["tool_input"] as? [String: Any]
         let op = AuditExtractor.claude(name: toolName, input: input)
-        // PostToolUse 无 per-call 唯一 ID（官方确认），合成稳定键：
-        // receivedAtMs 使同命令的不同调用互不碰撞，且随 spool 文件体重放稳定。
+        // PostToolUse has no per-call unique ID (officially confirmed), so synthesize a stable key:
+        // receivedAtMs keeps different calls of the same command apart and is stable across spool
+        // file replays.
         let opId = (payload["tool_use_id"] as? String)
             ?? synthOpId(
                 sessionId: sessionId, toolName: toolName, input: input,
@@ -32,7 +34,8 @@ public enum ClaudeAuditDecoder {
             isError: sniffError(payload["tool_response"] ?? payload["tool_output"]))
     }
 
-    /// 尽力嗅探失败标记（各工具形态不一，仅取显式布尔；取不到按成功）
+    /// Best-effort sniffing of a failure marker (tool shapes vary; only explicit booleans count;
+    /// absent means success)
     private static func sniffError(_ response: Any?) -> Bool {
         guard let dict = response as? [String: Any] else { return false }
         if let isError = dict["is_error"] as? Bool { return isError }
@@ -52,7 +55,8 @@ public enum ClaudeAuditDecoder {
         hasher.update(data: Data("\(sessionId)\u{1}\(toolName)\u{1}\(ms)\u{1}".utf8))
         hasher.update(data: inputJSON)
         let hex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        // 前缀带 source：Claude 与 Trae 的 session id 空间互不相关，同一 hash 也不该撞键
+        // Prefixed with source: Claude and Trae session id spaces are unrelated, so the same hash
+        // must not collide
         return source.rawValue + ":" + hex.prefix(32)
     }
 }

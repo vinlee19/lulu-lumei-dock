@@ -4,9 +4,9 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// 一次性资产预处理:从四角连通区域 flood-fill 抠掉"外圈纯色背景",
-/// 保留内部白色(眼睛/床品)。把模切贴纸转成透明浮动角色。
-/// 用法:`eureka --prep-mascot-assets <srcDir> <dstDir>`
+/// One-time asset preprocessing: flood-fill from the four corners to cut out the "solid outer
+/// background", keeping interior white (eyes / bedding). Turns die-cut stickers into transparent
+/// floating characters. Usage: `eureka --prep-mascot-assets <srcDir> <dstDir>`
 enum MascotAssetPrep {
     private static let v3SheetNames = [
         "00-idle-snack.png",
@@ -40,7 +40,8 @@ enum MascotAssetPrep {
         }
     }
 
-    /// 从四角 flood-fill,容差内的连通背景像素 → 透明(并清零 RGB 防白边)。
+    /// Flood-fill from the four corners; connected background pixels within tolerance → transparent
+    /// (RGB zeroed too, to avoid white fringes).
     static func removeBackground(_ image: CGImage, tolerance: Int = 72) -> CGImage? {
         let w = image.width, h = image.height
         guard w > 4, h > 4 else { return image }
@@ -53,7 +54,7 @@ enum MascotAssetPrep {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
-        // 参考背景色 = 四角均值
+        // Reference background color = average of the four corners
         let cornerPts = [(2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3)]
         var sr = 0, sg = 0, sb = 0
         for (x, y) in cornerPts {
@@ -83,7 +84,8 @@ enum MascotAssetPrep {
             if y < h - 1 { let q = p + w; if !visited[q] { visited[q] = true; stack.append(q) } }
         }
 
-        // 羽化:与透明相邻、且偏背景色的半透明边缘像素降低 alpha,减白边
+        // Feathering: lower alpha on semi-transparent edge pixels that border transparency and lean
+        // toward the background color, reducing white fringes
         var alphaCut = [(Int, UInt8)]()
         for p in 0..<(w * h) where !visited[p] {
             let i = p * 4
@@ -109,8 +111,9 @@ enum MascotAssetPrep {
         }
     }
 
-    /// 把 12 张 2×2 透明分镜图按固定顺序打包为 4×12、每格 256px 的 v3 图集。
-    /// 输入只接受源目录的直接子文件，拒绝软链接和非 PNG 文件，避免路径越界。
+    /// Pack 12 transparent 2×2 storyboard images in a fixed order into a 4×12 v3 atlas with 256px
+    /// cells. Only direct children of the source directory are accepted; symlinks and non-PNG files
+    /// are rejected to prevent path escape.
     static func packV3(srcDir: String, outputPath: String) throws {
         let fm = FileManager.default
         let sourceDirectory = URL(fileURLWithPath: srcDir, isDirectory: true)

@@ -1,7 +1,8 @@
 import EurekaKit
 import SwiftUI
 
-/// 限额面板：5h / 周窗口用量进度条 + 重置时间。数据不可得即整块隐藏。
+/// Rate-limit panel: 5h / weekly window usage progress bars + reset times. The whole block hides
+/// when data is unavailable.
 struct LimitsPanelView: View {
     @ObservedObject var service: RateLimitsService
     @ObservedObject var settings: AppSettings
@@ -51,7 +52,7 @@ struct LimitsPanelView: View {
     }
 }
 
-/// Antigravity 实验开关：控制用量扫描（格式未公开，默认关）
+/// Antigravity experiment toggle: controls usage scanning (format undocumented, off by default)
 private struct AntigravityOptInRow: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var service: RateLimitsService
@@ -74,7 +75,7 @@ private struct AntigravityOptInRow: View {
 
 private struct LimitCard: View {
     let snapshot: RateLimitSnapshot
-    /// 预计打满时刻（key = "source#primary/secondary"，见 RateLimitsService.forecasts）
+    /// Expected full-at times (key = "source#primary/secondary", see RateLimitsService.forecasts)
     var forecasts: [String: Date] = [:]
 
     var body: some View {
@@ -122,7 +123,7 @@ private struct LimitCard: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    /// 窗口时长 → 中文标签（Codex 5h/周；Grok 周/月单窗）
+    /// Window duration → localized label (Codex 5h/weekly; Grok weekly/monthly single window)
     static func windowLabel(_ minutes: Int, fallback: String) -> String {
         switch minutes {
         case 300: return L10n.text("5-hour window", zhHans: "5 小时窗口")
@@ -136,11 +137,11 @@ private struct LimitCard: View {
 private struct WindowGauge: View {
     let label: String
     let window: RateLimitWindow
-    /// 按最近用量速度外推的预计打满时刻（无风险 = nil，不显示）
+    /// Expected full-at time extrapolated from recent usage speed (no risk = nil, not shown)
     var fullAt: Date?
 
     /// The window rolled over after the snapshot was taken: its percentage is history, not
-    /// state. Draw it dimmed and say "已重置" instead of a past-tense "上周 重置".
+    /// state. Draw it dimmed and say "Reset" instead of a past-tense "reset last week".
     private var hasReset: Bool { window.hasReset() }
 
     var body: some View {

@@ -1,15 +1,17 @@
 import Foundation
 import EurekaKit
 
-/// Claude 订阅限额：**非官方接口，默认关闭、设置页 opt-in**。
-/// 凭证经 `/usr/bin/security` 子进程读取（弹窗主体是 Apple 签名的 security 工具，
-/// "始终允许"一次后静默——避开 ad-hoc 重签后 Keychain ACL 反复弹窗）。
-/// 任何失败 → 返回 nil → UI 整块隐藏；绝不自己 refresh token（避免与 Claude Code
-/// 竞争使 refresh token 失效），401 时提示用户跑一次 claude。
+/// Claude subscription rate limits: **unofficial endpoint, off by default, opt-in in Settings**.
+/// Credentials are read via the `/usr/bin/security` subprocess (the prompt's subject is Apple's
+/// signed security tool,
+/// silent after one "Always Allow" - avoids repeated Keychain ACL prompts after ad-hoc re-signing).
+/// Any failure → returns nil → the whole UI block hides; never refreshes the token itself (racing
+/// Claude Code
+/// would invalidate the refresh token); on 401 the user is told to run claude once.
 public final class ClaudeOAuthUsageProvider: RateLimitProvider {
     public let source = AgentSource.claude
 
-    /// 最近一次失败原因（UI 提示用；nil = 正常）
+    /// Most recent failure reason (for UI hints; nil = OK)
     public private(set) var lastFailure: String?
     private var cached: RateLimitSnapshot?
 
@@ -50,17 +52,18 @@ public final class ClaudeOAuthUsageProvider: RateLimitProvider {
         }
     }
 
-    /// 失败时给最近一次成功值（标 stale），连缓存都没有则 nil（UI 隐藏）
+    /// On failure, returns the last successful value (marked stale); nil if there is no cache at
+    /// all (UI hides)
     private func staleCache() -> RateLimitSnapshot? {
         guard var cached else { return nil }
         cached.isStale = true
         return cached
     }
 
-    // MARK: - 凭证
+    // MARK: - Credentials
 
-    /// Keychain 条目 "Claude Code-credentials" 的值是 JSON，
-    /// 取 claudeAiOauth.accessToken
+    /// The Keychain item "Claude Code-credentials" holds JSON;
+    /// take claudeAiOauth.accessToken
     static func readAccessToken() -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -88,12 +91,12 @@ public final class ClaudeOAuthUsageProvider: RateLimitProvider {
         return oauth["accessToken"] as? String
     }
 
-    // MARK: - 宽松解析
+    // MARK: - Lenient parsing
 
-    /// 已知形态（社区观察，随时可能变）：
+    /// Known shape (community observation, may change at any time):
     /// `{"five_hour":{"utilization":32,"resets_at":"2026-06-10T16:00:00Z"},
     ///   "seven_day":{...}, "seven_day_opus":{...}}`
-    /// utilization 可能是 0-1 小数或 0-100 百分数；只取认识的字段。
+    /// utilization may be a 0-1 fraction or a 0-100 percentage; only recognized fields are read.
     public static func parseUsageResponse(_ data: Data, now: Date = Date()) -> RateLimitSnapshot? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil

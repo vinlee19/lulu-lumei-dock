@@ -1,27 +1,29 @@
 import Foundation
 
-/// 一次 API 调用的 token 用量（两家统一后的记账单位）
+/// Token usage of one API call (the unified accounting unit across both vendors)
 public struct UsageRecord: Equatable, Sendable {
     public var source: AgentSource
     public var model: String
-    /// 项目名（仓库根归组），按项目统计用
+    /// Project name (grouped by repo root), for per-project stats
     public var project: String?
-    /// 会话 id，会话级费用统计用
+    /// Session id, for per-session cost stats
     public var sessionId: String?
     public var timestamp: Date
     public var inputTokens: Int
     public var outputTokens: Int
-    /// 写入缓存的 token 总量（Claude cache_creation_input_tokens）
+    /// Total tokens written to cache (Claude cache_creation_input_tokens)
     public var cacheCreationTokens: Int
-    /// 其中 1h TTL 部分（定价 2x；5m 部分 = 总量 - 1h 部分，定价 1.25x）
+    /// The 1h-TTL portion of it (priced 2x; the 5m portion = total - 1h portion, priced 1.25x)
     public var cacheCreation1hTokens: Int
-    /// 缓存读取（Claude cache_read / Codex cached_input）
+    /// Cache reads (Claude cache_read / Codex cached_input)
     public var cacheReadTokens: Int
-    /// 计费 provider（opencode providerID / codex model_provider / hermes billing_provider…），
-    /// 区分同名模型走订阅套餐还是按量计费；无此信息的来源为 nil
+    /// Billing provider (opencode providerID / codex model_provider / hermes billing_provider...),
+    /// tells whether a same-named model runs on a subscription plan or pay-as-you-go; nil for
+    /// sources without it
     public var provider: String?
-    /// agent 自报的本条费用（USD）。有值时优先于价格表（Grok 的 costUsdTicks 已含 build
-    /// 模型实价与阶梯，价格目录里没有对应条目）；其余来源为 nil
+    /// The agent's self-reported cost for this record (USD). When set it wins over the price table
+    /// (Grok's costUsdTicks already includes build-model real prices and tiers, which have no entry
+    /// in the price catalog); nil for other sources
     public var reportedCostUSD: Double?
 
     public init(

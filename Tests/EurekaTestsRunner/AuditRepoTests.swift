@@ -30,7 +30,7 @@ func auditRepoTests(_ t: TestRunner) {
         try expectEqual(try store.audit.insert(event("op-1")), false, "重复 op_id 应被忽略")
         try expectEqual(try store.audit.count(), 1)
 
-        // 不同来源同 op_id 视为不同（唯一键含 source）
+        // The same op_id from different sources counts as distinct (the unique key includes source)
         try expectEqual(try store.audit.insert(event("op-1", source: .claude)), true)
         try expectEqual(try store.audit.count(), 2)
     }
@@ -48,9 +48,9 @@ func auditRepoTests(_ t: TestRunner) {
         try expectEqual(try store.audit.count(.init(riskOnly: true)), 2)
         try expectEqual(try store.audit.count(.init(keyword: "main.swift")), 1)
         try expectEqual(try store.audit.count(.init(keyword: "sudo")), 1)
-        // keyword 命中 tool 列
+        // keyword matches the tool column
         try expectEqual(try store.audit.count(.init(keyword: "Read")), 1)
-        // 组合
+        // combined
         try expectEqual(try store.audit.count(.init(source: .codex, riskOnly: true)), 2)
     }
 
@@ -96,7 +96,7 @@ func auditRepoTests(_ t: TestRunner) {
         let row = try store.audit.recent(limit: 1)[0]
         try expectEqual(row.riskLevel, .high)
         try expectEqual(row.riskRule, "rm-rf")
-        // 无风险行读回 nil
+        // A row without risk reads back as nil
         try store.audit.insert(event("n", detail: "plain-cmd"))
         let none = try store.audit.recent(.init(keyword: "plain-cmd"), limit: 1)[0]
         try expect(none.riskLevel == nil)
@@ -119,14 +119,15 @@ func auditRepoTests(_ t: TestRunner) {
             try store.audit.counts(by: .kind),
             ["command": 2, "edit": 1, "read": 1])
 
-        // 筛选参与分组：这正是筛选 chip 上「切过去还剩多少条」的来源
+        // Filters apply to grouping: this is exactly where a filter chip's "how many rows remain if
+        // you switch to it" comes from
         try expectEqual(try store.audit.counts(by: .kind, .init(source: .codex)), ["command": 2])
         try expectEqual(try store.audit.counts(by: .source, .init(riskOnly: true)), ["codex": 1])
-        // 一条都不命中时返回空字典（不是 0 值占位）
+        // No match at all returns an empty dictionary (not zero-valued placeholders)
         let noMatch = try store.audit.counts(by: .source, .init(keyword: "no-such"))
         try expect(noMatch.isEmpty)
 
-        // 返回的键必须能还原成领域枚举 —— UI 端就是靠 rawValue 反查的
+        // Returned keys must map back to the domain enum - the UI looks them up by rawValue
         let sources = try store.audit.counts(by: .source)
         try expectEqual(sources.keys.compactMap { AgentSource(rawValue: $0) }.count, 3)
         let kinds = try store.audit.counts(by: .kind)
@@ -140,7 +141,7 @@ func auditRepoTests(_ t: TestRunner) {
         for i in 1...10 {
             try store.audit.insert(event("op-\(i)", ts: Double(i) * 100))
         }
-        try store.audit.prune(olderThan: Date(timeIntervalSince1970: 350))  // 删 ts<350（op1..3）
+        try store.audit.prune(olderThan: Date(timeIntervalSince1970: 350))  // delete ts<350 (op1..3)
         try expectEqual(try store.audit.count(), 7)
         try store.audit.prune(keepingLast: 3)
         try expectEqual(try store.audit.count(), 3)

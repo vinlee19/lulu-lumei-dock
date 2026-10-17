@@ -1,14 +1,16 @@
 import Foundation
 import EurekaKit
 
-/// 启动时重建 Claude 会话现场（Codex 由 rollout tailer 的初见扫描负责）：
-/// app 启动前就在跑的会话，其 UserPromptSubmit 早已消费/丢失，
-/// 心跳又要等下一次工具调用结束才来——长命令/纯生成期间会一直隐形。
+/// Rebuilds live Claude session state at launch (Codex is handled by the rollout tailer's
+/// first-sight scan): for sessions already running before the app started, the UserPromptSubmit was
+/// long since consumed/lost, and the heartbeat only arrives after the next tool call ends, so they
+/// would stay invisible through long commands / pure generation.
 ///
-/// 判定：transcript 尾部最后一个真实用户 prompt 之后，
-/// 没有 turn_duration（turn 结束标记）/ API 错误行 → turn 仍在飞行中。
+/// Rule: after the last real user prompt in the transcript tail, no turn_duration (the turn-end
+/// marker) / API error line → the turn is still in flight.
 public enum ClaudeSessionBootstrap {
-    /// 默认 ~/.claude/projects（EUREKA_CLAUDE_PROJECTS 覆盖，与用量扫描器同约定）
+    /// Defaults to ~/.claude/projects (overridden by EUREKA_CLAUDE_PROJECTS, same convention as the
+    /// usage scanner)
     public static func defaultProjectsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -19,8 +21,9 @@ public enum ClaudeSessionBootstrap {
             .appendingPathComponent(".claude/projects", isDirectory: true)
     }
 
-    /// 扫描近期活跃的会话 transcript，合成状态重建事件。
-    /// 只看 projects/<项目>/<会话>.jsonl 两层（subagents/ 是子代理侧链，不是会话）。
+    /// Scans recently active session transcripts and synthesizes state-rebuild events.
+    /// Looks only two levels deep, at projects/<project>/<session>.jsonl (subagents/ holds subagent
+    /// side chains, not sessions).
     public static func discover(
         projectsRoot: URL,
         idleWindow: TimeInterval = 1800,
@@ -43,7 +46,7 @@ public enum ClaudeSessionBootstrap {
         return events
     }
 
-    /// 会话现场快照（尾窗分类结果）
+    /// Live session snapshot (the tail-window classification result)
     public struct Snapshot: Equatable {
         public var sessionId: String
         public var cwd: String?
@@ -56,7 +59,7 @@ public enum ClaudeSessionBootstrap {
         public var earliestAt: Date?
     }
 
-    /// 单个 transcript 的现场判定（公开供测试）。
+    /// Live-state verdict for a single transcript (public for tests).
     public static func inspectSession(
         fileURL: URL, mtime: Date, tailBytes: Int = 262144
     ) -> [TaskEvent] {
@@ -71,7 +74,8 @@ public enum ClaudeSessionBootstrap {
         var events: [TaskEvent] = []
         if snapshot.running {
             let title = snapshot.promptText.flatMap { summarizeTitle($0) }
-            // 开始时间：prompt 时间 → 尾窗最早时间（至少不低估时长）→ mtime
+            // Start time: prompt time → earliest time in the tail window (at least never
+            // underestimates the duration) → mtime
             events.append(event(
                 .taskStarted(title: title),
                 at: snapshot.promptAt ?? snapshot.earliestAt ?? mtime))
@@ -87,8 +91,8 @@ public enum ClaudeSessionBootstrap {
         return events
     }
 
-    /// 尾窗分类：turn 是否在飞行中。
-    /// 尾窗要够大：长 turn 期间真实 prompt 可能在数百 KB 之外。
+    /// Tail-window classification: whether the turn is in flight.
+    /// The tail window must be large: in a long turn the real prompt can be hundreds of KB back.
     public static func classify(fileURL: URL, tailBytes: Int = 262144) -> Snapshot? {
         guard
             let handle = FileHandle(forReadingAtPath: fileURL.path),
@@ -110,7 +114,8 @@ public enum ClaudeSessionBootstrap {
         var lastPromptText: String?
         var lastTurnEndAt: Date?
         var contextPercent: Double?
-        /// 尾部是否有主链执行痕迹（assistant/tool_result）——超长 turn 中段的判据
+        /// Whether the tail shows main-chain execution traces (assistant/tool_result): the
+        /// criterion for the middle of a very long turn
         var hasMainChainActivity = false
         var earliestAt: Date?
 
@@ -135,7 +140,7 @@ public enum ClaudeSessionBootstrap {
                 guard root["isMeta"] as? Bool != true,
                       let message = root["message"] as? [String: Any]
                 else { continue }
-                // 真实 prompt：content 是字符串；数组（tool_result）算执行痕迹
+                // Real prompt: content is a string; an array (tool_result) is an execution trace
                 if let content = message["content"] as? String {
                     lastPromptAt = timestamp
                     lastPromptText = content
@@ -152,7 +157,7 @@ public enum ClaudeSessionBootstrap {
                 guard root["isSidechain"] as? Bool != true,
                       let message = root["message"] as? [String: Any]
                 else { continue }
-                // API 错误行也意味着 turn 结束（不会再有 turn_duration）
+                // An API error line also means the turn ended (no turn_duration will follow)
                 if root["isApiErrorMessage"] as? Bool == true
                     || message["model"] as? String == "<synthetic>" {
                     lastTurnEndAt = timestamp ?? lastTurnEndAt
@@ -177,13 +182,14 @@ public enum ClaudeSessionBootstrap {
         guard let sessionId else { return nil }
         let running: Bool
         if let promptAt = lastPromptAt {
-            // prompt 可见：之后没有结束标记 → 在飞行中
+            // Prompt visible with no end marker after it → in flight
             running = lastTurnEndAt.map { $0 < promptAt } ?? true
         } else if lastTurnEndAt != nil {
-            // 只看到结束标记 → 上一轮已收尾
+            // Only an end marker seen → the previous turn already wrapped up
             running = false
         } else {
-            // 超长 turn 中段：prompt 和结束标记都滚出尾窗，满屏执行痕迹 → 在飞行中
+            // Middle of a very long turn: prompt and end marker both scrolled out of the tail
+            // window and it is full of execution traces → in flight
             running = hasMainChainActivity
         }
 

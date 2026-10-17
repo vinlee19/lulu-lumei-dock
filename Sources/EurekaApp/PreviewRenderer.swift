@@ -4,7 +4,8 @@ import EurekaKit
 import EurekaStore
 import SwiftUI
 
-/// 离屏渲染灵动岛各形态为 PNG：无需屏幕录制权限即可做视觉走查/自检。
+/// Offscreen-renders every Dynamic Island state to PNG: visual walkthroughs/self-checks without
+/// Screen Recording permission.
 @MainActor
 enum PreviewRenderer {
     static func renderAll(to directory: String) {
@@ -38,8 +39,9 @@ enum PreviewRenderer {
             source: .claude, sessionId: "p3", title: L10n.text("Batch update dependency versions", zhHans: "批量更新依赖版本"),
             cwd: "/Users/me/work/deps", startedAt: now.addingTimeInterval(-301),
             phase: .waiting(.permission, since: now.addingTimeInterval(-20)))
-        // 等待授权卡的重点是"在请求什么"（PreToolUse 带来的工具 + 对象），
-        // 而不只是"等待权限确认"。会话身份由副标题的项目 + #会话号承担。
+        // The point of a waiting-for-permission card is "what is being requested" (tool + target
+        // from PreToolUse), not just "waiting for permission". Session identity is carried by the
+        // subtitle's project + #session number.
         waitingTask.currentActivity = "Bash"
         waitingTask.currentToolDetail = "rm -rf node_modules/"
         let finished = FinishedTask(
@@ -127,17 +129,19 @@ enum PreviewRenderer {
             idle2.lastActivityAt = now.addingTimeInterval(-300)
             var withActivity = running1
             withActivity.currentActivity = "Bash"
-            // 具体对象串（PreToolUse 带来）：验证「Edit src/main.swift」这类长文本不破版
+            // Concrete target string (from PreToolUse): checks long text like "Edit src/main.swift"
+            // doesn't break the layout
             withActivity.currentToolDetail = "swift build -c release"
             withActivity.contextUsedPercent = 64
-            // 压缩上下文态：这段时间没有别的事件，必须在列表里看得出来
+            // Compacting-context state: no other events arrive meanwhile, so it must be visible in
+            // the list
             var compacting = running2
             compacting.isCompacting = true
             $0.updateActiveTasks([withActivity, compacting, waitingTask], idle: [idle1, idle2])
             $0.islandTapped()
         }
 
-        // 子 agent：收起徽标 / 展开三态 / 胶囊聚合标识
+        // Subagents: collapsed badge / three expanded states / capsule aggregate marker
         let subagents = [
             SubagentInfo(agentId: "a1", agentType: "Explore",
                          description: L10n.text("Locate the transcript parsing entry point", zhHans: "定位 transcript 解析入口"), status: .running,
@@ -175,15 +179,16 @@ enum PreviewRenderer {
                     cwd: "/Users/me/work/crowd",
                     startedAt: now.addingTimeInterval(-Double(index) * 600)))
             }
-            crowd[0].startedAt = now.addingTimeInterval(-6 * 86400)  // 两位月份，如 10/10
+            crowd[0].startedAt = now.addingTimeInterval(-6 * 86400)  // two-digit month, e.g. 10/10
             $0.isFloating = true
             $0.showStartTime = true
             $0.updateActiveTasks(crowd)
         }
     }
 
-    /// 离屏渲染知识库页（Plans/Skills/Memory/Agents × 卡片/列表）做视觉走查。
-    /// 真实服务扫本机数据，等扫描完成后截图；宽度对齐主窗口内容区。
+    /// Offscreen-renders the knowledge pages (Plans/Skills/Memory/Agents × card/list) for visual
+    /// walkthroughs. Real services scan local data; screenshots are taken after the scan finishes.
+    /// Width matches the main window's content area.
     @MainActor
     static func renderKnowledge(to directory: String, style: ThemeStyle = .classic) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
@@ -199,13 +204,15 @@ enum PreviewRenderer {
         skillMemory.refresh()
         agents.refresh()
 
-        // 等三边扫描完成（CLI 无主 runloop 驱动 → 手动泵；首次全量解析会话可能要几分钟，上限 300s）
+        // Wait for all three scans to finish (the CLI has no main runloop → pump manually; the
+        // first full session parse may take minutes, capped at 300s)
         let deadline = Date().addingTimeInterval(300)
         while (plans.scanning || skillMemory.scanning || agents.scanning), Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        // 记忆按「统计口径」打印：memoryTotal 含记忆库内条目，memories 只是列表里的独立条目
-        // —— 两个数字都要有，否则看不出折叠是否生效
+        // Print memories by the counting rule: memoryTotal includes entries inside memory
+        // libraries, memories is only standalone list entries — both numbers are needed, otherwise
+        // you can't tell whether folding took effect
         print("扫描结束：plans=\(plans.totalCount) "
             + "skills=\(skillMemory.skills.count) "
             + "memoryTotal=\(skillMemory.memoryTotal) "
@@ -216,11 +223,13 @@ enum PreviewRenderer {
             + "claudeAgents=\(agents.claudeAgents.count) codexProfiles=\(agents.codexProfiles.count) "
             + "scanning=\(plans.scanning)/\(skillMemory.scanning)/\(agents.scanning)")
 
-        // NSHostingView + cacheDisplay 光栅化：ImageRenderer 离屏下 Lazy 容器/ScrollView 不物化、
-        // 动态 NSColor 与 SF Symbol 也会失真；走 AppKit 布局绘制才接近真实窗口观感。
+        // Rasterize via NSHostingView + cacheDisplay: offscreen, ImageRenderer doesn't materialize
+        // Lazy containers/ScrollView, and dynamic NSColor and SF Symbols get distorted too; going
+        // through AppKit layout and drawing is closer to the real window.
         @MainActor func snap<V: View>(_ name: String, _ view: V, dark: Bool = false,
                                       width: CGFloat = 780) {
-            // 垫一层窗口底色：页面 surfaceSecondary 是半透明叠加层，无底色时 PNG 透明区会失真
+            // Lay a window background underneath: the page's surfaceSecondary is a translucent
+            // overlay, so transparent PNG areas would be wrong without it
             let hosting = NSHostingView(rootView: ZStack {
                 Color(nsColor: .windowBackgroundColor)
                 view
@@ -237,7 +246,8 @@ enum PreviewRenderer {
             print("已渲染 \(name).png")
         }
 
-        // 每页列表 + 图标各出一张（默认列表，对齐设计稿）；宽窗核对三列卡片比例；深色抽查一张
+        // One image per page for list + icons each (list by default, matching the design mock); a
+        // wide window checks three-column card proportions; one dark spot check
         snap("knowledge-plans-list", PlansView(service: plans, initialLayout: .list))
         snap("knowledge-plans-cards", PlansView(service: plans, initialLayout: .cards))
         snap("knowledge-plans-cards-wide", PlansView(service: plans, initialLayout: .cards), width: 1270)
@@ -257,7 +267,8 @@ enum PreviewRenderer {
         snap("knowledge-memory-cards",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLayout: .cards))
-        // 记忆库二级页 + 图谱：两处都只有点击才能到，离屏渲染必须靠初始状态注入
+        // Memory library sub-page + graph: both are reachable only by clicking, so offscreen
+        // rendering must inject initial state
         snap("knowledge-memory-library",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLibraryKey: skillMemory.libraries.first?.key))
@@ -267,7 +278,8 @@ enum PreviewRenderer {
         snap("knowledge-memory-graph-dark",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLayout: .graph), dark: true)
-        // 记忆详情 + 一跳关联小图：挑引用/来源最多的一条（关联为空时那张图不出现，就看不出问题了）
+        // Memory detail + one-hop relation mini-graph: pick the entry with the most
+        // references/sources (with no relations that graph doesn't render, hiding problems)
         if let busiest = skillMemory.libraries.first?.entries
             .max(by: { ($0.links.count + ($0.originSessionId == nil ? 0 : 1))
                 < ($1.links.count + ($1.originSessionId == nil ? 0 : 1)) }) {
@@ -279,7 +291,8 @@ enum PreviewRenderer {
         snap("knowledge-instructions-list",
              SkillMemoryView(service: skillMemory, mode: .instructions, usageService: usage,
                              initialLayout: .list))
-        // 搜索态：命中数胶囊 + 圆形清空键（聚焦渐变环需真实键盘焦点，离屏无法呈现）
+        // Search state: hit-count capsule + round clear button (the focus gradient ring needs real
+        // keyboard focus, impossible offscreen)
         skillMemory.searchText = "arkcli"
         snap("knowledge-skills-search",
              SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
@@ -292,7 +305,8 @@ enum PreviewRenderer {
         snap("knowledge-plans-list-dark",
              PlansView(service: plans, initialLayout: .list), dark: true)
 
-        // MCP 页：列表 / 图标 / 详情（跨源矩阵 + 各处配置）。扫描是毫秒级，短等即可。
+        // MCP page: list / icons / detail (cross-source matrix + every config location). Scanning
+        // takes milliseconds, so a short wait suffices.
         let mcp = MCPService()
         mcp.refresh()
         let mcpDeadline = Date().addingTimeInterval(30)
@@ -309,7 +323,8 @@ enum PreviewRenderer {
                  MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(
                     id: "edit", mode: .form, editing: first)))
         }
-        // 再出一张 remote server 的详情：鉴权路由（OAuth/请求头密钥）只有 remote 才展现
+        // One more detail for a remote server: auth routing (OAuth / header secret) only shows for
+        // remote
         if let remote = mcp.servers.first(where: { $0.transport != "stdio" }) {
             snap("knowledge-mcp-detail-remote",
                  MCPView(service: mcp, usageService: usage, initialDetailName: remote.name))
@@ -321,23 +336,27 @@ enum PreviewRenderer {
         snap("knowledge-mcp-list-dark", MCPView(service: mcp, usageService: usage, initialLayout: .list), dark: true)
     }
 
-    /// 离屏渲染「外壳」：侧栏（含品牌区）与审计页，明/暗两版。
+    /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light
+    /// and dark.
     ///
-    /// 之所以需要它：侧栏与审计页此前**没有任何自动看图的办法**（只有灵动岛和徽标有渲染器），
-    /// 改 logo 尺寸、组标签数量、行内密度只能请人肉眼比。两个必查项也只有渲图能查：
-    ///  1. 品牌标是不是明显大于导航图标、有没有高光与投影（不是一块扁方块）；
-    ///  2. **最小窗高 540 下五个组标签 + 品牌脚注会不会被裁**
-    ///     —— `MainWindowController` 用的是 `hosting.sizingOptions = []`，内容超出是裁剪而不是撑窗。
+    /// Why it exists: the sidebar and audit page previously had **no automated way to look at them** (only the Dynamic Island and badges had renderers),
+    /// so changes to logo size, group-label count, or row density needed a human to compare by eye. Two must-checks are only possible with renders:
+    ///  1. Is the brand mark clearly larger than the nav icons, with highlight and shadow (not a
+    ///     flat square)?
+    ///  2. **At the minimum window height of 540, are the five group labels + brand footnote
+    ///     clipped?** — `MainWindowController` uses `hosting.sizingOptions = []`, so overflowing
+    ///     content is clipped rather than growing the window.
     @MainActor
     static func renderShell(to directory: String, style: ThemeStyle = .classic) {
-        // 主题字体（Space Grotesk/Mono）须先于任何视图渲染注册；注册失败自动回退系统字体
+        // Theme fonts (Space Grotesk/Mono) must be registered before any view renders; registration
+        // failure falls back to the system font
         ThemeFonts.register()
         ThemeStyle.current = style
         defer { ThemeStyle.current = .classic }
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // NSHostingView + cacheDisplay（同 renderKnowledge：ImageRenderer 离屏下会失真）
+        // NSHostingView + cacheDisplay (same as renderKnowledge: ImageRenderer distorts offscreen)
         @MainActor func snap<V: View>(
             _ name: String, _ view: V, dark: Bool = false,
             width: CGFloat = 780, height: CGFloat = 980
@@ -358,7 +377,7 @@ enum PreviewRenderer {
             print("已渲染 \(name).png")
         }
 
-        // MARK: 侧栏
+        // MARK: Sidebar
         func sidebar(selected: PopoverRootView.Tab) -> some View {
             SidebarView(
                 selected: selected,
@@ -366,7 +385,8 @@ enum PreviewRenderer {
                 appVersion: "0.15.0",
                 onSelect: { _ in })
         }
-        // 品牌标放大后单独放一版对照（26 = 脚注，44 = 关于卡，18 = 旧尺寸基准）
+        // A separate comparison sheet for the enlarged brand mark (26 = footnote, 44 = About card,
+        // 18 = old size baseline)
         snap("shell-logo-sizes", HStack(spacing: 24) {
             ForEach([18.0, 26.0, 44.0, 88.0], id: \.self) { size in
                 VStack(spacing: 8) {
@@ -379,36 +399,41 @@ enum PreviewRenderer {
         snap("shell-sidebar", sidebar(selected: .audit), width: SidebarView.width, height: 980)
         snap("shell-sidebar-dark", sidebar(selected: .audit), dark: true,
              width: SidebarView.width, height: 980)
-        // 最小窗高实测。注意 `MainWindowController` 的 `window.minSize` 540 是**窗口 frame**，
-        // 含标题栏（~28pt）→ 内容区实际只有 ~512。再多渲一版 470 看还剩多少余量。
+        // Measured minimum window height. Note `MainWindowController`'s `window.minSize` 540 is the
+        // **window frame**, including the title bar (~28pt) → the content area is really only ~512.
+        // Render one more at 470 to see how much headroom is left.
         snap("shell-sidebar-min-height", sidebar(selected: .history),
              width: SidebarView.width, height: 512)
         snap("shell-sidebar-tight", sidebar(selected: .history),
              width: SidebarView.width, height: 470)
 
-        // MARK: 审计页（真实本机数据）
+        // MARK: Audit page (real local data)
         let audit = AuditService()
         let installer = InstallerService()
         let settings = AppSettings()
-        // AppSettings.init 会按持久化偏好重置 ThemeStyle.current，这里重申渲染参数
+        // AppSettings.init resets ThemeStyle.current from the persisted preference, so restate the
+        // render parameters here
         ThemeStyle.current = style
         let notifications = NotificationService()
         audit.start()
         installer.refresh()
-        // 服务在自己的串行队列上读库、@Published 回主线程，而 CLI 没有主 runloop → 手动泵。
-        // ⚠️ 必须**无条件**泵满一段时间：早先按 `while events.isEmpty` 泵，第二次换查询时
-        // events 还留着上一批（非空），循环立刻退出，于是截到的是**上一次查询的旧数据**
-        // ——「仅风险」那张图里 chip 是红的、列表却是全量。
+        // The service reads the DB on its own serial queue and publishes @Published back on main,
+        // but the CLI has no main runloop → pump manually. ⚠️ Must pump for a fixed time
+        // **unconditionally**: pumping earlier with `while events.isEmpty`, on the second query
+        // switch events still held the previous batch (non-empty), the loop exited at once, and the
+        // capture showed **the previous query's stale data** — in the "risk only" image the chip
+        // was red while the list was the full set.
         @MainActor func loadAndSettle(_ query: AuditRepo.Query, seconds: Double = 2.5) {
             audit.load(query: query, page: 1, pageSize: 100)
             RunLoop.current.run(until: Date().addingTimeInterval(seconds))
         }
-        // 首次要等库打开 + 首轮扫描，给足时间
+        // The first round waits for the DB to open + the first scan, so give it plenty of time
         loadAndSettle(AuditRepo.Query(), seconds: 8)
         print("审计读库：total=\(audit.total) risk=\(audit.riskTotal) "
             + "sources=\(audit.sourceCounts.count) kinds=\(audit.kindCounts.count)")
 
-        // 配置一致性卡要真实数据才有内容（它在 lastScanAt == nil 时不占版面）
+        // The config-consistency card needs real data to have content (it takes no space while
+        // lastScanAt == nil)
         let skillMemory = SkillMemoryService()
         skillMemory.refresh()
         let scanDeadline = Date().addingTimeInterval(180)
@@ -427,42 +452,48 @@ enum PreviewRenderer {
         }
         snap("shell-audit", auditPage())
         snap("shell-audit-dark", auditPage(), dark: true)
-        // 宽窗：来源 chips 会不会挤成两行、行内标题行有没有互相顶
+        // Wide window: do the source chips wrap to two lines, do the row title lines push into each
+        // other
         snap("shell-audit-wide", auditPage(), width: 1270)
-        // 侧栏 + 审计页并排（核对分隔线两侧的字号/留白衔接）。
-        // 放在改筛选之前：AuditService 是单例式共享状态，下面换查询后这张就变空了。
+        // Sidebar + audit page side by side (checks font size/spacing continuity across the
+        // divider). Placed before the filter changes: AuditService is singleton-style shared state,
+        // so this image would be empty after the query switch below.
         snap("shell-full", HStack(spacing: 0) {
             sidebar(selected: .audit)
             Divider()
             auditPage()
         }, width: SidebarView.width + 1 + 780)
 
-        // 仅风险：行内风险 TagChip 与总览卡的「风险 N」都要出得来
+        // Risk only: both the inline risk TagChip and the overview card's "Risk N" must appear
         loadAndSettle(AuditRepo.Query(riskOnly: true))
         print("仅风险：\(audit.events.count) 行 / total=\(audit.total)")
         snap("shell-audit-risk", auditPage(riskOnly: true))
-        // 空态（筛不到）：确认走的是 EmptyStateView 而不是一片空白
+        // Empty state (nothing matches): confirm it goes through EmptyStateView rather than a blank
+        // area
         let nonsense = "zzz-no-such-command-zzz"
         loadAndSettle(AuditRepo.Query(keyword: nonsense))
         print("空态：\(audit.events.count) 行 / total=\(audit.total)")
         snap("shell-audit-empty", auditPage(keyword: nonsense), height: 520)
 
-        // 采集关闭：hooksHint 让位给 captureOffHint（两张提示卡不该同时出现）
+        // Capture off: hooksHint yields to captureOffHint (the two hint cards should never appear
+        // together)
         loadAndSettle(AuditRepo.Query())
         settings.auditEnabled = false
         snap("shell-audit-capture-off", auditPage(), height: 620)
-        settings.auditEnabled = true  // 别把渲染副作用留在真实偏好里
+        settings.auditEnabled = true  // don't leave render side effects in the real preferences
 
-        // 齿轮浮层单独出图：popover 依赖真实窗口，整页离屏渲染时不会被光栅化。
-        // 这一版是「设置 → 审计」那张卡搬过来的 4 个开关，必须自带 switch/small/11.5 样式。
+        // Render the gear popover separately: the popover depends on a real window and isn't
+        // rasterized when rendering the whole page offscreen. This version holds the 4 toggles
+        // moved over from the Settings → Audit card, which must carry their own switch/small/11.5
+        // style.
         let auditView = AuditView(
             service: audit, installer: installer, settings: settings,
             notificationService: notifications, skillMemory: skillMemory)
         snap("shell-audit-settings", auditView.settingsPopover, width: 340, height: 300)
     }
 
-    /// Offscreen-render the remaining pages: 历史 / 会话 (two-pane + detail) / 用量 (all six
-    /// sub-tabs) / 限额 / Prompts (list + detail) / 设置 (five sections) / ⌘K palette.
+    /// Offscreen-render the remaining pages: History / Sessions (two-pane + detail) / Usage (all
+    /// six sub-tabs) / Limits / Prompts (list + detail) / Settings (five sections) / ⌘K palette.
     ///
     /// These pages had no automated way to be looked at (knowledge pages and the audit page
     /// each have a renderer; nothing covered the rest). Driven by real local data, same
@@ -539,7 +570,7 @@ enum PreviewRenderer {
             + "codex=\(limits.codex != nil) grok=\(limits.grok != nil) "
             + "antigravity=\(limits.antigravity != nil)")
 
-        // MARK: 历史
+        // MARK: History
         let history = HistoryView(
             tasks: usage.recentHistory, dailyOutcomes: usage.historyDailyOutcomes,
             tokens: usage.historyTokens, runningTasks: usage.runningTasks,
@@ -548,7 +579,7 @@ enum PreviewRenderer {
         snap("pages-history-dark", history, dark: true)
         snap("pages-history-min", history, width: 675, height: 512)
 
-        // MARK: 会话（两栏 + 详情）
+        // MARK: Sessions (two-pane + detail)
         if let first = sessions.flatSessions.first ?? sessions.groups.first?.sessions.first {
             sessions.select(first)
             wait("对话记录", upTo: 60) { !sessions.transcriptLoading }
@@ -568,7 +599,7 @@ enum PreviewRenderer {
                  width: 1270)
         }
 
-        // MARK: 用量：六个子页签（本月区间；onAppear 在离屏下不可靠，手动拉数据）
+        // MARK: Usage: six sub-tabs (this-month range; onAppear is unreliable offscreen, so fetch data manually)
         let month = UsageService.DashboardPeriod.month
         let range = (from: month.startDate, to: Date())
         usage.loadRecords(page: 1, pageSize: 50, source: nil, from: range.from, to: range.to)
@@ -611,7 +642,8 @@ enum PreviewRenderer {
              UsageDashboardView(usageService: usage, sessionBrowser: sessions,
                                 initialPeriod: .month, initialSubTab: .log),
              dark: true, width: 1270, height: 2000)
-        // 侧栏 + 用量页并排（核对分隔线两侧的字号/留白衔接）
+        // Sidebar + usage page side by side (checks font size/spacing continuity across the
+        // divider)
         snap("pages-full-usage", HStack(spacing: 0) {
             SidebarView(
                 selected: .usage, limitsBadge: ("9%", Theme.enabledGreen),
@@ -622,13 +654,13 @@ enum PreviewRenderer {
                                initialPeriod: .month, initialSubTab: .models)
         }, width: SidebarView.width + 1 + 1270, height: 1400)
 
-        // MARK: 限额
+        // MARK: Limits
         pump(2)
         snap("pages-limits", LimitsPanelView(service: limits, settings: settings), height: 700)
         snap("pages-limits-dark", LimitsPanelView(service: limits, settings: settings),
              dark: true, height: 700)
 
-        // MARK: Prompts（列表 + 详情）
+        // MARK: Prompts (list + detail)
         snap("pages-prompts",
              PromptsView(service: prompts, sessionBrowser: sessions, skillMemory: skillMemory))
         snap("pages-prompts-wide",
@@ -640,7 +672,7 @@ enum PreviewRenderer {
                              skillMemory: skillMemory, initialDetail: entry))
         }
 
-        // MARK: 设置：五个子栏目
+        // MARK: Settings: five sections
         for section in SettingsView.SettingsSection.allCases {
             let view = SettingsView(
                 section: .constant(section), settings: settings, installer: installer,
@@ -655,7 +687,7 @@ enum PreviewRenderer {
                 updateService: update, syncService: sync),
              dark: true, height: 1200)
 
-        // MARK: ⌘K 面板
+        // MARK: ⌘K palette
         palette.query = "metricflow"
         wait("⌘K 命中", upTo: 20) { !palette.hits.isEmpty }
         print("⌘K 命中：\(palette.hits.count)")
@@ -666,12 +698,12 @@ enum PreviewRenderer {
         }, width: 700, height: 560)
     }
 
-    /// 离屏渲染**轮次血缘图**。
+    /// Offscreen-renders the **turn lineage graph**.
     ///
-    /// 输入用**手搓的 `TurnInput` 字面量**而不是本机真实会话：验收形态是一个具体形状
-    /// （提问→思考分叉→子代理回指已存在的 Read→Edit⇄build 重试环→汇聚回答），
-    /// 真实会话不可能稳定复现，而离屏渲染就是验收手段 ⇒ **基准必须可复现**。
-    /// 先例正是 `renderAll`：它渲灵动岛用的也全是手搓的 `AgentTask`/`SubagentInfo` 字面量。
+    /// Input is **hand-written `TurnInput` literals** rather than real local sessions: acceptance is one specific shape
+    /// (question → thinking fork → subagent pointing back at an existing Read → Edit⇄build retry loop → converging answer),
+    /// which real sessions can't reproduce reliably, and offscreen rendering is the acceptance tool ⇒ **the baseline must be reproducible**.
+    /// The precedent is `renderAll`: it renders the Dynamic Island entirely from hand-written `AgentTask`/`SubagentInfo` literals too.
     @MainActor
     static func renderLineage(to directory: String) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
@@ -697,7 +729,8 @@ enum PreviewRenderer {
             print("已渲染 \(name).png")
         }
 
-        /// 画布 + 图例 + 一行统计，固定尺寸、无 ScrollView/无 Lazy → 光栅化风险最低
+        /// Canvas + legend + one stats line, fixed size, no ScrollView/no Lazy → lowest
+        /// rasterization risk
         @MainActor func board(
             _ turn: TurnInput, width: CGFloat, compact: Bool = false,
             expandedSubagents: Set<String> = []
@@ -729,7 +762,7 @@ enum PreviewRenderer {
                 batch: batch, messageId: 1, stepIndex: index)
         }
 
-        // 验收形态（用户选中的那张预览）
+        // Acceptance shape (the preview the user picked)
         let accepted = TurnInput(
             turnIndex: 7, promptMessageId: 0, promptText: L10n.text("Fix pagination on the audit page", zhHans: "修一下审计页的分页"),
             thinkingTexts: [L10n.text("Locate the pagination code first, then decide which layer to change", zhHans: "先定位分页代码在哪，再决定改哪一层")],
@@ -750,8 +783,10 @@ enum PreviewRenderer {
         snap("lineage-golden-wide", board(accepted, width: 1270), width: 1270)
         snap("lineage-golden-compact", board(accepted, width: 780, compact: true))
 
-        // 子代理展开：内部步骤并进同一张图，且它读的文件与主流程去重 → 出现**跨界回读边**。
-        // 这条边正是「内联展开而不是画独立子图」的全部理由（独立子图会把它剪掉）。
+        // Subagent expanded: its inner steps merge into the same graph, and files it reads are
+        // deduped with the main flow → a **cross-boundary read-back edge** appears. That edge is
+        // the whole reason for "expand inline instead of drawing a separate subgraph" (a separate
+        // subgraph would cut it).
         var withSubagent = accepted
         withSubagent.turnIndex = 8
         withSubagent.steps[1].subSteps = [
@@ -764,13 +799,13 @@ enum PreviewRenderer {
             withSubagent, width: 780,
             expandedSubagents: ["Explore|定位分页实现"]), height: 700)
 
-        // Claude 形态：没有思考明文 → 不伪造思考节点，改用分叉点
+        // Claude shape: no plaintext thinking → don't fake thinking nodes, use a fork point instead
         var noThinking = accepted
         noThinking.thinkingTexts = []
         noThinking.turnIndex = 3
         snap("lineage-golden-no-thinking", board(noThinking, width: 780))
 
-        // 纯链式：验脊线笔直
+        // Pure chain: checks the spine is straight
         var chainSteps: [TurnInput.Step] = []
         for index in 0..<7 {
             chainSteps.append(step(
@@ -780,7 +815,7 @@ enum PreviewRenderer {
             turnIndex: 1, promptMessageId: 0, promptText: L10n.text("Review each one", zhHans: "逐个看一遍"),
             steps: chainSteps, answerMessageIds: [1], answerText: L10n.text("Review complete", zhHans: "看完了")), width: 780))
 
-        // 一层 9 个同类：验折叠
+        // 9 siblings of one kind in one layer: checks folding
         var wideSteps: [TurnInput.Step] = []
         for index in 0..<9 {
             wideSteps.append(step(.search, "Grep", "pattern-\(index)", batch: 1, index: index))
@@ -789,7 +824,7 @@ enum PreviewRenderer {
             turnIndex: 2, promptMessageId: 0, promptText: L10n.text("Search the entire codebase", zhHans: "全库找一遍"),
             steps: wideSteps, answerMessageIds: [1], answerText: L10n.text("Found it", zhHans: "找到了")), width: 780))
 
-        // 60 节点最坏可读态
+        // Worst-case readable state with 60 nodes
         var bigSteps: [TurnInput.Step] = []
         var cursor = 0
         for batchIndex in 0..<12 {
@@ -805,7 +840,8 @@ enum PreviewRenderer {
             steps: bigSteps, answerMessageIds: [1], answerText: L10n.text("Finished reading", zhHans: "读完了")),
             width: 780), height: 1100)
 
-        // 多条回读 + 多条重试：验左右分道与角标降级
+        // Multiple read-backs + multiple retries: checks left/right lanes and corner-badge
+        // degradation
         var laneSteps: [TurnInput.Step] = []
         cursor = 0
         for index in 0..<5 {
@@ -828,7 +864,7 @@ enum PreviewRenderer {
             steps: laneSteps, answerMessageIds: [1], answerText: L10n.text("All files updated", zhHans: "都改完了")),
             width: 780), height: 900)
 
-        // 超上限：验降级不排版
+        // Over the limit: checks it degrades instead of laying out
         var hugeSteps: [TurnInput.Step] = []
         for index in 0..<160 {
             hugeSteps.append(step(
@@ -839,20 +875,22 @@ enum PreviewRenderer {
             steps: hugeSteps, answerMessageIds: [1], answerText: L10n.text("All commands finished", zhHans: "跑完了")),
             width: 780), height: 320)
 
-        // MARK: 真实数据（golden 是形态基准，live 是「真数据下会不会崩/难看」）
-        // 用默认 30 天窗口：`rangeAll = true` 会把窗口放到无穷、上限 2000，
-        // 离屏渲染等不起（也不是用户默认看到的样子）
+        // MARK: Real data (golden is the shape baseline; live answers "does real data crash it or look bad")
+        // Use the default 30-day window: `rangeAll = true` widens the window to infinity with a cap of 2000,
+        // which offscreen rendering can't wait for (and isn't what users see by default)
         let browser = SessionBrowserService()
         browser.refresh()
-        // ⚠️ 先等 scanning 落定，再**无条件**多泵一段。
-        // 不能只按「结果非空」泵：切换数据时旧结果还在，循环会立刻退出、截到旧数据（上一轮踩过）
+        // ⚠️ Wait for scanning to settle first, then pump some more **unconditionally**. Pumping
+        // only until "results non-empty" fails: old results linger when data switches, the loop
+        // exits at once and captures stale data (bitten before)
         let deadline = Date().addingTimeInterval(90)
         while browser.scanning, Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
-        // 挑轮次最多的会话，规则可复现（不是「第一个」）
-        // 会话按排序档可能落在 flatSessions 或 groups 里（SessionsView 自己也是两者相加）
+        // Pick the session with the most turns, a reproducible rule (not "the first one") Depending
+        // on the sort bucket a session may live in flatSessions or groups (SessionsView itself adds
+        // both)
         let candidates = browser.flatSessions + browser.groups.flatMap(\.sessions)
         print("live 候选会话 \(candidates.count) 个")
         var best: (session: AgentSessionInfo, turns: [TurnInput])?
@@ -882,7 +920,8 @@ enum PreviewRenderer {
         snap("lineage-live-graph-dark", page(.graph, turn: worst), dark: true, height: 900)
     }
 
-    /// 离屏渲染桌面吉祥物全部状态、变体和分镜，生成逐变体接触表做视觉走查。
+    /// Offscreen-renders every desktop mascot state, variant, and storyboard, producing per-variant
+    /// contact sheets for visual walkthroughs.
     static func renderMascot(to directory: String) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -1022,7 +1061,7 @@ private struct MascotVariantPreviewSheet: View {
     }
 }
 
-/// 静态贴纸卡(预览用,不走帧动画)
+/// Static sticker card (for previews; no frame animation)
 private struct MascotPreviewCard: View {
     let image: NSImage
     var bubble: String?
@@ -1060,7 +1099,7 @@ private struct MascotPreviewCard: View {
     }
 }
 
-// MARK: - 来源徽标一览（新增 agent 源后离屏核对 logo 渲染用）
+// MARK: - Source badge overview (for checking logo rendering offscreen after adding an agent source)
 
 @MainActor
 enum BadgeSheetRenderer {

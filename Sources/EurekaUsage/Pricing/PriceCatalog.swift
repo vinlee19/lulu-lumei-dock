@@ -1,10 +1,12 @@
 import EurekaKit
 import Foundation
 
-/// 远程价格目录（LiteLLM + models.dev）的规整形态：统一为 USD / 百万 token，键一律小写。
-/// 纯值类型，可跨线程共享；磁盘缓存与随包快照都是它的 JSON 序列化。
+/// Normalized form of the remote price catalogs (LiteLLM + models.dev): unified to USD / million
+/// tokens, all keys lowercase. A pure value type, safe to share across threads; the disk cache and
+/// bundled snapshot are both its JSON serialization.
 public struct PriceCatalog: Codable, Equatable, Sendable {
-    /// models.dev 的一个 provider：订阅套餐（coding plan 等）价格全为 0，只用于识别，不采信其价格
+    /// One models.dev provider: subscription plans (coding plan etc.) are all priced 0, used only
+    /// for identification, never trusted for price
     public struct Provider: Codable, Equatable, Sendable {
         public var subscription: Bool
         public var models: [String: CatalogPrice]
@@ -20,7 +22,8 @@ public struct PriceCatalog: Codable, Equatable, Sendable {
         }
     }
 
-    /// 单个来源的元信息（fetchedAt 用于缓存 vs 随包快照谁新用谁；etag 用于条件请求）
+    /// Per-source metadata (fetchedAt decides whether the cache or bundled snapshot is newer; etag
+    /// is for conditional requests)
     public struct SourceMeta: Codable, Equatable, Sendable {
         public var fetchedAt: Date
         public var etag: String?
@@ -35,9 +38,9 @@ public struct PriceCatalog: Codable, Equatable, Sendable {
         }
     }
 
-    /// LiteLLM：原始键小写（如 `gpt-6-sol`、`zai/glm-5.2`、`openrouter/z-ai/glm-5.2`）
+    /// LiteLLM: raw keys lowercased (e.g. `gpt-6-sol`, `zai/glm-5.2`, `openrouter/z-ai/glm-5.2`)
     public var litellm: [String: CatalogPrice]
-    /// models.dev：provider id（小写）→ 模型 id（小写）→ 价格
+    /// models.dev: provider id (lowercase) → model id (lowercase) → price
     public var modelsDev: [String: Provider]
     public var litellmMeta: SourceMeta?
     public var modelsDevMeta: SourceMeta?
@@ -56,7 +59,8 @@ public struct PriceCatalog: Codable, Equatable, Sendable {
 
     public var isEmpty: Bool { litellm.isEmpty && modelsDev.isEmpty }
 
-    /// 逐来源取较新者合并：磁盘缓存与随包快照各自可能只有一边新（如 models.dev 拉取失败）
+    /// Merges by taking the newer side per source: the disk cache and bundled snapshot may each be
+    /// newer on only one side (e.g. a failed models.dev fetch)
     public static func newest(_ a: PriceCatalog, _ b: PriceCatalog) -> PriceCatalog {
         func newer(_ x: SourceMeta?, _ y: SourceMeta?) -> Bool {
             (x?.fetchedAt ?? .distantPast) >= (y?.fetchedAt ?? .distantPast)
@@ -77,8 +81,9 @@ public struct PriceCatalog: Codable, Equatable, Sendable {
     }
 }
 
-/// 目录里的单条价格（USD / 百万 token）。短键编码，控制缓存/快照体积。
-/// 缓存价为 nil 表示目录未给出（按 Anthropic 惯例推导）；显式 0 就是 0。
+/// A single catalog price (USD / million tokens). Short-key encoding keeps the cache/snapshot
+/// small. A nil cache price means the catalog gave none (derived by Anthropic convention); an
+/// explicit 0 means 0.
 public struct CatalogPrice: Codable, Equatable, Sendable {
     public var inputPerM: Double
     public var outputPerM: Double
@@ -120,18 +125,20 @@ public struct CatalogValidationError: Error, CustomStringConvertible, Equatable 
     public var description: String { message }
 }
 
-/// 远程目录解析 + 校验。远程数据一律不信任：超大、结构不对、条目过少、数值异常都拒收，
-/// 调用方拒收后继续用上一份缓存。
+/// Remote catalog parsing + validation. Remote data is never trusted: oversized, malformed, too few
+/// entries, or abnormal values are all rejected, and on rejection the caller keeps using the
+/// previous cache.
 public enum PriceCatalogParser {
-    /// 单来源体积上限（字节）
+    /// Per-source size cap (bytes)
     public static let litellmMaxBytes = 16 << 20
     public static let modelsDevMaxBytes = 24 << 20
-    /// 有效条目下限：低于此值视为源坏了（正常 LiteLLM ~3000、models.dev ~200 provider）
+    /// Minimum valid entries: below this the source is considered broken (normally LiteLLM ~3000,
+    /// models.dev ~200 providers)
     public static let litellmMinEntries = 1000
     public static let modelsDevMinProviders = 50
-    /// 单价上限（USD / 百万 token），超过视为脏数据
+    /// Unit price cap (USD / million tokens); anything above is treated as dirty data
     public static let maxPricePerM: Double = 10_000
-    /// LiteLLM 里有对话计价意义的 mode；embedding / image 等跳过
+    /// LiteLLM modes that are meaningful for chat pricing; embedding / image etc. are skipped
     static let litellmModes: Set<String> = ["chat", "responses", "completion"]
 
     public static func parseLiteLLM(
@@ -159,7 +166,8 @@ public enum PriceCatalogParser {
                 cacheReadPerM: perToken(entry["cache_read_input_token_cost"]),
                 cacheWrite5mPerM: perToken(entry["cache_creation_input_token_cost"]),
                 cacheWrite1hPerM: perToken(entry["cache_creation_input_token_cost_above_1hr"]))
-            // 裸键但归属转售平台（together_ai 等）：改挂到 `<平台>/<键>` 下，避免被裸名当官方价命中
+            // Bare key that belongs to a reseller (together_ai etc.): re-file it under
+            // `<platform>/<key>` so the bare name is not matched as the official price
             var lowerKey = key.lowercased()
             if !lowerKey.contains("/"),
                let host = (entry["litellm_provider"] as? String)?.lowercased(),
@@ -203,7 +211,8 @@ public enum PriceCatalogParser {
             }
             guard !prices.isEmpty else { continue }
             let id = providerId.lowercased()
-            // 订阅套餐：id 带 plan（coding-plan / token-plan / agent-plan…）或全部模型价格为 0
+            // Subscription plan: id contains plan (coding-plan / token-plan / agent-plan…) or every
+            // model is priced 0
             let subscription = id.contains("plan") || prices.values.allSatisfy(\.isZero)
             result[id] = PriceCatalog.Provider(subscription: subscription, models: prices)
         }
@@ -216,7 +225,8 @@ public enum PriceCatalogParser {
         return result
     }
 
-    /// 与上一份缓存相比条目骤减一半以上：多半是源端事故，整份拒收
+    /// Entries dropped by more than half versus the previous cache: most likely an upstream
+    /// incident, reject the whole thing
     public static func checkNotCollapsed(new: Int, previous: Int?, name: String) throws {
         guard let previous, previous > 0 else { return }
         if new * 2 < previous {
@@ -228,13 +238,13 @@ public enum PriceCatalogParser {
         guard valid >= min else {
             throw CatalogValidationError(message: L10n.format("%@ has too few valid entries (%@ < %@)", zhHans: "%@ 有效条目过少（%@ < %@）", String(name), String(valid), String(min)))
         }
-        // 坏条目超过 5%：整体格式可能变了，宁可不用
+        // More than 5% bad entries: the overall format may have changed; better not to use it
         if bad * 20 > valid + bad {
             throw CatalogValidationError(message: L10n.format("%@ has too many invalid entries (%@/%@)", zhHans: "%@ 异常条目过多（%@/%@）", String(name), String(bad), String(valid + bad)))
         }
     }
 
-    /// LiteLLM 按 token 计价 → 每百万；非数值 / 负数 / NaN / 超上限 → nil
+    /// LiteLLM prices per token → per million; non-numeric / negative / NaN / over the cap → nil
     private static func perToken(_ value: Any?) -> Double? {
         guard let raw = number(value) else { return nil }
         return sane((raw * 1_000_000 * 1e9).rounded() / 1e9)
@@ -246,7 +256,7 @@ public enum PriceCatalogParser {
     }
 
     private static func number(_ value: Any?) -> Double? {
-        // JSONSerialization 把 true/false 也桥接成 NSNumber，排除布尔
+        // JSONSerialization also bridges true/false to NSNumber; exclude booleans
         guard let number = value as? NSNumber,
               CFGetTypeID(number) != CFBooleanGetTypeID()
         else { return nil }

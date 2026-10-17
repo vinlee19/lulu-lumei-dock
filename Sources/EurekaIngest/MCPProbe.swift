@@ -1,27 +1,32 @@
 import EurekaKit
 import Foundation
 
-/// MCP server 连接检测的**纯逻辑层**：状态分类、initialize 握手响应解析、
-/// tools/list 解析与 stdio 命令解析。网络请求在 app 层（MCPService）发起——
-/// 且只在用户点击时发起，绝不自动探测。
+/// The **pure logic layer** for MCP server connection checks: status classification, initialize
+/// handshake response parsing, tools/list parsing and stdio command resolution. Network requests
+/// are made in the app layer (MCPService), and only when the user clicks; never probed
+/// automatically.
 ///
-/// 与 MCP 协议定义对齐：server = 经 `initialize` 协商能力后暴露 tools/resources/prompts
-/// 的端点。所以"已连接"必须以**握手成功**为准 —— 只看 HTTP 200 会把任意网站误判为
-/// MCP server（v1 的毛病），现在 2xx 还要能解析出 `result.protocolVersion` 才算。
+/// Aligned with the MCP protocol definition: a server is an endpoint that exposes tools/resources/prompts
+/// after negotiating capabilities via `initialize`. So "connected" must mean **the handshake succeeded**;
+/// looking only at HTTP 200 would misjudge any website as an MCP server (the v1 bug). Now a 2xx must also
+/// yield a parseable `result.protocolVersion`.
 public enum MCPProbe {
-    /// 我们实现所对齐的最新**定稿**协议版本（2026-07-28 已正式发布：stateless core、
-    /// 多轮请求、header 版本协商）。initialize 报此版本，server 协商回落什么就记录什么
-    /// （旧 server 回旧版本照样连通）；后续请求按规范带
-    /// `MCP-Protocol-Version: <协商版本>` 头。经典握手序列对新规范保持兼容；
-    /// stateless core 的单请求能力发现属后续跟进项，不影响探测正确性。
+    /// The latest **finalized** protocol version our implementation aligns with (officially
+    /// released 2026-07-28: stateless core, multi-round requests, header version negotiation).
+    /// initialize reports this version and records whatever the server negotiates down to (old
+    /// servers answering with an old version still connect); later requests carry the
+    /// `MCP-Protocol-Version: <negotiated version>` header per spec. The classic handshake sequence
+    /// stays compatible with the new spec; stateless core's single-request capability discovery is
+    /// a follow-up and does not affect probe correctness.
     public static let latestProtocolVersion = "2026-07-28"
 
-    /// initialize 握手取回的 server 自述（协议定义里的 serverInfo + capabilities）
+    /// The server's self-description returned by the initialize handshake (serverInfo +
+    /// capabilities in the protocol definition)
     public struct HandshakeInfo: Equatable, Sendable {
         public var serverName: String?
         public var serverVersion: String?
         public var protocolVersion: String?
-        /// capabilities 的键名（tools / resources / prompts / logging…），排序后
+        /// Capability key names (tools / resources / prompts / logging…), sorted
         public var capabilities: [String]
 
         public init(
@@ -34,7 +39,8 @@ public enum MCPProbe {
             self.capabilities = capabilities
         }
 
-        /// 一行摘要（详情行副标题用）："v1.2 · 协议 2025-03-26 · 能力 tools, prompts"
+        /// One-line summary (subtitle of the detail row): "v1.2 · Protocol 2025-03-26 ·
+        /// Capabilities tools, prompts"
         public var summary: String {
             var parts: [String] = []
             if let version = serverVersion, !version.isEmpty { parts.append("v\(version)") }
@@ -47,19 +53,21 @@ public enum MCPProbe {
     }
 
     public enum Status: Equatable, Sendable {
-        /// 握手成功（2xx 且响应解析出 protocolVersion）
+        /// Handshake succeeded (2xx and the response yields a protocolVersion)
         case connected(HandshakeInfo)
-        /// 2xx 但响应不是 MCP initialize 结果——端点可达但多半配错了 URL/传输方式
+        /// 2xx but the response is not an MCP initialize result: the endpoint is reachable but the
+        /// URL/transport is most likely misconfigured
         case notMCP
-        /// 401 / 403：凭证缺失或过期；authServer = WWW-Authenticate 里的 OAuth 元数据地址
+        /// 401 / 403: credentials missing or expired; authServer = the OAuth metadata URL from
+        /// WWW-Authenticate
         case unauthorized(code: Int, authServer: String?)
-        /// 其它 HTTP 状态（404/5xx…）
+        /// Any other HTTP status (404/5xx…)
         case httpError(Int)
-        /// 传输层失败（断网 / DNS / 超时）
+        /// Transport-level failure (offline / DNS / timeout)
         case unreachable(String)
-        /// stdio：命令已解析到可执行文件（关联值 = 实际路径）
+        /// stdio: the command resolved to an executable (associated value = actual path)
         case commandFound(String)
-        /// stdio：PATH 与绝对路径都找不到可执行文件
+        /// stdio: no executable found on PATH or at the absolute path
         case commandMissing
 
         public var label: String {
@@ -74,7 +82,7 @@ public enum MCPProbe {
             }
         }
 
-        /// 语义色（UI 映射：ok=绿 / warning=金 / bad=红）
+        /// Semantic color (UI mapping: ok=green / warning=gold / bad=red)
         public enum Tone: Equatable, Sendable { case ok, warning, bad }
         public var tone: Tone {
             switch self {
@@ -84,7 +92,8 @@ public enum MCPProbe {
             }
         }
 
-        /// 行下引导文案（需要授权 / 非 MCP 端点时给动线）
+        /// Guidance text under the row (points to next steps when authorization is needed / the
+        /// endpoint is not MCP)
         public var hint: String? {
             switch self {
             case .unauthorized(_, let authServer):
@@ -103,10 +112,10 @@ public enum MCPProbe {
         }
     }
 
-    // MARK: - 状态分类（唯一入口，纯函数可测）
+    // MARK: - Status classification (single entry point, pure and testable)
 
-    /// 2xx → 解析握手（成功 connected / 失败 notMCP）；401/403 → 需授权（附 OAuth 元数据）；
-    /// 其余按异常报。
+    /// 2xx → parse the handshake (success connected / failure notMCP); 401/403 → needs
+    /// authorization (with OAuth metadata); everything else is reported as an error.
     public static func classify(
         statusCode: Int, body: Data? = nil, contentType: String? = nil,
         wwwAuthenticate: String? = nil
@@ -125,8 +134,8 @@ public enum MCPProbe {
         }
     }
 
-    /// initialize 响应 → 握手信息（支持纯 JSON 与 text/event-stream 两种载荷）。
-    /// 解析不出 `result.protocolVersion` 即判定"不是 MCP"。
+    /// initialize response → handshake info (supports both plain JSON and text/event-stream
+    /// payloads). If `result.protocolVersion` cannot be parsed, it is judged "not MCP".
     public static func parseInitializeResponse(
         _ data: Data, contentType: String?
     ) -> HandshakeInfo? {
@@ -144,18 +153,20 @@ public enum MCPProbe {
             capabilities: capabilities)
     }
 
-    /// 单个 tool 的展示信息（2025-11-25：title / description / annotations / outputSchema）
+    /// Display info for a single tool (2025-11-25: title / description / annotations /
+    /// outputSchema)
     public struct ToolInfo: Equatable, Sendable {
         public var name: String
         public var title: String?
         public var description: String?
-        /// annotations.readOnlyHint（不可信提示，仅作展示）
+        /// annotations.readOnlyHint (an untrusted hint, display only)
         public var readOnly: Bool?
         /// annotations.destructiveHint
         public var destructive: Bool?
-        /// 是否声明了结构化输出 schema
+        /// Whether a structured output schema is declared
         public var hasOutputSchema: Bool
-        /// inputSchema.properties 的参数名（必填的带 `*` 后缀；只取名字，不存 schema 正文）
+        /// Parameter names from inputSchema.properties (required ones get a `*` suffix; names only,
+        /// schema bodies are not stored)
         public var params: [String]
 
         public init(
@@ -173,7 +184,7 @@ public enum MCPProbe {
         }
     }
 
-    /// prompts/resources 的通用条目（名字 + 描述，别的一概不读）
+    /// Generic entry for prompts/resources (name + description; nothing else is read)
     public struct NamedItem: Equatable, Sendable {
         public var name: String
         public var description: String?
@@ -184,8 +195,9 @@ public enum MCPProbe {
         }
     }
 
-    /// tools/list 响应 → 工具清单（含 title/描述/注解）+ 分页游标；解析失败返回 nil。
-    /// `nextCursor` 非空说明还有下一页（2025-11-25 分页语义），调用方跟随之。
+    /// tools/list response → tool list (with title/description/annotations) + pagination cursor;
+    /// returns nil on parse failure. A non-empty `nextCursor` means there is another page
+    /// (2025-11-25 pagination semantics); the caller follows it.
     public static func parseToolsList(
         _ data: Data, contentType: String?
     ) -> (tools: [ToolInfo], nextCursor: String?)? {
@@ -213,8 +225,9 @@ public enum MCPProbe {
         return (parsed, result["nextCursor"] as? String)
     }
 
-    /// resources/list、prompts/list 共用的清单解析（`result.<key>[].{name,description}`
-    /// + 游标）。只取名字与描述——正文/URI 一概不读（隐私面最小化）。
+    /// List parsing shared by resources/list and prompts/list (`result.<key>[].{name,description}`
+    /// + cursor). Only names and descriptions are taken; bodies/URIs are never read (minimal
+    ///   privacy surface).
     public static func parseNamedList(
         _ data: Data, contentType: String?, key: String
     ) -> (items: [NamedItem], nextCursor: String?)? {
@@ -230,8 +243,9 @@ public enum MCPProbe {
         return (parsed, result["nextCursor"] as? String)
     }
 
-    /// Streamable HTTP 的响应可能是 SSE：取第一条 `data:` 行；纯 JSON 原样返回。
-    /// 公开给 app 层复用（tools/list 的 schema 文本要拿去做 token 估算）。
+    /// A Streamable HTTP response may be SSE: take the first `data:` line; plain JSON is returned
+    /// as-is. Public so the app layer can reuse it (the tools/list schema text feeds token
+    /// estimation).
     public static func extractJSONPayload(_ data: Data, contentType: String?) -> Data? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         let isSSE = (contentType?.lowercased().contains("text/event-stream") ?? false)
@@ -247,9 +261,9 @@ public enum MCPProbe {
         return nil
     }
 
-    /// 401/403 的 WWW-Authenticate 质询解析结果（RFC 9728 + RFC 6750）。
-    /// `scopes` 来自质询的 `scope` 参数——规范定其为**权威** scope 来源，
-    /// 授权请求应优先于 AS 元数据的 scopes_supported 使用之。
+    /// Parsed WWW-Authenticate challenge from a 401/403 (RFC 9728 + RFC 6750). `scopes` comes from
+    /// the challenge's `scope` parameter, which the spec makes the **authoritative** scope source;
+    /// authorization requests should prefer it over the AS metadata's scopes_supported.
     public struct Challenge: Equatable, Sendable {
         public var resourceMetadata: String?
         public var scopes: [String]
@@ -260,8 +274,9 @@ public enum MCPProbe {
         }
     }
 
-    /// WWW-Authenticate 里的 OAuth 元数据地址（MCP 授权规范用 RFC 9728 的
-    /// `resource_metadata` 参数；旧实现也见过 authorization_uri / as_uri）
+    /// The OAuth metadata URL in WWW-Authenticate (the MCP authorization spec uses RFC 9728's
+    /// `resource_metadata` parameter; older implementations have also been seen using
+    /// authorization_uri / as_uri)
     public static func parseWWWAuthenticate(_ header: String?) -> String? {
         guard let header else { return nil }
         for param in ["resource_metadata", "authorization_uri", "as_uri"] {
@@ -270,7 +285,7 @@ public enum MCPProbe {
         return nil
     }
 
-    /// 完整质询解析：元数据地址 + scope 参数（空格分隔多值）
+    /// Full challenge parsing: metadata URL + scope parameter (space-separated, multi-valued)
     public static func parseChallenge(_ header: String?) -> Challenge {
         let scopeText = header.flatMap { challengeParameter("scope", in: $0) } ?? ""
         return Challenge(
@@ -278,7 +293,7 @@ public enum MCPProbe {
             scopes: scopeText.split(separator: " ").map(String.init))
     }
 
-    /// 质询里单个参数取值（带引号或裸值皆可）
+    /// Value of a single challenge parameter (quoted or bare)
     private static func challengeParameter(_ name: String, in header: String) -> String? {
         guard !header.isEmpty, let range = header.range(of: name + "=") else { return nil }
         var rest = String(header[range.upperBound...])
@@ -293,11 +308,13 @@ public enum MCPProbe {
         return nil
     }
 
-    // MARK: - stdio 命令解析
+    // MARK: - stdio command resolution
 
-    /// stdio 命令解析：绝对/相对路径直接查；裸命令按 PATH 逐目录找可执行文件。
-    /// 本函数**纯 syscall，不 spawn 进程**——只判可达性。真正启动进程读取能力清单
-    /// 的是 `MCPStdioProbe`（v2.8 起，仅在用户点击「重新检测」时发生）。
+    /// stdio command resolution: absolute/relative paths are checked directly; a bare command is
+    /// looked up as an executable directory by directory along PATH. This function is **pure
+    /// syscalls and spawns no process**; it only judges reachability. Actually launching the
+    /// process to read its capability list is `MCPStdioProbe`'s job (since v2.8, and only when the
+    /// user clicks "Re-check").
     public static func resolveCommand(
         _ command: String,
         pathVariable: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
@@ -317,9 +334,10 @@ public enum MCPProbe {
         return nil
     }
 
-    // MARK: - 请求体（JSON-RPC 2.0）
+    // MARK: - Request bodies (JSON-RPC 2.0)
 
-    /// MCP `initialize` 探测请求体（报最新定稿版本，server 协商回落什么记什么）
+    /// MCP `initialize` probe request body (reports the latest finalized version; records whatever
+    /// the server negotiates down to)
     public static func initializeRequestBody() -> Data {
         let payload: [String: Any] = [
             "jsonrpc": "2.0",
@@ -334,7 +352,8 @@ public enum MCPProbe {
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 
-    /// 握手完成通知（规范要求在其它请求前发送；无 id 的通知）
+    /// Handshake-complete notification (the spec requires sending it before other requests; a
+    /// notification without an id)
     public static func initializedNotificationBody() -> Data {
         let payload: [String: Any] = [
             "jsonrpc": "2.0",
@@ -343,17 +362,17 @@ public enum MCPProbe {
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 
-    /// tools/list 请求体（cursor 非空即取下一页）
+    /// tools/list request body (a non-empty cursor fetches the next page)
     public static func toolsListRequestBody(cursor: String? = nil) -> Data {
         listRequestBody(method: "tools/list", id: 2, cursor: cursor)
     }
 
-    /// resources/list 请求体（只为计数，取第一页即可）
+    /// resources/list request body (only for counting, so the first page is enough)
     public static func resourcesListRequestBody(cursor: String? = nil) -> Data {
         listRequestBody(method: "resources/list", id: 3, cursor: cursor)
     }
 
-    /// prompts/list 请求体（只为计数，取第一页即可）
+    /// prompts/list request body (only for counting, so the first page is enough)
     public static func promptsListRequestBody(cursor: String? = nil) -> Data {
         listRequestBody(method: "prompts/list", id: 4, cursor: cursor)
     }

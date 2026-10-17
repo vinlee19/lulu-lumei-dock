@@ -1,24 +1,27 @@
 import Foundation
 
-/// 一次「会话 ↔ 终端」绑定：这个 session 在哪个终端里跑过。
+/// One session <-> terminal binding: which terminal this session ran in.
 ///
-/// 来源有两条，精度不同，由 `origin` 区分：
-/// - `.hook`：relay 从自己继承的环境里读到的（`TERM_PROGRAM` / `__CFBundleIdentifier` /
-///   `TMUX_PANE` / `ttyname`）—— 准确，因为 hook 就是那个终端的后代进程。
-/// - `.probe`：app 事后按 cwd 匹配运行中的进程、再沿父进程链上溯推出来的 —— 覆盖没装
-///   hook 的源，但拿不到 tmux pane，且 tty 可能是 CLI 自己的而不是终端的。
+/// There are two sources with different precision, told apart by `origin`:
+/// - `.hook`: read by the relay from the environment it inherited (`TERM_PROGRAM` /
+///   `__CFBundleIdentifier` / `TMUX_PANE` / `ttyname`). Accurate, because the hook is a descendant
+///   process of that terminal.
+/// - `.probe`: inferred by the app after the fact by matching running processes on cwd and walking
+///   up the parent chain. Covers sources without hooks, but can't get the tmux pane, and the tty
+///   may be the CLI's own rather than the terminal's.
 public struct TerminalBinding: Equatable, Sendable, Codable {
-    /// 采集来源，决定可信度
+    /// Where it was collected from; determines trustworthiness
     public enum Origin: String, Sendable, Codable {
         case hook
         case probe
     }
 
-    /// `TERM_PROGRAM` 原值，如 "iTerm.app" / "Apple_Terminal" / "ghostty"
+    /// Raw `TERM_PROGRAM`, e.g. "iTerm.app" / "Apple_Terminal" / "ghostty"
     public var app: String?
-    /// `__CFBundleIdentifier`，如 "com.googlecode.iterm2"。激活终端应用只认这个
+    /// `__CFBundleIdentifier`, e.g. "com.googlecode.iterm2". Activating the terminal app only
+    /// trusts this
     public var bundleId: String?
-    /// 控制终端设备路径，如 "/dev/ttys004"
+    /// Controlling terminal device path, e.g. "/dev/ttys004"
     public var tty: String?
     public var tmuxPane: String?
     public var origin: Origin
@@ -37,24 +40,25 @@ public struct TerminalBinding: Equatable, Sendable, Codable {
         self.origin = origin
     }
 
-    /// 什么都没采到 —— 调用方据此决定不落库（免得留一堆空行）
+    /// Nothing was collected; callers use this to skip persisting (avoids piling up empty rows)
     public var isEmpty: Bool {
         app == nil && bundleId == nil && tty == nil && tmuxPane == nil
     }
 
-    /// 人读的终端名：优先把已知 bundle id 翻成正式名，其次清理 `TERM_PROGRAM`。
-    /// 都没有就退到 tty，最后兜底"未知终端"。
+    /// Human-readable terminal name: prefer mapping a known bundle id to its proper name, then a
+    /// cleaned-up `TERM_PROGRAM`. With neither, fall back to the tty, and finally to "unknown
+    /// terminal".
     public var terminalName: String {
         if let bundleId, let known = Self.knownTerminals[Self.canonicalBundleId(bundleId)] {
             return known
         }
         if let app, !app.isEmpty {
-            // "iTerm.app" → "iTerm"，"Apple_Terminal" → "Terminal"
+            // "iTerm.app" → "iTerm", "Apple_Terminal" → "Terminal"
             if app == "Apple_Terminal" { return "Terminal" }
             return app.hasSuffix(".app") ? String(app.dropLast(4)) : app
         }
         if let bundleId, !bundleId.isEmpty {
-            // 未收录的 bundle id：取最后一段总比整串好看（com.foo.bar → bar）
+            // unlisted bundle id: the last segment beats the whole string (com.foo.bar → bar)
             let canonical = Self.canonicalBundleId(bundleId)
             return canonical.split(separator: ".").last.map(String.init) ?? canonical
         }
@@ -62,12 +66,12 @@ public struct TerminalBinding: Equatable, Sendable, Codable {
         return L10n.text("Unknown terminal", zhHans: "未知终端")
     }
 
-    /// tty 的短名：`/dev/ttys004` → `ttys004`
+    /// Short tty name: `/dev/ttys004` → `ttys004`
     public var shortTTY: String? {
         tty.map { URL(fileURLWithPath: $0).lastPathComponent }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// 列表里一行展示用："iTerm2 · ttys004"；tmux 会话额外标出 pane
+    /// One-line display for lists: "iTerm2 · ttys004"; tmux sessions also show the pane
     public var displayName: String {
         var parts = [terminalName]
         if let shortTTY { parts.append(shortTTY) }
@@ -75,8 +79,8 @@ public struct TerminalBinding: Equatable, Sendable, Codable {
         return parts.joined(separator: " · ")
     }
 
-    /// 归一 bundle id：剥掉 JetBrains 的预览版后缀（`com.jetbrains.intellij-EAP` →
-    /// `com.jetbrains.intellij`），免得逐个枚举各 IDE 的 EAP / Preview 变体。
+    /// Normalize the bundle id: strip JetBrains preview suffixes (`com.jetbrains.intellij-EAP` →
+    /// `com.jetbrains.intellij`) so we don't have to enumerate every IDE's EAP / Preview variant.
     static func canonicalBundleId(_ bundleId: String) -> String {
         for suffix in ["-EAP", "-eap", "-Preview", "-preview"] where bundleId.hasSuffix(suffix) {
             return String(bundleId.dropLast(suffix.count))
@@ -84,7 +88,8 @@ public struct TerminalBinding: Equatable, Sendable, Codable {
         return bundleId
     }
 
-    /// bundle id → 正式名。只收录常见 macOS 终端；未收录不影响功能（退到 TERM_PROGRAM）
+    /// bundle id → proper name. Only common macOS terminals are listed; unlisted ones still work
+    /// (fall back to TERM_PROGRAM)
     static let knownTerminals: [String: String] = [
         "com.googlecode.iterm2": "iTerm2",
         "com.apple.Terminal": "Terminal",

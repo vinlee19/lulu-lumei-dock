@@ -21,7 +21,7 @@ func syncStateRepoTests(_ t: TestRunner) {
         try store.syncState.upsert(entry)
         try expectEqual(try store.syncState.entry(path: "/a/b.jsonl"), entry)
 
-        // upsert 覆盖
+        // upsert overwrites
         var updated = entry
         updated.size = 100
         try store.syncState.upsert(updated)
@@ -64,10 +64,11 @@ func syncStateRepoTests(_ t: TestRunner) {
             let store = try EurekaStore(path: path)
             try store.syncState.upsert(SyncStateRepo.Entry(
                 path: "/keep", remoteKey: "k/keep", size: 7, mtime: 7, uploadedAt: Date()))
-            // 回拨版本号，模拟"旧库升级到新版"场景
+            // Roll back the version number to simulate "old DB upgraded to a new version"
             try store.db.execute("PRAGMA user_version = 7")
         }
-        // 重开触发 migrate（7 < 8）：派生表 DROP 重建，sync_state 必须保留
+        // Reopening triggers migrate (7 < 8): derived tables are DROPped and rebuilt; sync_state
+        // must be kept
         let reopened = try EurekaStore(path: path)
         try expectEqual(try reopened.syncState.entry(path: "/keep")?.size, 7)
     }

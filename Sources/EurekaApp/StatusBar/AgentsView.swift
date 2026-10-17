@@ -3,28 +3,30 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// Agent 配置：统计瓦片（点击按 CLI 筛选）+ 卡片网格 + 内嵌详情，与「计划」页同一套交互语言。
-/// Claude/OpenCode/Grok 逐文件 markdown，可编辑/启停/删除；Kimi 为内置只读；
-/// Codex 是 config.toml 的 `[profiles.*]` 预设，内嵌表单增删改。
+/// Agent configuration: stat tiles (click to filter by CLI) + card grid + inline detail, same
+/// interaction language as the Plans page. Claude/OpenCode/Grok are per-file markdown, editable /
+/// toggleable / deletable; Kimi's are built-in and read-only; Codex uses `[profiles.*]` presets in
+/// config.toml, added / edited / removed through an inline form.
 struct AgentsView: View {
     @ObservedObject var service: AgentConfigService
     @ObservedObject var usageService: UsageService
 
-    /// 内嵌 agent 详情（markdown 预览/编辑；内置 agent 只读概览）
+    /// Inline agent detail (markdown preview / edit; read-only overview for built-in agents)
     @State private var detail: AgentDefinition?
-    /// 内嵌 Codex profile 表单（含新建）
+    /// Inline Codex profile form (including create)
     @State private var profileDetail: ProfileEditTarget?
-    /// 来源筛选（nil = 全部）
+    /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
     @State private var creatingAgent = false
     @State private var creatingKind: AgentCreateKind = .claude
     @State private var newAgentName = ""
     @State private var deletingAgent: AgentDefinition?
     @State private var deletingProfile: CodexProfile?
-    /// 管理区布局：列表 / 图标网格（默认列表，对齐设计稿）
+    /// Management area layout: list / icon grid (list by default, matching the design mock)
     @State private var layout: KnowledgeLayout = .list
 
-    /// 离屏渲染/预览专用：指定初始布局（交互时由 LayoutToggle 切换）
+    /// Offscreen rendering / previews only: sets the initial layout (LayoutToggle switches it
+    /// during interaction)
     init(service: AgentConfigService, usageService: UsageService,
          initialLayout: KnowledgeLayout = .list) {
         self._service = ObservedObject(wrappedValue: service)
@@ -106,7 +108,7 @@ struct AgentsView: View {
         }
     }
 
-    // MARK: - 顶部栏（标题 + 搜索 + 新建 + 刷新 + 布局切换）
+    // MARK: - Top bar (title + search + new + refresh + layout toggle)
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -164,9 +166,9 @@ struct AgentsView: View {
         creatingAgent = true
     }
 
-    // MARK: - 统一条目（合并各来源 agent + Codex profile）
+    // MARK: - Unified entries (agents from every source merged with Codex profiles)
 
-    /// 子代理调用次数映射（Claude/Kimi；键 = 来源:小写名）
+    /// Subagent invocation counts (Claude/Kimi; key = source:lowercased name)
     private var callsByKey: [String: Int] {
         var map: [String: Int] = [:]
         for stat in usageService.agentStats {
@@ -175,7 +177,8 @@ struct AgentsView: View {
         return map
     }
 
-    /// 全部子代理（Claude 用户/项目/插件/内置 + OpenCode + Grok + Kimi 内置 + ZCode 快照 + Codex profile）
+    /// All subagents (Claude user/project/plugin/built-in + OpenCode + Grok + Kimi built-in + ZCode
+    /// snapshot + Codex profiles)
     private var allItems: [AgentItem] {
         let calls = callsByKey
         func item(_ agent: AgentDefinition) -> AgentItem {
@@ -234,7 +237,7 @@ struct AgentsView: View {
         return distinct.sorted { count(for: $0) > count(for: $1) }
     }
 
-    /// 模型分布（统计卡图例；紫色系深浅区分，取前 4 + 其他）
+    /// Model distribution (stat card legend; shades of purple, top 4 + other)
     private var modelSegments: [StatOverviewCard.Segment] {
         var counts: [String: Int] = [:]
         for item in allItems { counts[item.model, default: 0] += 1 }
@@ -256,7 +259,7 @@ struct AgentsView: View {
         return segments
     }
 
-    // MARK: - 主体（统计概览卡 + 来源 chips + 扁平列表/网格）
+    // MARK: - Body (stat overview card + source chips + flat list / grid)
 
     private let gridColumns = [GridItem(.flexible(), spacing: 14),
                                GridItem(.flexible(), spacing: 14),
@@ -340,7 +343,7 @@ struct AgentsView: View {
         }
     }
 
-    // MARK: - 动作路由
+    // MARK: - Action routing
 
     private func open(_ item: AgentItem) {
         withAnimation(.easeOut(duration: 0.15)) {
@@ -373,7 +376,7 @@ struct AgentsView: View {
     }
 }
 
-// MARK: - 数据载体
+// MARK: - Data carriers
 
 enum AgentCreateKind { case claude, opencode, grok, cursor }
 
@@ -383,9 +386,10 @@ struct ProfileEditTarget: Identifiable {
     var isNew: Bool
 }
 
-// MARK: - 统一条目 + 卡片 / 列表行
+// MARK: - Unified entry + card / list row
 
-/// 统一子代理条目（合并 AgentDefinition 与 CodexProfile，供角色头像/标签/模型统一渲染）
+/// Unified subagent entry (merges AgentDefinition and CodexProfile so avatar / tags / model render
+/// the same way)
 private struct AgentItem: Identifiable {
     let id: String
     let source: AgentSource
@@ -393,11 +397,11 @@ private struct AgentItem: Identifiable {
     let description: String?
     let role: AgentRole
     let model: String
-    let toolCount: Int?      // nil = Codex profile；0 = 继承全部工具
+    let toolCount: Int?      // nil = Codex profile; 0 = inherits all tools
     let builtin: Bool
     let enabled: Bool
     let canToggle: Bool
-    let calls: Int?          // 调用次数（Claude/Kimi 有数据，其余 nil）
+    let calls: Int?          // invocation count (Claude/Kimi have data, others nil)
     let path: String
     let deletable: Bool
     let projectName: String?
@@ -451,7 +455,8 @@ private func agentItemMenu(
     }
 }
 
-/// 子代理图标卡：角色头像 + 名 + 角色标签/来源 logo + 开关；描述；模型 · 工具数 · 调用次数
+/// Subagent icon card: role avatar + name + role tag / source logo + toggle; description; model ·
+/// tool count · invocations
 private struct AgentCard: View {
     let item: AgentItem
     let service: AgentConfigService
@@ -505,7 +510,8 @@ private struct AgentCard: View {
     }
 }
 
-/// 子代理列表行：角色头像 + 名/角色标签/内置标 + 描述 + 模型 · 调用次数 + 开关
+/// Subagent list row: role avatar + name / role tag / built-in badge + description + model ·
+/// invocations + toggle
 private struct AgentRow: View {
     let item: AgentItem
     let service: AgentConfigService
@@ -554,7 +560,7 @@ private struct AgentRow: View {
     }
 }
 
-// MARK: - agent 内嵌详情（markdown 预览/编辑；内置只读概览）
+// MARK: - Inline agent detail (markdown preview / edit; read-only overview for built-ins)
 
 private struct AgentDetailView: View {
     let agent: AgentDefinition
@@ -574,13 +580,13 @@ private struct AgentDetailView: View {
         self.service = service
         self.onBack = onBack
         self.onDelete = onDelete
-        // init 即加载：避免首帧空白（agent 定义均为小文件）
+        // Load in init to avoid a blank first frame (agent definitions are all small files)
         _text = State(initialValue: agent.path.isEmpty
             ? "" : (service.readContent(path: agent.path) ?? ""))
     }
 
     private var hasFile: Bool { !agent.path.isEmpty }
-    /// 插件文件由 Claude Code 管理 → 只读预览；用户自建可编辑
+    /// Plugin files are managed by Claude Code → read-only preview; user-created ones are editable
     private var editable: Bool { hasFile && !agent.builtin && agent.pluginName == nil }
 
     var body: some View {
@@ -603,7 +609,7 @@ private struct AgentDetailView: View {
         }
     }
 
-    /// 内置 agent（无磁盘文件）：描述 + 配置概览
+    /// Built-in agent (no file on disk): description + config overview
     private var builtinOverview: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
@@ -711,7 +717,7 @@ private struct AgentDetailView: View {
     }
 }
 
-// MARK: - Codex profile 内嵌表单
+// MARK: - Inline Codex profile form
 
 private struct CodexProfileDetailView: View {
     let service: AgentConfigService
@@ -736,7 +742,7 @@ private struct CodexProfileDetailView: View {
 
             Form {
                 TextField(L10n.text("Name", zhHans: "名称"), text: $name)
-                    .disabled(!target.isNew)  // 名称即段名，改名等于新建，避免歧义
+                    .disabled(!target.isNew)  // name = section name; renaming = creating anew, so lock it
                 TextField(L10n.text("model (e.g. gpt-5.5)", zhHans: "model（如 gpt-5.5）"), text: $model)
                 Picker("reasoning effort", selection: $reasoning) {
                     ForEach(reasoningOptions, id: \.self) { Text($0.isEmpty ? L10n.text("(Not set)", zhHans: "（不设置）") : $0) }

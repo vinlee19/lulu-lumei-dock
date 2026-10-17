@@ -2,31 +2,35 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 轮询 Cursor `state.vscdb` 产出实时事件（灵动岛生命周期）。
+/// Polls Cursor's `state.vscdb` to produce live events (Dynamic Island lifecycle).
 ///
-/// 为什么是轮询：Cursor 是 IDE，没有 hook / notify 回调，全部会话状态只落在
-/// 一个 SQLite 库里（同 opencode / hermes / antigravity 的取舍——没有回调时这是唯一实时通道）。
-/// 库由 Cursor 进程常驻持有并跑 WAL，本 tailer 一律 `SQLITE_OPEN_READONLY` 打开，
-/// **绝不用 `immutable=1`**，否则读不到未 checkpoint 的新写入。
+/// Why polling: Cursor is an IDE with no hook / notify callback, and all session state lives only
+/// in one SQLite database (same trade-off as opencode / hermes / antigravity — with no callback
+/// this is the only live channel). The Cursor process keeps the database open in WAL mode, so this
+/// tailer always opens it with `SQLITE_OPEN_READONLY` and **never with `immutable=1`**, or it would
+/// miss new writes that haven't been checkpointed.
 ///
-/// 每轮两段：
-///   1. `composerHeaders`（`idx_composerHeaders_1(recency, composerId)` 覆盖索引）取近窗会话头，
-///      拿到标题 / ctx% / 待授权标记，只有 `recency` 前进或仍在 live 的会话才进第 2 段；
-///   2. 单点读 `composerData:<id>`，判运行/结束、取工具名与子会话。
+/// Each tick has two stages:
+///   1. `composerHeaders` (covering index `idx_composerHeaders_1(recency, composerId)`) fetches the
+///      recent-window session headers for title / ctx% / pending-permission flag; only sessions
+///      whose `recency` advanced or that are still live go on to stage 2;
+///   2. a point read of `composerData:<id>` decides running vs. finished and gets the tool name
+///      and child sessions.
 ///
-/// 进度水位 = 气泡数 + `contextTokensUsed`，只用来判「有没有推进」，
-/// 用量口径另有 `CursorUsageScanner` 负责。
+/// Progress watermark = bubble count + `contextTokensUsed`, used only to tell "did it advance";
+/// usage accounting is `CursorUsageScanner`'s job.
 ///
-/// ⚠️ 顶层会话的判定用 `value.subagentInfo == nil` 而**不是** `isSubagent` 列：
-/// 实勘里子会话（Best-of-N 变体）的 `isSubagent` 列仍是 0，只有 JSON 里带 `subagentInfo`。
+/// Warning: top-level sessions are identified by `value.subagentInfo == nil`, **not** the
+/// `isSubagent` column: on real data, child sessions (Best-of-N variants) still have
+/// `isSubagent` = 0 and only carry `subagentInfo` in the JSON.
 public final class CursorStateTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
-    /// 会话在本 tailer 眼里的阶段（决定同一行下次该发什么事件）
+    /// The session's phase as this tailer sees it (decides which event the row emits next)
     private enum Phase {
-        case live      // 已发过开始/心跳，尚未收尾
-        case ended     // 已按 status 发过收尾
-        case reaped    // 静默超阈值、按空闲收尾过
+        case live      // start/heartbeat already emitted, not yet closed
+        case ended     // closed according to status
+        case reaped    // silent past the threshold and closed as idle
     }
 
     private struct SessionState {
@@ -40,15 +44,17 @@ public final class CursorStateTailer {
         var lastContextPercent: Double?
         var waiting: Bool = false
         var lastSubagents: [SubagentInfo] = []
-        /// 已看到收口状态、但还在等一轮确认（见 inspect 里的 aborted→completed 实勘）
+        /// A closing status was seen but awaits one more tick to confirm
+        /// (see the aborted→completed finding in inspect)
         var pendingClose: String?
-        /// 这一轮开始时转录文件就已存在 → 整轮的生命周期都归转录侧。
-        /// **必须在开始那一刻定死**：若中途才改判，会出现「开始由库侧发、收尾由转录侧
-        /// 负责，而转录侧首见文件时它已收尾所以静默」→ 卡片永远挂着。
+        /// The transcript file already existed when this turn started → the transcript side owns
+        /// the whole turn's lifecycle. **Must be fixed at turn start**: deciding mid-turn yields
+        /// "start emitted by the DB side, finish left to the transcript side, which stays silent
+        /// because the turn had already ended when it first saw the file" → the card hangs forever.
         var ownedByTranscript = false
     }
 
-    /// `composerHeaders` 一行（value 里的 JSON 已摊平）
+    /// One `composerHeaders` row (the JSON in value already flattened)
     struct Header {
         var composerId: String
         var workspaceId: String?
@@ -60,7 +66,7 @@ public final class CursorStateTailer {
         var subagentIds: [String]
     }
 
-    /// `composerData:<id>` 摘要
+    /// Summary of `composerData:<id>`
     struct Detail {
         var progress: Int64
         var generating: Bool
@@ -77,14 +83,15 @@ public final class CursorStateTailer {
     private let recentWindow: TimeInterval
     private let maxSessions: Int
     private let handler: Handler
-    /// 有转录文件的会话 → 生命周期事件让给 `CursorTranscriptTailer`（它有显式 turn_ended）。
-    /// ctx% / 子会话 / 等待授权只有库里有，那几样照发。
+    /// Sessions with a transcript file → lifecycle events are left to `CursorTranscriptTailer`
+    /// (it has an explicit turn_ended). ctx% / child sessions / waiting-for-permission exist only
+    /// in the DB, so those are still emitted.
     private let transcriptOwned: (Date) -> Set<String>
     private let queue = DispatchQueue(label: "com.vinlee.eureka.cursor-tailer")
     private var timer: DispatchSourceTimer?
 
     private var states: [String: SessionState] = [:]
-    /// 已建过水位（首扫只记水位、不重放历史）
+    /// Watermark established (the first scan only records watermarks, never replays history)
     private var baselined = false
 
     static let healthName = "Cursor 会话监视"
@@ -127,7 +134,7 @@ public final class CursorStateTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public for tests and for a synchronous call at launch
     public func scanOnce(now: Date = Date()) {
         HealthRegistry.shared.beat(Self.healthName)
         poll(now: now)
@@ -149,7 +156,8 @@ public final class CursorStateTailer {
             seen.insert(header.composerId)
             let cwd = header.workspaceId.flatMap { folders[$0] }
             if isBaseline {
-                // 首扫只记水位：否则每次 app 启动都会把历史会话重放成一堆卡片
+                // First scan only records watermarks: otherwise every app launch would replay
+                // past sessions as a pile of cards
                 guard let detail = fetchDetail(db: db, composerId: header.composerId) else {
                     continue
                 }
@@ -171,8 +179,9 @@ public final class CursorStateTailer {
         _ header: Header, cwd: String?, db: SQLiteDB, now: Date, owned: Bool
     ) {
         let previous = states[header.composerId]
-        // 没推进又不在跑的会话，跳过 composerData 的读取（最大的一笔开销）。
-        // 待落定的收口要放行：它正是靠「下一轮水位不再动」才敢认最终状态。
+        // Skip the composerData read (the biggest cost) for sessions that neither advanced nor are
+        // running. A pending close must pass through: it relies on "the watermark didn't move on
+        // the next tick" to accept the final status.
         if let previous, previous.phase != .live, previous.pendingClose == nil,
             previous.recency >= header.recency { return }
         guard let detail = fetchDetail(db: db, composerId: header.composerId) else { return }
@@ -187,20 +196,23 @@ public final class CursorStateTailer {
         if let title = header.title { state.title = title }
 
         let advanced = previous == nil || detail.progress > previous!.progress
-        state.progress = detail.progress  // 水位必须回写，否则 advanced 永远为真
+        state.progress = detail.progress  // write the watermark back, or advanced stays true
         let fresh = now.timeIntervalSince(header.recency) <= staleThreshold
-        // `generatingBubbleIds` 实勘全程为空（Cursor 不落生成中状态），所以它只是
-        // 一层保险，真正判活的是「水位在推进且状态还没收口」。
+        // `generatingBubbleIds` was always empty on real data (Cursor doesn't persist a
+        // generating state), so it's only a safety net; liveness really comes from "the watermark
+        // is advancing and the status hasn't closed".
         let running = detail.generating || (advanced && !Self.isClosed(detail.status))
 
-        // 等待授权要在「水位不推进」时也判：卡在授权弹窗上恰恰是什么都不动的时候，
-        // 塞进 running 分支就永远等不到。
+        // Waiting-for-permission must be checked even when the watermark doesn't advance: being
+        // stuck on a permission prompt is exactly when nothing moves, so inside the running branch
+        // it would never fire.
         if state.phase == .live { emitWaiting(header, state: &state, now: now) }
 
         if running {
             state.pendingClose = nil
             if state.phase != .live {
-                // 水位建立后才冒出来的老会话不出假卡：只有真·刚动过的才当活跃
+                // Old sessions that surface after the watermark is set get no fake card: only
+                // ones that really just moved count as active
                 state.phase = fresh ? .live : .reaped
                 state.lastProgressAt = now
                 state.ownedByTranscript = owned
@@ -217,8 +229,8 @@ public final class CursorStateTailer {
                         state: state, at: now, now: now)
                 }
             }
-            // 本轮才转 live 的会话上面那次还没轮到，这里补一次；
-            // `emitWaiting` 只在翻转时发，重复调用是空操作。
+            // A session that only went live this tick missed the call above, so call it again here;
+            // `emitWaiting` only emits on a flip, so repeated calls are no-ops.
             emitWaiting(header, state: &state, now: now)
             emitContext(header, detail: detail, state: &state, now: now)
             emitSubagents(header, detail: detail, db: db, state: &state, now: now)
@@ -227,16 +239,18 @@ public final class CursorStateTailer {
         }
 
         guard Self.isClosed(detail.status) else {
-            // 状态没收口又没推进（例如刚被打开的老会话）：只更新水位。
-            // 之前挂着的待落定收口作废——状态已经不是收口的了。
+            // Status not closed and no progress (e.g. an old session just opened): only update the
+            // watermark. Any pending close is void — the status is no longer a closing one.
             state.pendingClose = nil
             states[header.composerId] = state
             return
         }
 
-        // 收口状态**要等一轮再落定**：实勘同一轮里 status 先写 `aborted` 再写
-        // `completed`（f704e4ec，2s 内两次），当场收尾会把成功的一轮记成中断。
-        // 等到「状态仍是收口的 且 水位不再推进」才认，正好落在最终状态上。
+        // A closing status **must wait one tick before it's final**: real data showed status
+        // written as `aborted` then `completed` within one turn (f704e4ec, twice within 2s), so
+        // closing immediately would record a successful turn as interrupted. Accept it only once
+        // "the status is still closing and the watermark stopped advancing", which lands on the
+        // final status.
         guard let pending = state.pendingClose, pending == detail.status, !advanced else {
             state.pendingClose = detail.status
             states[header.composerId] = state
@@ -244,8 +258,9 @@ public final class CursorStateTailer {
         }
         state.pendingClose = nil
 
-        // 一整轮跑完都没被任何一次轮询逮到（turn 短于轮询间隔）→ 补一张开始卡，
-        // 否则这一轮在历史里会整条消失。老会话被顺手碰一下不算，靠 fresh 挡住。
+        // A whole turn finished without any poll catching it (turn shorter than the poll interval)
+        // → emit a start card too, or the turn vanishes from history entirely. An old session that
+        // merely gets touched doesn't count; `fresh` guards against that.
         let wasLive = state.phase == .live
         guard wasLive || fresh else {
             state.phase = .ended
@@ -256,7 +271,8 @@ public final class CursorStateTailer {
         state.waiting = false
         state.lastSubagents = []
         states[header.composerId] = state
-        // 只认开始那一刻的归属：中途冒出来的转录文件不能把收尾抢走
+        // Only the ownership fixed at turn start counts: a transcript file that appears
+        // mid-turn can't take over the finish
         guard !state.ownedByTranscript else { return }
         if !wasLive {
             emit(.taskStarted(title: state.title), composerId: header.composerId,
@@ -268,11 +284,14 @@ public final class CursorStateTailer {
             composerId: header.composerId, state: state, at: now, now: now)
     }
 
-    /// `hasBlockingPendingActions` = Cursor 在等用户点确认（工具授权 / 阻塞式提问）。
-    /// 只在翻转时发一次，复位交给下一次 `.activity`（TaskStore 会把 waiting 打回 running）。
-    /// ⚠️ **尚未实勘到它真的翻 true**：一轮带命令执行的真实会话全程采样，该字段恒为 0。
-    /// 字段名摆在那儿、代价也只是一次布尔比较，故保留；但别把「Cursor 会出等待授权卡」
-    /// 当成已验证行为——真遇到授权弹窗时它可能压根不落盘（同 Hermes 的处境）。
+    /// `hasBlockingPendingActions` = Cursor is waiting for the user to confirm (tool permission /
+    /// blocking question). Emitted once on the flip; resetting is left to the next `.activity`
+    /// (TaskStore moves waiting back to running).
+    /// Warning: **it has not yet been observed actually flipping to true**: sampling a real session
+    /// with command execution end to end, the field stayed 0. The field name exists and the cost is
+    /// one boolean comparison, so it stays; but don't treat "Cursor shows a waiting-for-permission
+    /// card" as verified behavior — on a real permission prompt it may never be written to disk at
+    /// all (same situation as Hermes).
     private func emitWaiting(_ header: Header, state: inout SessionState, now: Date) {
         guard header.blocking != state.waiting else { return }
         state.waiting = header.blocking
@@ -281,8 +300,8 @@ public final class CursorStateTailer {
             state: state, at: now, now: now)
     }
 
-    /// ctx% 直接取 Cursor 自己算好的 `contextUsagePercent`（不用我们估），
-    /// 沿用 CodeBuddy 的 ≥0.5pt 节流，避免每轮都刷一次 UI
+    /// ctx% comes straight from Cursor's own `contextUsagePercent` (not our estimate), with
+    /// CodeBuddy's ≥0.5pt throttle so the UI isn't refreshed every tick
     private func emitContext(
         _ header: Header, detail: Detail, state: inout SessionState, now: Date
     ) {
@@ -296,8 +315,9 @@ public final class CursorStateTailer {
             at: now, now: now)
     }
 
-    /// 子会话快照：`subagentComposerIds`（真子代理）与 `subComposerIds`（Best-of-N 并行变体）
-    /// 都当子代理展示——岛上那个盒子要的就是「父会话下面并行跑着几路」。
+    /// Child-session snapshot: both `subagentComposerIds` (real subagents) and `subComposerIds`
+    /// (Best-of-N parallel variants) are shown as subagents — the island box is meant to show "how
+    /// many parallel runs are under the parent session".
     private func emitSubagents(
         _ header: Header, detail: Detail, db: SQLiteDB, state: inout SessionState, now: Date
     ) {
@@ -336,14 +356,14 @@ public final class CursorStateTailer {
             finishedAt: status == .running ? nil : header?.recency)
     }
 
-    /// 静默超过 staleThreshold 的活跃会话按空闲收尾：Cursor 被强退时不会写 `status`，
-    /// 不收尾岛上就挂着一张永不消失的运行卡。
+    /// Live sessions silent past staleThreshold are closed as idle: a force-quit Cursor never
+    /// writes `status`, and without closing, the island keeps a running card that never goes away.
     private func reapIdle(now: Date) {
         for (composerId, var state) in states
         where state.phase == .live && now.timeIntervalSince(state.lastProgressAt) > staleThreshold {
             state.phase = .reaped
             guard !state.ownedByTranscript else {
-                states[composerId] = state  // 转录侧负责收尾，这里只记相位
+                states[composerId] = state  // transcript side owns the finish; record phase only
                 continue
             }
             state.waiting = false
@@ -358,7 +378,8 @@ public final class CursorStateTailer {
         }
     }
 
-    /// 掉出时间窗的行清掉，避免 states 无限膨胀；活跃行保留（等 reapIdle 收尾后再清）
+    /// Drop rows that fell out of the time window so states doesn't grow unbounded; live rows
+    /// stay (cleared after reapIdle closes them)
     private func prune(seen: Set<String>) {
         for (composerId, state) in states
         where state.phase != .live && !seen.contains(composerId) {
@@ -366,7 +387,7 @@ public final class CursorStateTailer {
         }
     }
 
-    // MARK: - 读库
+    // MARK: - DB reads
 
     private func fetchHeaders(db: SQLiteDB, now: Date) -> [Header] {
         let cutoff = Int64((now.timeIntervalSince1970 - recentWindow) * 1000)
@@ -402,7 +423,7 @@ public final class CursorStateTailer {
     ) -> Header? {
         guard !composerId.isEmpty else { return nil }
         let json = value.flatMap { Self.parse($0) } ?? [:]
-        // 草稿（还没发过 prompt 的空会话）与子会话不占岛上的位置
+        // Drafts (empty sessions with no prompt sent yet) and child sessions take no island slot
         if json["isDraft"] as? Bool == true { return nil }
         if !allowSubagent, json["subagentInfo"] != nil { return nil }
         return Header(
@@ -434,8 +455,8 @@ public final class CursorStateTailer {
             subagentIds: Self.ids(json["subagentComposerIds"]) + Self.ids(json["subComposerIds"]))
     }
 
-    /// 当前工具名：从尾部往回找最近一条带 `toolFormerData` 的气泡。
-    /// 只看最后 8 条——再往回翻拿到的是上一轮的工具，反而误导。
+    /// Current tool name: walk back from the tail to the latest bubble with `toolFormerData`.
+    /// Only the last 8 — looking further back finds the previous turn's tool, which misleads.
     private func lastTool(db: SQLiteDB, composerId: String, bubbleIds: [String]) -> String? {
         let tail = bubbleIds.suffix(8)
         guard !tail.isEmpty else { return nil }
@@ -452,7 +473,7 @@ public final class CursorStateTailer {
         return nil
     }
 
-    // MARK: - 小工具
+    // MARK: - Helpers
 
     private func emit(
         _ kind: TaskEvent.Kind, composerId: String, state: SessionState, at timestamp: Date,
@@ -476,7 +497,7 @@ public final class CursorStateTailer {
         (raw as? [Any])?.compactMap { $0 as? String }.filter { !$0.isEmpty } ?? []
     }
 
-    /// `status` 取值实勘：`completed` / `aborted` / `none` / 空
+    /// `status` values observed on real data: `completed` / `aborted` / `none` / empty
     static func isClosed(_ status: String) -> Bool {
         status == "completed" || status == "aborted"
     }

@@ -1,7 +1,7 @@
 import Foundation
 import EurekaKit
 
-/// 按信封 channel 路由到对应解码器
+/// Routes to the matching decoder by envelope channel
 public enum EventRouter {
     public static func route(_ raw: RawEvent) -> [TaskEvent] {
         let events: [TaskEvent]
@@ -10,7 +10,8 @@ public enum EventRouter {
             events = ClaudeHookDecoder.decode(payload: raw.payload, receivedAt: raw.receivedAt)
                 .map { [$0] } ?? []
         case "trae-hook":
-            // Trae CN 的 hooks 是 Claude 兼容实现 → 同一个解码器，只换 source
+            // Trae CN's hooks are a Claude-compatible implementation → same decoder, only the
+            // source differs
             events = ClaudeHookDecoder.decode(
                 payload: raw.payload, receivedAt: raw.receivedAt, source: .trae)
                 .map { [$0] } ?? []
@@ -23,8 +24,9 @@ public enum EventRouter {
         default:
             return []
         }
-        // 终端归属来自信封而非 payload，故在此统一贴上：各解码器保持"纯 payload 解析"，
-        // 两个 channel 也不必各写一遍。
+        // Terminal attribution comes from the envelope, not the payload, so it's attached here in
+        // one place: decoders stay "pure payload parsing", and the two channels don't each have to
+        // repeat it.
         guard let terminal = raw.terminal else { return events }
         return events.map { event in
             var copy = event

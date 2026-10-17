@@ -1,9 +1,11 @@
 import Foundation
 
-/// cwd → 项目名：向上找最近的 `.git` **目录**（真仓库根）。
-/// `.git` 文件（子模块/worktree）不算根，继续向上找父仓库——
-/// 在 repo 子目录/子模块里跑的会话归到仓库名下，而不是按 cwd 末段碎成多个"项目"。
-/// 找不到（非 git 目录）回退 cwd 末段。带缓存（每文件每行都要查）。
+/// cwd → project name: walk up to the nearest `.git` **directory** (a real repo root).
+/// A `.git` file (submodule/worktree) is not a root; keep walking up to the parent repo -
+/// sessions run in a repo subdirectory/submodule land under the repo name instead of fragmenting
+/// into several "projects" by the cwd's last component.
+/// If none is found (not a git directory), fall back to the cwd's last component. Cached (looked
+/// up for every line of every file).
 public final class ProjectResolver {
     private var cache: [String: String] = [:]
 
@@ -17,7 +19,8 @@ public final class ProjectResolver {
         return name
     }
 
-    /// cwd → 项目根目录（仓库根，找不到回退 cwd 本身）。项目级技能/agent 发现用。
+    /// cwd → project root directory (the repo root, falling back to the cwd itself). Used for
+    /// project-level skill/agent discovery.
     public func projectRoot(forCwd cwd: String?) -> URL? {
         guard let cwd, !cwd.isEmpty else { return nil }
         return Self.resolveRoot(cwd: cwd)
@@ -27,17 +30,18 @@ public final class ProjectResolver {
         resolveRoot(cwd: cwd).lastPathComponent
     }
 
-    /// 向上找最近的 `.git` 目录（真仓库根）；找不到回退 cwd。
+    /// Walks up to the nearest `.git` directory (a real repo root); falls back to the cwd.
     public static func resolveRoot(cwd rawCwd: String) -> URL {
-        // 防御：含控制字符的脏 cwd（如来自二进制来源裸扫的碎片）会让下面的
-        // URL.appendingPathComponent 抛不可捕获的 ObjC 异常 → 崩溃。截断到首个控制字符/DEL。
+        // Defensive: a dirty cwd containing control characters (e.g. fragments from raw-scanning a
+        // binary source) makes URL.appendingPathComponent below throw an uncatchable ObjC exception
+        // → crash. Truncate at the first control character/DEL.
         let cwd = String(rawCwd.unicodeScalars.prefix { $0.value >= 0x20 && $0.value != 0x7F })
         guard !cwd.isEmpty else { return URL(fileURLWithPath: "/") }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.standardizedFileURL.path
         var dir = URL(fileURLWithPath: cwd).standardizedFileURL
         for _ in 0..<12 {
-            // home 本身不算项目（有人会 git 管理 dotfiles）
+            // home itself is not a project (some people keep their dotfiles in git)
             if dir.path == home || dir.path == "/" { break }
             var isDirectory: ObjCBool = false
             let gitPath = dir.appendingPathComponent(".git").path

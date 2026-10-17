@@ -1,14 +1,15 @@
 import Foundation
 
-/// Google Antigravity CLI（`agy`）本地数据路径（`~/.gemini/antigravity-cli`）。
-/// 会话是每会话一个 SQLite：`conversations/<uuid>.db`，但正文/token/计划/标题全在
-/// 二进制 protobuf blob 里（Google 未公开 schema）——本项目零第三方依赖，无法解 protobuf。
-/// 故只做能干净拿到的部分：工作区路径（从 db 字节里裸扫 `file://` URI）、活跃时间（文件 mtime）、
-/// 技能（SKILL.md）。env `EUREKA_ANTIGRAVITY_*` 覆盖，便于单测。
+/// Local data paths of the Google Antigravity CLI (`agy`) (`~/.gemini/antigravity-cli`). Each
+/// session is its own SQLite file, `conversations/<uuid>.db`, but bodies/tokens/plans/titles all
+/// sit in binary protobuf blobs (schema not published by Google), and this project has zero
+/// third-party deps, so it cannot decode protobuf. So only what can be read cleanly is used:
+/// workspace path (raw scan of `file://` URIs in the db bytes), activity time (file mtime), skills
+/// (SKILL.md). Overridable via env `EUREKA_ANTIGRAVITY_*` for unit tests.
 public enum AntigravityPaths {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
-    /// `~/.gemini`（env `EUREKA_GEMINI_HOME`）
+    /// `~/.gemini` (env `EUREKA_GEMINI_HOME`)
     public static func geminiHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -18,7 +19,7 @@ public enum AntigravityPaths {
         return home().appendingPathComponent(".gemini", isDirectory: true)
     }
 
-    /// `~/.gemini/antigravity-cli`（env `EUREKA_ANTIGRAVITY_HOME`）
+    /// `~/.gemini/antigravity-cli` (env `EUREKA_ANTIGRAVITY_HOME`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -29,7 +30,8 @@ public enum AntigravityPaths {
             .appendingPathComponent("antigravity-cli", isDirectory: true)
     }
 
-    /// 会话根 `~/.gemini/antigravity-cli/conversations`（env `EUREKA_ANTIGRAVITY_CONVERSATIONS`）
+    /// Session root `~/.gemini/antigravity-cli/conversations` (env
+    /// `EUREKA_ANTIGRAVITY_CONVERSATIONS`)
     public static func conversationsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -40,12 +42,14 @@ public enum AntigravityPaths {
             .appendingPathComponent("conversations", isDirectory: true)
     }
 
-    /// 技能根：用户 `~/.gemini/antigravity/skills` + 内置 `~/.gemini/antigravity-cli/builtin/skills`。
-    /// env `EUREKA_ANTIGRAVITY_SKILLS` 覆盖时只用该单一根。
+    /// Skill roots: user `~/.gemini/antigravity/skills` + built-in
+    /// `~/.gemini/antigravity-cli/builtin/skills`. When env `EUREKA_ANTIGRAVITY_SKILLS` overrides,
+    /// only that single root is used.
     ///
-    /// ⚠️ 用户根**不是** `~/.gemini/skills` —— 那是 Gemini 的。两者是各自独立的目录
-    /// （实勘 inode 不同，同名 `SKILL.md` 也是各自的副本）。曾经指错，后果是「新建
-    /// Antigravity 技能」写进了 Gemini 的目录、刷新后被索引成 gemini 来源，建完就改名换姓。
+    /// Warning: the user root is **not** `~/.gemini/skills` -- that one is Gemini's. They are
+    /// separate directories (verified: different inodes, and a same-named `SKILL.md` is a separate
+    /// copy in each). It once pointed there, so a "new Antigravity skill" was written into Gemini's
+    /// directory and, after a refresh, indexed as a gemini source -- renamed right after creation.
     public static func skillsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
@@ -59,8 +63,9 @@ public enum AntigravityPaths {
         ]
     }
 
-    /// 用户技能根 `~/.gemini/antigravity/skills`（新建技能写这里）。
-    /// env `EUREKA_ANTIGRAVITY_SKILLS` 覆盖时用该单一根，与 `skillsRoots()` 保持一致。
+    /// User skill root `~/.gemini/antigravity/skills` (new skills are written here). When env
+    /// `EUREKA_ANTIGRAVITY_SKILLS` overrides, that single root is used, consistent with
+    /// `skillsRoots()`.
     public static func userSkillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -71,10 +76,11 @@ public enum AntigravityPaths {
             .appendingPathComponent("antigravity/skills", isDirectory: true)
     }
 
-    // MARK: - 会话 db 裸读（避开 live-WAL 只读打开问题；不依赖 SQLite）
+    // MARK: - Raw read of the session db (avoids the live-WAL read-only open problem; no SQLite dependency)
 
-    /// 从会话 db（及其 -wal）字节里裸扫工作区 `file://` URI → 本地路径。
-    /// Antigravity 把 workspace_uris 存在 protobuf 字符串里，值以明文 ASCII 落在页数据中。
+    /// Raw-scans the session db (and its -wal) bytes for the workspace `file://` URI → local path.
+    /// Antigravity stores workspace_uris in protobuf strings, whose values land in page data as
+    /// plain ASCII.
     public static func cwd(dbURL: URL) -> String? {
         for path in [dbURL.path, dbURL.path + "-wal"] {
             guard let data = FileManager.default.contents(atPath: path) else { continue }
@@ -83,7 +89,7 @@ public enum AntigravityPaths {
         return nil
     }
 
-    /// 会话最近活跃时间 = `.db` 与 `.db-wal` mtime 的较新者
+    /// Session last-active time = the newer of the `.db` and `.db-wal` mtimes
     public static func newestMtime(dbURL: URL) -> Date? {
         var newest: Date?
         for path in [dbURL.path, dbURL.path + "-wal"] {
@@ -94,7 +100,7 @@ public enum AntigravityPaths {
         return newest
     }
 
-    /// `.db` + `.db-wal` + `.db-shm` 总字节
+    /// Total bytes of `.db` + `.db-wal` + `.db-shm`
     public static func sizeBytes(dbURL: URL) -> UInt64 {
         var total: UInt64 = 0
         for path in [dbURL.path, dbURL.path + "-wal", dbURL.path + "-shm"] {
@@ -107,14 +113,16 @@ public enum AntigravityPaths {
 
     private static let fileNeedle = Array("file:///".utf8)
 
-    /// 在字节里找首个 `file:///…` 字符串。优先用 protobuf 短字符串的单字节长度前缀精确取；
-    /// 失败退可打印 ASCII 段（遇控制字符/引号止）。
+    /// Finds the first `file:///…` string in the bytes. Prefers the exact single-byte length prefix
+    /// of a short protobuf string; falls back to a printable ASCII run (stopping at a control
+    /// character/quote).
     static func findFileURI(_ bytes: [UInt8]) -> String? {
         guard let idx = indexOf(fileNeedle, in: bytes) else { return nil }
-        // 长度前缀（值 < 128 时为单字节 = 字符串长度，紧邻 'f' 之前）。
-        // 仅当整段可打印（无控制字符）才采信——live db 里 URI 可能是被覆盖的碎片，
-        // 长度前缀会把后面的二进制（NUL 等）一并框进来，那样的脏串绝不能返回（会让
-        // URL.appendingPathComponent 抛不可捕获的 NSException 崩溃）。
+        // Length prefix (for values < 128 it is a single byte = the string length, right before the
+        // 'f'). Trusted only if the whole run is printable (no control chars) -- in a live db the
+        // URI may be an overwritten fragment, and the length prefix would frame trailing binary
+        // (NUL etc.) along with it; such a dirty string must never be returned (it makes
+        // URL.appendingPathComponent throw an uncatchable NSException and crash).
         if idx > 0 {
             let len = Int(bytes[idx - 1])
             if len >= fileNeedle.count, len < 128, idx + len <= bytes.count {
@@ -125,7 +133,8 @@ public enum AntigravityPaths {
                 }
             }
         }
-        // 兜底：向后收可打印 ASCII（不含引号），遇控制字符即止 → 必为干净串
+        // Fallback: collect printable ASCII forward (excluding quotes), stopping at a control char
+        // → always a clean string
         var end = idx
         while end < bytes.count, bytes[end] >= 0x20, bytes[end] <= 0x7E, bytes[end] != 0x22 {
             end += 1
@@ -139,12 +148,13 @@ public enum AntigravityPaths {
         guard uri.hasPrefix("file://") else { return nil }
         let raw = String(uri.dropFirst("file://".count))  // "/Users/…"
         let path = raw.removingPercentEncoding ?? raw
-        // 百分号解码可能引入控制字符（如 %00）→ 截断到首个控制字符，保证干净路径
+        // Percent-decoding may introduce control chars (e.g. %00) → truncate at the first control
+        // char to keep the path clean
         let clean = String(path.unicodeScalars.prefix { $0.value >= 0x20 && $0.value != 0x7F })
         return clean.isEmpty ? nil : clean
     }
 
-    /// 朴素子串查找
+    /// Naive substring search
     private static func indexOf(_ needle: [UInt8], in haystack: [UInt8]) -> Int? {
         guard !needle.isEmpty, haystack.count >= needle.count else { return nil }
         let last = haystack.count - needle.count

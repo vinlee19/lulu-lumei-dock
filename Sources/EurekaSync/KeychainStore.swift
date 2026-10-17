@@ -1,17 +1,18 @@
 import Foundation
 
-/// AK/SK 存 macOS 钥匙串，经 /usr/bin/security 子进程读写。
-/// 用子进程而非 Security.framework 的原因与 Claude OAuth 读取相同：
-/// security 是 Apple 签名主体，用户点过「始终允许」后 ad-hoc 重签 app 也不会失效；
-/// 直接 SecItem* 的 ACL 会在每次重签后重新弹窗。
-/// 所有调用均阻塞（waitUntilExit），只应在后台队列上执行。
+/// Stores AK/SK in the macOS keychain, read and written through the /usr/bin/security subprocess.
+/// A subprocess instead of Security.framework for the same reason as the Claude OAuth read:
+/// security is an Apple-signed principal, so once the user clicks "Always Allow" it survives
+/// ad-hoc re-signing of the app;
+/// direct SecItem* ACLs re-prompt after every re-sign.
+/// Every call blocks (waitUntilExit) and must only run on a background queue.
 public enum KeychainStore {
     public static let service = "com.vinlee.eureka.cos"
     public static let secretIdAccount = "secret-id"
     public static let secretKeyAccount = "secret-key"
 
-    /// 读：find-generic-password -w（密钥经 stdout 返回，不进 argv）。
-    /// service 可指定（默认 COS；MCP OAuth 用 "com.vinlee.eureka.mcp"）
+    /// Read: find-generic-password -w (the secret comes back via stdout, never via argv).
+    /// service is configurable (COS by default; MCP OAuth uses "com.vinlee.eureka.mcp")
     public static func read(account: String, service: String = KeychainStore.service) -> String? {
         let output = run(arguments: [
             "find-generic-password", "-s", service, "-a", account, "-w",
@@ -20,8 +21,10 @@ public enum KeychainStore {
         return output
     }
 
-    /// 写：security -i 交互模式，命令连同密钥经 stdin 喂入（不进 argv，防 ps 窥见）。
-    /// -U 更新已有项；部分系统 -U 更新失败 → 先 delete 再 add 兜底。
+    /// Write: security -i interactive mode; the command and the secret are fed via stdin (never
+    /// argv, so ps can't see them).
+    /// -U updates an existing item; on some systems the -U update fails → fall back to delete then
+    /// add.
     @discardableResult
     public static func write(
         account: String, secret: String, service: String = KeychainStore.service
@@ -38,12 +41,12 @@ public enum KeychainStore {
         run(arguments: ["delete-generic-password", "-s", service, "-a", account]) != nil
     }
 
-    // MARK: - 内部
+    // MARK: - Internal
 
     private static func writeViaStdin(
         account: String, secret: String, service: String = KeychainStore.service
     ) -> Bool {
-        // security 交互解析器支持双引号 + 反斜杠转义
+        // security's interactive parser supports double quotes + backslash escapes
         let escaped = secret
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -51,7 +54,7 @@ public enum KeychainStore {
         return run(arguments: ["-i"], stdin: command) != nil
     }
 
-    /// 跑 /usr/bin/security；exit 0 → 返回 stdout（trim），否则 nil
+    /// Runs /usr/bin/security; exit 0 → returns stdout (trimmed), otherwise nil
     private static func run(arguments: [String], stdin: String? = nil) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")

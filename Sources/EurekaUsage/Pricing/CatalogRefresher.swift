@@ -1,11 +1,11 @@
 import EurekaKit
 import Foundation
 
-/// 一次 HTTP 请求的结果（传输层由 app 注入，测试用假实现）
+/// Result of one HTTP request (the transport is injected by the app; tests use a fake)
 public struct CatalogFetchResponse: Sendable {
     public var status: Int
     public var body: Data
-    /// 响应头（键已小写）
+    /// Response headers (keys lowercased)
     public var headers: [String: String]
 
     public init(status: Int, body: Data, headers: [String: String] = [:]) {
@@ -17,21 +17,23 @@ public struct CatalogFetchResponse: Sendable {
 
 public typealias CatalogFetch = (URLRequest) throws -> CatalogFetchResponse
 
-/// 远程价格目录的拉取与合并策略（纯编排，无定时器 / 无文件 IO）。
-/// 每个来源按镜像顺序尝试；任何失败都保留上一份数据，绝不因为网络问题把价格清空。
+/// Fetch-and-merge policy for the remote price catalogs (pure orchestration: no timers, no file
+/// IO). Each source tries its mirrors in order; any failure keeps the previous data - a network
+/// problem never blanks prices.
 public enum CatalogRefresher {
     public static let litellmURLs = [
         URL(string: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json")!,
-        // raw.githubusercontent 在国内经常不通，jsDelivr 镜像兜底
+        // raw.githubusercontent is often unreachable from mainland China; the jsDelivr mirror is
+        // the fallback
         URL(string: "https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json")!,
     ]
     public static let modelsDevURLs = [
         URL(string: "https://models.dev/api.json")!,
     ]
 
-    /// 正常刷新周期
+    /// Normal refresh interval
     public static let refreshInterval: TimeInterval = 24 * 3600
-    /// 连续失败的退避序列（最后一档封顶）
+    /// Backoff sequence for consecutive failures (the last step is the cap)
     public static let backoff: [TimeInterval] = [60, 300, 1800, 7200, 21600]
 
     public static func retryDelay(afterFailures failures: Int) -> TimeInterval {
@@ -39,7 +41,7 @@ public enum CatalogRefresher {
         return backoff[min(failures - 1, backoff.count - 1)]
     }
 
-    /// 是否该拉取：从未成功过，或距上次成功已满一个周期
+    /// Whether to fetch: never succeeded, or a full interval has passed since the last success
     public static func isDue(lastSuccess: Date?, now: Date) -> Bool {
         guard let lastSuccess else { return true }
         return now.timeIntervalSince(lastSuccess) >= refreshInterval
@@ -47,14 +49,15 @@ public enum CatalogRefresher {
 
     public struct Outcome: Sendable {
         public var catalog: PriceCatalog
-        /// 有来源拿到了新内容（200）；304 或全失败为 false
+        /// Some source got new content (200); false on 304 or total failure
         public var changed: Bool
-        /// 两个来源都至少有一个镜像成功（200 或 304）
+        /// Both sources had at least one mirror succeed (200 or 304)
         public var succeeded: Bool
         public var errors: [String]
     }
 
-    /// minimums：有效条目下限（测试用小样本时调低，线上用默认值）
+    /// minimums: lower bound on valid entries (lowered for small test samples; production uses the
+    /// defaults)
     public static func refresh(
         previous: PriceCatalog, now: Date = Date(),
         minimums: (litellm: Int, modelsDev: Int) = (

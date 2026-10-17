@@ -1,8 +1,11 @@
 import Foundation
 
-/// 最小 protobuf 线格式读取器（无 schema）：只认 varint / fixed64 / length-delimited / fixed32，
-/// 按字段号路径取值。用于读 Antigravity 未公开的 protobuf（字段含义靠结构核对，见调用方注释）。
-/// 任何越界、非法 wire type、截断数据一律返回 nil，**永不崩溃**——格式变了就优雅降级。
+/// Minimal schema-less protobuf wire-format reader: understands only varint / fixed64 /
+/// length-delimited / fixed32,
+/// and reads values by field-number path. Used for Antigravity's undocumented protobuf (field
+/// meanings are verified against structure; see the callers' comments).
+/// Any out-of-bounds read, illegal wire type or truncated data returns nil and **never crashes** -
+/// if the format changes it degrades gracefully.
 public enum ProtobufReader {
     public enum Value: Equatable, Sendable {
         case varint(UInt64)
@@ -35,7 +38,7 @@ public enum ProtobufReader {
         }
     }
 
-    /// 单层解析；数据非法返回 nil
+    /// Parses a single level; nil on invalid data
     public static func fields(_ data: Data) -> [Field]? {
         let bytes = [UInt8](data)
         var index = 0
@@ -65,13 +68,13 @@ public enum ProtobufReader {
                 index += 4
                 result.append(Field(number: number, value: .fixed32(raw)))
             default:
-                return nil  // group（3/4）等已废弃 wire type：当作格式不符
+                return nil  // group (3/4) and other deprecated wire types: treated as a format mismatch
             }
         }
         return result
     }
 
-    /// 按路径取第一个命中的字段（中间层必须是可解析的子消息）
+    /// First field matching the path (intermediate levels must be parseable submessages)
     public static func first(_ data: Data, _ path: [Int]) -> Field? {
         guard let head = path.first, let fields = fields(data) else { return nil }
         guard let hit = fields.first(where: { $0.number == head }) else { return nil }
@@ -80,7 +83,7 @@ public enum ProtobufReader {
         return first(inner, Array(path.dropFirst()))
     }
 
-    /// 同层某字段的全部重复值
+    /// All repeated values of one field at the same level
     public static func all(_ data: Data, _ number: Int) -> [Field] {
         (fields(data) ?? []).filter { $0.number == number }
     }

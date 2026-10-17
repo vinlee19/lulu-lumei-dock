@@ -1,33 +1,38 @@
 import Foundation
 
-/// 一个**记忆库的关系图**：节点 = 索引 / 分类 / 记忆条目 / 来源会话，
-/// 边 = 索引收录、`[[wiki 链接]]` 引用、条目诞生于哪次会话。
+/// The **relationship graph of a memory library**: nodes = index / category / memory entry /
+/// origin session; edges = index inclusion, `[[wiki link]]` references, and the session an
+/// entry was born in.
 ///
-/// 纯值类型 + 纯函数构图，放 EurekaKit（照 `TurnGraph` 的先例）：无 IO、无 AppKit、
-/// 结果可复现 ⇒ 能单测，也能被离屏渲染当作稳定基准。
+/// Pure value types + a pure-function builder, living in EurekaKit (following `TurnGraph`):
+/// no IO, no AppKit, reproducible output => unit-testable, and usable as a stable baseline for
+/// offscreen rendering.
 ///
-/// 输入刻意**不是** `MemoryEntry`：那是 EurekaIngest 的类型，而模块方向是
-/// `EurekaIngest → EurekaStore → EurekaKit`，反向依赖不允许。映射在 EurekaIngest 侧做
-/// （`MemoryLibrary.graphInput()`），与 `TurnInput` ← `TurnMetricsIndexer` 的分工一致。
+/// The input is deliberately **not** `MemoryEntry`: that is an EurekaIngest type, and the module
+/// direction is `EurekaIngest → EurekaStore → EurekaKit`, so the reverse dependency is not
+/// allowed. The mapping happens on the EurekaIngest side (`MemoryLibrary.graphInput()`), the
+/// same split as `TurnInput` ← `TurnMetricsIndexer`.
 public struct MemoryGraphInput: Equatable, Sendable {
     public struct Item: Equatable, Sendable {
-        /// 稳定标识（用记忆文件的绝对路径）
+        /// Stable identifier (the memory file's absolute path)
         public var id: String
         public var title: String
-        /// 副标：description 摘要
+        /// Subtitle: description summary
         public var subtitle: String
         public var type: MemoryType
-        /// `[[link]]` 的可匹配别名：文件 basename、frontmatter `name`（大小写不敏感）
+        /// Matchable aliases for `[[link]]`: file basename, frontmatter `name` (case-insensitive)
         public var aliases: [String]
-        /// 正文里出现的 `[[…]]` 原文
+        /// Raw `[[…]]` text found in the body
         public var links: [String]
         public var originSessionId: String?
-        /// 来源会话的 transcript 是否还在（不在 = 图上置灰、不可跳转）
+        /// Whether the origin session's transcript still exists (missing = greyed out on the
+        /// graph, not navigable)
         public var originSessionExists: Bool
         public var modifiedAt: Date
-        /// 记忆库的索引文件（MEMORY.md），不是普通条目
+        /// The memory library's index file (MEMORY.md), not a regular entry
         public var isIndex: Bool
-        /// 没被 `MEMORY.md` 收录 —— agent 读索引时看不到这条，等于死记忆
+        /// Not listed in `MEMORY.md` -- an agent reading the index never sees it, so it is a
+        /// dead memory
         public var isUnindexed: Bool
 
         public init(
@@ -51,7 +56,7 @@ public struct MemoryGraphInput: Equatable, Sendable {
         }
     }
 
-    /// 记忆库名（项目名）
+    /// Memory library name (project name)
     public var title: String
     public var items: [Item]
 
@@ -62,16 +67,17 @@ public struct MemoryGraphInput: Equatable, Sendable {
 }
 
 public enum MemoryGraph {
-    // MARK: - 节点
+    // MARK: - Nodes
 
     public enum NodeKind: Equatable, Sendable {
-        /// 记忆库索引 MEMORY.md
+        /// Memory library index MEMORY.md
         case index
-        /// 分类泳道头
+        /// Category swimlane header
         case category(MemoryType)
-        /// 一条记忆
+        /// A single memory
         case entry(MemoryType)
-        /// 来源会话；`exists == false` = transcript 已不在（本机 84 条来源里 47 条如此）
+        /// Origin session; `exists == false` = transcript is gone (47 of the 84 origins on
+        /// this machine)
         case session(exists: Bool)
 
         public var memoryType: MemoryType? {
@@ -93,16 +99,16 @@ public enum MemoryGraph {
         public var kind: NodeKind
         public var title: String
         public var subtitle: String
-        /// 条目节点的记忆文件路径（UI 用它打开详情）；其余节点为 nil
+        /// Memory file path for entry nodes (the UI uses it to open details); nil for others
         public var path: String?
-        /// 会话节点的 session id（UI 用它跳会话页）
+        /// Session id for session nodes (the UI uses it to jump to the session page)
         public var sessionId: String?
         public var modifiedAt: Date?
-        /// 连边数（引用 + 被引用 + 来源），UI 拿它标热度
+        /// Edge count (references + referenced-by + origin); the UI uses it to show heat
         public var degree: Int
-        /// 分类节点的成员数
+        /// Member count for category nodes
         public var memberCount: Int
-        /// 条目节点：没被 `MEMORY.md` 收录（UI 虚线描边 + 说明）
+        /// Entry nodes: not listed in `MEMORY.md` (UI draws a dashed border + explanation)
         public var isUnindexed: Bool
 
         public init(
@@ -123,14 +129,14 @@ public enum MemoryGraph {
         }
     }
 
-    // MARK: - 边
+    // MARK: - Edges
 
     public enum EdgeRole: String, Equatable, Sendable, CaseIterable {
-        /// 索引 → 分类（MEMORY.md 收录）
+        /// Index → category (listed in MEMORY.md)
         case contains
-        /// 条目 → 条目（`[[wiki 链接]]`）
+        /// Entry → entry (`[[wiki link]]`)
         case link
-        /// 条目 → 来源会话
+        /// Entry → origin session
         case origin
 
         public var label: String {
@@ -146,7 +152,8 @@ public enum MemoryGraph {
         public var from: NodeID
         public var to: NodeID
         public var role: EdgeRole
-        /// 两条记忆互相引用（合成一条双向边，别画两条重合线）
+        /// Two memories reference each other (merged into one bidirectional edge instead of
+        /// two overlapping lines)
         public var isBidirectional: Bool
 
         public init(
@@ -159,15 +166,16 @@ public enum MemoryGraph {
         }
     }
 
-    // MARK: - 图
+    // MARK: - Graph
 
     public struct Graph: Equatable, Sendable {
         public var title: String
         public var nodes: [Node]
         public var edges: [Edge]
-        /// 解析不到目标的 `[[…]]` 条数（正文里把 `[[…]]` 当强调用会落在这儿，不造边）
+        /// Number of `[[…]]` whose target can't be resolved (bodies that use `[[…]]` for
+        /// emphasis land here; no edge is created)
         public var unresolvedLinkCount: Int
-        /// 来源会话已被删除的条目数
+        /// Number of entries whose origin session has been deleted
         public var missingSessionCount: Int
 
         public init(
@@ -183,7 +191,8 @@ public enum MemoryGraph {
 
         public func node(_ id: NodeID) -> Node? { nodes.first { $0.id == id } }
 
-        /// 按记忆文件路径找节点（调用方只有 `MemoryEntry`，不该去猜节点 id 的拼法）
+        /// Finds a node by memory file path (callers only have a `MemoryEntry` and shouldn't
+        /// guess how node ids are spelled)
         public func nodeID(forPath path: String) -> NodeID? {
             nodes.first { $0.path == path }?.id
         }
@@ -195,8 +204,9 @@ public enum MemoryGraph {
             nodes.filter { if case .session = $0.kind { return true } else { return false } }.count
         }
 
-        /// 以某个节点为中心的一跳子图（记忆详情页的「关联」小图用）。
-        /// 只留焦点 + 直接邻居，**丢掉索引/分类节点**：它们是结构骨架，在一跳视野里只是噪声。
+        /// One-hop subgraph centred on a node (used by the "Related" mini graph on the memory
+        /// detail page). Keeps only the focus + direct neighbours and **drops index/category
+        /// nodes**: they are the structural skeleton and just noise in a one-hop view.
         public func subgraph(around focus: NodeID) -> Graph {
             let related = edges.filter { $0.from == focus || $0.to == focus }
             var keep: Set<NodeID> = [focus]
@@ -221,9 +231,9 @@ public enum MemoryGraph {
     }
 }
 
-// MARK: - 构图
+// MARK: - Building
 
-/// `MemoryGraphInput` → `MemoryGraph.Graph`。纯函数、确定性（同输入必得同输出）。
+/// `MemoryGraphInput` → `MemoryGraph.Graph`. Pure and deterministic (same input, same output).
 public enum MemoryGraphBuilder {
     public static func build(_ input: MemoryGraphInput) -> MemoryGraph.Graph {
         let indexItem = input.items.first(where: \.isIndex)
@@ -236,8 +246,8 @@ public enum MemoryGraphBuilder {
         var edges: [MemoryGraph.Edge] = []
         var degree: [MemoryGraph.NodeID: Int] = [:]
 
-        // 条目节点。**先按同一套确定性次序排好**（时间倒序 → 标题 → id），
-        // 布局器与这里共用这个次序，两边不会各排一套。
+        // Entry nodes. **Sorted first by one deterministic order** (newest first → title → id);
+        // the layout engine shares this order so the two sides never sort independently.
         let sorted = entries.sorted(by: entryOrder)
         var nodeByAlias: [String: MemoryGraph.NodeID] = [:]
         var entryNodeIDs: [String: MemoryGraph.NodeID] = [:]
@@ -248,13 +258,15 @@ public enum MemoryGraphBuilder {
                 id: id, kind: .entry(item.type), title: item.title, subtitle: item.subtitle,
                 path: item.id, sessionId: item.originSessionId, modifiedAt: item.modifiedAt,
                 isUnindexed: item.isUnindexed))
-            // 别名先到先得：重名时保留排序在前的那条（确定性）
+            // Aliases are first come, first served: on a clash keep the earlier-sorted entry
+            // (deterministic)
             for alias in aliasKeys(of: item) where nodeByAlias[alias] == nil {
                 nodeByAlias[alias] = id
             }
         }
 
-        // 索引 + 分类泳道头（索引收录分类，分类归属由列表达 —— 见 MemoryGraphLayout 的 rails）
+        // Index + category swimlane headers (the index contains categories; category
+        // membership is expressed by column -- see the rails in MemoryGraphLayout)
         let presentTypes = Set(sorted.map(\.type))
             .sorted { $0.laneOrder < $1.laneOrder }
         if let indexItem {
@@ -276,9 +288,9 @@ public enum MemoryGraphBuilder {
             }
         }
 
-        // `[[链接]]` → 引用边。解析不到就只计数、不造边。
+        // `[[link]]` → reference edges. Unresolvable links are only counted; no edge is made.
         var unresolved = 0
-        var seenLinks: [String: Int] = [:]  // "from->to" → edges 下标
+        var seenLinks: [String: Int] = [:]  // "from->to" → index into edges
         for item in sorted {
             guard let from = entryNodeIDs[item.id] else { continue }
             for raw in item.links {
@@ -287,7 +299,8 @@ public enum MemoryGraphBuilder {
                     continue
                 }
                 if let existing = seenLinks["\(to.raw)->\(from.raw)"] {
-                    // 互相引用：合成一条双向边，不画第二条重合线
+                    // Mutual reference: merge into one bidirectional edge, no second
+                    // overlapping line
                     if !edges[existing].isBidirectional {
                         edges[existing].isBidirectional = true
                         degree[from, default: 0] += 1
@@ -304,7 +317,8 @@ public enum MemoryGraphBuilder {
             }
         }
 
-        // 来源会话节点（按 session id 去重，首个引用它的条目决定它的排序位置）
+        // Origin session nodes (deduped by session id; the first entry referencing one
+        // decides its sort position)
         var sessionNodeIDs: [String: MemoryGraph.NodeID] = [:]
         var missingSessions = 0
         for item in sorted {
@@ -336,9 +350,10 @@ public enum MemoryGraphBuilder {
             unresolvedLinkCount: unresolved, missingSessionCount: missingSessions)
     }
 
-    // MARK: - 排序与标识（布局器共用，必须是纯函数）
+    // MARK: - Ordering and identifiers (shared with the layout engine; must be pure)
 
-    /// 条目次序：最近修改在前 → 标题 → id（全同的输入必得全同的图与排版）
+    /// Entry order: most recently modified first → title → id (identical input yields an
+    /// identical graph and layout)
     public static func entryOrder(_ lhs: MemoryGraphInput.Item, _ rhs: MemoryGraphInput.Item) -> Bool {
         if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
         if lhs.title != rhs.title { return lhs.title < rhs.title }
@@ -353,7 +368,7 @@ public enum MemoryGraphBuilder {
         MemoryGraph.NodeID("cat:\(type.rawValue)")
     }
 
-    /// 一条记忆的全部可匹配别名（文件 basename、frontmatter name、标题）
+    /// All matchable aliases of a memory (file basename, frontmatter name, title)
     static func aliasKeys(of item: MemoryGraphInput.Item) -> [String] {
         var seen = Set<String>()
         return (item.aliases + [item.title])
@@ -361,9 +376,10 @@ public enum MemoryGraphBuilder {
             .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
-    /// 链接匹配键：小写 + 去首尾空白 + `_` 视作 `-`。
-    /// 后者是实勘出来的：文件名用下划线（`project_query_history.md`）而 frontmatter
-    /// `name` 用连字符（`project-query-history`），同一条记忆两种写法都会被引用。
+    /// Link match key: lowercased + trimmed + `_` treated as `-`.
+    /// The latter comes from observing real data: file names use underscores
+    /// (`project_query_history.md`) while frontmatter `name` uses hyphens
+    /// (`project-query-history`), and the same memory gets referenced both ways.
     public static func normalizeKey(_ raw: String) -> String {
         raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()

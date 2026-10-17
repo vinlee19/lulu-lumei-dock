@@ -2,14 +2,15 @@ import EurekaKit
 import Foundation
 import ServiceManagement
 
-/// 用户自定义同步目录（备份自选目录 → 远端 `custom/<名>`）
+/// User-defined sync folder (backup's chosen folder → remote `custom/<name>`)
 struct CustomSyncFolder: Codable, Equatable, Identifiable {
     var id = UUID()
     var path: String
     var remoteName: String
     var enabled = true
 
-    /// 远端类目：`custom/<清洗后的远端名>`（去斜杠与首尾空白；空名回退文件夹名）
+    /// Remote category: `custom/<sanitized remote name>` (slashes and surrounding whitespace
+    /// stripped; an empty name falls back to the folder name)
     var remoteCategory: String {
         let cleaned = remoteName
             .replacingOccurrences(of: "/", with: "-")
@@ -19,7 +20,7 @@ struct CustomSyncFolder: Codable, Equatable, Identifiable {
     }
 }
 
-/// 用户偏好（UserDefaults 持久化）
+/// User preferences (persisted in UserDefaults)
 @MainActor
 final class AppSettings: ObservableObject {
     @Published var notifyCompletion: Bool {
@@ -31,84 +32,95 @@ final class AppSettings: ObservableObject {
     @Published var notifyError: Bool {
         didSet { defaults.set(notifyError, forKey: "notifyError") }
     }
-    /// 关键事件（完成/等待/出错）同时发系统通知（锁屏/其他桌面可见）。
-    /// 默认关，opt-in，开启时才请求授权；仍受上方按类型开关门控。
+    /// Also posts a system notification for key events (finished / waiting / error), visible on the
+    /// lock screen and other desktops. Off by default, opt-in; authorization is requested only when
+    /// enabled. Still gated by the per-type toggles above.
     @Published var eventSystemNotifyEnabled: Bool {
         didSet { defaults.set(eventSystemNotifyEnabled, forKey: "eventSystemNotifyEnabled") }
     }
     @Published var autoDismissSeconds: Double {
         didSet { defaults.set(autoDismissSeconds, forKey: "autoDismissSeconds") }
     }
-    /// 岛上时间显示：false=已持续时长，true=开始的日期时间
+    /// Island time display: false = elapsed duration, true = start date and time
     @Published var showStartTime: Bool {
         didSet { defaults.set(showStartTime, forKey: "islandShowStartTime") }
     }
-    /// 菜单栏标题显示限额百分比
+    /// Show the rate-limit percentage in the menu-bar title
     @Published var menuBarShowsLimit: Bool {
         didSet { defaults.set(menuBarShowsLimit, forKey: "menuBarShowsLimit") }
     }
-    /// 健康提示（连续过久/会话过多/深夜关怀）
+    /// Health nudges (active too long / too many sessions / late-night care)
     @Published var wellnessEnabled: Bool {
         didSet { defaults.set(wellnessEnabled, forKey: "wellnessEnabled") }
     }
-    /// 连续活跃多少小时后提醒
+    /// Remind after this many hours of continuous activity
     @Published var wellnessThresholdHours: Double {
         didSet { defaults.set(wellnessThresholdHours, forKey: "wellnessThresholdHours") }
     }
-    /// 会话面板按时间最多展示多少个会话（0 = 全部）
-    /// 跨会话全文搜索索引（关闭后索引冻结不再更新；UsageService 扫描循环读同一 key）
+    /// Max number of sessions the session panel shows, by time (0 = all)
+    /// Cross-session full-text search index (when off the index freezes and stops updating;
+    /// UsageService's scan loop reads the same key)
     @Published var fullTextSearchEnabled: Bool {
         didSet { defaults.set(fullTextSearchEnabled, forKey: "fullTextSearchEnabled") }
     }
-    /// Antigravity 用量 / 限额（实验，默认关；读未公开 protobuf）
+    /// Antigravity usage / rate limits (experimental, off by default; reads undocumented protobuf)
     @Published var antigravityExperimentalEnabled: Bool {
         didSet { defaults.set(antigravityExperimentalEnabled, forKey: AntigravityExperiment.key) }
     }
-    /// 联网更新模型价格（LiteLLM / models.dev 公开价格表，PricingCatalogService 读同一 key）
+    /// Fetch model prices online (LiteLLM / models.dev public price tables; PricingCatalogService
+    /// reads the same key)
     @Published var remotePricingEnabled: Bool {
         didSet { defaults.set(remotePricingEnabled, forKey: "remotePricingEnabled") }
     }
-    /// 限额临近打满预警岛卡（RateLimitsService 告警时读同一 key）
+    /// Island card warning when a rate limit is close to full (RateLimitsService reads the same key
+    /// when alerting)
     @Published var limitAlertsEnabled: Bool {
         didSet { defaults.set(limitAlertsEnabled, forKey: "limitAlertsEnabled") }
     }
-    /// app 升级后自动把**已经装过的** hook 刷到当前版本。
+    /// After an app upgrade, automatically refresh hooks that are **already installed** to the
+    /// current version.
     ///
-    /// 只存这一条**策略**：「某项是否已安装」的唯一真相是磁盘上的配置文件，绝不在这里存
-    /// 意图布尔值 —— 那会与磁盘状态不同步，然后我们就会拿着陈旧状态去改用户的文件。
-    /// 即便开着，也永远不会安装用户没点过的集成，且遇到看不懂的配置会整体跳过。
+    /// Only this **policy** is stored. The sole source of truth for "is X installed" is the config
+    /// file on disk; never store an intent boolean here — it would drift from disk state and we
+    /// would then edit the user's files based on stale state. Even when on, it never installs an
+    /// integration the user hasn't enabled, and skips entirely on any config it can't parse.
     @Published var hookAutoUpdate: Bool {
         didSet { defaults.set(hookAutoUpdate, forKey: "hookAutoUpdate") }
     }
-    /// 你正看着该会话所在的终端应用时，不再弹完成卡（默认**关**）。
+    /// Skip the finished card while you are looking at the terminal app the session runs in
+    /// (default **off**).
     ///
-    /// 判定只到**应用级**，分不清标签页：开着多个标签时，任意一个在前台都算"你在看"。
-    /// 所以**永不静音等待授权卡** —— 那是需要你动手的阻塞提示，
-    /// 因为"某个 iTerm 标签在前台"就把它藏掉是真伤害（见 AppDelegate.shouldSuppressCard）。
+    /// Detection is **app-level** only and can't tell tabs apart: with several tabs open, any one
+    /// in front counts as "you're looking". So the waiting-for-permission card is **never
+    /// silenced** — it is a blocking prompt that needs your action, and hiding it because "some
+    /// iTerm tab is in front" does real harm (see AppDelegate.shouldSuppressCard).
     @Published var suppressCardWhenTerminalFrontmost: Bool {
         didSet {
             defaults.set(suppressCardWhenTerminalFrontmost,
                          forKey: "suppressCardWhenTerminalFrontmost")
         }
     }
-    /// 会话页时间范围：false = 近 30 天（默认）；true = 全部时间
+    /// Sessions page time range: false = last 30 days (default); true = all time
     @Published var sessionRangeAll: Bool {
         didSet { defaults.set(sessionRangeAll, forKey: "sessionRangeAll") }
     }
-    /// 历史列表排序：active=最近活跃 / start=最初对话开始时间（存 rawValue）
+    /// History list sort: active = most recently active / start = first conversation start time
+    /// (stores rawValue)
     @Published var historySortMode: String {
         didSet { defaults.set(historySortMode, forKey: "historySortMode") }
     }
-    /// 会话列表排序：time=最近活跃 / size=按大小 / duration=按时长（存 rawValue）
+    /// Session list sort: time = most recently active / size = by size / duration = by duration
+    /// (stores rawValue)
     @Published var sessionSortMode: String {
         didSet { defaults.set(sessionSortMode, forKey: "sessionSortMode") }
     }
-    /// 外观主题：system=跟随系统 / light=浅色 / dark=深色
+    /// Appearance: system = follow system / light / dark
     @Published var appearanceMode: String {
         didSet { defaults.set(appearanceMode, forKey: "appearanceMode") }
     }
-    /// 界面语言（`AppLanguage` rawValue）。缺省英文。
-    /// didSet 同步 `L10n.current`，并通知主菜单和灵动岛重绘。init 里 didSet 不触发，末尾要再同步一次。
+    /// Interface language (`AppLanguage` rawValue). Defaults to English. didSet syncs
+    /// `L10n.current` and tells the main menu and the Dynamic Island to redraw. didSet doesn't fire
+    /// in init, so sync once more at the end.
     @Published var appLanguage: String {
         didSet {
             defaults.set(appLanguage, forKey: AppLanguage.defaultsKey)
@@ -116,59 +128,60 @@ final class AppSettings: ObservableObject {
             NotificationCenter.default.post(name: .eurekaLanguageDidChange, object: nil)
         }
     }
-    /// 界面风格：classic=经典（默认）/ brutal=新粗野主义（Neo-Brutalism，参考 raft.build）。
-    /// didSet 里同步 ThemeStyle.current，配合根视图 .id 整树重建即时生效。
+    /// Interface style: classic (default) / brutal = Neo-Brutalism (after raft.build). didSet syncs
+    /// ThemeStyle.current; together with the root view's .id rebuilding the whole tree, it takes
+    /// effect immediately.
     @Published var themeStyle: String {
         didSet {
             defaults.set(themeStyle, forKey: "themeStyle")
             ThemeStyle.current = ThemeStyle.resolve(themeStyle)
         }
     }
-    /// 桌面吉祥物（默认关，opt-in）
+    /// Desktop mascot (off by default, opt-in)
     @Published var mascotEnabled: Bool {
         didSet { defaults.set(mascotEnabled, forKey: "mascotEnabled") }
     }
-    /// 当前吉祥物动画包 id（"built-in" 或 mascots/ 下目录名）
+    /// Current mascot animation pack id ("built-in" or a directory name under mascots/)
     @Published var mascotPack: String {
         didSet { defaults.set(mascotPack, forKey: "mascotPack") }
     }
-    /// 云端备份（默认关，opt-in；密钥存钥匙串、不进 UserDefaults）
+    /// Cloud backup (off by default, opt-in; secrets live in the Keychain, never in UserDefaults)
     @Published var cloudBackupEnabled: Bool {
         didSet { defaults.set(cloudBackupEnabled, forKey: "cloudBackupEnabled") }
     }
-    /// 存储服务商（StorageProvider rawValue）
+    /// Storage provider (StorageProvider rawValue)
     @Published var storageProvider: String {
         didSet { defaults.set(storageProvider, forKey: "storageProvider") }
     }
-    /// COS 地域（如 ap-guangzhou）
+    /// COS region (e.g. ap-guangzhou)
     @Published var cosRegion: String {
         didSet { defaults.set(cosRegion, forKey: "cosRegion") }
     }
-    /// COS 存储桶（如 backup-1250000000）
+    /// COS bucket (e.g. backup-1250000000)
     @Published var cosBucket: String {
         didSet { defaults.set(cosBucket, forKey: "cosBucket") }
     }
-    /// 自定义 endpoint host（空 = COS 默认；AWS 填 s3.<region>.amazonaws.com）
+    /// Custom endpoint host (empty = COS default; for AWS use s3.<region>.amazonaws.com)
     @Published var cosEndpointHost: String {
         didSet { defaults.set(cosEndpointHost, forKey: "cosEndpointHost") }
     }
-    /// 对象键前缀
+    /// Object key prefix
     @Published var cosKeyPrefix: String {
         didSet { defaults.set(cosKeyPrefix, forKey: "cosKeyPrefix") }
     }
-    /// 增量同步间隔（分钟，最小 1）
+    /// Incremental sync interval (minutes, minimum 1)
     @Published var cosSyncIntervalMinutes: Double {
         didSet { defaults.set(cosSyncIntervalMinutes, forKey: "cosSyncIntervalMinutes") }
     }
-    /// 备份单文件失败重试次数（0 = 关；仅网络错误/5xx 重试）
+    /// Retry count for a failed backup file (0 = off; only network errors / 5xx are retried)
     @Published var cosRetryAttempts: Int {
         didSet { defaults.set(cosRetryAttempts, forKey: "cosRetryAttempts") }
     }
-    /// 重试退避基数（秒，指数 ×2）
+    /// Retry backoff base (seconds, exponential ×2)
     @Published var cosRetryBackoffSeconds: Double {
         didSet { defaults.set(cosRetryBackoffSeconds, forKey: "cosRetryBackoffSeconds") }
     }
-    /// 自定义同步目录（JSON 编码存 UserDefaults——本仓库首个数组型设置）
+    /// Custom sync folders (JSON-encoded in UserDefaults — the repo's first array-valued setting)
     @Published var customSyncFolders: [CustomSyncFolder] {
         didSet {
             if let data = try? JSONEncoder().encode(customSyncFolders) {
@@ -176,20 +189,23 @@ final class AppSettings: ObservableObject {
             }
         }
     }
-    /// 安全审计：记录 agent 执行的操作（命令全文/文件路径，不含输出）。默认开。
+    /// Security audit: records operations agents perform (full command text / file paths, no
+    /// output). On by default.
     @Published var auditEnabled: Bool {
         didSet { defaults.set(auditEnabled, forKey: "auditEnabled") }
     }
-    /// 高危操作岛内红卡告警。默认开。
+    /// Red in-island card alert for high-risk operations. On by default.
     @Published var auditRiskAlertsEnabled: Bool {
         didSet { defaults.set(auditRiskAlertsEnabled, forKey: "auditRiskAlertsEnabled") }
     }
-    /// 高危操作系统通知（锁屏/其他 Space 可见）。默认关，opt-in，开启时才请求授权。
+    /// System notification for high-risk operations (visible on the lock screen / other Spaces).
+    /// Off by default, opt-in; authorization is requested only when enabled.
     @Published var auditSystemNotifyEnabled: Bool {
         didSet { defaults.set(auditSystemNotifyEnabled, forKey: "auditSystemNotifyEnabled") }
     }
-    /// 审计流水保留天数（0 = 永久）。默认 90。
-    /// 审计归档：把脱敏后的审计记录按天写成 Parquet 随备份上传（默认关；依赖云端备份开启）
+    /// Audit log retention in days (0 = forever). Default 90.
+    /// Audit archive: writes redacted audit records as daily Parquet files uploaded with backups
+    /// (off by default; requires cloud backup)
     @Published var auditArchiveEnabled: Bool {
         didSet { defaults.set(auditArchiveEnabled, forKey: AuditArchiveSettings.key) }
     }
@@ -245,12 +261,14 @@ final class AppSettings: ObservableObject {
         auditRetentionDays = defaults.object(forKey: "auditRetentionDays") as? Int ?? 90
         auditArchiveEnabled = defaults.bool(forKey: AuditArchiveSettings.key)
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        // 启动即同步界面风格与语言（init 内 didSet 不触发，须在全部属性初始化后显式同步）
+        // Sync interface style and language at startup (didSet doesn't fire in init, so sync
+        // explicitly once every property is initialized)
         ThemeStyle.current = ThemeStyle.resolve(themeStyle)
         L10n.current = AppLanguage.resolve(appLanguage)
     }
 
-    /// SMAppService 对 ad-hoc/开发态注册可能不稳：失败给降级提示而不是静默
+    /// SMAppService registration may be flaky for ad-hoc / dev builds: on failure show a degraded
+    /// hint instead of failing silently
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
@@ -270,22 +288,24 @@ final class AppSettings: ObservableObject {
     }
 }
 
-/// Antigravity 实验开关（UsageService / RateLimitsService 在各自队列上直接读 UserDefaults）
+/// Antigravity experiment toggle (UsageService / RateLimitsService read UserDefaults directly on
+/// their own queues)
 enum AntigravityExperiment {
     static let key = "antigravityExperimentalEnabled"
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: key) }
 }
 
-/// 审计归档开关（SyncService / AuditService 在各自队列上直接读 UserDefaults）
+/// Audit archive toggle (SyncService / AuditService read UserDefaults directly on their own queues)
 enum AuditArchiveSettings {
     static let key = "auditArchiveEnabled"
 
-    /// 真正生效需要备份也开着：备份关了就传不上去，清理联动会让本地无限增长
+    /// Only effective when backup is also on: with backup off nothing gets uploaded, and the linked
+    /// pruning would let local data grow without bound
     static var isActive: Bool {
         UserDefaults.standard.bool(forKey: key) && UserDefaults.standard.bool(forKey: "cloudBackupEnabled")
     }
 
-    /// 审计保留期截止时间（0 = 永久保留 → nil）
+    /// Audit retention cutoff (0 = keep forever → nil)
     static var retentionCutoff: Date? {
         let days = UserDefaults.standard.object(forKey: "auditRetentionDays") as? Int ?? 90
         return days > 0 ? Date().addingTimeInterval(-Double(days) * 86400) : nil

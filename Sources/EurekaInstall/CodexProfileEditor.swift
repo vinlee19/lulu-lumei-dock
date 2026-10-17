@@ -1,7 +1,8 @@
 import Foundation
 
-/// Codex 的「agent」= config.toml 里的 `[profiles.<name>]` 预设
-/// （model / 推理强度 / persona / 审批策略）。仅覆盖常用键，未识别键在 upsert 时原样保留。
+/// A Codex "agent" = a `[profiles.<name>]` preset in config.toml (model / reasoning effort /
+/// persona / approval policy). Only common keys are covered; unrecognised keys are preserved as-is
+/// on upsert.
 public struct CodexProfile: Equatable, Sendable, Identifiable {
     public var id: String { name }
     public var name: String
@@ -22,14 +23,16 @@ public struct CodexProfile: Equatable, Sendable, Identifiable {
     }
 }
 
-/// `~/.codex/config.toml` 的 profile 段编辑器：行级读/写/删，**不整体重序列化 TOML**。
-/// 关键不变量：profile 是 `[table]` 段，追加到文件尾安全（不同于顶层 `notify` 键的插入约束）；
-/// upsert 只改段内被管理的键、保留其它行；因此 mcp_servers / notify / 其它 profile 均不受影响。
+/// Editor for profile sections in `~/.codex/config.toml`: line-level read/write/delete, **never
+/// re-serialises the whole TOML**.
+/// Key invariant: a profile is a `[table]` section, so appending it at EOF is safe (unlike the
+/// insertion constraint on the top-level `notify` key); upsert only changes the managed keys inside
+/// the section and keeps every other line, so mcp_servers / notify / other profiles are unaffected.
 public enum CodexProfileEditor {
-    /// 被管理的键（写入顺序即此顺序）
+    /// Managed keys (written in this order)
     static let managedKeys = ["model", "model_reasoning_effort", "personality", "approval_policy"]
 
-    // MARK: - 读
+    // MARK: - Read
 
     public static func read(from toml: String) -> [CodexProfile] {
         let lines = toml.components(separatedBy: "\n")
@@ -41,7 +44,7 @@ public enum CodexProfileEditor {
             index += 1
             while index < lines.count {
                 let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("[") { break }  // 下一个 table，段结束
+                if trimmed.hasPrefix("[") { break }  // Next table; section ends
                 index += 1
                 guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
                       let (key, rawValue) = splitKeyValue(trimmed) else { continue }
@@ -59,9 +62,10 @@ public enum CodexProfileEditor {
         return profiles.sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
-    // MARK: - 写
+    // MARK: - Write
 
-    /// 段存在 → 改/删段内被管理键、保留其它行；不存在 → 在文件尾追加新段
+    /// Section exists → change/delete managed keys in it, keep other lines; otherwise → append a
+    /// new section at EOF
     public static func upsert(into toml: String, profile: CodexProfile) -> String {
         var lines = toml.isEmpty ? [] : toml.components(separatedBy: "\n")
         let managed = managedPairs(profile)
@@ -76,12 +80,12 @@ public enum CodexProfileEditor {
             for line in lines[(start + 1)..<end] {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if let (key, _) = splitKeyValue(trimmed), managedKeys.contains(key) {
-                    if let value = managed[key] {  // 改：写新值；nil：删（跳过）
+                    if let value = managed[key] {  // Changed: write new value; nil: delete (skip)
                         newBody.append(keyLine(key, value))
                         written.insert(key)
                     }
                 } else {
-                    newBody.append(line)  // 未识别键 / 注释 / 空行原样保留
+                    newBody.append(line)  // Unrecognised keys / comments / blank lines kept as-is
                 }
             }
             for key in managedKeys where managed[key] != nil && !written.contains(key) {
@@ -91,7 +95,7 @@ public enum CodexProfileEditor {
             return lines.joined(separator: "\n")
         }
 
-        // 不存在：文件尾追加新段
+        // Not present: append a new section at EOF
         while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
             lines.removeLast()
         }
@@ -114,7 +118,7 @@ public enum CodexProfileEditor {
         while end < lines.count,
               !lines[end].trimmingCharacters(in: .whitespaces).hasPrefix("[") { end += 1 }
         var removeStart = start
-        // 顺带吃掉段前一个空行，避免堆积空行
+        // Also swallow one blank line before the section so blank lines don't pile up
         if removeStart > 0, lines[removeStart - 1].trimmingCharacters(in: .whitespaces).isEmpty {
             removeStart -= 1
         }
@@ -122,7 +126,7 @@ public enum CodexProfileEditor {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - 内部
+    // MARK: - Internals
 
     private static func managedPairs(_ profile: CodexProfile) -> [String: String] {
         var pairs: [String: String] = [:]
@@ -136,8 +140,9 @@ public enum CodexProfileEditor {
         return pairs
     }
 
-    /// 解析 profile 段头 `[profiles.<name>]`（裸名或带引号名）；非该形态返回 nil。
-    /// 裸名含点视为子表（如 `[profiles.x.mcp_servers]`），不当作 profile。
+    /// Parses a profile section header `[profiles.<name>]` (bare or quoted name); nil for any other
+    /// form. A bare name containing a dot is a subtable (e.g. `[profiles.x.mcp_servers]`), not a
+    /// profile.
     static func profileName(fromHeader line: String) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else { return nil }
@@ -147,7 +152,7 @@ public enum CodexProfileEditor {
         if name.count >= 2, name.first == "\"", name.last == "\"" {
             return String(name.dropFirst().dropLast())
         }
-        if name.contains(".") { return nil }  // 子表，非 profile 本身
+        if name.contains(".") { return nil }  // Subtable, not the profile itself
         name = name.trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? nil : name
     }

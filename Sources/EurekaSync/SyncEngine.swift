@@ -2,7 +2,7 @@ import EurekaStore
 import EurekaKit
 import Foundation
 
-/// 一轮同步的结果汇总（UI 文案与 health 上报用）
+/// Summary of one sync round (for UI copy and health reporting)
 public struct SyncReport: Equatable {
     public var uploaded = 0
     public var uploadedBytes: Int64 = 0
@@ -10,7 +10,8 @@ public struct SyncReport: Equatable {
     public var deferred = 0
     public var skippedOversize = 0
     public var firstError: String?
-    /// 本轮成功上传的文件（名 + 字节）；上限 500 条（uploaded 计数仍为真实总数）
+    /// Files uploaded successfully this round (name + bytes); capped at 500 entries (the uploaded
+    /// count is still the real total)
     public var uploadedFiles: [UploadedFile] = []
 
     public init() {}
@@ -18,24 +19,26 @@ public struct SyncReport: Equatable {
     public struct UploadedFile: Equatable, Sendable {
         public var name: String
         public var size: Int64
-        /// 来源类目（如 "claude/skills"、"kimi/sessions"、"custom/notes"）；首段即来源
+        /// Source category (e.g. "claude/skills", "kimi/sessions", "custom/notes"); the first
+        /// segment is the source
         public var category: String = ""
     }
 
     static let maxRecordedFiles = 500
 }
 
-/// 同步进行中的实时进度（UI 进度条用）
+/// Live progress while a sync runs (for the UI progress bar)
 public struct SyncProgress: Equatable {
-    /// 本轮计划上传的文件总数
+    /// Total number of files planned for upload this round
     public var totalFiles: Int
-    /// 已处理（成功 + 失败）
+    /// Processed so far (succeeded + failed)
     public var completedFiles: Int
-    /// 本轮计划上传的字节总量
+    /// Total bytes planned for upload this round
     public var totalBytes: Int64
-    /// 已成功传输的字节
+    /// Bytes transferred successfully
     public var transferredBytes: Int64
-    /// 正在上传的文件名（对象键末段）；nil = 枚举/收尾阶段
+    /// Name of the file being uploaded (last segment of the object key); nil = enumerating /
+    /// wrapping up
     public var currentFile: String?
 
     public var fraction: Double {
@@ -43,25 +46,26 @@ public struct SyncProgress: Equatable {
     }
 }
 
-/// 单轮同步编排：枚举 → diff → 串行上传 → 落状态。
-/// 调用方（SyncService）保证串行执行与 skip-if-syncing 守卫。
+/// Orchestrates one sync round: enumerate → diff → serial upload → persist state.
+/// The caller (SyncService) guarantees serial execution and the skip-if-syncing guard.
 public final class SyncEngine {
     public struct Limits {
-        /// 单文件上限（超过跳过并计数）
+        /// Per-file size cap (larger files are skipped and counted)
         public var maxFileSize: Int64 = 256 << 20
         public var maxFilesPerCycle = 500
-        /// 单轮字节预算：首轮大积压按每轮 100MB 渐进排空
+        /// Per-round byte budget: a large first-run backlog drains gradually at 100MB per round
         public var maxBytesPerCycle: Int64 = 100 << 20
-        /// 连续传输层失败（URLError）达到该数 → 判定断网，中止余量
+        /// This many consecutive transport-layer failures (URLError) → treat as offline and abort
+        /// the rest
         public var abortAfterConsecutiveNetworkFailures = 3
-        /// 单文件失败后的额外重试次数（0 = 关；仅 URLError / 5xx 重试，4xx 不重试）
+        /// Extra retries after a file fails (0 = off; only URLError / 5xx are retried, never 4xx)
         public var maxRetries = 2
-        /// 重试退避基数（秒），指数递增：base × 2^已试次数
+        /// Retry backoff base (seconds), growing exponentially: base × 2^attempts so far
         public var retryBackoffSeconds: TimeInterval = 3
 
         public init() {}
 
-        /// 手动「立即同步」用的放宽配额
+        /// Relaxed quotas for a manual "Sync now"
         public static var relaxed: Limits {
             var limits = Limits()
             limits.maxFilesPerCycle = 100_000
@@ -76,7 +80,8 @@ public final class SyncEngine {
     private let keyPrefix: String
     private let host: String
     private let limits: Limits
-    /// 实时进度回调（在引擎执行线程上调用；UI 侧自行回主线程）
+    /// Live progress callback (called on the engine's thread; the UI hops to the main thread
+    /// itself)
     public var onProgress: ((SyncProgress) -> Void)?
 
     public init(
@@ -94,13 +99,15 @@ public final class SyncEngine {
     public func runCycle() -> SyncReport {
         var report = SyncReport()
 
-        // 1. 枚举本地文件
+        // 1. Enumerate local files
         let enumerated = SyncSourceCatalog.enumerate(
             roots: roots, prefix: keyPrefix, host: host, maxFileSize: limits.maxFileSize)
         var candidates = enumerated.candidates
         report.skippedOversize = enumerated.skippedOversize
 
-        // 2. opencode 库：指纹并入候选（键 = db 路径；上传时临时 VACUUM 快照）
+        // 2. opencode database: fold its fingerprint into the candidates (key = db path; a
+        //    temporary
+        // VACUUM snapshot is taken at upload time)
         if let fp = OpencodeSnapshot.fingerprint(dbPath: roots.opencodeDB) {
             candidates.append(SyncCandidate(
                 localPath: roots.opencodeDB.path,
@@ -117,7 +124,8 @@ public final class SyncEngine {
             maxFiles: limits.maxFilesPerCycle, maxBytes: limits.maxBytesPerCycle)
         report.deferred = plan.deferred
 
-        // 4. 串行上传：成功即落库（断电不丢进度）；单文件失败继续；连续断网中止
+        // 4. Serial upload: persist each success immediately (no lost progress on power loss); keep
+        // going past single-file failures; abort on consecutive network failures
         var progress = SyncProgress(
             totalFiles: plan.uploads.count, completedFiles: 0,
             totalBytes: plan.uploads.reduce(0) { $0 + $1.size },
@@ -168,16 +176,17 @@ public final class SyncEngine {
             }
         }
 
-        // 5. 清盘上已消失的状态行（远端不删）
+        // 5. Purge state rows for files that vanished from disk (remote copies are not deleted)
         if !plan.vanishedPaths.isEmpty {
             try? repo.deletePaths(plan.vanishedPaths)
         }
         return report
     }
 
-    /// putObject + 可配置重试：仅传输层错误（URLError）与服务端 5xx 重试
-    /// （4xx = 权限/键错误，重试无意义直接抛）。指数退避 base × 2^已试次数；
-    /// 引擎本就在后台串行队列上执行，阻塞 sleep 可接受。
+    /// putObject + configurable retry: only transport errors (URLError) and server 5xx are retried
+    /// (4xx = permission/key errors, retrying is pointless, so throw right away). Exponential
+    /// backoff base × 2^attempts so far;
+    /// the engine already runs on a background serial queue, so a blocking sleep is acceptable.
     private func putWithRetry(key: String, data: Data) throws -> String? {
         var attempt = 0
         while true {
@@ -194,9 +203,10 @@ public final class SyncEngine {
         }
     }
 
-    /// 常规文件直接读；opencode 库先 VACUUM 快照再读（用后即删）。
-    /// append-only 文件在枚举与读取之间长大 → 上传的字节 ≥ 记录的指纹，
-    /// 下轮 stat 对比自然补传，方向安全。
+    /// Regular files are read directly; the opencode database is VACUUM-snapshotted first, then
+    /// read (and deleted after use). An append-only file that grows between enumeration and read →
+    /// uploaded bytes ≥ the recorded fingerprint, and next round's stat comparison naturally
+    /// re-uploads it; the error is in the safe direction.
     private func readData(for candidate: SyncCandidate) throws -> Data {
         if candidate.localPath == roots.opencodeDB.path {
             let snapshot = try OpencodeSnapshot.snapshot(

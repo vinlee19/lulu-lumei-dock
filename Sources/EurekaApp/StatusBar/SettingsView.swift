@@ -2,11 +2,12 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// 设置页：五个子栏目（通用 / 集成 / 备份 / 高级 / 关于），仿参考设计的胶囊子页签条。
-/// 使用统计不在此页——顶级「用量」模块已完整覆盖；
-/// 审计也已升为顶级页签（采集开关随页面一起搬进了 `AuditView` 的页头齿轮浮层）。
+/// Settings page: five sub-sections (General / Integrations / Backup / Advanced / About), with a
+/// capsule sub-tab bar modeled on the reference design. Usage stats aren't here -- the top-level
+/// Usage module already covers them fully; Audit has also been promoted to a top-level tab (its
+/// capture toggle moved with it into the header gear popover of `AuditView`).
 struct SettingsView: View {
-    /// 由 PopoverNavigation 持有，便于侧栏品牌区直接跳「关于」
+    /// Owned by PopoverNavigation so the sidebar brand area can jump straight to "About"
     @Binding var section: SettingsSection
 
     @ObservedObject var settings: AppSettings
@@ -24,7 +25,8 @@ struct SettingsView: View {
         case advanced = "高级"
         case about = "关于"
 
-        /// 子页签上的名字。rawValue 仍是原来的中文，离屏渲染的文件名继续用 case 名。
+        /// Name shown on the sub-tab. rawValue is still the original Chinese text; offscreen-render
+        /// file names keep using the case name.
         var title: String {
             switch self {
             case .general: return L10n.text("General", zhHans: "通用")
@@ -35,7 +37,7 @@ struct SettingsView: View {
             }
         }
 
-        /// 子页签前置图标（与全站导航一致，单色）
+        /// Sub-tab leading icon (monochrome, consistent with site-wide navigation)
         var icon: String {
             switch self {
             case .general: return "gearshape"
@@ -53,7 +55,8 @@ struct SettingsView: View {
             Divider()
             switch section {
             case .backup:
-                // 备份面板自带滚动与留白，不套外层 ScrollView
+                // The backup panel has its own scrolling and padding; don't wrap it in an outer
+                // ScrollView
                 BackupView(service: syncService, settings: settings)
             default:
                 ScrollView {
@@ -79,7 +82,7 @@ struct SettingsView: View {
         .onAppear { notificationService.refresh() }
     }
 
-    // MARK: - 子页签条（灰底托盘 + 品牌色选中胶囊）
+    // MARK: - Sub-tab bar (grey tray + brand-colored selected capsule)
 
     private var sectionBar: some View {
         CapsuleTabTray {
@@ -95,7 +98,7 @@ struct SettingsView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - 通用
+    // MARK: - General
 
     @ViewBuilder
     private var generalSection: some View {
@@ -323,7 +326,8 @@ struct SettingsView: View {
         }
     }
 
-    /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）
+    /// System notification degradation hint: reflects the real authorization state (unavailable in
+    /// dev / denied / OK)
     private var notificationHint: String? {
         switch notificationService.availability {
         case .unavailableNotBundled:
@@ -339,7 +343,8 @@ struct SettingsView: View {
         }
     }
 
-    /// 胶囊分段选项（外观主题 / 界面风格共用）：选中 = 品牌底 + onBrand 字（brutal 下为墨字）
+    /// Capsule segmented option (shared by appearance theme / UI style): selected = brand fill +
+    /// onBrand text (ink text under brutal)
     private func capsuleOption(
         _ selection: Binding<String>, _ mode: String, _ label: String, icon: String
     ) -> some View {

@@ -1,18 +1,20 @@
 import Foundation
 
-/// Hermes Agent（Nous Research，v0.19 实勘）的本地数据路径，默认 `~/.hermes`。
+/// Local data paths for Hermes Agent (Nous Research, surveyed on v0.19), default `~/.hermes`.
 ///
-/// 与其它 CLI 最大的不同：**会话 / 消息 / token / 成本全部在单个 SQLite `state.db` 里**
-/// （schema v23，WAL），`~/.hermes/sessions/` 是空目录、不是存储位置。知识库侧：
-/// 技能 `skills/<分类>/<名>/SKILL.md`（还有 `<分类>/<子类>/<名>/` 与顶层无分类三种深度），
-/// 记忆只有全局 `memories/{MEMORY.md,USER.md}`，全局人格 `SOUL.md`，计划由 `plan` 技能
-/// 写到**项目内** `<repo>/.hermes/plans/`（profile 级 `~/.hermes/plans/` 可选）。
+/// The biggest difference from other CLIs: **sessions / messages / tokens / cost all live in a
+/// single SQLite `state.db`** (schema v23, WAL); `~/.hermes/sessions/` is an empty directory, not
+/// the storage location. Knowledge side: skills `skills/<category>/<name>/SKILL.md` (plus
+/// `<category>/<subcategory>/<name>/` and uncategorized top-level — three depths), memory is only
+/// the global `memories/{MEMORY.md,USER.md}`, the global persona is `SOUL.md`, and plans are
+/// written by the `plan` skill **inside the project** at `<repo>/.hermes/plans/` (profile-level
+/// `~/.hermes/plans/` is optional).
 ///
-/// ⚠️ `.env` / `auth.json` 是凭证文件，`config.yaml` 可能含 provider base_url：
-/// 任何备份 / 上传都不得纳入这三者，也不得纳入 `state.db`。
+/// ⚠️ `.env` / `auth.json` are credential files and `config.yaml` may contain a provider base_url:
+/// no backup / upload may ever include these three, nor `state.db`.
 public enum HermesPaths {
-    /// 配置主目录（env `EUREKA_HERMES_HOME` > `HERMES_HOME` > `~/.hermes`）。
-    /// `HERMES_HOME` 是 Hermes 自己认的覆盖变量，跟随它才能和用户实际安装对齐。
+    /// Config home (env `EUREKA_HERMES_HOME` > `HERMES_HOME` > `~/.hermes`). `HERMES_HOME` is
+    /// Hermes's own override variable; following it keeps us aligned with the actual install.
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -25,14 +27,14 @@ public enum HermesPaths {
             .appendingPathComponent(".hermes", isDirectory: true)
     }
 
-    /// 会话 / 消息 / 用量库 `<home>/state.db`（只读打开，WAL 感知）
+    /// Session / message / usage db `<home>/state.db` (opened read-only, WAL-aware)
     public static func stateDB(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("state.db")
     }
 
-    /// 技能根 `<home>/skills`（带分类目录层级，需递归扫描）
+    /// Skill root `<home>/skills` (has category directory levels; needs a recursive scan)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -40,7 +42,7 @@ public enum HermesPaths {
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 全局记忆目录 `<home>/memories`（只有 MEMORY.md 与 USER.md）
+    /// Global memory directory `<home>/memories` (only MEMORY.md and USER.md)
     public static func memoriesRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -48,14 +50,16 @@ public enum HermesPaths {
             .appendingPathComponent("memories", isDirectory: true)
     }
 
-    /// 全局人格 / 身份文件 `<home>/SOUL.md`（占系统提示第一槽，等价于用户级 CLAUDE.md）
+    /// Global persona / identity file `<home>/SOUL.md` (takes the first system-prompt slot,
+    /// equivalent to a user-level CLAUDE.md)
     public static func soulFile(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("SOUL.md")
     }
 
-    /// profile 级计划目录 `<home>/plans`（常不存在；项目内计划见 `projectPlansDir`）
+    /// Profile-level plan directory `<home>/plans` (often absent; for in-project plans see
+    /// `projectPlansDir`)
     public static func plansRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -63,30 +67,31 @@ public enum HermesPaths {
             .appendingPathComponent("plans", isDirectory: true)
     }
 
-    /// 配置文件 `<home>/config.yaml`（技能启停 `skills.disabled` 就在这里）
+    /// Config file `<home>/config.yaml` (skill enable/disable `skills.disabled` lives here)
     public static func configFile(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("config.yaml")
     }
 
-    /// 技能用量 sidecar `<home>/skills/.usage.json`（use_count / last_used_at，真实命中数据）
+    /// Skill usage sidecar `<home>/skills/.usage.json` (use_count / last_used_at, real hit data)
     public static func skillUsageFile(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         skillsRoot(environment: environment).appendingPathComponent(".usage.json")
     }
 
-    /// 项目内计划目录 `<repo>/.hermes/plans`（`plan` 技能的落盘位置）
+    /// In-project plan directory `<repo>/.hermes/plans` (where the `plan` skill writes)
     public static func projectPlansDir(repoRoot: URL) -> URL {
         repoRoot
             .appendingPathComponent(".hermes", isDirectory: true)
             .appendingPathComponent("plans", isDirectory: true)
     }
 
-    /// 全部 HERMES_HOME：默认 home + `profiles/<name>/`（每个 profile 是完整克隆，
-    /// 各有自己的 state.db / config.yaml / skills / memories / SOUL.md）。
-    /// 多 profile 用户若只读默认 home 会整段漏数据，故索引器统一走这里。
+    /// Every HERMES_HOME: the default home + `profiles/<name>/` (each profile is a full clone with
+    /// its own state.db / config.yaml / skills / memories / SOUL.md).
+    /// Multi-profile users would lose whole swaths of data if only the default home were read, so
+    /// the indexers all go through here.
     public static func allHomes(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
@@ -102,7 +107,7 @@ public enum HermesPaths {
         return homes
     }
 
-    /// 每个 home 下的 state.db（只保留真实存在的）
+    /// state.db under each home (only those that actually exist)
     public static func allStateDBs(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {

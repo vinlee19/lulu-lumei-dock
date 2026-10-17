@@ -1,13 +1,14 @@
 import Foundation
 
-/// 某一目标配置（Claude settings.json / Codex config.toml）的安装状态
+/// Install state of one target config (Claude settings.json / Codex config.toml)
 public enum InstallStatus: String, Sendable {
-    /// 已完整安装 Eureka 条目
+    /// Eureka entries are fully installed
     case installed
-    /// 部分安装（如只装了部分 hook 事件）
+    /// Partially installed (e.g. only some hook events)
     case partial
-    /// 存在他人的冲突配置（如已有非 Eureka 的 notify），拒绝自动覆盖
+    /// Someone else's config conflicts (e.g. an existing non-Eureka notify); never overwritten
+    /// automatically
     case foreign
-    /// 未安装
+    /// Not installed
     case none
 }

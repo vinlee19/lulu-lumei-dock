@@ -1,6 +1,6 @@
 import Foundation
 
-/// 同步 HTTP 响应（body + 响应头，头键统一小写）
+/// Synchronous HTTP response (body + response headers, header keys lowercased)
 public struct HTTPReply {
     public var status: Int
     public var body: Data
@@ -13,13 +13,15 @@ public struct HTTPReply {
     }
 }
 
-/// 同步 HTTP 传输协议：同步引擎全程跑在后台串行队列上，阻塞式最简单；
-/// 测试注入 mock 也无需 async harness 支持。
+/// Synchronous HTTP transport protocol: the sync engine runs entirely on a background serial
+/// queue, so blocking is simplest;
+/// injecting a mock in tests needs no async harness support either.
 public protocol HTTPTransport {
     func send(_ request: URLRequest, body: Data?) throws -> HTTPReply
 }
 
-/// 生产实现：URLSession + 信号量桥接。超时由调用方按请求设置 timeoutInterval。
+/// Production implementation: URLSession + a semaphore bridge. Callers set timeoutInterval per
+/// request.
 public struct URLSessionTransport: HTTPTransport {
     public init() {}
 

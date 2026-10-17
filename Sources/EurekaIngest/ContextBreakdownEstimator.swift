@@ -1,22 +1,23 @@
 import EurekaKit
 import Foundation
 
-/// 按 AgentSource 的配置约定表：各 agent 把技能 / MCP / 记忆 / 子智能体定义放在哪些路径。
-/// 逐源尽力填写；未知源目录全空，退化为「对话消息 + 系统提示词(含其余)」两类估算。
+/// Per-AgentSource config conventions: where each agent keeps its skills / MCP / memory /
+/// subagent definitions. Filled in best-effort per source; unknown sources have no dirs and
+/// degrade to a two-way estimate: conversation messages + system prompt (incl. everything else).
 public struct AgentContextProfile: Equatable, Sendable {
-    /// 技能目录（读其中 */SKILL.md 的 frontmatter 描述）
+    /// Skill dirs (reads the frontmatter description of each */SKILL.md)
     public var skillDirs: [String]
-    /// MCP 配置文件（只数 server 个数；工具 schema 不可得，按常量估算）
+    /// MCP config files (counts servers only; tool schemas are unavailable, estimated by constant)
     public var mcpConfigFiles: [String]
-    /// 记忆/指令文件（全文注入 system prompt）
+    /// Memory / instruction files (injected verbatim into the system prompt)
     public var memoryFiles: [String]
-    /// 子智能体定义目录（*.md frontmatter 注入工具列表）
+    /// Subagent definition dirs (*.md frontmatter is injected into the tool list)
     public var agentDirs: [String]
-    /// 系统提示词基线（估算基线：CLI 骨架提示词，transcript 不记录，经验值兜底）
+    /// System prompt baseline (CLI skeleton prompt; not in the transcript, empirical fallback)
     public var baselineSystemPromptTokens: Int
-    /// 内建工具 schema 基线（估算基线：schema 不进 transcript，经验值兜底）
+    /// Built-in tool schema baseline (schemas aren't in the transcript; empirical fallback)
     public var baselineBuiltinToolTokens: Int
-    /// 每个已配置 MCP server 的固定估算（schema 不可得，只能按常驻常量估）
+    /// Fixed estimate per configured MCP server (schema unavailable; a resident constant)
     public var perMCPServerTokens: Int
 
     public init(
@@ -33,7 +34,7 @@ public struct AgentContextProfile: Equatable, Sendable {
         self.perMCPServerTokens = perMCPServerTokens
     }
 
-    // MARK: - 估算基线常量（集中定义，偏大无害：reconcile 拿到真实总量会按比例压缩）
+    // MARK: - Estimate baselines (centralized; overshoot is harmless: reconcile scales to the real total)
 
     static let defaultSystemPromptBaseline = 2_000
     static let defaultBuiltinToolBaseline = 4_000
@@ -59,7 +60,8 @@ public struct AgentContextProfile: Equatable, Sendable {
                     + at(cwd, "CLAUDE.md"),
                 agentDirs: [home.appendingPathComponent(".claude/agents").path]
                     + at(cwd, ".claude/agents"),
-                // Claude Code 系统提示词骨架 + 内建工具 schema 都偏大（实测量级）
+                // Claude Code's system prompt skeleton and built-in tool schemas are both large
+                // (measured magnitude)
                 baselineSystemPromptTokens: 3_000,
                 baselineBuiltinToolTokens: 13_000,
                 perMCPServerTokens: defaultPerMCPServerTokens)
@@ -74,7 +76,8 @@ public struct AgentContextProfile: Equatable, Sendable {
                 baselineBuiltinToolTokens: 8_000,
                 perMCPServerTokens: defaultPerMCPServerTokens)
         case .zcode:
-            // zcode 技能在共享 ~/.agents/skills；记忆按 AGENTS.md 惯例（未见全局记忆文件）
+            // zcode skills live in the shared ~/.agents/skills; memory follows the AGENTS.md
+            // convention (no global memory file seen)
             return AgentContextProfile(
                 skillDirs: [home.appendingPathComponent(".agents/skills").path]
                     + at(cwd, ".agents/skills"),
@@ -114,7 +117,8 @@ public struct AgentContextProfile: Equatable, Sendable {
                 baselineBuiltinToolTokens: defaultBuiltinToolBaseline,
                 perMCPServerTokens: defaultPerMCPServerTokens)
         default:
-            // 无配置约定的源：目录全空，只剩基线 + 对话消息两类
+            // Sources with no config convention: no dirs, only the baselines + conversation
+            // messages
             return AgentContextProfile(
                 skillDirs: [], mcpConfigFiles: [], memoryFiles: [], agentDirs: [],
                 baselineSystemPromptTokens: defaultSystemPromptBaseline,
@@ -124,14 +128,18 @@ public struct AgentContextProfile: Equatable, Sendable {
     }
 }
 
-/// 上下文用量分类估算器：最后一轮真实总量（若有）+ 对话消息估算 + 配置文件测量。
-/// 全部 best-effort：任何文件缺失/解析失败都安静跳过，不抛错。
+/// Context usage breakdown estimator: last turn's real total (if any) + conversation message
+/// estimate + measured config files. All best-effort: a missing or unparsable file is skipped
+/// silently, never thrown.
 public enum ContextBreakdownEstimator {
-    /// 入口：按源估五类，再与最后一轮真实总量对账。
-    /// - model：该会话 token 最多的模型（决定窗口大小）；nil → 默认窗口。
-    /// - lastTurnTotalTokens：LastTurnUsageReader 的结果；nil → 总量为纯估算。
-    /// - windowOverride：会话数据里带的真实窗口（codex 的 model_context_window /
-    ///   kimi config.toml 的 max_context_size）；优先于 ContextWindows 内建表。
+    /// Entry point: estimate the five categories per source, then reconcile against the last
+    /// turn's real total.
+    /// - model: the session's model with the most tokens (decides the window size);
+    ///   nil → default window.
+    /// - lastTurnTotalTokens: result of LastTurnUsageReader; nil → the total is a pure estimate.
+    /// - windowOverride: the real window carried in session data (codex `model_context_window` /
+    ///   kimi config.toml `max_context_size`); takes precedence over the built-in ContextWindows
+    ///   table.
     public static func estimate(
         source: AgentSource,
         cwd: String?,
@@ -164,10 +172,11 @@ public enum ContextBreakdownEstimator {
             lastTurnTotalTokens: lastTurnTotalTokens)
     }
 
-    /// 对账（纯函数，可单测）：
-    /// 有真实总量 R 时 —— 估算合计 E < R，差值并入 systemPrompt（「系统提示词」含其余
-    /// 开销）；E > R 则各类按比例缩放到 R（残差补到最大类，保证合计严格等于 R）。
-    /// 没有 R → totalIsReal = false，总量 = 估算合计。
+    /// Reconcile (pure function, unit-testable): with a real total R — if the estimate sum E < R,
+    /// the difference goes into systemPrompt ("system prompt" includes all other overhead); if E >
+    /// R, every category is scaled proportionally down to R (the residual goes to the largest
+    /// category so the sum is exactly R). Without R → totalIsReal = false and the total is the
+    /// estimate sum.
     public static func reconcile(
         estimates: [ContextBreakdown.Category: Int],
         windowTokens: Int,
@@ -187,7 +196,7 @@ public enum ContextBreakdownEstimator {
                 for (category, value) in tokens {
                     scaled[category] = Int((Double(value) * Double(real) / Double(estimateTotal)).rounded())
                 }
-                // 舍入残差补到最大类，保证缩放后合计 == R
+                // Add the rounding residual to the largest category so the scaled sum == R
                 let residual = real - scaled.values.reduce(0, +)
                 if residual != 0,
                    let largest = scaled.max(by: { $0.value < $1.value })?.key {
@@ -208,10 +217,10 @@ public enum ContextBreakdownEstimator {
             totalTokens: estimateTotal, windowTokens: windowTokens, totalIsReal: false)
     }
 
-    // MARK: - 私有：各类目测量
+    // MARK: - Private: per-category measurement
 
-    /// 技能目录：每个子目录的 SKILL.md 只取 frontmatter 的 name+description 估算
-    /// （注入 context 的就是这段描述，不是技能全文）
+    /// Skill dirs: for each subdir's SKILL.md, estimate only the frontmatter name+description
+    /// (that description is what gets injected into context, not the full skill)
     private static func estimateSkills(inDir dir: String) -> Int {
         let fm = FileManager.default
         let subs = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
@@ -221,7 +230,7 @@ public enum ContextBreakdownEstimator {
                 .appendingPathComponent(sub).appendingPathComponent("SKILL.md").path
             guard let head = readHead(path: skillFile) else { continue }
             let frontmatter = frontmatterFields(head, keys: ["name", "description"])
-            // frontmatter 缺失时按目录名兜底（有技能就该计入一点开销）
+            // Fall back to the dir name when frontmatter is missing (a skill should cost something)
             total += frontmatter.isEmpty
                 ? TokenEstimator.estimate(sub)
                 : TokenEstimator.estimate(frontmatter)
@@ -229,7 +238,8 @@ public enum ContextBreakdownEstimator {
         return total
     }
 
-    /// Markdown 定义目录（子智能体等）：逐个 *.md 取 frontmatter name+description 估算
+    /// Markdown definition dirs (subagents etc.): estimate each *.md from frontmatter
+    /// name+description
     private static func estimateMarkdownFrontmatter(inDir dir: String) -> Int {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
@@ -244,7 +254,8 @@ public enum ContextBreakdownEstimator {
         return total
     }
 
-    /// 记忆/指令文件：全文注入 system prompt，整篇估算
+    /// Memory / instruction files: injected verbatim into the system prompt, so estimate the whole
+    /// file
     private static func estimateFileText(at path: String) -> Int {
         guard let data = FileManager.default.contents(atPath: path),
               let text = String(data: data, encoding: .utf8)
@@ -252,10 +263,12 @@ public enum ContextBreakdownEstimator {
         return TokenEstimator.estimate(text)
     }
 
-    /// MCP 上下文开销：优先用探测缓存里的**真实 schema token**（MCPToolCache——
-    /// MCP 页「检测连接」时经 tools/list 实测落盘），没测过的 server 退回常量估算。
-    /// server 名解析：JSON 取 mcpServers 键；TOML 取 [mcp_servers.<name>] 段名首段
-    /// （`.env` / `.tools.*` 子段归属同名 server，不再按行前缀重复计数——旧实现会多算）。
+    /// MCP context overhead: prefer the **real schema tokens** from the probe cache (MCPToolCache,
+    /// measured via tools/list and persisted when the MCP page's "test connection" runs); servers
+    /// never probed fall back to the constant estimate.
+    /// Server name resolution: JSON takes the mcpServers keys; TOML takes the first segment after
+    /// [mcp_servers.<name>] (`.env` / `.tools.*` subsections belong to the same server and are no
+    /// longer counted again by line prefix — the old implementation over-counted).
     private static func mcpTokens(profile: AgentContextProfile) -> Int {
         let cache = MCPToolCache.load()
         var names: Set<String> = []
@@ -269,7 +282,8 @@ public enum ContextBreakdownEstimator {
                     names.formUnion(servers.keys.map { $0.lowercased() })
                 }
             } else {
-                // TOML 无解析器依赖，按段头取名（codex [mcp_servers.xxx] / kimi [mcp.xxx]）
+                // No TOML parser dependency; take names from section headers
+                // (codex [mcp_servers.xxx] / kimi [mcp.xxx])
                 for line in text.split(separator: "\n") {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
                     guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else { continue }
@@ -287,7 +301,7 @@ public enum ContextBreakdownEstimator {
         }
     }
 
-    /// 文件头部（frontmatter 都在开头，读 8KB 足够）
+    /// File head (frontmatter is always at the top; 8KB is enough)
     private static func readHead(path: String, bytes: Int = 8192) -> String? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
@@ -295,7 +309,7 @@ public enum ContextBreakdownEstimator {
         return String(data: data, encoding: .utf8)
     }
 
-    /// 提取 YAML frontmatter（--- 包裹段）里指定键的取值文本
+    /// Extract the value text of the given keys from the YAML frontmatter (the --- delimited block)
     private static func frontmatterFields(_ head: String, keys: [String]) -> String {
         let lines = head.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return "" }

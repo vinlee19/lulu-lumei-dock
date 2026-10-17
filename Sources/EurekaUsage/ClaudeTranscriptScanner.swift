@@ -2,10 +2,10 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.claude/projects/*/*.jsonl 的 assistant 行用量。
-/// 关键不变量：**跨文件全局去重**（requestId + message.id）——
-/// 流式写入会重复同一条 usage 多次，resume/fork 还会把旧行复制进新文件；
-/// 本机实测单文件 1803 个重复对，不去重费用会虚高数倍。
+/// Scans usage from assistant lines in ~/.claude/projects/*/*.jsonl. Key invariant: **global dedup
+/// across files** (requestId + message.id) -- streaming writes repeat the same usage many times,
+/// and resume/fork copies old lines into new files; measured locally: 1803 duplicate pairs in a
+/// single file. Without dedup, cost is inflated several times over.
 public final class ClaudeTranscriptScanner {
     public static func defaultProjectsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -37,9 +37,10 @@ public final class ClaudeTranscriptScanner {
         self.store = store
     }
 
-    /// 返回本轮新增的用量记录数。
-    /// 必须**递归**枚举：子代理/团队会话嵌套在 <项目>/<会话>/subagents/*.jsonl
-    /// （本机实测嵌套文件数是顶层的 5 倍，漏掉会少记 15-30% 用量）。
+    /// Returns the number of usage records added in this pass. Enumeration must be **recursive**:
+    /// subagent/team sessions are nested in <project>/<session>/subagents/*.jsonl (measured
+    /// locally: 5x as many nested files as top-level ones; missing them under-counts usage by
+    /// 15-30%).
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
@@ -50,8 +51,9 @@ public final class ClaudeTranscriptScanner {
         )
         while let item = enumerator?.nextObject() as? URL {
             if item.pathExtension == "jsonl" {
-                // 每文件一个池：逐行 JSON 解析的桥接对象是 autorelease 的，
-                // 全量重扫（迁移清空 scan_files 后）不排水会积累出 GB 级峰值
+                // One pool per file: the bridged objects from per-line JSON parsing are
+                // autoreleased, and a full rescan (after a migration clears scan_files) without
+                // draining builds up GB-level peaks
                 inserted += try autoreleasepool { try scanFile(item) }
             }
         }
@@ -70,19 +72,21 @@ public final class ClaudeTranscriptScanner {
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
 
-        // 批内合并：同 key 的流式重复行 output 递增，保留最大（最终）值；
-        // 顺路数真实用户 prompt（对话数，零额外 IO）
+        // Merge within the batch: streaming duplicates of the same key have increasing output; keep
+        // the max (final) value; count real user prompts along the way (conversation count, zero
+        // extra IO)
         var merged: [String: UsageRecord] = [:]
         var order: [String] = []
         var promptCount = 0
-        // 工具/技能/插件调用：**逐 tool_use id 累积**，不按 assistant 去重键归并 ——
-        // Claude Code 每个 content block 单独写一行却共享同一 (requestId, message.id)，
-        // 按 key 覆盖会让同消息的 Skill 行被后面的 Bash 行顶掉（本机实测 78 条技能调用丢 10 条）。
+        // Tool/skill/plugin calls: **accumulated per tool_use id**, not merged by the assistant
+        // dedup key -- Claude Code writes each content block as its own line but they share one
+        // (requestId, message.id); overwriting by key lets a later Bash line evict a Skill line
+        // from the same message (measured locally: 10 of 78 skill calls lost).
         var toolCalls: [(
             id: String, kind: String, name: String, day: String, ts: Double, tokens: Int
         )] = []
         var seenToolIds: Set<String> = []
-        // 斜杠命令：(uuid, day, name)，用 s:<uuid> 去重后计数
+        // Slash commands: (uuid, day, name), counted after dedup on s:<uuid>
         var commands: [(uuid: String, day: String, name: String)] = []
         for line in chunk.lines {
             guard
@@ -100,19 +104,22 @@ public final class ClaudeTranscriptScanner {
             guard let parsed = Self.parseAssistantLine(root) else { continue }
             let key = parsed.key
             var record = parsed.record
-            // 项目名按仓库根归组（子目录/子模块的会话归到仓库名下）
+            // Project names are grouped by repo root (sessions in subdirectories/submodules count
+            // under the repo name)
             record.project = projectResolver.projectName(forCwd: record.project) ?? record.project
             if let message = root["message"] as? [String: Any] {
-                // 触发时 token = 该 assistant 行 token 合计（≈调用时上下文规模，仅 Claude 可得）；
-                // 同行多 tool_use 时按行归给每个调用，技能场景重叠可忽略
+                // Token at trigger time = token total of that assistant line (≈ context size at
+                // call time; Claude only); with several tool_use blocks on one line, each call gets
+                // the line's total; overlap in the skill case is negligible
                 let lineTokens = record.inputTokens + record.outputTokens
                     + record.cacheCreationTokens + record.cacheReadTokens
                 let day = Self.dayFormatter.string(from: record.timestamp)
                 let ts = record.timestamp.timeIntervalSince1970
                 for call in Self.extractToolCalls(message) {
-                    // 无 id 的 tool_use 无法去重（重扫会翻倍）→ 保守不计数
+                    // A tool_use without an id can't be deduped (a rescan would double it) →
+                    // conservatively not counted
                     guard let id = call.id, !id.isEmpty else { continue }
-                    guard seenToolIds.insert(id).inserted else { continue }  // 文件内同 id 只算一次
+                    guard seenToolIds.insert(id).inserted else { continue }  // Count the same id only once within a file
                     toolCalls.append((id, call.kind, call.name, day, ts, lineTokens))
                 }
             }
@@ -127,18 +134,21 @@ public final class ClaudeTranscriptScanner {
         }
 
         var newCount = 0
-        // 会话 = 文件（文件名即 session id）；对话数按文件计，口径不随归属改写
+        // Session = file (the filename is the session id); conversations are counted per file,
+        // unaffected by attribution rewrites
         let sessionId = url.deletingPathExtension().lastPathComponent
-        // 调用计数归属的会话：子代理转录归到父会话（见 attributionSessionId）
+        // Session that call counts are attributed to: subagent transcripts go to the parent session
+        // (see attributionSessionId)
         let callSessionId = Self.attributionSessionId(for: url, root: projectsRoot)
         try store.scanState.transaction {
-            // 去重必须跨文件全局：dedup_keys 表持久化
+            // Dedup must be global across files: persisted in the dedup_keys table
             let existing = try store.scanState.existingDedupKeys(order)
             let now = Date()
             for key in order {
                 guard let record = merged[key] else { continue }
                 if let entry = existing[key] {
-                    // 已记录过：扫描赶上流式中途时记的是部分 output，用更大值回填
+                    // Already recorded: if the scan caught a stream mid-way, a partial output was
+                    // stored; backfill the larger value
                     if record.outputTokens > entry.outputTokens, let recordId = entry.recordId {
                         try store.usage.updateOutputTokens(
                             recordId: recordId, outputTokens: record.outputTokens)
@@ -154,9 +164,11 @@ public final class ClaudeTranscriptScanner {
                     newCount += 1
                 }
             }
-            // 工具/技能/插件/子代理调用：用 tc:<tool_use id> 跨文件去重，**与消息级用量去重解耦** ——
-            // 挂在"首次入库"分支上会漏：某轮只读到消息的 thinking/text 行就消费了消息级键，
-            // 下轮读到同消息的 tool_use 行时走回填分支，调用永久无归属。
+            // Tool/skill/plugin/subagent calls: deduped across files by tc:<tool_use id>,
+            // **decoupled from message-level usage dedup** -- hanging it on the "first insert"
+            // branch misses calls: if one pass only reads a message's thinking/text lines it
+            // consumes the message-level key, and when the next pass reads that message's tool_use
+            // line it takes the backfill branch, so the call is never attributed.
             if !toolCalls.isEmpty {
                 let callKeys = toolCalls.map { "tc:\($0.id)" }
                 let existingCalls = try store.scanState.existingDedupKeys(callKeys)
@@ -170,7 +182,7 @@ public final class ClaudeTranscriptScanner {
                         dkey, recordId: nil, outputTokens: 0, at: now)
                 }
             }
-            // 斜杠命令：用 s:<uuid> 跨文件去重，新键才计数
+            // Slash commands: deduped across files by s:<uuid>; only new keys are counted
             if !commands.isEmpty {
                 let commandKeys = commands.map { "s:\($0.uuid)" }
                 let existingCommands = try store.scanState.existingDedupKeys(commandKeys)
@@ -187,7 +199,7 @@ public final class ClaudeTranscriptScanner {
             try store.scanState.setFileState(
                 path: path,
                 .init(inode: info.inode, offset: Int64(chunk.newOffset)))
-            // offset==0 是全量重扫 → 覆盖而非累加
+            // offset==0 means a full rescan → overwrite instead of accumulate
             try store.sessionStats.recordPrompts(
                 path: path,
                 sessionId: sessionId,
@@ -197,11 +209,15 @@ public final class ClaudeTranscriptScanner {
         return newCount
     }
 
-    /// 调用计数归属的会话 id：子代理转录（`<父会话>/subagents/**/agent-*.jsonl`）归到**父会话**。
-    /// 文件名派生的 `agent-<hash>` 不是真会话，`ClaudeSessionIndexer` 只枚举一层、永远解析不到，
-    /// 直接用它做反查会给死跳转。父会话就是 `subagents` 目录的上一级 —— 注意 subagents 下还会
-    /// 再套一层 `workflows/wf_<id>/`（本机 4 个目录如此），所以必须按路径组件定位 subagents，
-    /// 只看父目录名会漏掉这一形态。查找从项目根之下开始，免得根路径自己带同名目录时误判。
+    /// Session id that call counts are attributed to: subagent transcripts (`<parent
+    /// session>/subagents/**/agent-*.jsonl`) go to the **parent session**. The filename-derived
+    /// `agent-<hash>` is not a real session; `ClaudeSessionIndexer` only enumerates one level and
+    /// can never resolve it, so using it for lookup yields a dead link. The parent session is the
+    /// directory above `subagents` -- note that under subagents there can be another
+    /// `workflows/wf_<id>/` level (4 local directories look like this), so subagents must be
+    /// located by path component; looking only at the parent directory name misses this shape. The
+    /// search starts below the project root, so a root path that itself contains a directory of the
+    /// same name isn't misread.
     static func attributionSessionId(for url: URL, root: URL) -> String {
         let fileName = url.deletingPathExtension().lastPathComponent
         let components = url.pathComponents
@@ -213,9 +229,10 @@ public final class ClaudeTranscriptScanner {
         return components[marker - 1]
     }
 
-    /// assistant 行的 tool_use 块 → (id, kind, name)：
-    /// Skill→(skill,技能名) / mcp__ 前缀→(mcp, server.tool) / Task|Agent→(agent,子代理类型) / 其余→(tool,工具名)。
-    /// id 是 tool_use 块自带的唯一标识（`toolu_xxx`），调用计数按它去重；缺失则为 nil。
+    /// tool_use block of an assistant line → (id, kind, name): Skill→(skill, skill name) / mcp__
+    /// prefix→(mcp, server.tool) / Task|Agent→(agent, subagent type) / everything else→(tool, tool
+    /// name). id is the tool_use block's own unique identifier (`toolu_xxx`); call counts dedup on
+    /// it; nil when missing.
     static func extractToolCalls(
         _ message: [String: Any]
     ) -> [(id: String?, kind: String, name: String)] {
@@ -244,7 +261,8 @@ public final class ClaudeTranscriptScanner {
         return result
     }
 
-    /// user 行内嵌的斜杠命令：`<command-name>/xx</command-name>` → (uuid, 命令名)
+    /// Slash command embedded in a user line: `<command-name>/xx</command-name>` → (uuid, command
+    /// name)
     static func extractCommand(_ root: [String: Any]) -> (uuid: String, name: String)? {
         guard root["type"] as? String == "user",
               root["isMeta"] as? Bool != true,
@@ -261,7 +279,8 @@ public final class ClaudeTranscriptScanner {
         return (uuid, name)
     }
 
-    /// 真实用户 prompt（对话轮次）：非 meta、content 是字符串（tool_result 是数组）
+    /// Real user prompt (conversation turn): non-meta, and content is a string (tool_result is an
+    /// array)
     static func isRealPrompt(_ root: [String: Any]) -> Bool {
         guard root["type"] as? String == "user",
               root["isMeta"] as? Bool != true,
@@ -270,7 +289,8 @@ public final class ClaudeTranscriptScanner {
         return message["content"] is String
     }
 
-    /// assistant 行 → (去重键, 用量记录)；synthetic 错误行与非 assistant 行返回 nil
+    /// assistant line → (dedup key, usage record); synthetic error lines and non-assistant lines
+    /// return nil
     static func parseAssistantLine(_ root: [String: Any]) -> (key: String, record: UsageRecord)? {
         guard
             root["type"] as? String == "assistant",
@@ -286,7 +306,7 @@ public final class ClaudeTranscriptScanner {
         let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
         let cache1h = (usage["cache_creation"] as? [String: Any])?[
             "ephemeral_1h_input_tokens"] as? Int ?? 0
-        // 全零行（如纯工具结果回包）不记
+        // All-zero lines (e.g. pure tool-result replies) are not recorded
         if input == 0 && output == 0 && cacheCreation == 0 && cacheRead == 0 { return nil }
 
         let requestId = root["requestId"] as? String
@@ -295,7 +315,8 @@ public final class ClaudeTranscriptScanner {
         if let requestId, let messageId {
             key = "c:\(requestId):\(messageId)"
         } else {
-            // 缺标识的行退化为 uuid 键（不跨文件去重，但也不会丢数据）
+            // Lines missing identifiers fall back to a uuid key (no cross-file dedup, but no data
+            // loss either)
             key = "u:\(root["uuid"] as? String ?? UUID().uuidString)"
         }
 
@@ -306,7 +327,7 @@ public final class ClaudeTranscriptScanner {
         return (key, UsageRecord(
             source: .claude,
             model: model,
-            // 暂存原始 cwd，scanFile 经 ProjectResolver 归组为仓库名
+            // Stash the raw cwd; scanFile groups it into a repo name via ProjectResolver
             project: root["cwd"] as? String,
             sessionId: root["sessionId"] as? String,
             timestamp: timestamp,

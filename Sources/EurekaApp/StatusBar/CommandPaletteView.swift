@@ -1,12 +1,14 @@
 import EurekaKit
 import SwiftUI
 
-/// ⌘K 全局搜索浮层：输入框 + 按类型分组结果，↑↓ 移动 / 回车直达 / Esc 关闭。
+/// ⌘K global search overlay: input field + results grouped by kind; ↑↓ to move / Return to jump /
+/// Esc to close.
 struct CommandPaletteView: View {
     @ObservedObject var service: CommandPaletteService
     var onClose: () -> Void
-    /// 会话正文命中的消息级定位：`revealMessage` 是 SessionBrowserService 的实例方法，
-    /// 经通知走不通（通知只带 object/userInfo，不能带闭包），由 PopoverRootView 注入。
+    /// Message-level positioning for session-body hits: `revealMessage` is an instance method of
+    /// SessionBrowserService, which can't travel through a notification (notifications carry only
+    /// object/userInfo, not closures), so PopoverRootView injects it.
     var onRevealMessage: ((String, Int) -> Void)? = nil
 
     @State private var selection = 0
@@ -99,8 +101,10 @@ struct CommandPaletteView: View {
         .contentShape(Rectangle())
     }
 
-    /// 回车/点击直达：发对应 reveal 通知并关面板。userInfo["kind"] 用 `hit.kind.revealKind`
-    /// （EurekaKit.CommandPalette.Kind 的计算属性）而非手写字面量，防两端拼写漂移。
+    /// Return/click jumps straight there: posts the matching reveal notification and closes the
+    /// panel. userInfo["kind"] uses `hit.kind.revealKind` (a computed property on
+    /// EurekaKit.CommandPalette.Kind) instead of a hand-written literal, so the two ends can't
+    /// drift apart in spelling.
     private func route(at index: Int) {
         guard service.hits.indices.contains(index) else { return }
         let hit = service.hits[index]

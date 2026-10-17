@@ -2,7 +2,7 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 设置→关于：应用信息 + CLI 工具版本卡片网格（仿参考设计）
+/// Settings → About: app info + a card grid of CLI tool versions (modeled on the reference design)
 struct AboutView: View {
     @ObservedObject var cliTools: CLIToolsService
     @ObservedObject var updateService: UpdateService
@@ -30,11 +30,11 @@ struct AboutView: View {
         }
         .onAppear {
             cliTools.detectLocal()
-            cliTools.checkLatest()  // 自动查最新版 → 有新版本才浮现「更新」
+            cliTools.checkLatest()  // Auto-check the latest version → "Update" shows only if newer
         }
     }
 
-    // MARK: - 应用卡
+    // MARK: - App card
 
     private var appCard: some View {
         VStack(spacing: 10) {
@@ -89,7 +89,7 @@ struct AboutView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    // MARK: - CLI 工具
+    // MARK: - CLI tools
 
     private var toolsHeader: some View {
         HStack {
@@ -148,7 +148,8 @@ struct AboutView: View {
                     }
                 }
                 .controlSize(.small)
-                // 仅在确有新版本时显示「更新」（semver：latest > local），在可见 Terminal 里跑
+                // Show "Update" only when a newer version really exists (semver: latest > local);
+                // it runs in a visible Terminal
                 if CLIToolsService.hasUpdate(tool), !tool.updateCommand.isEmpty {
                     Button(L10n.text("Update", zhHans: "更新")) { cliTools.updateTool(tool) }
                         .controlSize(.small)
@@ -180,7 +181,7 @@ struct AboutView: View {
         }
     }
 
-    // MARK: - 手动安装命令
+    // MARK: - Manual install commands
 
     private var installCommands: some View {
         VStack(alignment: .leading, spacing: 6) {

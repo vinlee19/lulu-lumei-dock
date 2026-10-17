@@ -2,13 +2,15 @@ import AppKit
 import EurekaKit
 import SwiftUI
 
-// MARK: - 富文本正文（Markdown 块渲染，会话/记忆/技能/计划共用）
+// MARK: - Rich-text body (Markdown block rendering, shared by sessions/memory/skills/plans)
 
-/// Markdown 富文本：块级结构自绘（代码块/标题/列表/引用/分隔线/表格），
-/// 行内样式（粗体/行内代码/链接）走 AttributedString(markdown:)。
+/// Markdown rich text: block-level structure is drawn by hand (code blocks/headings/lists/quotes/
+/// rules/tables),
+/// inline styles (bold/inline code/links) go through AttributedString(markdown:).
 struct MarkdownRichText: View {
     let blocks: [MarkdownBlock]
-    /// false = 宽度紧贴内容（聊天气泡用）；true = 撑满可用宽度（正文/文档页用）
+    /// false = width hugs the content (for chat bubbles); true = fills the available width
+    /// (for body/document pages)
     let fillWidth: Bool
 
     init(text: String, fillWidth: Bool = true) {
@@ -30,7 +32,7 @@ struct MarkdownRichText: View {
         switch block {
         case .paragraph(let text):
             if text.hasPrefix("|") {
-                // 表格降级：等宽渲染保持列对齐
+                // Table fallback: monospaced rendering keeps the columns aligned
                 Text(text)
                     .font(.system(size: 11.5).monospaced())
                     .textSelection(.enabled)
@@ -141,8 +143,8 @@ struct MarkdownRichText: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
     }
 
-    /// 行内 Markdown（粗体/斜体/行内代码/链接）；解析失败回退纯文本。
-    /// 行内代码 → 等宽 + 淡底 chip；链接 → 品牌色下划线。
+    /// Inline Markdown (bold/italic/inline code/links); falls back to plain text when parsing
+    /// fails. Inline code → monospaced + faint-background chip; links → brand-color underline.
     static func inline(_ text: String) -> AttributedString {
         var attributed = (try? AttributedString(
             markdown: text,
@@ -163,7 +165,7 @@ struct MarkdownRichText: View {
     }
 }
 
-/// 围栏代码块：语言标签 + 复制按钮 + 等宽代码
+/// Fenced code block: language label + copy button + monospaced code
 struct CodeBlockView: View {
     let language: String?
     let code: String

@@ -1,25 +1,27 @@
 import Foundation
 
-// eureka-relay：被 Claude Code hooks / Codex notify 调用的转发器。
+// eureka-relay: the forwarder invoked by Claude Code hooks / Codex notify.
 // Built as `eureka-relay`; the app installs it at the stable path as `lululumei-relay`
 // (the old name is kept there as a symlink so pre-0.36 configs keep working).
 //
-// 子命令：
-//   eureka-relay claude-hook            # 读 stdin 的 hook JSON
-//   eureka-relay trae-hook              # 同上（Trae CN 的 hooks 是 Claude 兼容实现）
-//   eureka-relay codex-notify '<json>'  # 读 argv 的 notify JSON
-//   eureka-relay codex-notify --chain <原 notify argv…> '<json>'
-//                                       # 同上，并先把 JSON 原样转给被串联的原 notify 程序
-//   eureka-relay inject --event <名> --session <id> [--source claude|codex|trae]
-//                       [--cwd <路径>] [--title <文本>]   # 测试注入
+// Subcommands:
+//   eureka-relay claude-hook            # reads the hook JSON from stdin
+//   eureka-relay trae-hook              # same as above (Trae CN's hooks are Claude-compatible)
+//   eureka-relay codex-notify '<json>'  # reads the notify JSON from argv
+//   eureka-relay codex-notify --chain <original notify argv...> '<json>'
+//                                       # same as above, but first forwards the JSON verbatim
+//                                       # to the chained original notify program
+//   eureka-relay inject --event <name> --session <id> [--source claude|codex|trae]
+//                       [--cwd <path>] [--title <text>]   # test injection
 //
-// 硬约束：永远 exit 0；stdout/stderr 绝对静默（UserPromptSubmit 的 stdout 会注入
-// 模型上下文）；全程 <50ms；stdin 限读 1MB。错误只写 relay-error.log。
+// Hard constraints: always exit 0; stdout/stderr absolutely silent (UserPromptSubmit stdout is
+// injected into the model's context); <50ms end to end; stdin capped at 1MB. Errors go only
+// to relay-error.log.
 //
-// 静默这条对 **Claude / Codex / Trae 三家一视同仁**：三家的 PreToolUse /
-// PermissionRequest 都把 stdout 当放行/拦截决策读（Trae 的 hook 输出契约里明确认
-// `hookSpecificOutput` 与 `permissionDecision`），任何一个字节都可能放行或拦掉
-// 一次工具调用。我们只报告，从不参与决策。
+// The silence rule applies **equally to Claude / Codex / Trae**: all three read PreToolUse /
+// PermissionRequest stdout as an allow/block decision (Trae's hook output contract explicitly
+// honours `hookSpecificOutput` and `permissionDecision`), so any single byte could allow or
+// block a tool call. We only report; we never take part in the decision.
 
 let maxStdinBytes = 1_048_576
 
@@ -46,52 +48,58 @@ func logError(_ message: String) {
     }
 }
 
-/// 本进程**控制终端**的具体设备路径（如 `/dev/ttys004`）；没有控制终端时 nil。
+/// Concrete device path of this process's **controlling terminal** (e.g. `/dev/ttys004`);
+/// nil when there is none.
 ///
-/// 走 `sysctl(KERN_PROC_PID)` 读 `kinfo_proc.kp_eproc.e_tdev` 再 `devname` 转名，
-/// 而**不是** `ttyname(open("/dev/tty"))` —— 后者实测只返回通用别名 `"/dev/tty"`，
-/// 对"是哪个终端"毫无辨识力（`fstat` 拿到的 st_rdev 也是通用克隆设备，同样没用）。
-/// 也不用 `ttyname(fd)`：hook 的 stdin 是管道，stdout/stderr 可能被 CLI 接管，都可能失败。
-/// 问"控制终端"则不受任何 fd 重定向影响。一次 syscall，微秒级。
+/// Uses `sysctl(KERN_PROC_PID)` to read `kinfo_proc.kp_eproc.e_tdev`, then `devname` to name it,
+/// **not** `ttyname(open("/dev/tty"))` -- in practice the latter only returns the generic alias
+/// `"/dev/tty"`, which says nothing about which terminal it is (the st_rdev from `fstat` is the
+/// generic clone device too, equally useless).
+/// Nor `ttyname(fd)`: the hook's stdin is a pipe and stdout/stderr may be taken over by the CLI,
+/// so any of them can fail.
+/// Asking for the "controlling terminal" is immune to fd redirection. One syscall, microseconds.
 func currentTTY() -> String? {
     var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
     var info = kinfo_proc()
     var size = MemoryLayout<kinfo_proc>.stride
     guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
     let device = info.kp_eproc.e_tdev
-    // -1 = 无控制终端（launchd / setsid 起的进程）
+    // -1 = no controlling terminal (processes started by launchd / setsid)
     guard device != -1, device != 0 else { return nil }
     guard let name = devname(device, S_IFCHR) else { return nil }
     return "/dev/" + String(cString: name)
 }
 
-/// 终端归属：hook 是 CLI 的子进程、CLI 又是终端的子进程，所以本进程**继承的环境**
-/// 里就带着「这个会话跑在哪个终端」。
+/// Terminal attribution: the hook is a child of the CLI, which is a child of the terminal, so the
+/// environment this process **inherits** already says which terminal the session runs in.
 ///
-/// 只读 env + 一次 `ttyname` —— 微秒级。**绝不起子进程**（会威胁 <50ms 预算，
-/// 这也是不抄 CodeIsland 那个 `tmux display-message` 调用的原因）。
+/// Reads only env + one `ttyname` -- microseconds. **Never starts a subprocess** (it would
+/// threaten the <50ms budget, which is also why we don't copy CodeIsland's `tmux display-message` call).
 func terminalContext(
     _ env: [String: String] = ProcessInfo.processInfo.environment
 ) -> [String: String] {
     var result: [String: String] = [:]
     // "iTerm.app" / "Apple_Terminal" / "ghostty" / "vscode" …
     if let value = env["TERM_PROGRAM"], !value.isEmpty { result["app"] = value }
-    // macOS 只给 GUI 启动的进程注入，是最精确的终端标识（用于按 bundle id 激活应用）
+    // macOS injects this only into GUI-launched processes; it is the most precise terminal
+    // identifier (used to activate the app by bundle id)
     if let value = env["__CFBundleIdentifier"], !value.isEmpty { result["bundleId"] = value }
     if let value = env["TMUX_PANE"], !value.isEmpty { result["tmuxPane"] = value }
     if let tty = currentTTY() { result["tty"] = tty }
     return result
 }
 
-/// 序列化终端上下文；全空时返回 nil（信封里就不出现该键）。
-/// 走 JSONSerialization 而非字符串拼接：env 值来自用户环境，必须正确转义。
+/// Serializes the terminal context; returns nil when it is entirely empty (the key is then
+/// absent from the envelope). Uses JSONSerialization rather than string concatenation: env
+/// values come from the user's environment and must be escaped correctly.
 func terminalContextJSON() -> Data? {
     let context = terminalContext()
     guard !context.isEmpty else { return nil }
     return try? JSONSerialization.data(withJSONObject: context)
 }
 
-/// 把事件原子写入 spool：先写 tmp/ 再 rename 进 events/，监听方永远看到完整文件
+/// Atomically writes the event into the spool: write to tmp/ first, then rename into events/,
+/// so watchers always see a complete file
 func writeEvent(channel: String, payloadJSON: Data) {
     let root = spoolRoot()
     let eventsDir = root.appendingPathComponent("events", isDirectory: true)
@@ -101,7 +109,7 @@ func writeEvent(channel: String, payloadJSON: Data) {
         try fm.createDirectory(at: eventsDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
 
-        // payload 必须是合法 JSON，否则包成 {"_raw": "..."}
+        // payload must be valid JSON; otherwise wrap it as {"_raw": "..."}
         let payload: Data
         if (try? JSONSerialization.jsonObject(with: payloadJSON)) != nil {
             payload = payloadJSON
@@ -111,8 +119,9 @@ func writeEvent(channel: String, payloadJSON: Data) {
         }
 
         let nowMs = Int(Date().timeIntervalSince1970 * 1000)
-        // terminal 放在**信封层**而不是并进 payload：终端归属是 relay 这次调用的环境属性，
-        // 不是 hook payload 的内容；而且免去 parse + 重序列化 payload（省时，也不会改坏它）。
+        // terminal lives at the **envelope level** rather than inside payload: terminal attribution
+        // is an environment property of this relay call, not hook payload content; it also avoids
+        // parsing + re-serializing payload (saves time, and can't corrupt it).
         var body = Data("{\"v\":1,\"channel\":\"\(channel)\",\"receivedAtMs\":\(nowMs)".utf8)
         if let terminal = terminalContextJSON() {
             body.append(Data(",\"terminal\":".utf8))
@@ -163,7 +172,7 @@ func readStdin(limit: Int) -> Data {
     return data
 }
 
-/// inject 子命令：把演示/测试事件合成为与真实 hook/notify 完全相同的 payload
+/// inject subcommand: synthesizes demo/test events into payloads identical to real hook/notify ones
 func runInject(_ args: [String]) {
     var options: [String: String] = [:]
     var index = 0
@@ -184,7 +193,8 @@ func runInject(_ args: [String]) {
     let cwd = options["cwd"] ?? FileManager.default.currentDirectoryPath
     let title = options["title"]
 
-    // --source trae 时走 trae-hook 通道（载荷同形，app 侧只据 channel 判 source）
+    // --source trae uses the trae-hook channel (same payload shape; the app infers source from
+    // channel only)
     let hookChannel = options["source"] == "trae" ? "trae-hook" : "claude-hook"
 
     func emitClaude(_ extra: [String: Any]) {
@@ -216,7 +226,8 @@ func runInject(_ args: [String]) {
         let tool = options["tool"] ?? "Bash"
         var extra: [String: Any] = ["hook_event_name": "PostToolUse", "tool_name": tool]
         if let title {
-            // 命令类工具入 command，其余入 file_path（供审计解析出 detail）
+            // Command-style tools go into command, the rest into file_path (so the audit can parse
+            // out a detail)
             let key = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"].contains(tool)
                 ? "file_path" : "command"
             extra["tool_input"] = [key: title]
@@ -241,7 +252,7 @@ func runInject(_ args: [String]) {
     }
 }
 
-// ---- 入口 ----
+// ---- Entry point ----
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
@@ -251,21 +262,24 @@ case "claude-hook":
         writeEvent(channel: "claude-hook", payloadJSON: stdin)
     }
 case "trae-hook":
-    // Trae CN 的 hook 载荷自带 hook_event_name（不像 Codex 要从 argv 补事件名），
-    // 所以这里与 claude-hook 逐字同构，只换 channel。
+    // Trae CN's hook payload carries its own hook_event_name (unlike Codex, which needs the event
+    // name from argv), so this mirrors claude-hook word for word; only the channel differs.
     let stdin = readStdin(limit: maxStdinBytes)
     if !stdin.isEmpty {
         writeEvent(channel: "trae-hook", payloadJSON: stdin)
     }
 case "codex-hook":
-    // Codex hooks 与 Claude 同样把载荷 JSON 走 stdin 传进来，但**不带事件名**
-    // （Claude 有 hook_event_name）→ 事件名由安装时写进命令行的第二个参数带入。
-    // stdout 依旧绝对静默：Codex 的 PermissionRequest 极可能像 Claude 的 PreToolUse
-    // 一样把 stdout 当授权决定读，任何一个字节都可能放行或拦掉一次工具调用。
+    // Codex hooks, like Claude's, pass the payload JSON over stdin, but **without the event name**
+    // (Claude has hook_event_name) -> the event name arrives as the second argument, written into
+    // the command line at install time.
+    // stdout stays absolutely silent: Codex's PermissionRequest very likely reads stdout as an
+    // authorization decision, like Claude's PreToolUse, so any single byte could allow or block
+    // a tool call.
     let codexEvent = arguments.count > 1 ? arguments[1] : ""
     let stdin = readStdin(limit: maxStdinBytes)
     if !codexEvent.isEmpty, !stdin.isEmpty {
-        // 把事件名并进载荷，省得下游再猜；解析失败就原样透传（app 侧容缺）
+        // Merge the event name into the payload so downstream needn't guess; on parse failure pass
+        // it through verbatim (the app tolerates the missing name)
         if var root = (try? JSONSerialization.jsonObject(with: stdin)) as? [String: Any] {
             root["hook_event_name"] = codexEvent
             if let merged = try? JSONSerialization.data(withJSONObject: root) {
@@ -276,7 +290,8 @@ case "codex-hook":
         }
     }
 case "codex-notify":
-    // notify 程序收到的 JSON 是最后一个参数（Codex 只在配置的 argv 末尾追加这一个）
+    // The notify program receives the JSON as the last argument (Codex appends only this one to
+    // the end of the configured argv)
     var rest = Array(arguments.dropFirst())
     let chained = rest.first == "--chain"
     if chained {

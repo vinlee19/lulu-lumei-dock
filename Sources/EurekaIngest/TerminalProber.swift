@@ -1,18 +1,18 @@
 import EurekaKit
 import Foundation
 
-/// 无 hook 时的终端归属兜底：扫运行中的进程，按 cwd 认出 agent CLI，再沿父进程链上溯
-/// 找到宿主终端应用。
+/// Fallback terminal attribution when there are no hooks: scan running processes, identify agent
+/// CLIs by cwd, then walk up the parent-process chain to find the host terminal app.
 ///
-/// 为什么需要：环境变量只有 relay 能拿到，所以精确采集只覆盖 Claude hooks 与 Codex notify。
-/// 其余七个源（opencode / Hermes / Gemini / Qwen / Kimi / Grok / Antigravity）以及**没装
-/// hook 的 Claude 用户**都得靠这条路 —— 「不装 hook 也能用」是本项目的既有原则。
+/// Why: only the relay can see environment variables, so precise collection covers only Claude hooks and Codex notify.
+/// The other seven sources (opencode / Hermes / Gemini / Qwen / Kimi / Grok / Antigravity) and **Claude users
+/// without hooks** all depend on this path; "works without hooks" is an established principle of this project.
 ///
-/// 精度低于 hook 采集，故产出一律标 `origin: .probe`（UI 用虚线描边区分）：
-/// 拿不到 tmux pane，且同一 (源, cwd) 有多个候选进程时会**主动放弃**而不是猜。
+/// Less precise than hook collection, so every result is tagged `origin: .probe` (the UI marks it with a dashed outline):
+/// it can't get the tmux pane, and when one (source, cwd) has several candidate processes it **deliberately gives up** rather than guess.
 ///
-/// 刻意不 import AppKit：`EurekaIngest` 不该依赖 UI 层，宿主应用的 bundle id 从
-/// `.app/Contents/Info.plist` 读出来即可。
+/// Deliberately doesn't import AppKit: `EurekaIngest` shouldn't depend on the UI layer, and the host app's bundle id
+/// can simply be read from `.app/Contents/Info.plist`.
 public enum TerminalProber {
     public struct Probe: Equatable, Sendable {
         public var source: AgentSource
@@ -20,9 +20,9 @@ public enum TerminalProber {
         public var binding: TerminalBinding
     }
 
-    /// 各源可接受的可执行名（取 `proc_pidpath` 的 basename）。
+    /// Accepted executable names per source (basename of `proc_pidpath`).
     ///
-    /// Claude Code 的真实进程名是 `claude.exe`（node 包装器），不是 `claude` —— 实测所得。
+    /// Claude Code's real process name is `claude.exe` (a node wrapper), not `claude`, as observed in practice.
     static let agentExecutables: [AgentSource: Set<String>] = [
         .claude: ["claude", "claude.exe"],
         .codex: ["codex", "codex.exe"],
@@ -35,23 +35,25 @@ public enum TerminalProber {
         .zcode: ["zcode", "zcode.exe", "zai", "zai.exe"],
     ]
 
-    /// 父链最多上溯几层（终端 → shell → 可能的 wrapper → CLI，正常 3~5 层）
+    /// Maximum parent-chain hops (terminal → shell → possible wrapper → CLI, normally 3-5 hops)
     private static let maxAncestorHops = 12
 
-    /// 为「知道 cwd 但还不知道终端」的会话补齐归属。
-    /// wanted 为空时立即返回，不做任何 syscall。
+    /// Fills in attribution for sessions whose cwd is known but whose terminal isn't yet.
+    /// Returns immediately with no syscalls when wanted is empty.
     public static func probe(wanted: [(source: AgentSource, cwd: String)]) -> [Probe] {
         guard !wanted.isEmpty else { return [] }
         let table = processTable()
         guard !table.isEmpty else { return [] }
 
-        // 按 (源, cwd) 归组候选进程
+        // Group candidate processes by (source, cwd)
         var candidates: [String: [ProcessEntry]] = [:]
         let wantedKeys = Set(wanted.map { key($0.source, $0.cwd) })
         for entry in table {
-            // 判据一：必须有控制终端。GUI 应用派生的同名助手（如
-            // /Applications/ChatGPT.app/Contents/Resources/codex）没有 tty，
-            // 靠这一条就能排掉，否则光按名字匹配会把它们误当成终端会话。
+            // Criterion one: there must be a controlling terminal. Same-named helpers spawned by
+            // GUI apps (e.g.
+            // /Applications/ChatGPT.app/Contents/Resources/codex) have no tty,
+            // so this alone excludes them; matching on name only would mistake them for terminal
+            // sessions.
             guard entry.tty != nil else { continue }
             guard let path = processPath(entry.pid) else { continue }
             let name = URL(fileURLWithPath: path).lastPathComponent
@@ -66,12 +68,13 @@ public enum TerminalProber {
         var bundleCache: [String: (bundleId: String?, app: String?)] = [:]
         for (source, cwd) in wanted {
             let group = candidates[key(source, cwd)] ?? []
-            // 同一 (源, cwd) 有多个在跑的会话时无法判断谁是谁 → 宁可没有也不给错的
+            // Several running sessions for one (source, cwd) can't be told apart → better nothing
+            // than a wrong answer
             guard group.count == 1, let entry = group.first else { continue }
             let host = terminalHost(of: entry, table: table, cache: &bundleCache)
             let binding = TerminalBinding(
                 app: host.app, bundleId: host.bundleId, tty: entry.tty,
-                tmuxPane: nil,  // 探测拿不到 tmux pane（那是环境变量）
+                tmuxPane: nil,  // Probing can't see the tmux pane (it comes from env vars)
                 origin: .probe)
             guard !binding.isEmpty else { continue }
             result.append(Probe(source: source, cwd: cwd, binding: binding))
@@ -79,9 +82,10 @@ public enum TerminalProber {
         return result
     }
 
-    // MARK: - 父链上溯
+    // MARK: - Parent-chain walk
 
-    /// 沿父进程链找第一个 `.app` 祖先 —— 那就是宿主终端（或 IDE 的内置终端）
+    /// Walk the parent-process chain to the first `.app` ancestor: that's the host terminal (or an
+    /// IDE's built-in terminal)
     private static func terminalHost(
         of entry: ProcessEntry, table: [ProcessEntry],
         cache: inout [String: (bundleId: String?, app: String?)]
@@ -112,7 +116,8 @@ public enum TerminalProber {
         return String(executablePath[executablePath.startIndex..<range.lowerBound]) + ".app"
     }
 
-    /// 读 `Info.plist` 拿 bundle id 与展示名（不 import AppKit 的原因见类型注释）
+    /// Read `Info.plist` for the bundle id and display name (see the type comment for why AppKit
+    /// isn't imported)
     private static func bundleIdentity(at bundleRoot: String) -> (bundleId: String?, app: String?) {
         let plistURL = URL(fileURLWithPath: bundleRoot)
             .appendingPathComponent("Contents/Info.plist")
@@ -136,22 +141,22 @@ public enum TerminalProber {
         "\(source.rawValue)|\(cwd)"
     }
 
-    // MARK: - 进程表原语
+    // MARK: - Process-table primitives
 
     public struct ProcessEntry: Equatable {
         public var pid: Int32
         public var ppid: Int32
-        /// 控制终端设备路径；nil = 无控制终端（GUI 派生进程）
+        /// Controlling-terminal device path; nil = no controlling terminal (GUI-spawned process)
         public var tty: String?
     }
 
-    /// 全进程表（pid / ppid / 控制终端）
+    /// Full process table (pid / ppid / controlling terminal)
     public static func processTable() -> [ProcessEntry] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
         guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
         let stride = MemoryLayout<kinfo_proc>.stride
-        // 取完 size 到真正读取之间进程数可能增加，多留一截余量
+        // The process count may grow between sizing and the actual read, so leave some headroom
         var buffer = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + 32)
         size = buffer.count * stride
         guard sysctl(&mib, UInt32(mib.count), &buffer, &size, nil, 0) == 0 else { return [] }
@@ -163,13 +168,14 @@ public enum TerminalProber {
         }
     }
 
-    /// 控制终端设备号 → 具体路径。-1 / 0 = 没有控制终端。
+    /// Controlling-terminal device number → concrete path. -1 / 0 = no controlling terminal.
     public static func ttyPath(of device: dev_t) -> String? {
         guard device != -1, device != 0, let name = devname(device, S_IFCHR) else { return nil }
         return "/dev/" + String(cString: name)
     }
 
-    /// 进程当前工作目录（`PROC_PIDVNODEPATHINFO`；他用户进程会失败 → nil）
+    /// Current working directory of a process (`PROC_PIDVNODEPATHINFO`; fails for other users'
+    /// processes → nil)
     public static func processCWD(_ pid: Int32) -> String? {
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
@@ -181,7 +187,7 @@ public enum TerminalProber {
         return path.isEmpty ? nil : path
     }
 
-    /// 进程可执行完整路径
+    /// Full executable path of a process
     public static func processPath(_ pid: Int32) -> String? {
         var buffer = [CChar](repeating: 0, count: 4096)
         guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }

@@ -2,8 +2,9 @@ import CoreGraphics
 import EurekaKit
 import Foundation
 
-/// MemoryGraph 构图 + MemoryGraphLayout 的**不变量**测试。
-/// 图长什么样会随数据变，肉眼看不出对错 —— 只能靠这几条能被机器验的性质兜住。
+/// **Invariant** tests for MemoryGraph construction + MemoryGraphLayout. What the graph looks like
+/// changes with the data and can't be judged by eye — only these machine-checkable properties can
+/// guard it.
 func memoryGraphTests(_ t: TestRunner) {
     t.suite("MemoryGraph · 构图")
 
@@ -16,12 +17,14 @@ func memoryGraphTests(_ t: TestRunner) {
             id: "/memory/\(id).md", title: title, subtitle: "副标 \(title)",
             type: type, aliases: [id, title], links: links,
             originSessionId: session, originSessionExists: sessionExists,
-            // 固定基准时刻：排版与次序必须可复现，不能跟运行时钟走
+            // Fixed reference instant: layout and ordering must be reproducible, not follow the
+            // runtime clock
             modifiedAt: Date(timeIntervalSince1970: 1_800_000_000 - minutesAgo * 60),
             isIndex: isIndex)
     }
 
-    /// 索引 + 4 条记忆（含互相引用、一条解析不到的链接）+ 2 个会话（其中一个已删除）
+    /// Index + 4 memories (with cross-references and one unresolvable link) + 2 sessions (one of
+    /// them deleted)
     func library() -> MemoryGraphInput {
         MemoryGraphInput(title: "aftership-semantic-layer", items: [
             item("MEMORY", "MEMORY", isIndex: true),
@@ -44,14 +47,14 @@ func memoryGraphTests(_ t: TestRunner) {
         }
         try expectEqual(categories.count, 3)  // feedback / project / user
         try expect(graph.nodes.contains { $0.kind == .index })
-        // 索引 → 每个分类一条收录边
+        // Index → one inclusion edge per category
         try expectEqual(graph.edges.filter { $0.role == .contains }.count, 3)
     }
 
     t.test("链接：按文件名/frontmatter name/下划线归一都能匹配，解析不到只计数不造边") {
         let graph = MemoryGraphBuilder.build(library())
         let links = graph.edges.filter { $0.role == .link }
-        // push↔alpha 合成一条双向边，beta→alpha 一条 ⇒ 共 2 条
+        // push↔alpha merge into one bidirectional edge, plus one beta→alpha ⇒ 2 total
         try expectEqual(links.count, 2)
         try expectEqual(links.filter(\.isBidirectional).count, 1, "互相引用应合成一条双向边")
         try expectEqual(graph.unresolvedLinkCount, 1, "「根本不存在」不该造出假边")
@@ -74,7 +77,7 @@ func memoryGraphTests(_ t: TestRunner) {
         let graph = MemoryGraphBuilder.build(library())
         let focus = try require(graph.nodeID(forPath: "/memory/project_alpha.md"))
         let sub = graph.subgraph(around: focus)
-        // alpha 自己 + push + beta + 会话 s1
+        // alpha itself + push + beta + session s1
         try expectEqual(sub.nodes.count, 4)
         try expect(
             !sub.nodes.contains { $0.kind == .index },
@@ -84,7 +87,8 @@ func memoryGraphTests(_ t: TestRunner) {
 
     t.suite("MemoryGraphLayout · 布局不变量")
 
-    /// 线段是否穿进矩形内部（端点贴边不算）。折线只有水平/竖直段，逐段区间相交即可。
+    /// Whether a segment enters a rectangle's interior (endpoints touching the edge don't count).
+    /// Polylines have only horizontal/vertical segments, so per-segment interval overlap suffices.
     func crosses(_ a: CGPoint, _ b: CGPoint, _ rect: CGRect) -> Bool {
         let shrunk = rect.insetBy(dx: 0.5, dy: 0.5)
         guard !shrunk.isEmpty else { return false }
@@ -135,7 +139,8 @@ func memoryGraphTests(_ t: TestRunner) {
                 let a = edge.points[index]
                 let b = edge.points[index + 1]
                 for placed in result.nodes {
-                    // 自己的起止节点：折线贴着它的边缘起止，不算穿
+                    // Its own start/end nodes: the polyline starts and ends on their edges, which
+                    // doesn't count as crossing
                     if placed.id == edge.from || placed.id == edge.to { continue }
                     try expect(
                         !crosses(a, b, placed.frame),
@@ -155,7 +160,7 @@ func memoryGraphTests(_ t: TestRunner) {
     t.test("泳道底轨：每个分类一条 + 会话道一条，且包住各自的节点") {
         let result = MemoryGraphLayout.layout(
             MemoryGraphBuilder.build(library()), metrics: .standard(width: 760))
-        try expectEqual(result.rails.count, 4)  // feedback / project / user + 会话道
+        try expectEqual(result.rails.count, 4)  // feedback / project / user + session lane
         try expect(result.rails.contains { $0.type == nil }, "会话道要有底轨（它没有 header 节点）")
         for rail in result.rails {
             let members = result.nodes.filter { rail.rect.intersects($0.frame) }
@@ -197,7 +202,7 @@ func memoryGraphTests(_ t: TestRunner) {
         let single = MemoryGraphBuilder.build(
             MemoryGraphInput(title: "单条", items: [item("only", "only")]))
         let result = MemoryGraphLayout.layout(single, metrics: .compact(width: 320))
-        try expectEqual(result.nodes.count, 2)  // 分类头 + 条目
+        try expectEqual(result.nodes.count, 2)  // category header + items
         try expect(result.canvasSize.height > 0)
     }
 }

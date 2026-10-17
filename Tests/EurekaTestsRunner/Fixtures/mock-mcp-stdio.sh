@@ -1,6 +1,6 @@
-# Mock MCP stdio server（测试用，经 /bin/sh 调起——Bundle 资源不保执行位）。
-# 按 MCPStdioProbe 的请求顺序应答：initialize(id1) → initialized 通知（不应答）
-# → tools/list(id2) → prompts/list(id4) → resources/list(id3)。
+# Mock MCP stdio server (for tests, launched via /bin/sh - bundle resources don't keep the exec bit).
+# Replies in MCPStdioProbe's request order: initialize(id1) → initialized notification (no reply)
+# → tools/list(id2) → prompts/list(id4) → resources/list(id3).
 read line1
 echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{},"prompts":{},"resources":{}},"serverInfo":{"name":"mock","version":"0.1"}}}'
 read line2

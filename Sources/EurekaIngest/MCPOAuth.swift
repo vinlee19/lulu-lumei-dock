@@ -1,23 +1,26 @@
 import CryptoKit
 import Foundation
 
-/// MCP 浏览器 OAuth 授权的**纯逻辑层**（MCP 授权规范 = OAuth 2.1 公共客户端）：
-/// RFC 9728 资源元数据 → RFC 8414 授权服务器发现 → RFC 7591 动态注册 →
-/// PKCE（RFC 7636）授权码 + 回环回调 → token 交换/刷新。
-/// 网络、浏览器与回环监听在 app 层（MCPOAuthFlow）；这里全部可单测。
+/// The **pure logic layer** for MCP browser OAuth authorization (MCP authorization spec = OAuth 2.1
+/// public client): RFC 9728 resource metadata → RFC 8414 authorization server discovery → RFC 7591
+/// dynamic registration → PKCE (RFC 7636) authorization code + loopback callback → token
+/// exchange/refresh. Network, browser and loopback listener live in the app layer (MCPOAuthFlow);
+/// everything here is unit-testable.
 ///
-/// 边界：换来的 token 只服务 Eureka 自己的探测（检测连接 / tools/list），
-/// 存 Keychain，**绝不写入任何 CLI 的凭证存储**。
+/// Boundary: the obtained token only serves Eureka's own probes (connection check / tools/list),
+/// is stored in the Keychain, and is **never written into any CLI's credential store**.
 public enum MCPOAuth {
-    /// 授权服务器元数据（RFC 8414 / OIDC Discovery 字段名相同，一套解析通吃）
+    /// Authorization server metadata (RFC 8414 / OIDC Discovery share field names, so one parser
+    /// handles both)
     public struct ASMetadata: Equatable, Sendable {
         public var issuer: String?
         public var authorizationEndpoint: String
         public var tokenEndpoint: String
         public var registrationEndpoint: String?
         public var scopesSupported: [String]
-        /// PKCE 能力声明。规范（2025-11-25）：缺失即视为不支持 PKCE，
-        /// 客户端 **MUST** 拒绝继续（OIDC 文档同样要求带上此字段才算 MCP 兼容）。
+        /// PKCE capability declaration. Spec (2025-11-25): if absent, PKCE is treated as
+        /// unsupported and the client **MUST** refuse to continue (OIDC documents likewise must
+        /// carry this field to be MCP-compatible).
         public var codeChallengeMethodsSupported: [String]
 
         public init(
@@ -34,7 +37,8 @@ public enum MCPOAuth {
         }
     }
 
-    /// 换到的令牌 + 刷新所需上下文（整体 JSON 编码后存 Keychain，一处一条）
+    /// Obtained tokens + the context needed to refresh (JSON-encoded as a whole and stored in the
+    /// Keychain, one item per server)
     public struct TokenSet: Equatable, Codable, Sendable {
         public var accessToken: String
         public var refreshToken: String?
@@ -58,31 +62,33 @@ public enum MCPOAuth {
 
     public enum CallbackResult: Equatable, Sendable {
         case code(String)
-        /// 授权页拒绝（error=access_denied 等）
+        /// Rejected on the authorization page (error=access_denied etc.)
         case denied(String)
-        /// state 不匹配（可能是伪造回调，丢弃）
+        /// state mismatch (possibly a forged callback; discarded)
         case stateMismatch
-        /// 不是回调请求（如浏览器顺手请求 /favicon.ico）
+        /// Not a callback request (e.g. the browser also requesting /favicon.ico)
         case invalid
     }
 
-    // MARK: - 发现（RFC 9728 / RFC 8414）
+    // MARK: - Discovery (RFC 9728 / RFC 8414)
 
-    /// 资源元数据 → 授权服务器列表（authorization_servers）
+    /// Resource metadata → list of authorization servers (authorization_servers)
     public static func parseResourceMetadata(_ data: Data) -> [String] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let servers = root["authorization_servers"] as? [String] else { return [] }
         return servers
     }
 
-    /// issuer → RFC 8414 well-known 地址（issuer 带路径时 well-known 插在路径前）
+    /// issuer → RFC 8414 well-known URL (when the issuer has a path, well-known is inserted before
+    /// the path)
     public static func wellKnownASMetadataURL(issuer: String) -> URL? {
         wellKnown(issuer: issuer, suffix: "oauth-authorization-server", pathInsertion: true)
     }
 
-    /// AS 元数据发现候选（2025-11-25 规范 MUST 双机制按优先序尝试）：
-    /// 带路径 issuer → ① OAuth AS 元数据（路径插入）② OIDC Discovery（路径插入）
-    /// ③ OIDC Discovery（路径追加）；无路径 issuer → ① OAuth ② OIDC。
+    /// AS metadata discovery candidates (the 2025-11-25 spec MUST try both mechanisms in priority
+    /// order): issuer with a path → (1) OAuth AS metadata (path insertion) (2) OIDC Discovery (path
+    /// insertion)
+    /// (3) OIDC Discovery (path appended); issuer without a path → (1) OAuth (2) OIDC.
     public static func asMetadataCandidates(issuer: String) -> [URL] {
         var urls: [URL] = []
         if let oauth = wellKnown(
@@ -93,7 +99,8 @@ public enum MCPOAuth {
             issuer: issuer, suffix: "openid-configuration", pathInsertion: true) {
             urls.append(oidcInsert)
         }
-        // 路径追加式仅对带路径 issuer 是第三候选；无路径时与②同址，去重即可
+        // Path-appended is a third candidate only for issuers with a path; without one it equals
+        // (2), so dedup suffices
         if let oidcAppend = wellKnown(
             issuer: issuer, suffix: "openid-configuration", pathInsertion: false),
             !urls.contains(oidcAppend) {
@@ -102,9 +109,9 @@ public enum MCPOAuth {
         return urls
     }
 
-    /// 401 无 WWW-Authenticate 元数据时的 PRM well-known 试探地址（RFC 9728，
-    /// 规范 MUST 回退）：路径插入式（`/.well-known/oauth-protected-resource/<path>`）
-    /// → 根路径。server URL 无路径时只有根路径一个候选。
+    /// PRM well-known probe URLs when a 401 has no WWW-Authenticate metadata (RFC 9728; the spec
+    /// MUST fall back): path insertion (`/.well-known/oauth-protected-resource/<path>`) → root
+    /// path. If the server URL has no path, the root path is the only candidate.
     public static func protectedResourceMetadataURLs(serverURL: String) -> [URL] {
         var urls: [URL] = []
         if let insertion = wellKnown(
@@ -119,8 +126,8 @@ public enum MCPOAuth {
         return urls
     }
 
-    /// well-known 构造共用体：pathInsertion = true 把 issuer 路径插到 well-known 段后
-    /// （RFC 8414 式），false 追加到路径末尾（OIDC 传统式）。
+    /// Shared well-known builder: pathInsertion = true puts the issuer path after the well-known
+    /// segment (RFC 8414 style); false appends it to the end of the path (traditional OIDC style).
     private static func wellKnown(
         issuer: String, suffix: String, pathInsertion: Bool
     ) -> URL? {
@@ -148,8 +155,9 @@ public enum MCPOAuth {
                 root["code_challenge_methods_supported"] as? [String] ?? [])
     }
 
-    /// scope 选择策略（2025-11-25）：质询 `scope` 参数是权威 → 其次 scopes_supported
-    /// → 全无则省略 scope 参数（交给 AS/用户在同意页决定）。
+    /// Scope selection strategy (2025-11-25): the challenge `scope` parameter is authoritative →
+    /// then scopes_supported
+    /// → if neither, omit the scope parameter (leave it to the AS/user on the consent page).
     public static func selectScopes(
         challengeScopes: [String], metadata: ASMetadata?
     ) -> [String] {
@@ -157,7 +165,7 @@ public enum MCPOAuth {
         return metadata?.scopesSupported ?? []
     }
 
-    /// server URL → origin（无资源元数据时按规范回退：AS = server 自己的 origin）
+    /// server URL → origin (spec fallback without resource metadata: AS = the server's own origin)
     public static func origin(of urlText: String) -> String? {
         guard let url = URL(string: urlText), let scheme = url.scheme,
               let host = url.host else { return nil }
@@ -165,7 +173,7 @@ public enum MCPOAuth {
         return "\(scheme)://\(host)\(portPart)"
     }
 
-    // MARK: - PKCE（RFC 7636，S256）
+    // MARK: - PKCE (RFC 7636, S256)
 
     public static func generateVerifier() -> String {
         var bytes = [UInt8](repeating: 0, count: 48)
@@ -184,7 +192,7 @@ public enum MCPOAuth {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    // MARK: - 动态注册（RFC 7591，公共客户端）
+    // MARK: - Dynamic registration (RFC 7591, public client)
 
     public static func registrationRequestBody(redirectURI: String) -> Data {
         let payload: [String: Any] = [
@@ -203,7 +211,7 @@ public enum MCPOAuth {
         return root["client_id"] as? String
     }
 
-    // MARK: - 授权 URL
+    // MARK: - Authorization URL
 
     public static func authorizationURL(
         endpoint: String, clientID: String, redirectURI: String,
@@ -229,9 +237,9 @@ public enum MCPOAuth {
         return components.url
     }
 
-    // MARK: - 回环回调解析（HTTP 请求首行）
+    // MARK: - Loopback callback parsing (HTTP request line)
 
-    /// `GET /callback?code=..&state=.. HTTP/1.1` → 结果；state 不符一律丢弃
+    /// `GET /callback?code=..&state=.. HTTP/1.1` → result; any state mismatch is discarded
     public static func parseCallbackRequest(
         _ requestHead: String, expectedState: String
     ) -> CallbackResult {
@@ -252,7 +260,7 @@ public enum MCPOAuth {
         return .code(code)
     }
 
-    // MARK: - token 交换 / 刷新（application/x-www-form-urlencoded）
+    // MARK: - Token exchange / refresh (application/x-www-form-urlencoded)
 
     public static func tokenRequestBody(
         code: String, redirectURI: String, clientID: String,
@@ -295,7 +303,7 @@ public enum MCPOAuth {
             obtainedAt: now)
     }
 
-    // MARK: - TokenSet ↔ Keychain 字符串（JSON，日期按 epoch 秒）
+    // MARK: - TokenSet ↔ Keychain string (JSON, dates as epoch seconds)
 
     public static func encodeTokenSet(_ set: TokenSet) -> String? {
         let encoder = JSONEncoder()

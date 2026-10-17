@@ -1,8 +1,9 @@
 import Foundation
 import EurekaKit
 
-/// grok 会话索引：扫 ~/.grok/sessions/<enc-cwd>/<uuid>/summary.json → AgentSessionInfo。
-/// 名字取 summary.json 的 generated_title；对话查看器读同目录 chat_history.jsonl。
+/// grok session index: scans ~/.grok/sessions/<enc-cwd>/<uuid>/summary.json → AgentSessionInfo.
+/// The name is summary.json's generated_title; the conversation viewer reads the sibling
+/// chat_history.jsonl.
 public enum GrokSessionIndexer {
     public static func index(
         sessionsRoot: URL = GrokPaths.sessionsRoot(),
@@ -47,7 +48,7 @@ public enum GrokSessionIndexer {
         let chatHistory = dir.appendingPathComponent("chat_history.jsonl")
         let size = (try? chatHistory.resourceValues(
             forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        // updated_at 缺失时退 summary.json 的 mtime
+        // Fall back to summary.json's mtime when updated_at is missing
         let lastActive = updatedAt
             ?? (try? summaryURL.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate

@@ -3,24 +3,28 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.qoder-cn/projects/**/*.jsonl（含 `<sessionId>/subagents/agent-*.jsonl`），
-/// 把 assistant 消息里的 tool_use 块落成审计流水。schema 已对真实会话核验
-/// （v1.1.5，2026-07）：Claude 式信封，`type:"assistant"` 行的
-/// `message.content[]` 内含 `{"type":"tool_use","id":…,"name":…,"input":{…}}`；
-/// `timestamp` 是 ISO-8601 字符串（runtime-config 等元行是 epoch 毫秒，不进审计）；
-/// `cwd` 在行字段（首行 workspace-directories 的 directories[0] 兜底）。
-/// 与 CodexAuditScanner 同构：持久化 offset 增量扫描（scan_files，键加 "audit://"
-/// 前缀避免与用量扫描器冲突），INSERT OR IGNORE 保证重扫幂等。
-/// 工具词汇是 Claude 式（Read/Bash/Grep/Glob/Agent…）→ 直接喂
-/// `AuditExtractor.claude(name:input:)`。子代理文件按路径归属父会话 id
-/// （`<slug>/<sessionId>/subagents/` 的父目录名），与 CodeBuddy 扫描器同口径。
+/// Scans ~/.qoder-cn/projects/**/*.jsonl (including `<sessionId>/subagents/agent-*.jsonl`) and
+/// records tool_use blocks in assistant messages as audit entries. Schema verified against real
+/// sessions (v1.1.5, 2026-07): a Claude-style envelope, where `message.content[]` on
+/// `type:"assistant"` lines contains `{"type":"tool_use","id":…,"name":…,"input":{…}}`;
+/// `timestamp` is an ISO-8601 string (meta lines such as runtime-config use epoch ms and are
+/// not audited); `cwd` is a line field (fallback: directories[0] of the first
+/// workspace-directories line).
+/// Same shape as CodexAuditScanner: incremental scanning with a persisted offset (scan_files,
+/// keys prefixed "audit://" to avoid colliding with the usage scanners), and INSERT OR IGNORE
+/// keeps rescans idempotent.
+/// The tool vocabulary is Claude-style (Read/Bash/Grep/Glob/Agent…) → fed straight to
+/// `AuditExtractor.claude(name:input:)`. Subagent files are attributed to the parent session id
+/// by path (the parent directory name of `<slug>/<sessionId>/subagents/`), same convention as
+/// the CodeBuddy scanner.
 public final class QoderAuditScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
     private let pipeline: AuditPipeline
     private let staleThreshold: TimeInterval
 
-    /// 每文件扫描私有状态（存 scan_files.extra）：路径推导的会话归属 + 行内 cwd 缓存
+    /// Per-file private scan state (stored in scan_files.extra): path-derived session ownership +
+    /// cached line cwd
     private struct FileExtra: Codable {
         var sessionId: String?
         var cwd: String?
@@ -36,7 +40,8 @@ public final class QoderAuditScanner {
         self.staleThreshold = staleThreshold
     }
 
-    /// 整树扫一遍（含 subagents/），返回本轮新插入的审计行数。alertSink 接收高危告警。
+    /// Scans the whole tree once (including subagents/); returns the number of audit rows newly
+    /// inserted this pass. alertSink receives high-risk alerts.
     @discardableResult
     public func scanOnce(alertSink: ((RiskAlert) -> Void)? = nil) throws -> Int {
         var inserted = 0
@@ -46,9 +51,10 @@ public final class QoderAuditScanner {
         return inserted
     }
 
-    /// projects/<slug>/*.jsonl（主会话）+ projects/<slug>/<sessionId>/subagents/*.jsonl
-    /// （子代理；不按 mtime 过滤——scan_state 水位使无新数据的老文件近乎零成本）。
-    /// 与 CodeBuddyAuditScanner.sessionFiles() 同一枚举口径（布局相同）。
+    /// projects/<slug>/*.jsonl (main sessions) + projects/<slug>/<sessionId>/subagents/*.jsonl
+    /// (subagents; not filtered by mtime — the scan_state watermark makes old files with no new
+    /// data nearly free). Same enumeration as CodeBuddyAuditScanner.sessionFiles() (identical
+    /// layout).
     private func sessionFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -106,7 +112,7 @@ public final class QoderAuditScanner {
                     let type = root["type"] as? String
                 else { continue }
                 if let cwd = QoderTranscriptDecoder.cwd(root) { extra.cwd = cwd }
-                // 只收 assistant 行的 tool_use 块，其余类型快速跳过
+                // Only collect tool_use blocks from assistant lines; skip other types fast
                 guard type == "assistant",
                       let message = root["message"] as? [String: Any],
                       let blocks = message["content"] as? [[String: Any]],
@@ -140,8 +146,9 @@ public final class QoderAuditScanner {
         return inserted
     }
 
-    /// 会话归属：主会话文件 = <slug>/<sessionId>.jsonl（文件名 stem 即会话 id）；
-    /// 子代理文件 = <slug>/<sessionId>/subagents/agent-*.jsonl（父目录名即父会话 id）。
+    /// Session ownership: main session file = <slug>/<sessionId>.jsonl (the file name stem is the
+    /// session id); subagent file = <slug>/<sessionId>/subagents/agent-*.jsonl (the parent
+    /// directory name is the parent session id).
     private func resolveOwnership(fileURL: URL, into extra: inout FileExtra) {
         let parent = fileURL.deletingLastPathComponent()
         if parent.lastPathComponent == "subagents" {
@@ -151,8 +158,8 @@ public final class QoderAuditScanner {
         }
     }
 
-    /// 无 id 的 tool_use 块用 (路径+行内容+块序号) 的 SHA256 合成稳定幂等键
-    /// （一行可能含多个 tool_use 块，序号消歧）。
+    /// tool_use blocks without an id get a stable idempotency key from SHA256(path + line content
+    /// + block index) (one line may hold several tool_use blocks; the index disambiguates).
     private static func synthOpId(path: String, line: Data, index: Int) -> String {
         var hasher = SHA256()
         hasher.update(data: Data(path.utf8))
@@ -162,7 +169,7 @@ public final class QoderAuditScanner {
         return "synth:" + hex.prefix(32)
     }
 
-    // MARK: - JSONL 增量读取（EurekaUsage.JSONLinesReader 跨模块不可见，此处自带）
+    // MARK: - Incremental JSONL reading (EurekaUsage.JSONLinesReader is not visible across modules, so this carries its own)
 
     private struct Chunk {
         var lines: [Data]

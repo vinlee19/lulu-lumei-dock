@@ -2,31 +2,34 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.qwen/projects/<encoded>/chats/<uuid>.jsonl（Qwen Code CLI v0.20 实勘）。
-/// token 在 type=system/subtype=ui_telemetry 行的 `systemPayload.uiEvent`，
-/// `event.name == "qwen-code.api_response"`：实测 total = input + output（thoughts 已含在
-/// output）→ 口径：inputTokens = input − cached、cacheRead = cached、outputTokens = output 原样。
-/// dedup key = `qwen:<response_id>`（response_id 全局唯一；防会话恢复整写与流式重复行）。
-/// user 消息（非空正文）计 session_stats 提问数。
+/// Scans ~/.qwen/projects/<encoded>/chats/<uuid>.jsonl (observed in Qwen Code CLI v0.20).
+/// Tokens live in `systemPayload.uiEvent` on type=system/subtype=ui_telemetry lines with
+/// `event.name == "qwen-code.api_response"`: measured total = input + output (thoughts already
+/// included in
+/// output) → accounting: inputTokens = input − cached, cacheRead = cached, outputTokens = output
+/// as-is.
+/// dedup key = `qwen:<response_id>` (response_id is globally unique; guards against session-resume
+/// rewrites and duplicate streamed lines).
+/// User messages (non-empty body) count toward session_stats prompts.
 public final class QwenUsageScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
 
-    /// 每文件私有状态（存 scan_files.extra）：会话/项目归属
+    /// Per-file private state (stored in scan_files.extra): session/project attribution
     private struct FileExtra: Codable {
         var project: String?
         var sessionId: String?
     }
 
-    /// 路径由调用方传入（app/CLI 用 QwenPaths，测试用临时目录）——
-    /// EurekaUsage 不依赖 EurekaIngest，故此处不设默认值。
+    /// Paths are passed in by the caller (app/CLI use QwenPaths, tests use a temp dir) -
+    /// EurekaUsage doesn't depend on EurekaIngest, so there is no default here.
     public init(projectsRoot: URL, store: EurekaStore) {
         self.projectsRoot = projectsRoot
         self.store = store
     }
 
-    /// 返回本轮新增的 usage 记录数
+    /// Returns the number of usage records added this pass
     @discardableResult
     public func scanOnce() throws -> Int {
         var inserted = 0
@@ -95,7 +98,7 @@ public final class QwenUsageScanner {
                 promptCount += 1
                 continue
             }
-            // ui_telemetry 的 api_response 事件（token）
+            // ui_telemetry api_response event (tokens)
             guard type == "system",
                   root["subtype"] as? String == "ui_telemetry",
                   let payload = root["systemPayload"] as? [String: Any],
@@ -129,7 +132,7 @@ public final class QwenUsageScanner {
         let extraJSON = String(
             data: (try? JSONEncoder().encode(extra)) ?? Data(), encoding: .utf8)
         try store.scanState.transaction {
-            // 整写/流式重复 → dedup_keys 过滤（含同批次去重）
+            // Rewrites / streamed duplicates → filter via dedup_keys (including within-batch dedup)
             let existing = try store.scanState.existingDedupKeys(candidates.map(\.dedupKey))
             var seenThisBatch = Set<String>()
             for candidate in candidates

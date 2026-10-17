@@ -4,16 +4,17 @@ import EurekaStore
 import EurekaUsage
 import SwiftUI
 
-/// 使用统计仪表盘：大数字总消耗 + 请求/成本 + 四宫格分项 + 缓存命中率 +
-/// 请求日志（分页）/ 模型统计 / 项目统计 三个子页签。
-/// 顶层「用量」页签与 设置→使用统计 共用本组件。
+/// Usage stats dashboard: big total-consumption number + requests/cost + four-tile breakdown +
+/// cache hit rate + three sub-tabs: request log (paged) / model stats / project stats. Shared by
+/// the top-level Usage tab and Settings → Usage stats.
 struct UsageDashboardView: View {
     @ObservedObject var usageService: UsageService
-    /// 会话索引：按会话排行 join 会话名 + 跳转目标解析（与"会话"页签共享实例）
+    /// Session index: joins session names into the per-session ranking + resolves jump targets
+    /// (instance shared with the Sessions tab)
     @ObservedObject var sessionBrowser: SessionBrowserService
 
     @State private var period: UsageService.DashboardPeriod = .today
-    @State private var sourceFilter: AgentSource?  // nil = 全部
+    @State private var sourceFilter: AgentSource?  // nil = all
     @State private var subTab: SubTab = .log
     @State private var page = 1
     @State private var trendMode: TrendMode = .byDate
@@ -54,7 +55,7 @@ struct UsageDashboardView: View {
         self._subTab = State(initialValue: initialSubTab)
     }
 
-    /// 周报周偏移：0 = 本周，1 = 上周…
+    /// Weekly report week offset: 0 = this week, 1 = last week...
     @State private var weekOffset = 0
     @State private var weeklyExportNote: String?
 
@@ -134,9 +135,10 @@ struct UsageDashboardView: View {
         .onChange(of: usageService.pricingRevision) { _, _ in reload() }
     }
 
-    // MARK: - 区间与数据聚合
+    // MARK: - Range and data aggregation
 
-    /// 当前时间区间：固定档 = (startDate, now)；自定义 = (起当天零点, 止当天末)，自动纠正颠倒
+    /// Current time range: fixed periods = (startDate, now); custom = (start day's midnight, end
+    /// day's end), auto-correcting reversed bounds
     private func currentRange() -> (from: Date, to: Date) {
         if period == .custom {
             let cal = Calendar.current
@@ -149,7 +151,8 @@ struct UsageDashboardView: View {
         return (period.startDate, Date())
     }
 
-    /// 英雄卡/四宫格/命中率数据源：selected range 的 modelTotals（按 sourceFilter 过滤）
+    /// Data source for the hero card/four tiles/hit rate: modelTotals of the selected range
+    /// (filtered by sourceFilter)
     private var filteredModelTotals: [UsageTotals] {
         usageService.modelTotals.filter { sourceFilter == nil || $0.source == sourceFilter }
     }
@@ -180,9 +183,9 @@ struct UsageDashboardView: View {
         usageService.loadHeatmap(from: range.from, to: range.to, source: sourceFilter)
     }
 
-    // MARK: - 技能/插件统计
+    // MARK: - Skill/plugin stats
 
-    @State private var toolKindFilter: String?  // nil = 全部；skill/mcp/agent/command/tool
+    @State private var toolKindFilter: String?  // nil = all; skill/mcp/agent/command/tool
 
     private static let kindOrder = ["skill", "mcp", "agent", "command", "tool"]
 
@@ -209,7 +212,7 @@ struct UsageDashboardView: View {
             .filter { toolKindFilter == nil || $0.kind == toolKindFilter }
         let maxCount = rows.map(\.count).max() ?? 1
         VStack(alignment: .leading, spacing: 0) {
-            // kind 筛选 chips
+            // kind filter chips
             HStack(spacing: 4) {
                 kindChip(nil, L10n.text("All", zhHans: "全部"))
                 ForEach(Self.kindOrder, id: \.self) { key in
@@ -267,7 +270,7 @@ struct UsageDashboardView: View {
                     .font(.system(size: 11).monospaced())
                     .lineLimit(1)
                     .truncationMode(.middle)
-                // 比例条
+                // Proportion bar
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.primary.opacity(0.06))
@@ -293,9 +296,9 @@ struct UsageDashboardView: View {
         .padding(.vertical, Theme.spacing.row)
     }
 
-    // MARK: - 趋势图
+    // MARK: - Trend chart
 
-    /// 图表分类色：来源品牌色（app 全局一致的固定 3 色分类方案）
+    /// Chart category colors: source brand colors (the app-wide fixed 3-color categorical scheme)
     private func brandColor(_ source: AgentSource) -> Color { source.brandColor }
 
     private var trendCard: some View {
@@ -339,7 +342,7 @@ struct UsageDashboardView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    /// 成本轴/标注格式（小额保留 4 位，避免全显示 $0.00）
+    /// Cost axis/annotation format (small amounts keep 4 decimals so not everything shows $0.00)
     private func costLabel(_ usd: Double) -> String {
         usd >= 1 ? String(format: "$%.2f", usd) : String(format: "$%.4f", usd)
     }
@@ -405,7 +408,8 @@ struct UsageDashboardView: View {
 
     @ViewBuilder
     private var byModelChart: some View {
-        // 同 (来源, 模型) 的多个 provider 行先合并，再取前 8（否则同一模型占多根柱）
+        // Merge multiple provider rows of the same (source, model) first, then take the top 8
+        // (otherwise one model takes several bars)
         let merged = Dictionary(
             grouping: usageService.modelTotals.filter { sourceFilter == nil || $0.source == sourceFilter },
             by: { "\($0.source.rawValue)\u{1}\($0.model)" }
@@ -470,13 +474,13 @@ struct UsageDashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 来源按固定顺序（品牌色不随数据变化重排）
+    /// Sources in a fixed order (brand colors don't reshuffle as the data changes)
     private func orderedSources(_ present: [AgentSource]) -> [AgentSource] {
         let set = Set(present)
         return AgentSource.allCases.filter { set.contains($0) }
     }
 
-    // MARK: - 筛选行
+    // MARK: - Filter row
 
     private var filterRow: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -493,23 +497,26 @@ struct UsageDashboardView: View {
 
                 Spacer(minLength: 8)
 
-                // 手动刷新：增量重扫本地用量 + 重算当前区间聚合（同 onAppear）
+                // Manual refresh: incremental rescan of local usage + recompute aggregates for the
+                // current range (same as onAppear)
                 RefreshButton(help: L10n.text("Refresh statistics (rescan local usage)", zhHans: "刷新统计（重新扫描本地用量）")) {
                     usageService.refreshNow()
                     reload()
                 }
             }
 
-            // 来源筛选 chips：全部 + 各来源徽标；流式布局超宽自动折行，避免最小窗口宽度下被裁剪
-            // （antigravity 内容为 protobuf 无法取用量；qoder 的 CN 后端 token 全零无用量，
-            //   故均不入用量；grok / kimi 有真实 token 账 → 自动包含）
+            // Source filter chips: All + per-source logos; flow layout wraps when too wide so
+            // nothing is clipped at the minimum window width (antigravity content is protobuf so no
+            // usage can be extracted; qoder's CN backend reports all-zero tokens so there's no
+            // usage --
+            //   neither enters usage; grok / kimi have real token accounting → included automatically)
             FlowLayout(spacing: 8, lineSpacing: 6) {
                 sourceChip(nil, label: L10n.text("All", zhHans: "全部"))
-                // 没有 token 记账的源不给 chip（否则永远是空列表）：
-                // antigravity 无本地 token；qoder 的 CN 后端报零；
-                // trae 的会话库经 SQLCipher 加密，本地一个 token 都读不到。
-                // （grok 1.0.4x 起 updates.jsonl 每轮带 usage，已入账）
-                // antigravity 只在实验开关打开时有账
+                // Sources without token accounting get no chip (otherwise it's always an empty
+                // list): antigravity has no local tokens; qoder's CN backend reports zero; trae's
+                // session DB is SQLCipher-encrypted, so not a single token can be read locally.
+                // (since grok 1.0.4x, updates.jsonl carries usage per turn and is in the ledger)
+                // antigravity has ledger entries only when the experiment toggle is on
                 ForEach(AgentSource.allCases.filter {
                     ($0 != .antigravity || AntigravityExperiment.isEnabled) && $0 != .qoder && $0 != .trae
                 }, id: \.self) { source in
@@ -555,7 +562,7 @@ struct UsageDashboardView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - 英雄卡
+    // MARK: - Hero card
 
     private var heroCard: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -608,7 +615,7 @@ struct UsageDashboardView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    // MARK: - 四宫格
+    // MARK: - Four tiles
 
     private var metricGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -637,7 +644,7 @@ struct UsageDashboardView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    // MARK: - 缓存命中率
+    // MARK: - Cache hit rate
 
     private var cacheHitCard: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -666,7 +673,7 @@ struct UsageDashboardView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    // MARK: - 子页签
+    // MARK: - Sub-tabs
 
     private var subTabBar: some View {
         CapsuleTabTray {
@@ -681,10 +688,11 @@ struct UsageDashboardView: View {
         }
     }
 
-    // MARK: - 周报
+    // MARK: - Weekly report
 
     private var weeklySection: some View {
-        // Monday-based, same seven days as the "本周" period above (UsageAggregator pins Monday)
+        // Monday-based, same seven days as the "This week" period above (UsageAggregator pins
+        // Monday)
         let range = UsageAggregator.weekRange(offset: weekOffset)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -708,7 +716,7 @@ struct UsageDashboardView: View {
                 } label: { Image(systemName: "chevron.right").font(.system(size: 10)) }
                 .buttonStyle(.borderless)
                 .disabled(weekOffset == 0)
-                // The report is a whole-week digest with its own 按来源 breakdown; say so instead of
+                // The report is a whole-week digest with its own "By source" breakdown; say so instead of
                 // letting a highlighted source chip imply the numbers below are filtered.
                 if sourceFilter != nil {
                     Text(L10n.text("The weekly report counts every source and ignores the source filter", zhHans: "周报按全部来源统计，不受来源筛选影响"))
@@ -743,7 +751,7 @@ struct UsageDashboardView: View {
 
     @ViewBuilder
     private func weeklyStats(_ report: WeeklyReport) -> some View {
-        // 概览行
+        // Overview row
         HStack(spacing: 16) {
             weeklyStat(L10n.text("Active time", zhHans: "活跃时长"), L10n.format("≈%@ hours", zhHans: "≈%@ 小时", String(report.activeHours)))
             weeklyStat(L10n.text("Tokens", zhHans: "消耗"), formatTokens(report.totalTokens))
@@ -895,11 +903,11 @@ struct UsageDashboardView: View {
         }
     }
 
-    // MARK: - 请求日志（分页表格）
+    // MARK: - Request log (paged table)
 
     private var requestLog: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 表头
+            // Table header
             HStack(spacing: 8) {
                 Text(L10n.text("Time", zhHans: "时间")).frame(width: 76, alignment: .leading)
                 Text(L10n.text("Source", zhHans: "来源")).frame(width: 66, alignment: .leading)
@@ -1003,7 +1011,7 @@ struct UsageDashboardView: View {
             }
             .buttonStyle(.borderless)
             .disabled(page >= totalPages)
-            // 跳页
+            // Go to page
             Text(L10n.text("Go to", zhHans: "跳至")).font(.system(size: 10)).foregroundStyle(.tertiary)
             TextField("", text: $pageInput)
                 .textFieldStyle(.roundedBorder)
@@ -1022,7 +1030,7 @@ struct UsageDashboardView: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: - 模型统计
+    // MARK: - Model stats
 
     private var modelStats: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1059,7 +1067,8 @@ struct UsageDashboardView: View {
                                 .font(.system(size: 10).monospaced())
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                            // 同名模型按 provider 分行（订阅套餐 vs 按量计费）
+                            // Same-name models get one row per provider (subscription plan vs
+                            // pay-as-you-go)
                             if let provider = totals.provider {
                                 Text(provider)
                                     .font(.system(size: 9))
@@ -1097,7 +1106,7 @@ struct UsageDashboardView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    // MARK: - 按会话统计
+    // MARK: - Per-session stats
 
     @ViewBuilder
     private var sessionStats: some View {
@@ -1133,7 +1142,8 @@ struct UsageDashboardView: View {
         }
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
         .onAppear {
-            // 会话名来自文件索引；首次进入子页签时索引可能还没建
+            // Session names come from the file index; it may not be built yet the first time the
+            // sub-tab opens
             if sessionBrowser.sessionsById.isEmpty {
                 sessionBrowser.refresh()
             }
@@ -1142,7 +1152,8 @@ struct UsageDashboardView: View {
 
     private func sessionRow(_ line: UsageService.SessionTotal) -> some View {
         let info = sessionBrowser.sessionsById[line.sessionId]
-        // 索引窗之外的老会话查不到名字，回退短 id 且不可跳转
+        // Old sessions outside the index window have no name; fall back to a short id and disable
+        // jumping
         let canJump = info != nil
         return Button {
             guard canJump else { return }
@@ -1195,7 +1206,7 @@ struct UsageDashboardView: View {
             : L10n.text("This session is outside the index window (usage only)", zhHans: "该会话不在索引窗口内（仅显示用量）"))
     }
 
-    // MARK: - 项目统计
+    // MARK: - Project stats
 
     private var projectStats: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1232,7 +1243,7 @@ struct UsageDashboardView: View {
         .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
     }
 
-    // MARK: - 底部
+    // MARK: - Footer
 
     private var footerRow: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -1261,7 +1272,7 @@ struct UsageDashboardView: View {
         }
     }
 
-    /// 中文单位（万/亿）副标签
+    /// Subtitle in Chinese magnitude units (wan = 10^4 / yi = 10^8)
     private func chineseUnit(_ value: Int) -> String {
         switch value {
         case ..<10_000: return "\(value)"
@@ -1274,15 +1285,17 @@ struct UsageDashboardView: View {
 }
 
 extension Notification.Name {
-    /// 用量"按会话"排行 → 切到会话页签并选中（携带 session id）。
-    /// 用通知而非透传 navigation：设置页里的用量面板也能跳转。
+    /// Usage "by session" ranking → switch to the Sessions tab and select it (carries the session
+    /// id). A notification instead of passing navigation through, so the usage panel in Settings
+    /// can jump too.
     static let eurekaRevealSession = Notification.Name("eurekaRevealSession")
-    /// 跨页直达：知识面条目（object = 文件路径 String；userInfo["kind"] = skill/memory/instruction）
+    /// Cross-page jump: knowledge entry (object = file path String; userInfo["kind"] =
+    /// skill/memory/instruction)
     static let eurekaRevealKnowledge = Notification.Name("eurekaRevealKnowledge")
-    /// 跨页直达：计划条目（object = 文件路径 String）
+    /// Cross-page jump: plan entry (object = file path String)
     static let eurekaRevealPlan = Notification.Name("eurekaRevealPlan")
-    /// 跨页直达：Prompt 库条目（object = 条目 id String）
+    /// Cross-page jump: Prompt library entry (object = entry id String)
     static let eurekaRevealPrompt = Notification.Name("eurekaRevealPrompt")
-    /// ⌘K 全局搜索面板开关（MainMenu 发、PopoverRootView 收）
+    /// ⌘K global search palette toggle (posted by MainMenu, received by PopoverRootView)
     static let eurekaToggleCommandPalette = Notification.Name("eurekaToggleCommandPalette")
 }

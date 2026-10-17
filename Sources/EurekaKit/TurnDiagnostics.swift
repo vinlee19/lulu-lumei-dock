@@ -1,12 +1,13 @@
 import Foundation
 
-/// 逐轮诊断指标：把血缘图的形状翻译成「提示词/上下文哪里没给好」。
+/// Per-turn diagnostic metrics: translate the shape of the lineage graph into "where the
+/// prompt/context fell short".
 ///
-/// 每条指标都必须能指回一个**可执行的改进动作**，否则就是装饰。
-/// 纯函数（EurekaKit），输入是已经构好的图 —— 因为诊断的定义就依赖图的结构
-/// （回读边、重试环），从原始步骤序列上重算一遍等于把规则写两份。
+/// Every metric must point back to an **actionable improvement**; otherwise it is decoration.
+/// Pure function (EurekaKit) whose input is the already-built graph — the diagnostics are defined in terms of graph structure
+/// (read-back edges, retry loops), so recomputing them from the raw step sequence would mean writing the rules twice.
 public struct TurnDiagnostics: Equatable, Sendable {
-    /// 严重度：只有三档，避免变成没人看的评分表
+    /// Severity: only three levels, so it doesn't turn into a scorecard nobody reads
     public enum Severity: Int, Comparable, Sendable {
         case clean = 0
         case notice = 1
@@ -16,16 +17,16 @@ public struct TurnDiagnostics: Equatable, Sendable {
         }
     }
 
-    /// 一条命中的信号（只在命中时产生，不命中不占位）
+    /// One triggered signal (produced only when triggered; takes no slot otherwise)
     public struct Signal: Equatable, Sendable, Identifiable {
         public var id: String { rule }
-        /// 规则 id（稳定，落库/聚合用）
+        /// Rule id (stable; used for persistence/aggregation)
         public var rule: String
         public var title: String
-        /// 指回的提示词问题 —— 这句话才是用户要看的
+        /// The prompt problem it points back to — this sentence is what the user actually reads
         public var advice: String
         public var severity: Severity
-        /// 命中的量（回读 3 次 / 重试 2 轮）
+        /// The triggered amount (read back 3 times / retried 2 rounds)
         public var count: Int
     }
 
@@ -33,54 +34,58 @@ public struct TurnDiagnostics: Equatable, Sendable {
     public var promptChars: Int
     public var stepCount: Int
     public var nodeCount: Int
-    /// 检索 + 读取节点数（探索开销的分子）
+    /// Search + read node count (numerator of the exploration cost)
     public var exploreNodes: Int
-    /// 回读**次数**（不是边数）。同一条回读边会被去重成一条并累加 `repeatCount`，
-    /// 而用户关心的是「回去了几次」，所以这里累加次数而不是数边。
+    /// Read-back **count** (not edge count). Identical read-back edges are deduped into one with an
+    /// accumulated `repeatCount`, and the user cares about "how many times it went back", so this
+    /// sums counts rather than counting edges.
     public var rereadCount: Int
     public var reworkCount: Int
-    /// 最长的一条重试环绕了几圈
+    /// How many laps the longest retry loop went around
     public var retryMax: Int
     public var errorSteps: Int
     public var subagentCount: Int
     public var askedUser: Bool
-    /// 同一个文件在这一轮里被改了多少次（最多的那个）。
-    /// 实机验证过的强信号：真实会话里出现过 `Edit X.java ×8` —— 一轮之内把同一个文件
-    /// 改了 8 遍，多半是没想清就动手。这类反复不产生回边，光看边会漏掉。
+    /// How many times the same file was edited in this turn (the most-edited one). A strong signal
+    /// verified on real data: a real session showed `Edit X.java ×8` — editing the same file 8
+    /// times within one turn usually means acting before thinking it through. Such repetition
+    /// creates no back-edge, so edges alone miss it.
     public var maxEditChurn: Int
-    /// 被反复改的那个文件（展示用）
+    /// The repeatedly edited file (for display)
     public var churnTarget: String
     public var signals: [Signal]
 
-    /// 探索开销比：定位代码花了多少比重。**提示词没点名文件时会显著偏高。**
+    /// Exploration cost ratio: how much of the turn went into locating code. **Noticeably high when
+    /// the prompt names no files.**
     public var exploreRatio: Double {
         nodeCount > 0 ? Double(exploreNodes) / Double(nodeCount) : 0
     }
 
-    /// 整轮严重度 = 最严重的那条信号
+    /// Turn severity = the most severe signal
     public var severity: Severity {
         signals.map(\.severity).max() ?? .clean
     }
 
-    // MARK: - 阈值（集中在这里，别散落在判断里）
+    // MARK: - Thresholds (kept here, not scattered across the checks)
 
     public enum Threshold {
-        /// 探索占比超过一半 ⇒ 大半轮在找东西
+        /// Exploration share above half ⇒ most of the turn was spent searching
         public static let exploreRatioBad = 0.5
         public static let exploreRatioNotice = 0.35
-        /// 探索占比只在步数够多时才有意义（3 步的轮子里 2 步检索不说明问题）
+        /// Exploration share is only meaningful with enough steps (2 searches in a 3-step turn
+        /// proves nothing)
         public static let exploreMinNodes = 6
         public static let rereadNotice = 1
         public static let rereadBad = 3
         public static let reworkNotice = 1
         public static let retryNotice = 1
         public static let retryBad = 3
-        /// 同一文件改 3 次 = 提醒，5 次 = 有问题
+        /// Same file edited 3 times = notice, 5 times = problem
         public static let churnNotice = 3
         public static let churnBad = 5
     }
 
-    // MARK: - 评估
+    // MARK: - Evaluation
 
     public static func evaluate(_ graph: TurnGraph.Graph, promptChars: Int) -> TurnDiagnostics {
         let toolNodes = graph.nodes.filter { $0.kind.toolKind != nil || $0.kind == .subagent }
@@ -88,7 +93,8 @@ public struct TurnDiagnostics: Equatable, Sendable {
             guard let kind = node.kind.toolKind else { return false }
             return kind == .read || kind == .search
         }.count
-        // 累加 repeatCount 而不是数边：同一条回读/重试边被去重成一条，次数在 repeatCount 里
+        // Sum repeatCount instead of counting edges: identical read-back/retry edges are deduped
+        // into one, with the count in repeatCount
         let reread = graph.backEdges.filter { $0.role == .dataFlow }
             .reduce(0) { $0 + $1.repeatCount }
         let rework = graph.backEdges.filter { $0.role == .rework }
@@ -198,9 +204,9 @@ public struct TurnDiagnostics: Equatable, Sendable {
     }
 }
 
-// MARK: - 跨会话聚合
+// MARK: - Cross-session aggregation
 
-/// 多轮 → 一份汇总（跨会话诊断页用）。同样是纯函数。
+/// Many turns → one summary (for the cross-session diagnostics page). Also a pure function.
 public struct TurnDiagnosticsSummary: Equatable, Sendable {
     public var turnCount: Int
     public var cleanTurns: Int
@@ -209,11 +215,12 @@ public struct TurnDiagnosticsSummary: Equatable, Sendable {
     public var totalReread: Int
     public var totalRework: Int
     public var totalRetry: Int
-    /// 出现过「同一文件反复改」的轮数
+    /// Number of turns where "same file edited repeatedly" occurred
     public var churnTurns: Int
-    /// 规则 id → 命中轮数（哪类问题最常犯）
+    /// Rule id → number of turns triggered (which problems occur most)
     public var ruleHits: [String: Int]
-    /// 平均探索开销比（只统计步数够多的轮，否则被大量小轮稀释）
+    /// Average exploration cost ratio (only over turns with enough steps, otherwise diluted by many
+    /// small turns)
     public var averageExploreRatio: Double
 
     public init(_ items: [TurnDiagnostics]) {

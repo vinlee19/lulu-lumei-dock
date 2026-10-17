@@ -1,7 +1,8 @@
 import EurekaKit
 import Foundation
 
-/// TurnGraphBuilder：TurnInput → 血缘图。构图规则是一张可断言的规则表，不是「看情况」。
+/// TurnGraphBuilder: TurnInput → lineage graph. Construction rules are an assertable rule table,
+/// not "it depends".
 func turnGraphTests(_ t: TestRunner) {
     t.suite("TurnGraph · 构图")
 
@@ -14,8 +15,9 @@ func turnGraphTests(_ t: TestRunner) {
             batch: batch, messageId: 1, stepIndex: index)
     }
 
-    /// 验收形态：提问 → 思考 → {Grep, 子代理} → Read → Edit → build✗ → Edit → build✓ → 回答，
-    /// 其中「回读同一文件」与「改→构建失败→再改」各构成一个环。
+    /// Acceptance shape: prompt → thinking → {Grep, subagent} → Read → Edit → build✗ → Edit →
+    /// build✓ → answer, where "re-reading the same file" and "edit → build fails → edit again" each
+    /// form a cycle.
     func acceptedTurn() -> TurnInput {
         TurnInput(
             turnIndex: 6,
@@ -38,7 +40,8 @@ func turnGraphTests(_ t: TestRunner) {
     t.test("验收形态：思考分叉、回读环、重试环、汇聚到回答") {
         let graph = TurnGraphBuilder.build(acceptedTurn())
 
-        // 去重：同一文件读两次 / 改两次 / 同一命令跑两次 各只有一个节点
+        // Dedup: reading the same file twice / editing twice / running the same command twice each
+        // yields a single node
         let titles = graph.nodes.map(\.title)
         try expectEqual(titles.filter { $0 == "Read" }.count, 1, "同文件重复读只有一个节点")
         try expectEqual(titles.filter { $0 == "Edit" }.count, 1)
@@ -50,17 +53,17 @@ func turnGraphTests(_ t: TestRunner) {
         try expectEqual(build.occurrences, 2)
         try expect(build.isError, "任一次失败该节点即标失败")
 
-        // 思考节点存在且是分叉点（有明文 → 不插 fork）
+        // The thinking node exists and is the fork point (has plaintext → no fork inserted)
         try expect(graph.hasThinking)
         let thinking = try expectSome(graph.nodes.first { $0.kind == .thinking })
         let fanOut = graph.edges.filter { $0.from == thinking.id && !$0.isBack }
         try expectEqual(fanOut.count, 2, "思考直接分叉出检索与子代理，不额外插 fork")
         try expect(!graph.nodes.contains { $0.kind == .fork })
 
-        // 子代理是 spawn 边
+        // The subagent is a spawn edge
         try expect(graph.edges.contains { $0.role == .spawn }, "派生子代理应是 spawn 边")
 
-        // 两个环：回读（Edit→Read）与重试（Bash→Edit）
+        // Two cycles: re-read (Edit→Read) and retry (Bash→Edit)
         try expect(
             graph.backEdges.contains { $0.role == .dataFlow && $0.to == read.id },
             "改完又回去读同一文件 → 回读回边")
@@ -70,7 +73,7 @@ func turnGraphTests(_ t: TestRunner) {
                 && $0.to == edit.id },
             "构建失败 → 指回编辑的重试回边")
 
-        // 汇聚到回答
+        // converges to the answer
         let answer = try expectSome(graph.nodes.first { $0.kind == .answer })
         try expect(graph.edges.contains { $0.to == answer.id })
     }
@@ -89,9 +92,11 @@ func turnGraphTests(_ t: TestRunner) {
     }
 
     t.test("seq 单调即拓扑序：前向边必然 from.seq < to.seq") {
-        // ⚠️ 必须把**有分叉点**的形态也覆盖到：分叉是在它的分支之后才决定要不要插的，
-        // 如果那时才取 seq，分叉的 seq 会大于分支 → 分层时孩子找不到已定层的父节点，
-        // 整层被错排到第 0 层。曾经只测了有思考（不插分叉）的用例，正好漏掉这个。
+        // ⚠️ The shape **with a fork point** must be covered too: whether to insert a fork is
+        // decided only after its branches, and if seq were taken only then, the fork's seq would
+        // exceed its branches' → during layering the children find no already-layered parent, and
+        // the whole layer is misplaced into layer 0. Only the case with thinking (no fork inserted)
+        // used to be tested, which missed exactly this.
         var noThinking = acceptedTurn()
         noThinking.thinkingTexts = []
         var parallel = acceptedTurn()
@@ -119,7 +124,7 @@ func turnGraphTests(_ t: TestRunner) {
                 let to = try expectSome(graph.node(edge.to))
                 try expect(to.seq <= from.seq, "\(label)：回边必须指向不更晚的节点")
             }
-            // nodes 必须按 seq 有序（折叠与分层都依赖这个顺序）
+            // nodes must be ordered by seq (both folding and layering depend on this order)
             try expectEqual(
                 graph.nodes.map(\.seq), graph.nodes.map(\.seq).sorted(),
                 "\(label)：nodes 未按 seq 排序")
@@ -189,7 +194,7 @@ func turnGraphTests(_ t: TestRunner) {
             options: .init(maxColumns: 6))
         let forks = graph.nodes.filter { $0.kind == .fork }
         try expect(!forks.isEmpty, "3→3 必须插分叉点，否则 9 条边")
-        // 3→fork(1) + fork→3 = 6 条，而不是 9 条
+        // 3→fork(1) + fork→3 = 6 edges, not 9
         let between = graph.forwardEdges.filter { edge in
             graph.node(edge.from)?.kind == .tool(.read) || graph.node(edge.to)?.kind == .tool(.edit)
         }
@@ -205,7 +210,8 @@ func turnGraphTests(_ t: TestRunner) {
         try expectEqual(onlyPrompt.nodes.count, 1)
         try expectEqual(onlyPrompt.nodes[0].kind, .prompt)
 
-        // TodoWrite 这类没有可比目标的工具：逐步骤独立，不该被错误合并
+        // Tools like TodoWrite with no comparable target: each step stands alone and must not be
+        // wrongly merged
         let todos = TurnGraphBuilder.build(TurnInput(
             turnIndex: 0, promptMessageId: 0, promptText: "记一下",
             steps: [
@@ -218,8 +224,9 @@ func turnGraphTests(_ t: TestRunner) {
     }
 
     t.test("子代理：收起显步数；展开后内部步骤并进同一张图并连出跨界回读边") {
-        // 主流程先读了 A.swift，子代理内部又读了同一个 A.swift ——
-        // 展开后这条「跨越子代理边界的回读」正是把它做成内联而不是独立子图的理由。
+        // The main flow reads A.swift first, then the subagent reads the same A.swift internally —
+        // once expanded, this "re-read across the subagent boundary" is exactly why it's inlined
+        // rather than a separate subgraph.
         var task = step(.agent, "Explore", "定位分页实现", batch: 2, index: 1)
         task.subSteps = [
             TurnInput.Step(kind: .search, name: "Grep", detail: "paginationBar", batch: 1),
@@ -233,7 +240,7 @@ func turnGraphTests(_ t: TestRunner) {
             ],
             answerMessageIds: [1], answerText: "找到了")
 
-        // 收起：子代理是一个节点，副标带内部步数
+        // Collapsed: the subagent is one node, with its internal step count in the subtitle
         let collapsed = TurnGraphBuilder.build(turn)
         let agent = try expectSome(collapsed.nodes.first { $0.kind == .subagent })
         try expect(agent.subtitle.contains("2 步"), "收起态要能看出它干了多少活，实得 \(agent.subtitle)")
@@ -241,7 +248,8 @@ func turnGraphTests(_ t: TestRunner) {
             !collapsed.nodes.contains { $0.title == "Grep" },
             "收起时不该把内部步骤铺出来")
 
-        // 展开：内部步骤进图，且对同一文件的读命中去重 → 连出回读回边
+        // Expanded: internal steps enter the graph, and reads of the same file hit dedup → a
+        // re-read back edge is drawn
         let expanded = TurnGraphBuilder.build(
             turn, options: .init(expandedSubagents: ["Explore|定位分页实现"]))
         try expect(expanded.nodes.contains { $0.title == "Grep" }, "展开后内部检索应进图")
@@ -254,8 +262,9 @@ func turnGraphTests(_ t: TestRunner) {
             expanded.backEdges.contains { $0.role == .dataFlow && $0.to == read.id },
             "跨子代理边界的回读边必须存在 —— 这是内联展开的全部意义")
 
-        // 子代理内部节点只能从子代理节点下来，不能被外层 frontier 再连一次
-        // （否则会被错拉到与子代理同层，看上去像「主流程直接读的」）
+        // Subagent internal nodes may only descend from the subagent node, not be connected again
+        // by the outer frontier (otherwise they'd be pulled up to the subagent's layer and look as
+        // if "the main flow read them directly")
         let grep = try expectSome(expanded.nodes.first { $0.title == "Grep" })
         let grepParents = expanded.forwardEdges.filter { $0.to == grep.id }
             .compactMap { expanded.node($0.from) }
@@ -264,15 +273,17 @@ func turnGraphTests(_ t: TestRunner) {
             "子代理内部步骤的上游只能是子代理（或它下面的分叉点），实得 "
                 + "\(grepParents.map(\.title))")
 
-        // 展开后 seq 仍是拓扑序（子代理内部也走 reserveSeq 分叉，容易破坏）
+        // After expansion seq is still a topological order (subagent internals also fork via
+        // reserveSeq, which is easy to break)
         for edge in expanded.forwardEdges {
             let from = try expectSome(expanded.node(edge.from))
             let to = try expectSome(expanded.node(edge.to))
             try expect(from.seq < to.seq, "展开子代理后 \(from.title)->\(to.title) 破坏了 seq 单调")
         }
 
-        // 除了提问，每个节点都得有前向父节点。孤儿 = 被误判成回边后甩到第 0 层，
-        // `forwardEdges` 的单调性检查抓不到这种（那条边根本不在 forwardEdges 里）。
+        // Apart from the prompt, every node must have a forward parent. An orphan = misjudged as a
+        // back edge and dumped into layer 0, which the `forwardEdges` monotonicity check can't
+        // catch (that edge isn't in forwardEdges at all).
         for node in expanded.nodes where node.kind != .prompt {
             let hasParent = expanded.forwardEdges.contains { $0.to == node.id }
             try expect(hasParent, "\(node.title) 没有前向父节点，会被甩到第 0 层")

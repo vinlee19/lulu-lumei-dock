@@ -3,31 +3,34 @@ import EurekaInstall
 import EurekaKit
 import SwiftUI
 
-/// MCP 页签：跨源 server 管理（查看 / 新建 / 跨 agent 安装 / 删除）。
+/// MCP tab: cross-source server management (view / create / install across agents / delete).
 ///
-/// 结构与其它知识页签逐条对齐：header（搜索+＋菜单+扫描状态+刷新+布局切换）→
-/// `StatOverviewCard` → `SourceFilterBar` → `KnowledgeRow`/`KnowledgeCard` → 滑入详情/表单。
-/// 一行 = 一处配置（与 Skills 同构：同名 server 配置在 2 个源就是 2 行），
-/// 详情页按名聚合并给出跨源安装矩阵。
-/// 密钥红线：列表/详情只显示 env/headers 的**键名**；完整值只在安装/传播时于
-/// 两个本地配置文件间内存中转（见 MCPService / MCPServerEditor 头注释）。
+/// Structure lines up item by item with the other knowledge tabs: header (search + "+" menu +
+/// scan status + refresh + layout toggle) → `StatOverviewCard` → `SourceFilterBar` →
+/// `KnowledgeRow`/`KnowledgeCard` → slide-in detail / form.
+/// One row = one config location (same shape as Skills: a server configured in 2 sources is
+/// 2 rows); the detail page aggregates by name and shows a cross-source install matrix.
+/// Secrets red line: list / detail only show env/headers **key names**; full values only pass
+/// through memory between two local config files during install / propagation (see the
+/// MCPService / MCPServerEditor header comments).
 struct MCPView: View {
     @ObservedObject var service: MCPService
-    /// MCP 调用统计（kind='mcp' 的 tool_calls 按 server 聚合；闲置检测用）
+    /// MCP call stats (kind='mcp' tool_calls aggregated by server; used for idle detection)
     @ObservedObject var usageService: UsageService
 
-    /// 滑入详情（按 server 名聚合）
+    /// Slide-in detail (aggregated by server name)
     @State private var detailName: String?
-    /// 滑入表单（新建 / 粘贴 JSON 导入）
+    /// Slide-in form (create / import pasted JSON)
     @State private var formTarget: MCPFormTarget?
-    /// 来源筛选（nil = 全部）
+    /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
-    /// 列表 / 图标网格
+    /// List / icon grid
     @State private var layout: KnowledgeLayout = .list
-    /// 待确认删除的配置处
+    /// Config location pending delete confirmation
     @State private var deletingEntry: MCPServerEntry?
 
-    /// 离屏渲染/预览专用：指定初始布局/初始详情/初始表单（交互时由用户操作驱动）
+    /// Offscreen render / preview only: initial layout / detail / form (during interaction these
+    /// are driven by the user)
     init(service: MCPService, usageService: UsageService,
          initialLayout: KnowledgeLayout = .list,
          initialDetailName: String? = nil, initialFormTarget: MCPFormTarget? = nil) {
@@ -98,7 +101,7 @@ struct MCPView: View {
         }
     }
 
-    // MARK: - 顶部栏（与家族逐字节一致）
+    // MARK: - Top bar (byte-for-byte identical to the family)
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -118,8 +121,9 @@ struct MCPView: View {
         .padding(.vertical, 10)
     }
 
-    /// 家族标准的裸 ＋ 圆钮：点击**直达**添加页（页内再分 快速安装/手动配置/JSON 三页签），
-    /// 不再弹二级菜单 —— 少一跳，风格也与其它知识页签一致。
+    /// The family-standard bare "+" round button: a click goes **straight** to the add page (which
+    /// is split into Quick install / Manual / JSON tabs), no secondary menu any more — one hop
+    /// fewer, and consistent with the other knowledge tabs.
     private var createButton: some View {
         Button {
             withAnimation(.easeOut(duration: 0.15)) {
@@ -137,7 +141,7 @@ struct MCPView: View {
         .help(L10n.text("Add MCP server", zhHans: "添加 MCP server"))
     }
 
-    // MARK: - 数据口径
+    // MARK: - Data definitions
 
     private var totalCount: Int { service.servers.count }
 
@@ -155,12 +159,13 @@ struct MCPView: View {
         service.servers.filter { selectedSource == nil || $0.source == selectedSource }
     }
 
-    /// 去重后的 server 名数（统计卡主数字）
+    /// Number of distinct server names after dedup (main number on the stats card)
     private var dedupedCount: Int {
         Set(service.servers.map { $0.name.lowercased() }).count
     }
 
-    /// 已实测 server 的能力合计（总览卡角注）：让"全局有多少工具可用"一眼可见
+    /// Capability totals across probed servers (overview card corner note): makes "how many tools
+    /// are available globally" visible at a glance
     private var measuredCapabilityNote: String? {
         let names = Set(service.servers.map { $0.name.lowercased() })
         let measured = names.compactMap { service.toolCache[$0] }
@@ -173,7 +178,8 @@ struct MCPView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// 传输方式分布（brand 渐变段，照 Agents 页的模型分布做法）
+    /// Transport distribution (brand gradient segments, following the Agents page's model
+    /// distribution)
     private var transportSegments: [StatOverviewCard.Segment] {
         var counts: [String: Int] = [:]
         for entry in service.servers { counts[entry.transport, default: 0] += 1 }
@@ -185,7 +191,7 @@ struct MCPView: View {
         }
     }
 
-    // MARK: - 内容区
+    // MARK: - Content area
 
     private var content: some View {
         ScrollView {
@@ -250,7 +256,8 @@ struct MCPView: View {
         withAnimation(.easeOut(duration: 0.15)) { detailName = entry.name }
     }
 
-    /// 批量检测操作行：串行逐处、可取消；stdio 深探只在此类显式动作下发生
+    /// Batch probe action row: serial, one location at a time, cancellable; stdio deep inspection
+    /// only happens on explicit actions like this
     @ViewBuilder
     private var probeBar: some View {
         HStack(spacing: 8) {
@@ -322,7 +329,7 @@ struct MCPView: View {
     }
 }
 
-/// 探测快照色调 → 主题色（列表状态点与详情 chip 共用）
+/// Probe snapshot tone → theme color (shared by list status dots and detail chips)
 func mcpToneColor(_ tone: String) -> Color {
     switch tone {
     case "ok": return Theme.enabledGreen
@@ -331,7 +338,8 @@ func mcpToneColor(_ tone: String) -> Color {
     }
 }
 
-/// NSOpenPanel 选项目根（项目级 .mcp.json 安装的 repo 选择兜底；表单与详情矩阵共用）
+/// NSOpenPanel to pick a project root (fallback repo picker for project-level .mcp.json
+/// installs; shared by the form and the detail matrix)
 private func mcpPickProjectRoot() -> String? {
     let panel = NSOpenPanel()
     panel.canChooseFiles = false
@@ -341,14 +349,16 @@ private func mcpPickProjectRoot() -> String? {
     return panel.runModal() == .OK ? panel.url?.path : nil
 }
 
-/// 快照过期阈值：超过 7 天视为过期（列表灰点 + 详情提示，建议重新检测）
+/// Snapshot staleness threshold: older than 7 days counts as stale (grey dot in the list +
+/// hint in detail suggesting a re-probe)
 private let mcpProbeStaleThreshold: TimeInterval = 7 * 86_400
 
 private func mcpSnapshotStale(_ snapshot: MCPProbeSnapshot) -> Bool {
     Date().timeIntervalSince(snapshot.checkedAt) > mcpProbeStaleThreshold
 }
 
-/// 总览行/卡的能力计数摘要："30 工具 · 5 提示词 · 2 资源"（实测过才有；0 略去不占位）
+/// Capability count summary for overview rows / cards: "30 tools · 5 prompts · 2 resources"
+/// (only once probed; zero counts are omitted, taking no space)
 func mcpCapabilitySummary(_ info: MCPToolCacheEntry?) -> String? {
     guard let info else { return nil }
     var parts = [L10n.format("%@ tools", zhHans: "%@ 工具", String(info.toolCount))]
@@ -357,20 +367,24 @@ func mcpCapabilitySummary(_ info: MCPToolCacheEntry?) -> String? {
     return parts.joined(separator: " · ")
 }
 
-/// 折叠态描述：换行/连续空白压成单空格。`lineLimit` 按渲染行计数，MCP server 的
-/// description 普遍带 `\n\n` 段落分隔——不压平的话第二"行"是一个看不见的空行，
-/// 每行工具被无端撑高 ~12pt，文字贴上分隔线、底下留说不清来由的空白，行距节奏全乱。
-/// （展开态仍显示原文段落，完整保真。）
+/// Collapsed description: newlines / runs of whitespace squashed to a single space.
+/// `lineLimit` counts rendered lines, and MCP server descriptions commonly carry `\n\n`
+/// paragraph breaks — unflattened, the second "line" is an invisible blank line, every tool row
+/// grows ~12pt for no reason, text hugs the divider with unexplained space below, and the row
+/// rhythm falls apart.
+/// (The expanded state still shows the original paragraphs, fully faithful.)
 func mcpFlatDescription(_ text: String) -> String {
     text.components(separatedBy: .whitespacesAndNewlines)
         .filter { !$0.isEmpty }
         .joined(separator: " ")
 }
 
-// MARK: - 能力清单的行组件（主题化：brutal = 墨线/硬角，classic = 细线/圆角）
+// MARK: - Capability list row components (themed: brutal = ink lines / hard corners,
+// classic = hairlines / rounded corners)
 
-/// 行分隔线：brutal = **实心墨线 2px**（粗野主义的表格线不打折扣，30% 透明的
-/// hairline 在奶油底上读作"柔和派"）；classic / 配色主题 = hairline 一像素。
+/// Row divider: brutal = **solid 2px ink line** (Neo-Brutalist table rules aren't watered
+/// down; a 30%-opacity hairline on the cream background reads as "soft style"); classic /
+/// palette themes = 1px hairline.
 struct MCPRowDivider: View {
     var body: some View {
         Rectangle()
@@ -379,9 +393,10 @@ struct MCPRowDivider: View {
     }
 }
 
-/// 能力清单的**表格井**：外框 + 行线成套才是完整的表格框线
-/// （brutal = 直角 + 2px 墨边；classic = 圆角 8 + hairline 的 macOS 分组表）。
-/// 底色用 surfaceSecondary，让表格从卡面上"凹"下去一层。
+/// The capability list's **table well**: the outer frame + row rules together make a complete
+/// table border (brutal = square corners + 2px ink edge; classic = radius 8 + hairline, a
+/// macOS grouped table).
+/// The background uses surfaceSecondary so the table sits one level "sunk" into the card.
 struct MCPListWell<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -398,10 +413,12 @@ struct MCPListWell<Content: View>: View {
     }
 }
 
-/// 工具行（Claude Desktop 式）：名称等宽 + 注解 chips，描述做副标题；
-/// 悬停整行轻染，点击展开全文与参数清单（必填带 *）。
-/// 行距节奏：brutal 用 `Theme.spacing.row`（9pt）垂直内边距——2pt 墨线表格线
-/// 要配足呼吸感才读作粗野主义的"格"；classic 保持原 7pt 紧凑分组表观感。
+/// Tool row (Claude Desktop style): monospaced name + annotation chips, description as the
+/// subtitle; the whole row tints lightly on hover, and a click expands the full text and the
+/// parameter list (required ones marked *).
+/// Row rhythm: brutal uses `Theme.spacing.row` (9pt) vertical padding — 2pt ink table rules
+/// need enough breathing room to read as Neo-Brutalist "cells"; classic keeps the original
+/// compact 7pt grouped-table look.
 struct MCPToolRowView: View {
     let tool: MCPToolSummary
     let expanded: Bool
@@ -471,8 +488,10 @@ struct MCPToolRowView: View {
     }
 }
 
-/// 提示词/资源行：名字等宽 + 描述副标题，悬停轻染（无展开语义）。
-/// 描述同样压平换行（`mcpFlatDescription` 见其注释）；行距随 brutal 加档。
+/// Prompt / resource row: monospaced name + description subtitle, light tint on hover (no
+/// expand semantics).
+/// The description is flattened the same way (see `mcpFlatDescription`'s comment); row spacing
+/// steps up under brutal.
 struct MCPNamedRowView: View {
     let item: MCPNamedSummary
 
@@ -500,8 +519,9 @@ struct MCPNamedRowView: View {
     }
 }
 
-/// 能力分组页签（工具/提示词/资源）：与 SourceFilterChip 同一套选中/悬停/描边规格
-/// （选中 = 品牌实底白字 + brutal 墨边硬影；未选 = 灰底细边、悬停轻染）
+/// Capability group tabs (tools / prompts / resources): same selected / hover / stroke spec as
+/// SourceFilterChip (selected = solid brand fill with white text + brutal ink edge and hard
+/// shadow; unselected = grey fill with thin edge, light tint on hover)
 struct MCPCapabilitySegment: View {
     let label: String
     let count: Int
@@ -528,7 +548,8 @@ struct MCPCapabilitySegment: View {
                     isSelected
                         ? AnyShapeStyle(Theme.brand)
                         : AnyShapeStyle(hovering ? Theme.brandFill(0.06) : Theme.surfaceSecondary))
-                    // 硬影只能画在纯形状层：画到含文字的合成视图上，文字会在偏移处留下重影
+                    // Hard shadows may only be painted on pure shape layers: on a composited view
+                    // containing text, the glyphs leave ghosts at the offset
                     .themeControlShadow(active: isSelected))
             .overlay(
                 Capsule().strokeBorder(
@@ -543,7 +564,7 @@ struct MCPCapabilitySegment: View {
     }
 }
 
-// MARK: - 图标瓦片（照 PlanIconTile / AuditView.kindTile 的 TileSpec 模板）
+// MARK: - Icon tile (TileSpec template, following PlanIconTile / AuditView.kindTile)
 
 struct MCPIconTile: View {
     var size: CGFloat = 26
@@ -564,14 +585,15 @@ struct MCPIconTile: View {
     }
 }
 
-// MARK: - 行 / 卡 共用的动作与菜单
+// MARK: - Actions and menus shared by row / card
 
 private func mcpEntryActions(
     _ entry: MCPServerEntry, service: MCPService,
     onEdit: @escaping () -> Void, onDelete: @escaping () -> Void
 ) -> [CardAction] {
     [
-        // 铅笔 = 应用内编辑表单（外部编辑器入口在右键菜单——直接弹整份配置文件太吓人）
+        // Pencil = in-app edit form (the external editor entry is in the context menu — popping
+        // open the whole config file directly is too intimidating)
         CardAction(icon: "square.and.pencil", help: L10n.text("Edit this definition", zhHans: "编辑该处定义")) {
             onEdit()
         },
@@ -598,7 +620,7 @@ private func mcpEntryMenu(
     Button(L10n.text("Remove from this config", zhHans: "从该配置移除"), role: .destructive) { onDelete() }
 }
 
-// MARK: - 列表行
+// MARK: - List row
 
 private struct MCPRow: View {
     let entry: MCPServerEntry
@@ -620,8 +642,9 @@ private struct MCPRow: View {
                 SourceLogoTile(source: entry.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        // 上次检测的健康点（持久快照；无快照不显示）——扫一眼列表即知全局状态；
-                        // 超过 7 天转灰点（过期，结果未必仍成立）
+                        // Health dot from the last probe (persisted snapshot; hidden when there is
+                        // none) — one glance at the list shows the global state; older than 7 days
+                        // it turns grey (stale, the result may no longer hold)
                         if let snapshot = service.probeSnapshots[entry.id] {
                             let stale = mcpSnapshotStale(snapshot)
                             Circle()
@@ -684,7 +707,7 @@ private struct MCPRow: View {
     }
 }
 
-// MARK: - 网格卡
+// MARK: - Grid card
 
 private struct MCPCard: View {
     let entry: MCPServerEntry
@@ -755,7 +778,8 @@ private struct MCPCard: View {
     }
 }
 
-// MARK: - 滑入详情（按名聚合：定义 + 跨源矩阵 + 各处配置）
+// MARK: - Slide-in detail (aggregated by name: definition + cross-source matrix + each config
+// location)
 
 private struct MCPDetailView: View {
     @ObservedObject var service: MCPService
@@ -764,33 +788,34 @@ private struct MCPDetailView: View {
     let onBack: () -> Void
     let onDeleteEntry: (MCPServerEntry) -> Void
     let onEdit: (MCPServerEntry) -> Void
-    /// 「编辑请求头/环境变量」入口：进编辑表单并强制展开对应折叠区
+    /// "Edit headers / environment variables" entry: opens the edit form with the matching
+    /// disclosure section forced open
     let onEditCredentials: (MCPServerEntry) -> Void
 
-    /// 待确认的跨源安装目标
+    /// Cross-source install target pending confirmation
     @State private var installTarget: AgentSource?
-    /// 项目级安装 sheet（repo 选择）
+    /// Project-level install sheet (repo picker)
     @State private var projectSheet = false
     @State private var projectRootPath = ""
     @State private var projectCursorToo = false
-    /// 安装结果反馈（矩阵下方短暂显示）
+    /// Install result feedback (shown briefly below the matrix)
     @State private var installNote: String?
-    /// 复制为 JSON 的反馈
+    /// Feedback for copy-as-JSON
     @State private var copyNote: String?
-    /// 预注册 client_id 草稿（高级折叠区）
+    /// Pre-registered client_id draft (advanced disclosure section)
     @State private var clientIDDraft = ""
     @State private var clientIDExpanded = false
-    /// 能力卡：当前分组（tools / prompts / resources）、搜索词、展开的工具
+    /// Capability card: current group (tools / prompts / resources), search text, expanded tool
     @State private var capabilityTab = "tools"
     @State private var capabilitySearch = ""
     @State private var expandedTools: Set<String> = []
-    /// 调用活跃（近 30 天逐日 + top 工具；onAppear 异步加载）
+    /// Call activity (daily over the last 30 days + top tools; loaded async in onAppear)
     @State private var activity: UsageService.MCPServerActivity?
-    /// 闲置清理（从所有源移除）确认与反馈
+    /// Idle cleanup (remove from every source) confirmation and feedback
     @State private var removeAllConfirm = false
     @State private var removeAllNote: String?
 
-    /// 实时条目：删除/安装后 service 重扫，这里跟着刷新
+    /// Live entries: the service rescans after delete / install, and this refreshes along with it
     private var entries: [MCPServerEntry] { service.entries(named: serverName) }
     private var primary: MCPServerEntry? { entries.first }
 
@@ -848,7 +873,7 @@ private struct MCPDetailView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: 定义卡
+    // MARK: Definition card
 
     @ViewBuilder
     private var definitionSection: some View {
@@ -917,7 +942,8 @@ private struct MCPDetailView: View {
             .frame(width: 44, alignment: .leading)
     }
 
-    // MARK: 连接与授权（v2.6：状态直显、动作摊开——不藏菜单、不让用户猜）
+    // MARK: Connection and authorization (v2.6: state shown directly, actions laid out — nothing
+    // hidden in menus, no guessing for the user)
 
     private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -936,15 +962,19 @@ private struct MCPDetailView: View {
                 .controlSize(.small)
             }
             VStack(alignment: .leading, spacing: 10) {
-                // ① 上次检测（逐处配置直显持久快照；从未检测过 = "尚未检测"）
+                // (1) Last probe (each config location shows its persisted snapshot directly; never
+                //     probed
+                // = the "not probed yet" label)
                 ForEach(entries) { entry in
                     probeStatusRow(entry)
                 }
-                // ② 鉴权动线（v2.7：按识别出的鉴权方式路由——OAuth 才给浏览器授权，
-                //    请求头密钥给「编辑请求头」，stdio 给「编辑环境变量」，不再让用户猜）
+                // (2) Auth flow (v2.7: routed by the detected auth method — only OAuth gets browser
+                //    authorization, header secrets get "Edit headers", stdio gets "Edit environment
+                //    variables"; no more guessing for the user)
                 MCPRowDivider()
                 authRouteSection
-                // ③ CLI 侧授权（按已配置的源逐行列出，带文字按钮直接可点）
+                // (3) CLI-side authorization (one row per configured source, with clickable text
+                //     buttons)
                 cliAuthRows
                 Text(L10n.text("The result is the last snapshot. Choose “Probe again” for a fresh one. Probe and auth requests go only to the address this server itself advertises.", zhHans: "检测结果为上次快照，点「重新检测」获取最新；检测与授权请求只发往该 server 自己披露的地址。")
                     + (primary?.transport == "stdio"
@@ -1003,8 +1033,9 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 鉴权路由（v2.7）：配置形态 + 持久快照信号，零网络零猜测。
-    /// envKeys 在索引层是 env/headers 键名的合集——remote 时按请求头解读，stdio 按环境变量。
+    /// Auth routing (v2.7): config shape + persisted snapshot signals, zero network, zero guessing.
+    /// envKeys at the index layer is the union of env/headers key names — read as headers for
+    /// remote, as environment variables for stdio.
     private var authRoute: MCPAuthRoute {
         guard let primary else { return .unknown }
         let schemes = entries.compactMap { service.probeSnapshots[$0.id]?.authScheme }
@@ -1019,7 +1050,8 @@ private struct MCPDetailView: View {
             hasToken: service.hasToken(for: primary))
     }
 
-    /// 鉴权动线：五路分流（OAuth 浏览器 / 请求头密钥 / 环境变量 / 无鉴权 / 待检测）
+    /// Auth flow: five-way split (OAuth browser / header secret / environment variables / no auth /
+    /// pending probe)
     @ViewBuilder
     private var authRouteSection: some View {
         if let primary {
@@ -1064,7 +1096,8 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 鉴权说明行：图标 + 标题 + 说明正文 + 可选动作按钮（正文可见，不用 tooltip）
+    /// Auth explanation row: icon + title + body text + optional action button (body is visible,
+    /// not a tooltip)
     private func authInfoRow(
         icon: String, title: String, body bodyText: String,
         buttonTitle: String?, prominent: Bool, action: (() -> Void)?
@@ -1096,8 +1129,10 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// Eureka 令牌行：状态点 + 说明正文 + 可见按钮（授权/撤销）；OAuth 进度就地显示。
-    /// prominent = false 用于「待检测」路由——授权仍可用但降为次要动作。
+    /// Eureka token row: status dot + body text + visible buttons (authorize / revoke); OAuth
+    /// progress shown in place.
+    /// prominent = false is for the "pending probe" route — authorization still works but is
+    /// demoted to a secondary action.
     @ViewBuilder
     private func eurekaTokenRow(prominent: Bool) -> some View {
         if let primary {
@@ -1136,7 +1171,8 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 高级：预注册 client_id（AS 不支持动态注册时的规范出口；client_id 非密钥）
+    /// Advanced: pre-registered client_id (the spec's way out when the AS doesn't support dynamic
+    /// registration; client_id isn't a secret)
     @ViewBuilder
     private var clientIDDisclosure: some View {
         if let primary {
@@ -1170,7 +1206,8 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// CLI 侧授权（每个已配置的源一行；codex 直跑授权命令，其余打开 CLI 引导）
+    /// CLI-side authorization (one row per configured source; codex runs the auth command
+    /// directly, the rest open CLI guidance)
     @ViewBuilder
     private var cliAuthRows: some View {
         let rows = cliAuthActionRows()
@@ -1215,7 +1252,8 @@ private struct MCPDetailView: View {
         return rows
     }
 
-    // MARK: 能力（工具/提示词/资源；MCP 的核心是它提供什么，这一区常驻——不让用户猜）
+    // MARK: Capabilities (tools / prompts / resources; what an MCP server provides is its core,
+    // so this section is always present — no guessing for the user)
 
     @ViewBuilder
     private var runtimeSection: some View {
@@ -1232,7 +1270,8 @@ private struct MCPDetailView: View {
                 if let cache {
                     capabilityBody(cache: cache, stat: stat)
                 } else {
-                    // 从未检测过也常驻本卡：告诉用户能力清单从哪来（可发现性）
+                    // Stays on this card even when never probed: tells the user where the
+                    // capability list comes from (discoverability)
                     Text(L10n.text("Not probed yet — choose “Probe again” above for this server’s tools, prompts, and resources.", zhHans: "尚未检测——点上方「重新检测」获取该 server 的工具、提示词与资源清单。")
                         + (primary?.transport == "stdio"
                             ? L10n.text(" (a stdio probe briefly starts the configured command and exits after reading)", zhHans: "（stdio server 检测时会短暂启动配置的命令，读完即退出）") : ""))
@@ -1260,7 +1299,7 @@ private struct MCPDetailView: View {
     private func capabilityBody(
         cache: MCPToolCacheEntry, stat: UsageService.MCPServerCallStat?
     ) -> some View {
-        // 概览 chips：开销与元信息（数量放进分组页签，不重复）
+        // Overview chips: cost and metadata (counts live in the group tabs, not duplicated)
         HStack(spacing: 6) {
             if cache.schemaTokens > 0 {
                 TagChip(L10n.format("~%@ tokens per turn", zhHans: "每轮 ~%@ tokens", String(formatTokens(cache.schemaTokens))))
@@ -1275,7 +1314,7 @@ private struct MCPDetailView: View {
                 TagChip(L10n.format("Total calls %@", zhHans: "累计调用 %@ 次", String(stat.calls)), neutral: true)
             }
         }
-        // 分组页签（只显示有数据的组；工具恒在）
+        // Group tabs (only groups with data are shown; tools is always present)
         HStack(spacing: 6) {
             capabilitySegment("tools", L10n.text("Tools", zhHans: "工具"), count: cache.toolCount)
             if let count = cache.promptCount {
@@ -1335,7 +1374,8 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 当前分组在搜索词下的命中数（SearchField 右侧计数胶囊用）
+    /// Hit count for the current group under the search text (for the count capsule on the right
+    /// of the SearchField)
     private func filteredCount(cache: MCPToolCacheEntry) -> Int {
         let query = capabilitySearch.trimmingCharacters(in: .whitespaces).lowercased()
         switch capabilityTab {
@@ -1378,7 +1418,8 @@ private struct MCPDetailView: View {
                     Text(L10n.format("No tools match “%@”", zhHans: "没有匹配「%@」的工具", String(capabilitySearch)))
                         .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
                 } else {
-                    // 表格井：外框 + 实心行线（brutal = 2px 墨），工具逐条成格
+                    // Table well: outer frame + solid row rules (brutal = 2px ink), one cell per
+                    // tool
                     MCPListWell {
                         ForEach(Array(filtered.enumerated()), id: \.element.name) { index, tool in
                             if index > 0 { MCPRowDivider() }
@@ -1396,7 +1437,7 @@ private struct MCPDetailView: View {
                     }
                 }
             } else if !cache.toolNames.isEmpty {
-                // 旧缓存只有名字（重新检测一次即升级为明细）
+                // Old caches only have names (one re-probe upgrades them to full details)
                 FlowLayout(spacing: 5, lineSpacing: 5) {
                     ForEach(cache.toolNames, id: \.self) { name in
                         Text(name)
@@ -1432,7 +1473,8 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 闲置提示：付着每轮 schema 税却 30 天没被调用 → 建议停用/移除
+    /// Idle hint: paying the per-turn schema tax but not called in 30 days → suggest disabling /
+    /// removing
     private func idleHint(
         cache: MCPToolCacheEntry?, stat: UsageService.MCPServerCallStat?
     ) -> String? {
@@ -1455,9 +1497,9 @@ private struct MCPDetailView: View {
         }
     }
 
-    // MARK: 调用活跃（用量下钻：近 30 天逐日 + top 工具）
+    // MARK: Call activity (usage drill-down: daily over the last 30 days + top tools)
 
-    /// 近 30 天窗口合计（series 已补零，直接求和）
+    /// Total over the last 30-day window (series is already zero-filled, so just sum it)
     private var recentCalls: Int {
         activity?.series.reduce(0) { $0 + $1.count } ?? 0
     }
@@ -1496,7 +1538,7 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 30 根迷你柱（缺 0 画基线灰；有调用按峰值缩放）
+    /// 30 mini bars (zero draws a grey baseline; days with calls scale to the peak)
     private func activityBars(_ activity: UsageService.MCPServerActivity) -> some View {
         let peak = max(activity.series.map(\.count).max() ?? 1, 1)
         return HStack(alignment: .bottom, spacing: 2) {
@@ -1514,7 +1556,7 @@ private struct MCPDetailView: View {
         .help(L10n.format("Calls per day over 30 days (peak %@/day)", zhHans: "近 30 天逐日调用（最高 %@ 次/天）", String(peak)))
     }
 
-    // MARK: 跨源矩阵（照 SkillDetailView.matrixSection 模板）
+    // MARK: Cross-source matrix (following the SkillDetailView.matrixSection template)
 
     private var matrixSection: some View {
         let configuredSources = Set(entries.map(\.source))
@@ -1617,8 +1659,9 @@ private struct MCPDetailView: View {
         }
     }
 
-    /// 项目级瓦片：不属于任何单一 agent（claude 的 .mcp.json 是 MCP 官方项目标准，
-    /// cursor 有同构约定）；已配置过也允许再装到别的 repo，所以始终可点
+    /// Project-level tile: belongs to no single agent (claude's .mcp.json is MCP's official project
+    /// standard, cursor has an equivalent convention); it can be installed into another repo even
+    /// when already configured, so it's always clickable
     private var projectMatrixTile: some View {
         let projectConfigured = entries.contains { $0.projectName != nil }
         return VStack(spacing: 4) {
@@ -1649,7 +1692,7 @@ private struct MCPDetailView: View {
             : L10n.text("Write this server into the selected repo’s .mcp.json (shared with the project)", zhHans: "把该 server 写入所选 repo 的 .mcp.json（随项目共享）"))
     }
 
-    /// repo 选择 sheet：最近项目（扫描实勘的根）+ 浏览兜底
+    /// Repo picker sheet: recent projects (roots found by the scan) + browse fallback
     private var projectInstallSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.format("Install “%@” into a project", zhHans: "安装「%@」到项目", String(serverName)))
@@ -1731,7 +1774,7 @@ private struct MCPDetailView: View {
         }
     }
 
-    // MARK: 各处配置
+    // MARK: Config locations
 
     private var occurrencesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1796,8 +1839,9 @@ private struct MCPDetailView: View {
         .help(L10n.text("Click to edit this definition", zhHans: "点击编辑该处定义"))
     }
 
-    /// 状态 chip：检测中 → spinner；否则显示**持久化快照**（重启不丢，v2.6 直显）；
-    /// 超过 7 天附「已过期」提示（相对时间本就带"几天前"）
+    /// Status chip: probing → spinner; otherwise shows the **persisted snapshot** (survives
+    /// restarts, shown directly since v2.6); older than 7 days adds a "stale" hint (the relative
+    /// time already reads "N days ago")
     @ViewBuilder
     private func probeChip(for entry: MCPServerEntry) -> some View {
         if service.probeResults[entry.id] == .checking {
@@ -1818,15 +1862,17 @@ private struct MCPDetailView: View {
     }
 }
 
-// MARK: - 滑入表单（新建 / 粘贴 JSON 导入）
+// MARK: - Slide-in form (create / import pasted JSON)
 
 struct MCPFormTarget: Identifiable {
     enum Mode { case quick, form, paste }
     let id: String
     var mode: Mode
-    /// 非 nil = 编辑既有配置处（名称与写入位置锁定，字段预填现值）
+    /// Non-nil = editing an existing config location (name and write location locked, fields
+    /// prefilled with current values)
     var editing: MCPServerEntry? = nil
-    /// true = 从「编辑请求头/环境变量」进来：对应折叠区强制展开（即使还没有键）
+    /// true = entered from "Edit headers / environment variables": the matching disclosure section
+    /// is forced open (even with no keys yet)
     var expandCredentials: Bool = false
 }
 
@@ -1844,7 +1890,7 @@ private struct MCPServerFormView: View {
     @State private var mode: MCPFormTarget.Mode = .form
     @State private var loaded = false
 
-    // 表单模式
+    // Form mode
     @State private var name = ""
     @State private var isRemote = false
     @State private var command = ""
@@ -1856,22 +1902,24 @@ private struct MCPServerFormView: View {
     @State private var envExpanded = false
     @State private var headersExpanded = false
 
-    // 快速安装：一个输入框通吃 命令 / URL / JSON（自动识别、名称自动派生）
+    // Quick install: one input box handles command / URL / JSON (auto-detected, name derived
+    // automatically)
     @State private var quickText = ""
 
-    // JSON 模式（与表单双向同步：切换页签时互相灌值）
+    // JSON mode (two-way synced with the form: values are carried over when switching tabs)
     @State private var pasteText = ""
 
-    // 共用
+    // Shared
     @State private var selectedTargets: Set<AgentSource> = []
-    // 项目级安装（新建模式）：选 repo + 约定（claude .mcp.json 必选、cursor 可选）
+    // Project-level install (create mode): pick a repo + conventions (claude .mcp.json required,
+    // cursor optional)
     @State private var projectInstall = false
     @State private var projectRootPath = ""
     @State private var projectCursorToo = false
     @State private var resultNote: String?
     @State private var submitting = false
 
-    /// 编辑模式：名称与写入位置锁定，字段预填现值
+    /// Edit mode: name and write location locked, fields prefilled with current values
     private var isEditing: Bool { target.editing != nil }
 
     var body: some View {
@@ -1916,8 +1964,9 @@ private struct MCPServerFormView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            // 三页签互通（对照 ZCode）：快速安装 / 手动配置 / JSON，切换时互相灌值；
-            // 编辑态没有"快速安装"（定义已存在）
+            // The three tabs interoperate (modeled on ZCode): Quick install / Manual / JSON, values
+            // carried over on switch; edit mode has no "Quick install" (the definition already
+            // exists)
             CapsuleTabTray {
                 if !isEditing {
                     CapsuleTabButton(
@@ -1938,17 +1987,17 @@ private struct MCPServerFormView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - 卡片（ZCode 式：标签在上、示例占位、可选项折叠）
+    // MARK: - Cards (ZCode style: label on top, example placeholders, optional fields folded)
 
     private var card: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // 快速安装无名称输入（名称自动派生，想改名切「手动配置」）
+            // Quick install has no name input (the name is derived; switch to "Manual" to rename)
             if mode != .quick {
                 fieldColumn(L10n.text("Name", zhHans: "名称")) {
                     TextField("my-mcp-server", text: $name)
                         .textFieldStyle(.roundedBorder)
                         .font(Theme.font.monoSkillName(12, weight: .regular))
-                        .disabled(isEditing)  // 改名 = 删 + 建（同 Codex profile 规矩）
+                        .disabled(isEditing)  // rename = delete + create (same rule as Codex profiles)
                         .frame(maxWidth: 320)
                 }
             }
@@ -1994,7 +2043,7 @@ private struct MCPServerFormView: View {
                 .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
     }
 
-    /// 标签在上的字段列（ZCode 式）
+    /// Field column with the label on top (ZCode style)
     private func fieldColumn<Content: View>(
         _ label: String, @ViewBuilder content: () -> Content
     ) -> some View {
@@ -2113,7 +2162,7 @@ private struct MCPServerFormView: View {
         }
     }
 
-    // MARK: - 快速安装（一框通吃 命令 / URL / JSON）
+    // MARK: - Quick install (one box handles command / URL / JSON)
 
     private var parsedQuick: [MCPServerDefinition] {
         MCPServerEditor.parseQuickInput(quickText)
@@ -2166,7 +2215,7 @@ private struct MCPServerFormView: View {
         }
     }
 
-    // MARK: - JSON 模式（与表单同步）
+    // MARK: - JSON mode (synced with the form)
 
     @ViewBuilder
     private var jsonEditor: some View {
@@ -2194,15 +2243,16 @@ private struct MCPServerFormView: View {
                 ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
     }
 
-    /// 页签互通：快速安装/手动配置/JSON 切换时互相灌值
-    /// （多 server 时表单只显示第一个，回原页签提交仍写全部）
+    /// Tab interop: values are carried over when switching Quick install / Manual / JSON
+    /// (with multiple servers the form shows only the first; submitting from the original tab still
+    /// writes all of them)
     private func switchMode(_ new: MCPFormTarget.Mode) {
         guard new != mode else { return }
         switch new {
         case .paste:
             let trimmedQuick = quickText.trimmingCharacters(in: .whitespacesAndNewlines)
             if mode == .quick, trimmedQuick.hasPrefix("{") {
-                pasteText = trimmedQuick  // 快速框里本就是 JSON，原样带过去（多 server 不丢）
+                pasteText = trimmedQuick  // the quick box already holds JSON; carry it over as-is (multiple servers aren't lost)
             } else {
                 if mode == .quick, let first = parsedQuick.first {
                     populate(from: first, keepName: false)
@@ -2221,7 +2271,7 @@ private struct MCPServerFormView: View {
                 resultNote = L10n.text("JSON did not parse into a server; the form was left unchanged", zhHans: "JSON 未解析出 server，保留原表单内容")
             }
         case .quick:
-            break  // 快速输入框保持用户原文
+            break  // the quick input box keeps the user's original text
         }
         mode = new
     }
@@ -2271,8 +2321,10 @@ private struct MCPServerFormView: View {
         mode = target.mode
         guard let entry = target.editing else { return }
         name = entry.name
-        // 预填现值（含 env/headers）：编辑必须见值——不扩大暴露面（详情页本就有
-        // "用默认编辑器打开配置文件"可见整份明文）；值仍不落库、不进日志、不上云。
+        // Prefill current values (including env/headers): editing must show the values — this
+        // doesn't widen exposure (the detail page already has "Open config file in default editor",
+        // which shows the whole file in plain text); values are still never persisted to the DB,
+        // logged, or uploaded.
         service.definition(of: entry) { definition in
             guard let definition else {
                 resultNote = L10n.text("Couldn’t read the existing definition", zhHans: "读取现有定义失败")
@@ -2285,7 +2337,7 @@ private struct MCPServerFormView: View {
         }
     }
 
-    // MARK: - 作用域 / 目标
+    // MARK: - Scope / targets
 
     private var availableTargets: [AgentSource] { MCPService.writableSources }
 
@@ -2311,7 +2363,8 @@ private struct MCPServerFormView: View {
         }
     }
 
-    /// 项目级安装开关（随 repo 共享的 .mcp.json，MCP 官方项目标准）
+    /// Project-level install toggle (a .mcp.json shared with the repo, MCP's official project
+    /// standard)
     private var projectChip: some View {
         Button { projectInstall.toggle() } label: {
             HStack(spacing: 5) {
@@ -2335,7 +2388,8 @@ private struct MCPServerFormView: View {
         .help(L10n.text("Writes .mcp.json at the repo root and shares it with the project (the Claude convention). Cursor’s project config can be written too.", zhHans: "写入仓库根的 .mcp.json，随项目共享（claude 约定）；可一并写 cursor 的项目配置"))
     }
 
-    /// repo 选择：最近项目（扫描实勘的根）+ 浏览兜底；cursor 项目配置可选
+    /// Repo picker: recent projects (roots found by the scan) + browse fallback; cursor project
+    /// config is optional
     private var projectPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -2415,7 +2469,7 @@ private struct MCPServerFormView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - 提交
+    // MARK: - Submit
 
     private var footerHint: String {
         if let entry = target.editing {
@@ -2431,7 +2485,7 @@ private struct MCPServerFormView: View {
         return L10n.format("Write global config for %@ agents (backup each before writing)", zhHans: "写入 %@ 个 agent 的全局配置（写前各留备份）", String(globalCount))
     }
 
-    /// 项目级安装有效 = 开关开 + repo 根路径非空
+    /// Project-level install is valid = toggle on + non-empty repo root path
     private var validProjectInstall: Bool {
         projectInstall && !projectRootPath.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -2483,7 +2537,8 @@ private struct MCPServerFormView: View {
     private func submit() {
         submitting = true
         resultNote = L10n.text("Writing…", zhHans: "正在写入…")
-        // 编辑：原位改写该条目所在配置（JSON 模式也支持——取首个 server、名称强制回原名）
+        // Edit: rewrite the entry in place in its config (JSON mode too — takes the first server
+        // and forces the name back to the original)
         if let entry = target.editing {
             var definition = mode == .form
                 ? formDefinition()
@@ -2509,7 +2564,9 @@ private struct MCPServerFormView: View {
             submitting = false
             return
         }
-        // 全局目标 + 项目级目标并行推进，结果统一聚合（项目级单列前缀防同名源混淆）
+        // Global targets + project-level targets proceed in parallel, results aggregated together
+        // (project-level entries get their own prefix so they aren't confused with same-named
+        // sources)
         var projectSources: [AgentSource] = [.claude]
         if projectCursorToo { projectSources.append(.cursor) }
         let useProject = validProjectInstall

@@ -1,38 +1,40 @@
 import Foundation
 
-/// 状态机输出的副作用：调用方（app 层）据此驱动 UI / 持久化
+/// Side effects emitted by the state machine; the caller (app layer) drives UI / persistence from
+/// them
 public enum TaskStoreEffect: Equatable, Sendable {
-    /// 有任务结束，应展示完成卡片并写入历史
+    /// A task finished: show a completion card and write it to history
     case taskFinished(FinishedTask)
-    /// 有任务进入等待确认状态，应展示提醒卡片
+    /// A task is waiting for confirmation: show a reminder card
     case taskWaiting(AgentTask)
-    /// 活跃任务集合变化（数量或状态），compact 胶囊需要刷新
+    /// The active task set changed (count or state); the compact capsule needs a refresh
     case activeTasksChanged
 }
 
-/// 会话状态机：事件进、状态表出。纯逻辑，无 IO，调用方负责线程约束（app 内主线程）。
-/// key = source:sessionId。
+/// Session state machine: events in, state table out. Pure logic, no IO; the caller owns thread
+/// confinement (main thread in the app). key = source:sessionId.
 ///
-/// 生命周期：sessionStarted/心跳发现 → idle/running ↔ waiting → (turn 完成) idle
-/// （Claude 会话开着可反复跑 turn；Codex 完成即移除）→ sessionEnded/超时 → 移除。
+/// Lifecycle: sessionStarted / discovered via heartbeat → idle/running ↔ waiting → (turn done) idle
+/// (an open Claude session can run turns repeatedly; Codex is removed on completion) → sessionEnded / timeout → removed.
 public final class TaskStore {
     public private(set) var activeTasks: [String: AgentTask] = [:]
 
     public init() {}
 
-    /// 应用一个领域事件，返回需要执行的副作用
+    /// Apply one domain event and return the side effects to execute
     @discardableResult
     public func apply(_ event: TaskEvent) -> [TaskStoreEffect] {
         let key = AgentTask.key(source: event.source, sessionId: event.sessionId)
         let effects = applyKind(event, key: key)
-        // 任何事件带来的"会话首启时间"都补到任务上（只设一次）
+        // Backfill the "session first-start time" from any event onto the task (set only once)
         if let sessionStart = event.sessionStartedAt,
            var task = activeTasks[key], task.sessionStartedAt == nil {
             task.sessionStartedAt = sessionStart
             activeTasks[key] = task
         }
-        // 终端归属则**每次都更新**（不是只设一次）：同一会话 resume 到别的终端后，
-        // 跳转必须落到当前那个，而不是最初那个。
+        // Terminal ownership, by contrast, is **updated every time** (not set once): after a
+        // session is resumed in another terminal, jumping must land on the current one, not the
+        // original one.
         if let terminal = event.terminal, var task = activeTasks[key], task.terminal != terminal {
             task.terminal = terminal
             activeTasks[key] = task
@@ -40,10 +42,11 @@ public final class TaskStore {
         return effects
     }
 
-    /// 补齐终端归属。与事件无关（探测得来），故单独开口而不是伪造一个事件。
+    /// Backfill terminal ownership. It is unrelated to events (it comes from probing), so it gets
+    /// its own entry point instead of a faked event.
     ///
-    /// 已有 `.hook` 精度的绑定不会被 `.probe` 覆盖 —— 前者由 relay 在会话所在终端内直接读到，
-    /// 后者是按 cwd 匹配进程推断的，可信度不同。返回是否真的改动了状态。
+    /// A binding with `.hook` precision is never overwritten by `.probe` — the former is read directly by the relay inside the session's terminal,
+    /// the latter is inferred by matching processes on cwd, so they differ in trust. Returns whether state actually changed.
     @discardableResult
     public func attachTerminal(
         _ binding: TerminalBinding, source: AgentSource, sessionId: String
@@ -63,14 +66,16 @@ public final class TaskStore {
         switch event.kind {
         case .taskStarted(let title):
             if var task = activeTasks[key] {
-                // 同会话再次提交（追加引导/等待输入后回复/空闲后新 turn）
+                // Another submit in the same session (follow-up steering / reply after waiting for
+                // input / new turn after idle)
                 task.lastActivityAt = event.timestamp
                 if task.title == nil { task.title = title }
                 if case .idle = task.phase {
-                    // 空闲后开新 turn：计时从现在起，新 prompt 即新任务名
+                    // New turn after idle: timing restarts now, and the new prompt becomes the new
+                    // task name
                     task.startedAt = event.timestamp
                     task.currentActivity = nil
-                    task.subagents = []  // 子 agent 属于上一 turn，清空
+                    task.subagents = []  // Subagents belong to the previous turn; clear them
                     if let title { task.title = title }
                 }
                 if case .running = task.phase {} else { task.phase = .running }
@@ -90,8 +95,9 @@ public final class TaskStore {
         case .taskFinished(let outcome, let title, let detail):
             let existing = activeTasks[key]
             if var task = existing, case .idle = task.phase {
-                // 已收尾会话的重复完成信号（hooks 与 transcript 监视双源）：
-                // 刷新活性即可，绝不重复出卡/写历史
+                // Duplicate completion signal for an already-finished session (hooks and transcript
+                // watching are dual sources): just refresh liveness; never emit a card or write
+                // history twice
                 task.lastActivityAt = event.timestamp
                 activeTasks[key] = task
                 return []
@@ -109,16 +115,16 @@ public final class TaskStore {
                 terminal: existing?.terminal
             )
             if var task = existing {
-                // 已知会话（Claude/Codex）：turn 结束 → 转空闲，等下一个 prompt
-                // Codex 空闲会话由 reapStaleTasks 按 idleTimeout 静默回收
+                // Known session (Claude/Codex): turn ended → go idle and wait for the next prompt
+                // Idle Codex sessions are silently reaped by reapStaleTasks after idleTimeout
                 task.phase = .idle
                 task.lastActivityAt = event.timestamp
                 task.currentActivity = nil
-                task.subagents = []  // 子 agent 属于本 turn，收尾即清
+                task.subagents = []  // Subagents belong to this turn; clear them on finish
                 if task.title == nil { task.title = title }
                 activeTasks[key] = task
             } else {
-                // 没赶上开始事件的未知会话：不留空闲残影
+                // Unknown session that missed its start event: leave no idle ghost behind
                 activeTasks.removeValue(forKey: key)
             }
             return [.taskFinished(finished), .activeTasksChanged]
@@ -130,7 +136,7 @@ public final class TaskStore {
                 activeTasks[key] = task
                 return [.taskWaiting(task), .activeTasksChanged]
             }
-            // 没赶上开始事件（hooks 中途安装）：以等待状态登记
+            // Missed the start event (hooks installed mid-turn): register in the waiting state
             let task = AgentTask(
                 source: event.source,
                 sessionId: event.sessionId,
@@ -139,13 +145,14 @@ public final class TaskStore {
                 startedAt: event.timestamp,
                 phase: .waiting(reason, since: event.timestamp)
             )
-            _ = message  // 文案不当标题（titleUpdate 会带来 ai-title）
+            _ = message  // The message text is not used as a title (titleUpdate brings the ai-title)
             activeTasks[key] = task
             return [.taskWaiting(task), .activeTasksChanged]
 
         case .activity(let tool):
             guard var task = activeTasks[key] else {
-                // 心跳发现未知会话（app 在 turn 中途启动）：登记为运行中
+                // Heartbeat discovered an unknown session (app launched mid-turn): register it as
+                // running
                 activeTasks[key] = AgentTask(
                     source: event.source,
                     sessionId: event.sessionId,
@@ -161,7 +168,7 @@ public final class TaskStore {
             var effects: [TaskStoreEffect] = []
             switch task.phase {
             case .waiting, .idle:
-                // 等待已处理 / 空闲会话有工具在跑 → running
+                // Wait resolved / an idle session has a tool running → running
                 task.phase = .running
                 effects.append(.activeTasksChanged)
             case .running:
@@ -169,12 +176,13 @@ public final class TaskStore {
             }
             if let tool, tool != task.currentActivity {
                 task.currentActivity = tool
-                // 换了工具，上一个工具的对象串就过期了（PostToolUse 只带名字，带不出对象）
+                // The tool changed, so the previous tool's target string is stale (PostToolUse
+                // carries only the name, not the target)
                 task.currentToolDetail = nil
                 if effects.isEmpty { effects.append(.activeTasksChanged) }
             }
             if task.isCompacting {
-                task.isCompacting = false  // 有工具动静说明压缩已结束
+                task.isCompacting = false  // Tool activity means compaction has finished
                 if effects.isEmpty { effects.append(.activeTasksChanged) }
             }
             activeTasks[key] = task
@@ -182,7 +190,8 @@ public final class TaskStore {
 
         case .toolPending(let tool, let detail):
             guard var task = activeTasks[key] else {
-                // 与 activity 同样的兜底：app 在 turn 中途启动时先登记为运行中
+                // Same fallback as activity: when the app launches mid-turn, register as running
+                // first
                 var task = AgentTask(
                     source: event.source,
                     sessionId: event.sessionId,
@@ -196,8 +205,9 @@ public final class TaskStore {
                 return [.activeTasksChanged]
             }
             task.lastActivityAt = event.timestamp
-            // PreToolUse 在权限提示**之前**到，所以此刻置 running 是对的；
-            // 紧随其后的 Notification 会把它重新置为 waiting，并借用这里存下的对象串。
+            // PreToolUse arrives **before** the permission prompt, so setting running here is
+            // correct; the Notification right after it flips it back to waiting and borrows the
+            // target string stored here.
             if case .running = task.phase {} else { task.phase = .running }
             task.currentActivity = tool
             task.currentToolDetail = detail
@@ -214,7 +224,8 @@ public final class TaskStore {
 
         case .contextUpdate(let percent):
             guard var task = activeTasks[key] else { return [] }
-            // 整数桶变化才刷 UI，避免高频小数抖动
+            // Refresh the UI only when the integer bucket changes, avoiding high-frequency
+            // fractional jitter
             let oldBucket = task.contextUsedPercent.map { Int($0.rounded()) }
             task.contextUsedPercent = percent
             task.lastActivityAt = event.timestamp
@@ -228,7 +239,8 @@ public final class TaskStore {
             return [.activeTasksChanged]
 
         case .subagentsUpdated(let subagents):
-            // 不为子 agent 事件凭空建会话；列表无变化则不刷 UI（防 5s 抖动）
+            // Don't create a session out of thin air for subagent events; skip the UI refresh when
+            // the list is unchanged (prevents 5s jitter)
             guard var task = activeTasks[key] else { return [] }
             guard task.subagents != subagents else { return [] }
             task.subagents = subagents
@@ -238,7 +250,7 @@ public final class TaskStore {
 
         case .sessionStarted:
             guard activeTasks[key] == nil else { return [] }
-            // 会话打开但还没跑任务：登记为空闲（任务列表可见）
+            // Session open but no task run yet: register as idle (visible in the task list)
             activeTasks[key] = AgentTask(
                 source: event.source,
                 sessionId: event.sessionId,
@@ -252,10 +264,10 @@ public final class TaskStore {
         case .sessionEnded(let reason):
             guard let task = activeTasks.removeValue(forKey: key) else { return [] }
             if case .idle = task.phase {
-                // 空闲会话正常关闭：不算任务中断，不出卡
+                // Idle session closed normally: not a task interruption, no card
                 return [.activeTasksChanged]
             }
-            // 任务还在跑会话就结束了 → 视为中断
+            // Session ended while the task was still running → treat as interrupted
             let finished = FinishedTask(
                 source: event.source,
                 sessionId: event.sessionId,
@@ -274,8 +286,8 @@ public final class TaskStore {
         }
     }
 
-    /// 清理超时任务（hook 丢失兜底）：
-    /// 运行/等待超时 → 判中断出卡；空闲超时（更短，可能没收到 SessionEnd）→ 静默移除
+    /// Reap timed-out tasks (fallback for lost hooks): running/waiting timeout → mark interrupted
+    /// and emit a card; idle timeout (shorter, SessionEnd may have been missed) → remove silently
     @discardableResult
     public func reapStaleTasks(
         now: Date, runningTimeout: TimeInterval, idleTimeout: TimeInterval = 3600
@@ -308,14 +320,14 @@ public final class TaskStore {
         return effects
     }
 
-    /// 运行/等待中的任务，按开始时间排序（胶囊计数、卡片）
+    /// Running/waiting tasks, sorted by start time (capsule count, cards)
     public var sortedActiveTasks: [AgentTask] {
         activeTasks.values
             .filter { if case .idle = $0.phase { return false } else { return true } }
             .sorted { $0.startedAt < $1.startedAt }
     }
 
-    /// 空闲会话，按最近活跃排序（任务列表"空闲"分组）
+    /// Idle sessions, sorted by most recent activity (the task list's "idle" group)
     public var sortedIdleTasks: [AgentTask] {
         activeTasks.values
             .filter { if case .idle = $0.phase { return true } else { return false } }

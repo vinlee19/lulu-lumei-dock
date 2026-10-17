@@ -1,8 +1,9 @@
 import Foundation
 
 extension L10n {
-    /// 健康登记键 → 英文展示名。键是 `HealthRegistry` 的身份，中英文界面都用同一个键注册。
-    /// 新增 `register` 名字时在这里补一行，否则英文界面会直接显示中文键。
+    /// Health-registry key → English display name. The key is the `HealthRegistry` identity; both
+    /// Chinese and English UIs register with the same key. When adding a new `register` name, add a
+    /// line here, or the English UI shows the Chinese key as-is.
     static let healthTitles: [String: String] = [
         "用量扫描 Claude": "Usage scan Claude",
         "用量扫描 Codex": "Usage scan Codex",

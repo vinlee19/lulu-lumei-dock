@@ -2,7 +2,8 @@ import Combine
 import Foundation
 import Sparkle
 
-/// Sparkle 应用内更新入口。仅标准 .app 包启用；`swift run` 与所有 CLI 模式都不会联网检查。
+/// Sparkle in-app update entry point. Enabled only for a standard .app bundle; `swift run` and all
+/// CLI modes never check over the network.
 @MainActor
 final class UpdateService: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
@@ -37,8 +38,9 @@ final class UpdateService: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// 启动调度器，并按用户当前偏好额外执行一次“本次启动”的后台检查。
-    /// Sparkle 要求强制启动检查只能紧跟在 updater 启动之后调用。
+    /// Starts the scheduler and, per the user's current preference, runs one extra background "this
+    /// launch" check. Sparkle requires a forced launch check to be called right after the updater
+    /// starts.
     func start() {
         guard !hasStarted, let updaterController else { return }
         hasStarted = true
@@ -48,13 +50,15 @@ final class UpdateService: ObservableObject {
         }
     }
 
-    /// 此属性由 Sparkle 自己写入 NSUserDefaults；不要在 AppSettings 中再存一份。
+    /// Sparkle writes this property to NSUserDefaults itself; don't store another copy in
+    /// AppSettings.
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
         guard let updater = updaterController?.updater else { return }
         updater.automaticallyChecksForUpdates = enabled
     }
 
-    /// 用户主动触发标准 Sparkle 流程；无更新与网络错误均由标准界面明确反馈。
+    /// User-initiated standard Sparkle flow; both "no update" and network errors get explicit
+    /// feedback from the standard UI.
     func checkForUpdates() {
         guard canCheckForUpdates else { return }
         updaterController?.checkForUpdates(nil)

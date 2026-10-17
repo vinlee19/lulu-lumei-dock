@@ -23,7 +23,7 @@ public enum SQLiteValue {
     }
 }
 
-/// 查询结果行的轻量读取器
+/// Lightweight reader for a query result row
 public struct SQLiteRow {
     let statement: OpaquePointer
 
@@ -39,7 +39,7 @@ public struct SQLiteRow {
         sqlite3_column_double(statement, index)
     }
 
-    /// BLOB 列（NULL → nil；零长度 → 空 Data）
+    /// BLOB column (NULL → nil; zero length → empty Data)
     public func blob(_ index: Int32) -> Data? {
         guard !isNull(index) else { return nil }
         let count = Int(sqlite3_column_bytes(statement, index))
@@ -56,15 +56,17 @@ public struct SQLiteRow {
     }
 }
 
-/// 系统 libsqlite3 薄封装：串行使用（调用方负责队列约束），WAL 模式。
-/// 数据工程师可直接 `sqlite3 eureka.sqlite` 查库调试。
+/// Thin wrapper over the system libsqlite3: used serially (callers own the queue constraint), WAL
+/// mode. Data engineers can query and debug the DB directly with `sqlite3 eureka.sqlite`.
 public final class SQLiteDB {
-    /// 锁争用等待上限（毫秒）。扫描是每文件一个短事务，5s 足以吸收所有争用。
+    /// Maximum wait on lock contention (milliseconds). Scans use one short transaction per file; 5s
+    /// absorbs all contention.
     private static let busyTimeoutMs: Int32 = 5000
 
     private var handle: OpaquePointer?
 
-    /// readOnly=true 用于只读打开外部库（如 opencode.db）：绝不建库/写入，也不改 journal 模式。
+    /// readOnly=true opens an external DB read-only (e.g. opencode.db): never creates or writes it,
+    /// nor changes its journal mode.
     public init(path: String, readOnly: Bool = false) throws {
         var db: OpaquePointer?
         let flags = readOnly
@@ -76,9 +78,10 @@ public final class SQLiteDB {
             throw SQLiteError(code: SQLITE_CANTOPEN, message: message)
         }
         handle = db
-        // 锁争用时最多等待 5s 再返回，而非立刻抛 SQLITE_BUSY。
-        // 多连接（UsageService / SessionBrowser）与跨进程（--usage-snapshot CLI）
-        // 并发写时，配合 WAL + BEGIN IMMEDIATE 即可避免 "database is locked"。
+        // On lock contention wait up to 5s before returning, instead of throwing SQLITE_BUSY
+        // immediately. With multiple connections (UsageService / SessionBrowser) and cross-process
+        // writers (the --usage-snapshot CLI) writing concurrently, this plus WAL + BEGIN IMMEDIATE
+        // avoids "database is locked".
         sqlite3_busy_timeout(db, Self.busyTimeoutMs)
         if !readOnly {
             try execute("PRAGMA journal_mode=WAL")
@@ -131,7 +134,8 @@ public final class SQLiteDB {
         sqlite3_last_insert_rowid(handle)
     }
 
-    /// 最近一条语句实际改动的行数（INSERT OR IGNORE 判定是否真插入：0=被忽略）
+    /// Rows actually changed by the last statement (tells whether INSERT OR IGNORE really inserted:
+    /// 0 = ignored)
     public var changes: Int {
         Int(sqlite3_changes(handle))
     }
