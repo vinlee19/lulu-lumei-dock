@@ -61,6 +61,46 @@ struct HistoryView: View {
         sortMode == .active ? task.finishedAt : startKey(task)
     }
 
+    /// Header count: merged sessions without harness background calls, so it matches the
+    /// per-day group counts and the sidebar badge.
+    private var userSessionCount: Int {
+        mergedSessions.filter { !PromptClassifier.isHarnessUtility($0.title ?? "") }.count
+    }
+
+    private enum HistoryLine: Identifiable {
+        case session(MergedSessionTask)
+        case utilities(Int)
+
+        var id: String {
+            switch self {
+            case .session(let task): return task.id
+            case .utilities: return "harness-utilities"
+            }
+        }
+    }
+
+    /// Folds a day's harness background calls into one row, placed where the first one was;
+    /// user sessions keep their order. `userCount` feeds the day header.
+    private func historyLines(
+        _ tasks: [MergedSessionTask]
+    ) -> (rows: [HistoryLine], userCount: Int) {
+        let isUtility = { (task: MergedSessionTask) in
+            PromptClassifier.isHarnessUtility(task.title ?? "")
+        }
+        let utilityCount = tasks.filter(isUtility).count
+        var rows: [HistoryLine] = []
+        var folded = false
+        for task in tasks {
+            if !isUtility(task) {
+                rows.append(.session(task))
+            } else if !folded {
+                rows.append(.utilities(utilityCount))
+                folded = true
+            }
+        }
+        return (rows, tasks.count - utilityCount)
+    }
+
     /// 四档分组：今天 / 昨天 / 本周更早 / 更早（sortedTasks 已倒序，组内保持该顺序）。
     /// 运行中的会话已在置顶分组呈现，这里必须剔除：AgentTask.id 与 MergedSessionTask.id
     /// 同为 `source:sessionId`，同一 id 在同一个 LazyVStack 的两个 ForEach 里重复出现时，
@@ -118,13 +158,22 @@ struct HistoryView: View {
                         }
 
                         ForEach(dayGroups, id: \.group) { entry in
-                            groupHeader(title: entry.group.label, count: entry.tasks.count)
-                            ForEach(entry.tasks) { task in
-                                HistoryRow(
-                                    task: task,
-                                    tokens: tokens[task.sessionId],
-                                    terminal: terminals[AgentTask.key(
-                                        source: task.source, sessionId: task.sessionId)])
+                            let lines = historyLines(entry.tasks)
+                            groupHeader(title: entry.group.label, count: lines.userCount)
+                            ForEach(lines.rows) { row in
+                                switch row {
+                                case .session(let task):
+                                    HistoryRow(
+                                        task: task,
+                                        tokens: tokens[task.sessionId],
+                                        terminal: terminals[AgentTask.key(
+                                            source: task.source, sessionId: task.sessionId)])
+                                case .utilities(let count):
+                                    HarnessUtilityRow(
+                                        count: count,
+                                        subtitle: "记忆压缩、分支名生成这类内部提示，不是你发起的会话",
+                                        verticalPadding: Theme.spacing.row)
+                                }
                                 Divider().padding(.leading, 44).opacity(0.5)
                             }
                         }
@@ -148,7 +197,7 @@ struct HistoryView: View {
         HStack(spacing: 8) {
             Text("任务历史")
                 .font(Theme.font.pageTitle)
-            Text("跨 \(Set(tasks.map(\.source)).count) 个来源 · 共 \(dayGroups.reduce(0) { $0 + $1.tasks.count }) 个会话")
+            Text("跨 \(Set(tasks.map(\.source)).count) 个来源 · 共 \(userSessionCount) 个会话")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             if let exportMessage {

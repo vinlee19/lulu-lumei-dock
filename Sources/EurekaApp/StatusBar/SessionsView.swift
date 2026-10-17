@@ -263,8 +263,13 @@ struct SessionsView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         // 扁平列表（最近活跃 / 大小 / 时长）：无项目属性
-                        ForEach(service.flatSessions) { session in
+                        let flat = sessionLines(service.flatSessions)
+                        ForEach(flat.users) { session in
                             sessionRow(session)
+                            Divider().padding(.leading, 12).opacity(0.4)
+                        }
+                        if flat.utilityCount > 0 {
+                            HarnessUtilityRow(count: flat.utilityCount, subtitle: Self.utilitySubtitle)
                             Divider().padding(.leading, 12).opacity(0.4)
                         }
                         // 项目视图：分组头 + 组内会话（默认全展开；折叠不做结构动画，
@@ -279,8 +284,13 @@ struct SessionsView: View {
                                 }
                             }
                             if isOpen {
-                                ForEach(group.sessions) { session in
+                                let lines = sessionLines(group.sessions)
+                                ForEach(lines.users) { session in
                                     sessionRow(session)
+                                        .padding(.leading, 10)
+                                }
+                                if lines.utilityCount > 0 {
+                                    HarnessUtilityRow(count: lines.utilityCount, subtitle: Self.utilitySubtitle)
                                         .padding(.leading, 10)
                                 }
                                 Divider().padding(.leading, 12)
@@ -419,6 +429,26 @@ struct SessionsView: View {
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+
+    private static let utilitySubtitle = "记忆压缩等内部提示，已从列表收起"
+
+    /// Splits harness background calls out of a session list. Nothing folds while searching,
+    /// otherwise searching for that prompt text itself would come back empty.
+    private func sessionLines(
+        _ sessions: [AgentSessionInfo]
+    ) -> (users: [AgentSessionInfo], utilityCount: Int) {
+        guard !service.isSearching else { return (sessions, 0) }
+        var users: [AgentSessionInfo] = []
+        var utilityCount = 0
+        for session in sessions {
+            if PromptClassifier.isHarnessUtility(session.displayName) {
+                utilityCount += 1
+            } else {
+                users.append(session)
+            }
+        }
+        return (users, utilityCount)
     }
 
     private func sessionRow(_ session: AgentSessionInfo) -> some View {

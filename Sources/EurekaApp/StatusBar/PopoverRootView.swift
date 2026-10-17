@@ -179,13 +179,21 @@ struct PopoverRootView: View {
         return ("\(Int(percent.rounded()))%", Theme.percentColor(percent))
     }
 
+    /// The history badge counts the same thing as the history page header: merged sessions
+    /// in the current window (last 14 days), harness background calls excluded. Zero hides it.
+    private var historyBadgeText: String? {
+        let merged = HistoryGrouping.mergeSessions(usageService.recentHistory)
+        let count = merged.filter {
+            !PromptClassifier.isHarnessUtility($0.title ?? "")
+        }.count
+        return count == 0 ? nil : "\(count)"
+    }
+
     private var sidebar: some View {
         SidebarView(
             selected: navigation.tab,
             limitsBadge: limitsBadge,
-            // 历史徽标 = 当前窗口（近 14 天）条数；0 不显示
-            historyBadge: usageService.recentHistory.isEmpty
-                ? nil : "\(usageService.recentHistory.count)",
+            historyBadge: historyBadgeText,
             appVersion: appVersion,
             onSelect: { tab in
                 // 用户手动导航即视为放弃未消费的跨页 reveal，收敛残留窗口到一次 reveal 生命周期
