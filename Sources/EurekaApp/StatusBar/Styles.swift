@@ -868,16 +868,37 @@ struct RefreshButton: View {
     var help = "刷新"
     let action: () -> Void
 
+    var body: some View {
+        RoundGlyphButton(icon: "arrow.clockwise", help: help, action: action)
+    }
+}
+
+/// The round toolbar button RefreshButton is made of: 26pt circle, brand-tinted glyph on a
+/// light brand fill with a thin brand stroke. `active` flips it to a solid brand fill for
+/// toggles (multi-select on the sessions page), so a toggle and the refresh button next to it
+/// are one shape instead of a square beside a circle.
+struct RoundGlyphButton: View {
+    let icon: String
+    var active = false
+    var help = ""
+    let action: () -> Void
+
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "arrow.clockwise")
+            Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.brandFg)
+                .foregroundStyle(active ? Theme.onBrand : Theme.brandFg)
                 .frame(width: 26, height: 26)
-                .background(Circle().fill(Theme.brandFill(hovering ? 0.18 : 0.10)))
-                .overlay(Circle().strokeBorder(Theme.brand.opacity(0.35), lineWidth: 0.8))
+                .background(
+                    Circle().fill(
+                        active
+                            ? AnyShapeStyle(Theme.brand)
+                            : AnyShapeStyle(Theme.brandFill(hovering ? 0.18 : 0.10))))
+                .overlay(
+                    Circle().strokeBorder(
+                        active ? Theme.brand : Theme.brand.opacity(0.35), lineWidth: 0.8))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

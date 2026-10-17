@@ -171,20 +171,23 @@ struct SessionsView: View {
             .padding(.bottom, 4)
             .animation(.easeOut(duration: 0.15), value: service.scanning)
 
-            // Search + source filter + tools, all from the shared kit: the old gradient-bordered
-            // panel and the coloured round buttons predated the themed controls used elsewhere.
-            HStack(spacing: 6) {
+            // Two rows from the shared kit. The list opens at 300pt, so the search field gets a
+            // row to itself (one row squeezed it to ~100pt and cut the placeholder); the source
+            // picker and the two round tool buttons share the row below.
+            VStack(spacing: 6) {
                 SearchField(placeholder: "搜索会话 / 项目 / id", text: $service.searchText, maxWidth: nil)
-                sourcePickerButton
-                CardActionButton(
-                    icon: multiSelect ? "checkmark.square.fill" : "checkmark.square",
-                    color: multiSelect ? Theme.brandFg : .secondary, size: 24,
-                    help: multiSelect ? "退出多选" : "多选模式（批量删除）"
-                ) {
-                    multiSelect.toggle()
-                    if !multiSelect { checkedIds = [] }
+                HStack(spacing: 6) {
+                    sourcePickerButton
+                    Spacer(minLength: 6)
+                    RoundGlyphButton(
+                        icon: "checkmark", active: multiSelect,
+                        help: multiSelect ? "退出多选" : "多选模式（批量删除）"
+                    ) {
+                        multiSelect.toggle()
+                        if !multiSelect { checkedIds = [] }
+                    }
+                    RefreshButton(help: "重新索引会话") { service.refresh() }
                 }
-                RefreshButton(help: "重新索引会话") { service.refresh() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
@@ -308,9 +311,10 @@ struct SessionsView: View {
         }
     }
 
-    /// Source filter entry: a bordered capsule (unselected SourceFilterChip metrics) showing the
-    /// chosen CLI's logo + name, brand-tinted while a filter is active. Opens a custom popover
-    /// (not an NSMenu) so the style is ours and it never crosses the pane divider.
+    /// Source filter entry: a 26pt capsule in the same brand-tinted family as the round tool
+    /// buttons beside it (light brand fill + thin brand stroke; solid brand while a filter is
+    /// active), showing the chosen CLI's logo + name. Opens a custom popover (not an NSMenu) so
+    /// the style is ours and it never crosses the pane divider.
     private var sourcePickerButton: some View {
         let active = service.sourceFilter != nil
         return Button {
@@ -324,24 +328,25 @@ struct SessionsView: View {
                         .lineLimit(1)
                         .fixedSize()
                 } else {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 10, weight: .semibold))
                     Text("全部来源")
                         .font(Theme.font.themed(11, .medium))
                         .fixedSize()
                 }
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .opacity(0.7)
             }
-            .foregroundStyle(active ? Theme.brandFg : .secondary)
+            .foregroundStyle(active ? Theme.onBrand : Theme.brandFg)
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(active ? Theme.brandFill(0.10) : Theme.surface))
+            .frame(height: 26)
+            .background(
+                Capsule().fill(
+                    active ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.brandFill(0.10))))
             .overlay(
                 Capsule().strokeBorder(
-                    Theme.cardBorder,
-                    lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.8))
+                    active ? Theme.brand : Theme.brand.opacity(0.35), lineWidth: 0.8))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
