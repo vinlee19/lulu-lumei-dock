@@ -886,19 +886,25 @@ struct RoundGlyphButton: View {
     @State private var hovering = false
 
     var body: some View {
+        // Hard-edged styles speak in 2px ink outlines, flat fills and offset hard shadows; the
+        // classic branch keeps the light brand tint it always had. The shadow is painted on
+        // the circle only, never on the glyph.
+        let hard = ThemeStyle.current.isHardEdged
+        let glyph: Color = active ? Theme.onBrand : (hard ? Theme.ink : Theme.brandFg)
+        let fill: AnyShapeStyle = active
+            ? AnyShapeStyle(Theme.brand)
+            : (hard
+                ? AnyShapeStyle(hovering ? Theme.surfaceSecondary : Theme.surface)
+                : AnyShapeStyle(Theme.brandFill(hovering ? 0.18 : 0.10)))
+        let stroke: Color = hard ? Theme.ink : (active ? Theme.brand : Theme.brand.opacity(0.35))
+        let strokeWidth: CGFloat = hard ? Theme.cardBorderWidth : 0.8
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(active ? Theme.onBrand : Theme.brandFg)
+                .foregroundStyle(glyph)
                 .frame(width: 26, height: 26)
-                .background(
-                    Circle().fill(
-                        active
-                            ? AnyShapeStyle(Theme.brand)
-                            : AnyShapeStyle(Theme.brandFill(hovering ? 0.18 : 0.10))))
-                .overlay(
-                    Circle().strokeBorder(
-                        active ? Theme.brand : Theme.brand.opacity(0.35), lineWidth: 0.8))
+                .background(Circle().fill(fill).themeControlShadow(active: hard))
+                .overlay(Circle().strokeBorder(stroke, lineWidth: strokeWidth))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

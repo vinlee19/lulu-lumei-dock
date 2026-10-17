@@ -311,12 +311,19 @@ struct SessionsView: View {
         }
     }
 
-    /// Source filter entry: a 26pt capsule in the same brand-tinted family as the round tool
-    /// buttons beside it (light brand fill + thin brand stroke; solid brand while a filter is
-    /// active), showing the chosen CLI's logo + name. Opens a custom popover (not an NSMenu) so
-    /// the style is ours and it never crosses the pane divider.
+    /// Source filter entry: a 26pt capsule styled exactly like the round tool buttons beside it
+    /// (RoundGlyphButton: ink outline + flat fill + hard shadow in brutal, light brand tint in
+    /// classic; solid brand while a filter is active), showing the chosen CLI's logo + name.
+    /// Opens a custom popover (not an NSMenu) so the style is ours and it never crosses the
+    /// pane divider.
     private var sourcePickerButton: some View {
         let active = service.sourceFilter != nil
+        let hard = ThemeStyle.current.isHardEdged
+        let fg: Color = active ? Theme.onBrand : (hard ? Theme.ink : Theme.brandFg)
+        let fill: AnyShapeStyle = active
+            ? AnyShapeStyle(Theme.brand)
+            : AnyShapeStyle(hard ? Theme.surface : Theme.brandFill(0.10))
+        let stroke: Color = hard ? Theme.ink : (active ? Theme.brand : Theme.brand.opacity(0.35))
         return Button {
             showSourcePicker.toggle()
         } label: {
@@ -338,15 +345,12 @@ struct SessionsView: View {
                     .font(.system(size: 8, weight: .semibold))
                     .opacity(0.7)
             }
-            .foregroundStyle(active ? Theme.onBrand : Theme.brandFg)
+            .foregroundStyle(fg)
             .padding(.horizontal, 10)
             .frame(height: 26)
-            .background(
-                Capsule().fill(
-                    active ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.brandFill(0.10))))
+            .background(Capsule().fill(fill).themeControlShadow(active: hard))
             .overlay(
-                Capsule().strokeBorder(
-                    active ? Theme.brand : Theme.brand.opacity(0.35), lineWidth: 0.8))
+                Capsule().strokeBorder(stroke, lineWidth: hard ? Theme.cardBorderWidth : 0.8))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
