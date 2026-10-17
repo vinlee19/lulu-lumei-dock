@@ -277,7 +277,8 @@ func formatTokens(_ count: Int) -> String {
     switch count {
     case ..<1000: return "\(count)"
     case ..<1_000_000: return String(format: "%.1fk", Double(count) / 1000)
-    default: return String(format: "%.2fM", Double(count) / 1_000_000)
+    case ..<1_000_000_000: return String(format: "%.2fM", Double(count) / 1_000_000)
+    default: return String(format: "%.2fB", Double(count) / 1_000_000_000)
     }
 }
 

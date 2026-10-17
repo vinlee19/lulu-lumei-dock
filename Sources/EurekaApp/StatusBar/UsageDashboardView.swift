@@ -307,7 +307,7 @@ struct UsageDashboardView: View {
             .frame(height: 170)
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     /// 成本轴/标注格式（小额保留 4 位，避免全显示 $0.00）
@@ -563,7 +563,7 @@ struct UsageDashboardView: View {
                         Text("总成本")
                             .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
-                        Text(totalCost.map { String(format: "$%.4f", $0) } ?? "—")
+                        Text(totalCost.map { formatCost($0) } ?? "—")
                             .font(.system(size: 14, weight: .semibold).monospacedDigit())
                             .foregroundStyle(Theme.cost)
                     }
@@ -574,7 +574,7 @@ struct UsageDashboardView: View {
         }
         .padding(Theme.spacing.card)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     // MARK: - 四宫格
@@ -597,13 +597,13 @@ struct UsageDashboardView: View {
                 Text(label)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Text(chineseUnit(value))
+                Text(formatTokens(value))
                     .font(.system(size: 14, weight: .semibold).monospacedDigit())
             }
             Spacer(minLength: 0)
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     // MARK: - 缓存命中率
@@ -632,7 +632,7 @@ struct UsageDashboardView: View {
             .frame(height: 6)
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     // MARK: - 子页签
@@ -925,7 +925,7 @@ struct UsageDashboardView: View {
             Text(formatTokens(record.row.outputTokens))
                 .font(.system(size: 10.5).monospacedDigit())
                 .frame(width: 56, alignment: .trailing)
-            Text(record.costUSD.map { String(format: "$%.4f", $0) } ?? "—")
+            Text(record.costUSD.map { costLabel($0) } ?? "—")
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(Theme.cost)
                 .frame(width: 66, alignment: .trailing)
@@ -1042,7 +1042,7 @@ struct UsageDashboardView: View {
                             .font(.system(size: 10.5).monospacedDigit())
                             .foregroundStyle(.secondary)
                             .frame(width: 62, alignment: .trailing)
-                        Text(usageService.cost(of: totals).map { String(format: "$%.4f", $0) } ?? "—")
+                        Text(usageService.cost(of: totals).map { costLabel($0) } ?? "—")
                             .font(.system(size: 10.5).monospacedDigit())
                             .foregroundStyle(Theme.cost)
                             .frame(width: 66, alignment: .trailing)
@@ -1130,7 +1130,7 @@ struct UsageDashboardView: View {
                 Text(formatTokens(line.tokens))
                     .font(.system(size: 10.5, weight: .medium).monospacedDigit())
                     .frame(width: 58, alignment: .trailing)
-                Text(line.costUSD.map { String(format: "$%.4f", $0) } ?? "—")
+                Text(line.costUSD.map { costLabel($0) } ?? "—")
                     .font(.system(size: 10.5).monospacedDigit())
                     .foregroundStyle(Theme.cost)
                     .frame(width: 62, alignment: .trailing)
@@ -1176,7 +1176,7 @@ struct UsageDashboardView: View {
                         Text(formatTokens(line.tokens))
                             .font(.system(size: 10.5).monospacedDigit())
                             .foregroundStyle(.secondary)
-                        Text(line.costUSD.map { String(format: "$%.4f", $0) } ?? "—")
+                        Text(line.costUSD.map { costLabel($0) } ?? "—")
                             .font(.system(size: 10.5).monospacedDigit())
                             .foregroundStyle(Theme.cost)
                             .frame(width: 66, alignment: .trailing)
@@ -1216,6 +1216,26 @@ struct UsageDashboardView: View {
         case ..<100_000_000: return String(format: "%.1f 万", Double(value) / 10_000)
         default: return String(format: "%.2f 亿", Double(value) / 100_000_000)
         }
+    }
+}
+
+extension View {
+    /// Usage-page card: the outline and hard shadow are painted on the background shape,
+    /// so no text ever lands in the shadow layer. Only hard-edged styles get the outline;
+    /// classic and the palette themes keep the plain fill they always had (classic must stay
+    /// pixel-identical).
+    func dashboardCard() -> some View {
+        background(
+            RoundedRectangle(cornerRadius: Theme.radius.card)
+                .fill(Theme.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.radius.card)
+                        .strokeBorder(
+                            ThemeStyle.current.isHardEdged ? Theme.cardBorder : .clear,
+                            lineWidth: Theme.cardBorderWidth)
+                )
+                .themeCardShadow()
+        )
     }
 }
 
