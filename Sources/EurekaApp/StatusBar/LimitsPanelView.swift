@@ -58,8 +58,11 @@ private struct AntigravityOptInRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // A switch like the Claude opt-in below, not the default checkbox it used to be
             Toggle("Antigravity 用量统计（实验）", isOn: $settings.antigravityExperimentalEnabled)
                 .font(.system(size: 11))
+                .toggleStyle(.themedSwitch)
+                .controlSize(.small)
                 .onChange(of: settings.antigravityExperimentalEnabled) { _, _ in service.refresh() }
             Text("解析 Antigravity 会话库里未公开的逐次调用 token（按公开价格折算 API 等价费用），结果在用量页。"
                 + "格式随版本可能变化，解析不了时自动隐藏。Antigravity 的每周 / 5 小时额度只由 agy 在线获取、"
@@ -196,7 +199,7 @@ private struct ClaudeOptInCard: View {
                 .foregroundStyle(.secondary)
             Toggle("启用（非官方接口）", isOn: $service.claudeEnabled)
                 .font(.system(size: 11))
-                .toggleStyle(.switch)
+                .toggleStyle(.themedSwitch)
                 .controlSize(.small)
         }
         .padding(Theme.spacing.card)

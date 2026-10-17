@@ -741,6 +741,37 @@ struct MiniSwitch: View {
     }
 }
 
+/// Toggle style for every on/off setting: classic delegates to the system switch (so classic
+/// is pixel-identical to `.toggleStyle(.switch)`), brutal draws the label followed by the
+/// ink-outlined MiniSwitch used on list rows, instead of a system-blue switch.
+struct ThemedSwitchToggleStyle: ToggleStyle {
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        if ThemeStyle.current.isHardEdged {
+            BrutalSwitchRow(configuration: configuration)
+        } else {
+            SwitchToggleStyle().makeBody(configuration: configuration)
+        }
+    }
+}
+
+extension ToggleStyle where Self == ThemedSwitchToggleStyle {
+    static var themedSwitch: ThemedSwitchToggleStyle { ThemedSwitchToggleStyle() }
+}
+
+private struct BrutalSwitchRow: View {
+    let configuration: ToggleStyleConfiguration
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 8) {
+            configuration.label
+            MiniSwitch(isOn: configuration.isOn) { configuration.isOn.toggle() }
+        }
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
 /// 启用状态文字（已启用绿 / 已停用灰）+ 迷你开关（详情工具条 / 列表行用；卡面只用 MiniSwitch）
 struct EnableToggle: View {
     let enabled: Bool

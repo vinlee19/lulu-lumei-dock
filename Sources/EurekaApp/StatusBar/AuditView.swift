@@ -189,7 +189,7 @@ struct AuditView: View {
             }
         }
         // 顶级页签不继承设置子树的样式注入，这三行必须自己声明
-        .toggleStyle(.switch)
+        .toggleStyle(.themedSwitch)
         .controlSize(.small)
         .font(.system(size: 11.5))
         .padding(Theme.spacing.card)

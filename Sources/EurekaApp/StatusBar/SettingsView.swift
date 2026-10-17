@@ -62,7 +62,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .toggleStyle(.switch)
+        .toggleStyle(.themedSwitch)
         .controlSize(.small)
         .font(.system(size: 11.5))
         .onAppear { notificationService.refresh() }

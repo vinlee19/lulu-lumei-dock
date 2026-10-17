@@ -59,7 +59,7 @@ struct BackupView: View {
         card("备份状态") {
             HStack {
                 Toggle("自动备份（增量上传，无变化自动跳过）", isOn: $settings.cloudBackupEnabled)
-                    .toggleStyle(.switch)
+                    .toggleStyle(.themedSwitch)
                     .controlSize(.small)
                 Spacer()
                 Button("配置…") { showConfig = true }
@@ -848,7 +848,7 @@ private struct BackupConfigSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
                     Toggle("", isOn: $folder.enabled)
-                        .toggleStyle(.switch)
+                        .toggleStyle(.themedSwitch)
                         .controlSize(.mini)
                         .labelsHidden()
                         .help(folder.enabled ? "已纳入备份" : "已暂停")
