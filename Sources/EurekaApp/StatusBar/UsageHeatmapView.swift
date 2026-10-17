@@ -35,19 +35,15 @@ struct UsageHeatmapView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("活跃时段")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 Spacer()
-                Picker("", selection: $metric) {
-                    ForEach(Metric.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 130)
-                .controlSize(.mini)
+                ThemedSegmentedPicker(
+                    selection: $metric, options: Metric.allCases,
+                    label: \.rawValue, classicWidth: 130, controlSize: .mini)
             }
             if cells.isEmpty {
                 Text("该时段暂无用量")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -57,7 +53,7 @@ struct UsageHeatmapView: View {
             }
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     private var grid: some View {
@@ -70,7 +66,7 @@ struct UsageHeatmapView: View {
                     .frame(width: 16)
                 ForEach(0..<24, id: \.self) { hour in
                     Text(hour % 6 == 0 ? "\(hour)" : "")
-                        .font(.system(size: 8).monospacedDigit())
+                        .font(Theme.font.themedMono(8))
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity)
                 }
@@ -78,7 +74,7 @@ struct UsageHeatmapView: View {
             ForEach(Self.displayWeekdays, id: \.self) { weekday in
                 HStack(spacing: 2) {
                     Text(Self.weekdayNames[weekday])
-                        .font(.system(size: 8.5))
+                        .font(Theme.font.themed(8.5))
                         .foregroundStyle(.tertiary)
                         .frame(width: 16)
                     ForEach(0..<24, id: \.self) { hour in
@@ -111,7 +107,7 @@ struct UsageHeatmapView: View {
         HStack(spacing: 3) {
             Spacer(minLength: 0)
             Text("少")
-                .font(.system(size: 8.5))
+                .font(Theme.font.themed(8.5))
                 .foregroundStyle(.tertiary)
             ForEach(0..<5, id: \.self) { step in
                 RoundedRectangle(cornerRadius: 2)
@@ -121,7 +117,7 @@ struct UsageHeatmapView: View {
                     .frame(width: 13, height: 10)
             }
             Text("多")
-                .font(.system(size: 8.5))
+                .font(Theme.font.themed(8.5))
                 .foregroundStyle(.tertiary)
         }
     }

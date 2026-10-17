@@ -65,7 +65,7 @@ struct UsageDashboardView: View {
                 filterRow
                 if let error = usageService.lastError {
                     Text(error)
-                        .font(.system(size: 11))
+                        .font(Theme.font.themed(11))
                         .foregroundStyle(.red)
                 }
                 if usageService.summary != nil {
@@ -194,7 +194,7 @@ struct UsageDashboardView: View {
 
             if rows.isEmpty {
                 Text("该时段暂无技能/插件调用记录")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -205,37 +205,26 @@ struct UsageDashboardView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     private func kindChip(_ kind: String?, _ label: String) -> some View {
-        let selected = toolKindFilter == kind
-        return Button {
+        CompactFilterChip(label: label, verticalPadding: 3, isSelected: toolKindFilter == kind) {
             toolKindFilter = kind
-        } label: {
-            Text(label)
-                .font(.system(size: 10, weight: selected ? .semibold : .regular))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(
-                    selected ? Theme.brandFill(0.16) : Color.primary.opacity(0.05)))
-                .foregroundStyle(selected ? Theme.brandFg : .secondary)
-                .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
     }
 
     private func toolRow(_ row: ToolCallsRepo.ToolCallTotal, maxCount: Int) -> some View {
         let meta = Self.kindMeta(row.kind)
         return HStack(spacing: 8) {
             Image(systemName: meta.icon)
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(meta.color)
                 .frame(width: 16)
             SourceBadge(source: row.source, size: 9)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.name)
-                    .font(.system(size: 11).monospaced())
+                    .font(Theme.font.monoSkillName(11, weight: .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 // 比例条
@@ -243,9 +232,7 @@ struct UsageDashboardView: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.primary.opacity(0.06))
                         Capsule()
-                            .fill(LinearGradient(
-                                colors: [Theme.brand.opacity(0.55), Theme.brand],
-                                startPoint: .leading, endPoint: .trailing))
+                            .fill(Theme.barFill(Theme.brand, from: 0.55))
                             .frame(width: max(3, proxy.size.width
                                 * CGFloat(row.count) / CGFloat(max(1, maxCount))))
                     }
@@ -253,10 +240,10 @@ struct UsageDashboardView: View {
                 .frame(height: 4)
             }
             Text(meta.label)
-                .font(.system(size: 9))
+                .font(Theme.font.themed(9))
                 .foregroundStyle(.tertiary)
             Text("\(row.count)")
-                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .font(Theme.font.themedMono(11, .semibold))
                 .foregroundStyle(Theme.brandFg)
                 .frame(width: 42, alignment: .trailing)
         }
@@ -273,30 +260,22 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("趋势")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 if usageService.trendIsHourly && trendMode == .byDate {
                     Text("小时粒度")
-                        .font(.system(size: 9))
+                        .font(Theme.font.themed(9))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.primary.opacity(0.05)))
                 }
                 Spacer()
-                Picker("", selection: $trendMetric) {
-                    ForEach(TrendMetric.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 110)
-                .controlSize(.mini)
-                Picker("", selection: $trendMode) {
-                    ForEach(TrendMode.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 140)
-                .controlSize(.mini)
+                ThemedSegmentedPicker(
+                    selection: $trendMetric, options: TrendMetric.allCases,
+                    label: \.rawValue, classicWidth: 110, controlSize: .mini)
+                ThemedSegmentedPicker(
+                    selection: $trendMode, options: TrendMode.allCases,
+                    label: \.rawValue, classicWidth: 140, controlSize: .mini)
             }
             Group {
                 switch trendMode {
@@ -414,7 +393,7 @@ struct UsageDashboardView: View {
                     Text(trendMetric == .tokens
                         ? formatTokens(Int(item.metricValue))
                         : costLabel(item.metricValue))
-                        .font(.system(size: 8).monospacedDigit())
+                        .font(Theme.font.themedMono(8))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -434,7 +413,7 @@ struct UsageDashboardView: View {
 
     private func emptyChart(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(Theme.font.themed(11))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -450,15 +429,9 @@ struct UsageDashboardView: View {
     private var filterRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Picker("", selection: $period) {
-                    ForEach(UsageService.DashboardPeriod.allCases, id: \.self) {
-                        Text($0.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 230)
-                .controlSize(.small)
+                ThemedSegmentedPicker(
+                    selection: $period, options: UsageService.DashboardPeriod.allCases,
+                    label: \.rawValue, classicWidth: 230, controlSize: .small)
 
                 Spacer(minLength: 8)
 
@@ -491,7 +464,7 @@ struct UsageDashboardView: View {
                         .labelsHidden()
                         .datePickerStyle(.field)
                         .controlSize(.small)
-                    Text("至").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("至").font(Theme.font.themed(10)).foregroundStyle(.secondary)
                     DatePicker("", selection: $customTo, displayedComponents: .date)
                         .labelsHidden()
                         .datePickerStyle(.field)
@@ -503,25 +476,9 @@ struct UsageDashboardView: View {
     }
 
     private func sourceChip(_ source: AgentSource?, label: String) -> some View {
-        let selected = sourceFilter == source
-        return Button {
+        CompactFilterChip(label: label, source: source, isSelected: sourceFilter == source) {
             sourceFilter = source
-        } label: {
-            HStack(spacing: 4) {
-                if let source {
-                    SourceBadge(source: source, size: 10)
-                }
-                Text(label)
-                    .font(.system(size: 10, weight: selected ? .semibold : .regular))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(
-                selected ? Theme.brandFill(0.16) : Color.primary.opacity(0.05)))
-            .foregroundStyle(selected ? Theme.brandFg : .secondary)
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - 英雄卡
@@ -529,19 +486,19 @@ struct UsageDashboardView: View {
     private var heroCard: some View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: "bolt.fill")
-                .font(.system(size: 18))
+                .font(Theme.font.themed(18))
                 .foregroundStyle(Theme.brandFg)
                 .frame(width: 40, height: 40)
                 .background(Circle().fill(Theme.brandFill(0.12)))
             VStack(alignment: .leading, spacing: 2) {
                 Text("消耗 Tokens（\(period.rawValue)）")
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(totalTokens.formatted(.number.grouping(.automatic)))
-                        .font(.system(size: 26, weight: .bold).monospacedDigit())
+                        .font(Theme.font.themedMono(26, .bold))
                     Text("≈ \(chineseUnit(totalTokens))")
-                        .font(.system(size: 11))
+                        .font(Theme.font.themed(11))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -553,18 +510,18 @@ struct UsageDashboardView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("总请求数")
-                            .font(.system(size: 9.5))
+                            .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
                         Text("\(totalRequests)")
-                            .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                            .font(Theme.font.themedMono(14, .semibold))
                     }
                     Divider().frame(height: 26)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("总成本")
-                            .font(.system(size: 9.5))
+                            .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
                         Text(totalCost.map { formatCost($0) } ?? "—")
-                            .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                            .font(Theme.font.themedMono(14, .semibold))
                             .foregroundStyle(Theme.cost)
                     }
                 }
@@ -591,14 +548,14 @@ struct UsageDashboardView: View {
     private func metricCard(_ label: String, _ value: Int, icon: String, tint: Color) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                 Text(formatTokens(value))
-                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(14, .semibold))
             }
             Spacer(minLength: 0)
         }
@@ -612,20 +569,18 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text("缓存命中率")
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(String(format: "%.1f%%", cacheHitRate * 100))
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(11, .semibold))
                     .foregroundStyle(Theme.brandFg)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
                     Capsule()
-                        .fill(LinearGradient(
-                            colors: [Theme.brand.opacity(0.6), Theme.brand],
-                            startPoint: .leading, endPoint: .trailing))
+                        .fill(Theme.barFill(Theme.brand, from: 0.6))
                         .frame(width: max(4, proxy.size.width * cacheHitRate))
                 }
             }
@@ -660,30 +615,30 @@ struct UsageDashboardView: View {
                 Button {
                     weekOffset += 1
                     loadWeekly()
-                } label: { Image(systemName: "chevron.left").font(.system(size: 10)) }
+                } label: { Image(systemName: "chevron.left").font(Theme.font.themed(10)) }
                 .buttonStyle(.borderless)
                 Text(weekOffset == 0 ? "本周" : (weekOffset == 1 ? "上周" : "\(weekOffset) 周前"))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 Text("\(range.start, format: .dateTime.month().day()) – \(range.end.addingTimeInterval(-1), format: .dateTime.month().day())")
-                    .font(.system(size: 10.5).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5))
                     .foregroundStyle(.secondary)
                 Button {
                     weekOffset = max(0, weekOffset - 1)
                     loadWeekly()
-                } label: { Image(systemName: "chevron.right").font(.system(size: 10)) }
+                } label: { Image(systemName: "chevron.right").font(Theme.font.themed(10)) }
                 .buttonStyle(.borderless)
                 .disabled(weekOffset == 0)
                 // The report is a whole-week digest with its own 按来源 breakdown; say so instead of
                 // letting a highlighted source chip imply the numbers below are filtered.
                 if sourceFilter != nil {
                     Text("周报按全部来源统计，不受来源筛选影响")
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
                 if let note = weeklyExportNote {
                     Text(note)
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
                 Button("导出 Markdown") { exportWeekly() }
@@ -695,14 +650,14 @@ struct UsageDashboardView: View {
                 weeklyStats(report)
             } else {
                 Text("该周没有活动记录")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
             }
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
         .onAppear { loadWeekly() }
     }
 
@@ -735,25 +690,25 @@ struct UsageDashboardView: View {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 Text("最贵会话")
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(Theme.font.themed(10.5, .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(report.topSessions) { entry in
                     HStack(spacing: 6) {
                         Text(sessionBrowser.sessionsById[entry.sessionId]?.name
                             ?? "会话 \(entry.sessionId.prefix(8))")
-                            .font(.system(size: 11))
+                            .font(Theme.font.themed(11))
                             .lineLimit(1)
                         if let project = entry.project {
                             Text(project)
-                                .font(.system(size: 9.5))
+                                .font(Theme.font.themed(9.5))
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer(minLength: 6)
                         Text(formatTokens(entry.tokens))
-                            .font(.system(size: 10).monospacedDigit())
+                            .font(Theme.font.themedMono(10))
                             .foregroundStyle(.secondary)
                         Text(formatCost(entry.costUSD ?? 0))
-                            .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5, .medium))
                             .foregroundStyle(Theme.cost)
                     }
                 }
@@ -763,16 +718,16 @@ struct UsageDashboardView: View {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 Text("技能调用 Top")
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(Theme.font.themed(10.5, .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(report.topSkills, id: \.name) { skill in
                     HStack {
                         Text(skill.name)
-                            .font(.system(size: 11))
+                            .font(Theme.font.themed(11))
                             .lineLimit(1)
                         Spacer(minLength: 6)
                         Text("\(skill.count) 次")
-                            .font(.system(size: 10).monospacedDigit())
+                            .font(Theme.font.themedMono(10))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -782,16 +737,16 @@ struct UsageDashboardView: View {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 Text("提问复用 Top")
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(Theme.font.themed(10.5, .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(prompts.topReused, id: \.name) { prompt in
                     HStack {
                         Text(prompt.name)
-                            .font(.system(size: 11))
+                            .font(Theme.font.themed(11))
                             .lineLimit(1)
                         Spacer(minLength: 6)
                         Text("累计 \(prompt.count) 次")
-                            .font(.system(size: 10).monospacedDigit())
+                            .font(Theme.font.themedMono(10))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -802,10 +757,10 @@ struct UsageDashboardView: View {
     private func weeklyStat(_ label: String, _ value: String, color: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
             Text(value)
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .font(Theme.font.themedMono(12, .semibold))
                 .foregroundStyle(color)
         }
     }
@@ -813,20 +768,20 @@ struct UsageDashboardView: View {
     private func weeklyRankColumn(_ title: String, _ entries: [WeeklyReport.Entry]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(Theme.font.themed(10.5, .semibold))
                 .foregroundStyle(.secondary)
             if entries.isEmpty {
-                Text("—").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                Text("—").font(Theme.font.themed(10.5)).foregroundStyle(.tertiary)
             }
             ForEach(entries) { entry in
                 HStack(spacing: 6) {
                     Text(entry.name)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 4)
                     Text(formatCost(entry.costUSD ?? 0))
-                        .font(.system(size: 10).monospacedDigit())
+                        .font(Theme.font.themedMono(10))
                         .foregroundStyle(Theme.cost)
                 }
             }
@@ -868,7 +823,7 @@ struct UsageDashboardView: View {
                 Text("输出").frame(width: 56, alignment: .trailing)
                 Text("成本").frame(width: 66, alignment: .trailing)
             }
-            .font(.system(size: 9.5, weight: .semibold))
+            .font(Theme.font.themed(9.5, .semibold))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -877,7 +832,7 @@ struct UsageDashboardView: View {
 
             if usageService.records.isEmpty {
                 Text("该时段暂无请求记录")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -890,43 +845,43 @@ struct UsageDashboardView: View {
 
             paginationBar
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     private func logRow(_ record: UsageService.RecordDisplay) -> some View {
         HStack(spacing: 8) {
             Text(record.row.ts, format: .dateTime.month(.twoDigits).day(.twoDigits)
                 .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .leading)
             HStack(spacing: 3) {
                 SourceBadge(source: record.row.source, size: 9)
                 Text(record.row.source.rawValue)
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             .frame(width: 66, alignment: .leading)
             Text(record.row.model)
-                .font(.system(size: 10).monospaced())
+                .font(Theme.font.monoSkillName(10, weight: .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
                 Text(formatTokens(record.row.inputTokens))
-                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5, .medium))
                 if record.row.cacheReadTokens > 0 {
                     Text("R\(formatTokens(record.row.cacheReadTokens))")
-                        .font(.system(size: 8.5).monospacedDigit())
+                        .font(Theme.font.themedMono(8.5))
                         .foregroundStyle(.tertiary)
                 }
             }
             .frame(width: 76, alignment: .trailing)
             Text(formatTokens(record.row.outputTokens))
-                .font(.system(size: 10.5).monospacedDigit())
+                .font(Theme.font.themedMono(10.5))
                 .frame(width: 56, alignment: .trailing)
             Text(record.costUSD.map { costLabel($0) } ?? "—")
-                .font(.system(size: 10.5).monospacedDigit())
+                .font(Theme.font.themedMono(10.5))
                 .foregroundStyle(Theme.cost)
                 .frame(width: 66, alignment: .trailing)
         }
@@ -941,34 +896,34 @@ struct UsageDashboardView: View {
     private var paginationBar: some View {
         HStack(spacing: 8) {
             Text("共 \(usageService.recordTotal) 条")
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
             Spacer()
             Button {
                 page = max(1, page - 1)
                 reload()
             } label: {
-                Image(systemName: "chevron.left").font(.system(size: 9))
+                Image(systemName: "chevron.left").font(Theme.font.themed(9))
             }
             .buttonStyle(.borderless)
             .disabled(page <= 1)
             Text("\(page) / \(totalPages)")
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.secondary)
             Button {
                 page = min(totalPages, page + 1)
                 reload()
             } label: {
-                Image(systemName: "chevron.right").font(.system(size: 9))
+                Image(systemName: "chevron.right").font(Theme.font.themed(9))
             }
             .buttonStyle(.borderless)
             .disabled(page >= totalPages)
             // 跳页
-            Text("跳至").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text("跳至").font(Theme.font.themed(10)).foregroundStyle(.tertiary)
             TextField("", text: $pageInput)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 40)
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .multilineTextAlignment(.center)
                 .onSubmit {
                     if let target = Int(pageInput.trimmingCharacters(in: .whitespaces)) {
@@ -994,7 +949,7 @@ struct UsageDashboardView: View {
                 Text("缓存").frame(width: 62, alignment: .trailing)
                 Text("成本").frame(width: 66, alignment: .trailing)
             }
-            .font(.system(size: 9.5, weight: .semibold))
+            .font(Theme.font.themed(9.5, .semibold))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -1006,7 +961,7 @@ struct UsageDashboardView: View {
             }
             if filtered.isEmpty {
                 Text("该时段暂无模型用量")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -1016,13 +971,13 @@ struct UsageDashboardView: View {
                         HStack(spacing: 4) {
                             SourceBadge(source: totals.source, size: 9)
                             Text(totals.model)
-                                .font(.system(size: 10).monospaced())
+                                .font(Theme.font.monoSkillName(10, weight: .regular))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             // 同名模型按 provider 分行（订阅套餐 vs 按量计费）
                             if let provider = totals.provider {
                                 Text(provider)
-                                    .font(.system(size: 9))
+                                    .font(Theme.font.themed(9))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
@@ -1030,20 +985,20 @@ struct UsageDashboardView: View {
                         }
                         .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
                         Text("\(totals.requestCount)")
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .frame(width: 46, alignment: .trailing)
                         Text(formatTokens(totals.inputTokens))
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .frame(width: 62, alignment: .trailing)
                         Text(formatTokens(totals.outputTokens))
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .frame(width: 62, alignment: .trailing)
                         Text(formatTokens(totals.cacheReadTokens + totals.cacheCreationTokens))
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(.secondary)
                             .frame(width: 62, alignment: .trailing)
                         Text(usageService.cost(of: totals).map { costLabel($0) } ?? "—")
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(Theme.cost)
                             .frame(width: 66, alignment: .trailing)
                             .help(usageService.priceResolution(of: totals).summary)
@@ -1054,7 +1009,7 @@ struct UsageDashboardView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     // MARK: - 按会话统计
@@ -1071,7 +1026,7 @@ struct UsageDashboardView: View {
                 Text("最近活跃").frame(width: 64, alignment: .trailing)
                 Text("").frame(width: 12)
             }
-            .font(.system(size: 9.5, weight: .semibold))
+            .font(Theme.font.themed(9.5, .semibold))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -1080,7 +1035,7 @@ struct UsageDashboardView: View {
 
             if usageService.sessionTotals.isEmpty {
                 Text("该时段暂无会话用量")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -1091,7 +1046,7 @@ struct UsageDashboardView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
         .onAppear {
             // 会话名来自文件索引；首次进入子页签时索引可能还没建
             if sessionBrowser.sessionsById.isEmpty {
@@ -1113,34 +1068,34 @@ struct UsageDashboardView: View {
                 HStack(spacing: 4) {
                     SourceBadge(source: line.source, size: 9)
                     Text(info?.name ?? "会话 \(line.sessionId.prefix(8))")
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
                 Text(line.project ?? "—")
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(width: 90, alignment: .leading)
                 Text("\(line.requests)")
-                    .font(.system(size: 10.5).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5))
                     .frame(width: 42, alignment: .trailing)
                 Text(formatTokens(line.tokens))
-                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5, .medium))
                     .frame(width: 58, alignment: .trailing)
                 Text(line.costUSD.map { costLabel($0) } ?? "—")
-                    .font(.system(size: 10.5).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5))
                     .foregroundStyle(Theme.cost)
                     .frame(width: 62, alignment: .trailing)
                 Text(relativeFormatter.localizedString(
                     for: line.lastActiveAt, relativeTo: Date()))
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
                     .frame(width: 64, alignment: .trailing)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8))
+                    .font(Theme.font.themed(8))
                     .foregroundStyle(.tertiary)
                     .frame(width: 12)
                     .opacity(canJump ? 1 : 0)
@@ -1159,7 +1114,7 @@ struct UsageDashboardView: View {
         VStack(alignment: .leading, spacing: 0) {
             if usageService.projectTotals.isEmpty {
                 Text("该时段暂无项目用量")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
@@ -1167,17 +1122,17 @@ struct UsageDashboardView: View {
                 ForEach(usageService.projectTotals) { line in
                     HStack {
                         Image(systemName: "folder.fill")
-                            .font(.system(size: 9))
+                            .font(Theme.font.themed(9))
                             .foregroundStyle(Theme.brandFg.opacity(0.7))
                         Text(line.name)
-                            .font(.system(size: 11))
+                            .font(Theme.font.themed(11))
                             .lineLimit(1)
                         Spacer()
                         Text(formatTokens(line.tokens))
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(.secondary)
                         Text(line.costUSD.map { costLabel($0) } ?? "—")
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(Theme.cost)
                             .frame(width: 66, alignment: .trailing)
                     }
@@ -1187,7 +1142,7 @@ struct UsageDashboardView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     // MARK: - 底部
@@ -1199,12 +1154,12 @@ struct UsageDashboardView: View {
                     .controlSize(.small)
                 if let message = usageService.exportMessage {
                     Text(message)
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.secondary)
                 }
             }
             Text("费用为本地估算（LiteLLM / models.dev 公开价格，订阅套餐按 API 等价价折算），与账单可能有出入；悬停费用可看价格来源，设置 → 高级 → 模型价格可查看未定价模型并自定义。")
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -1216,26 +1171,6 @@ struct UsageDashboardView: View {
         case ..<100_000_000: return String(format: "%.1f 万", Double(value) / 10_000)
         default: return String(format: "%.2f 亿", Double(value) / 100_000_000)
         }
-    }
-}
-
-extension View {
-    /// Usage-page card: the outline and hard shadow are painted on the background shape,
-    /// so no text ever lands in the shadow layer. Only hard-edged styles get the outline;
-    /// classic and the palette themes keep the plain fill they always had (classic must stay
-    /// pixel-identical).
-    func dashboardCard() -> some View {
-        background(
-            RoundedRectangle(cornerRadius: Theme.radius.card)
-                .fill(Theme.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radius.card)
-                        .strokeBorder(
-                            ThemeStyle.current.isHardEdged ? Theme.cardBorder : .clear,
-                            lineWidth: Theme.cardBorderWidth)
-                )
-                .themeCardShadow()
-        )
     }
 }
 

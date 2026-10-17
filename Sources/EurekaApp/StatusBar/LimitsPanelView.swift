@@ -26,7 +26,7 @@ struct LimitsPanelView: View {
                     }
                     if let hint = service.claudeFailureHint {
                         Text(hint)
-                            .font(.system(size: 10.5))
+                            .font(Theme.font.themed(10.5))
                             .foregroundStyle(.orange)
                     }
                 } else {
@@ -35,14 +35,14 @@ struct LimitsPanelView: View {
 
                 if service.codex == nil && service.grok == nil && !service.claudeEnabled {
                     Text("还没有 Codex/Grok 限额快照（跑一次 codex 或 grok 后出现）")
-                        .font(.system(size: 11))
+                        .font(Theme.font.themed(11))
                         .foregroundStyle(.secondary)
                 }
 
                 AntigravityOptInRow(settings: settings, service: service)
 
                 Text("Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额走非官方接口，失效时自动隐藏。OpenCode / Antigravity / Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。")
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
             }
             .padding(Theme.spacing.page)
@@ -60,18 +60,18 @@ private struct AntigravityOptInRow: View {
         VStack(alignment: .leading, spacing: 4) {
             // A switch like the Claude opt-in below, not the default checkbox it used to be
             Toggle("Antigravity 用量统计（实验）", isOn: $settings.antigravityExperimentalEnabled)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .toggleStyle(.themedSwitch)
                 .controlSize(.small)
                 .onChange(of: settings.antigravityExperimentalEnabled) { _, _ in service.refresh() }
             Text("解析 Antigravity 会话库里未公开的逐次调用 token（按公开价格折算 API 等价费用），结果在用量页。"
                 + "格式随版本可能变化，解析不了时自动隐藏。Antigravity 的每周 / 5 小时额度只由 agy 在线获取、"
                 + "不落本地，暂不显示。")
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 }
 
@@ -84,10 +84,10 @@ private struct LimitCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(snapshot.source.displayName)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font.themed(12, .medium))
                 if let plan = snapshot.planType {
                     Text(plan)
-                        .font(.system(size: 9, weight: .medium))
+                        .font(Theme.font.themed(9, .medium))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Theme.brandFill(0.14)))
@@ -98,7 +98,7 @@ private struct LimitCard: View {
                     Text(Calendar.current.isDateInToday(snapshot.asOf)
                         ? "截至 \(snapshot.asOf.formatted(.dateTime.hour().minute()))"
                         : "截至 \(snapshot.asOf.formatted(.dateTime.month().day().hour().minute()))")
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.orange)
                 }
             }
@@ -116,7 +116,7 @@ private struct LimitCard: View {
             }
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     /// 窗口时长 → 中文标签（Codex 5h/周；Grok 周/月单窗）
@@ -144,25 +144,25 @@ private struct WindowGauge: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(label)
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                 if let fullAt, !hasReset {
                     Text("⏳ 预计 \(fullAt, format: .dateTime.hour().minute()) 打满")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(Theme.font.themed(10, .medium))
                         .foregroundStyle(.orange)
                 }
                 Spacer()
                 Text("\(Int(window.usedPercent.rounded()))%")
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(11, .semibold))
                     .foregroundStyle(hasReset ? Color.secondary : barColor)
                 if hasReset {
                     Text("· 已重置，快照过期")
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.tertiary)
                         .help("快照晚于这个窗口的重置时刻，百分比已不代表当前用量；跑一次该 CLI 会刷新")
                 } else if let resets = window.resetsAt {
                     Text("· \(resets, format: .relative(presentation: .named)) 重置")
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -170,9 +170,7 @@ private struct WindowGauge: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
                     Capsule()
-                        .fill(LinearGradient(
-                            colors: [barColor.opacity(0.65), barColor],
-                            startPoint: .leading, endPoint: .trailing))
+                        .fill(Theme.barFill(barColor, from: 0.65))
                         .frame(width: max(
                             4, proxy.size.width * min(window.usedPercent, 100) / 100))
                         .opacity(hasReset ? 0.3 : 1)
@@ -193,16 +191,16 @@ private struct ClaudeOptInCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Claude Code 限额")
-                .font(.system(size: 12, weight: .medium))
+                .font(Theme.font.themed(12, .medium))
             Text("显示订阅 5 小时 / 每周窗口用量。需要读取钥匙串中的 Claude Code 凭证并调用非官方接口（官方变更后会自动隐藏，不影响其他功能）。首次启用会弹一次钥匙串授权，选「始终允许」即可。")
-                .font(.system(size: 10.5))
+                .font(Theme.font.themed(10.5))
                 .foregroundStyle(.secondary)
             Toggle("启用（非官方接口）", isOn: $service.claudeEnabled)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .toggleStyle(.themedSwitch)
                 .controlSize(.small)
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 }
