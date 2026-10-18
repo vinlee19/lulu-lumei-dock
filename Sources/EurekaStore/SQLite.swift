@@ -107,6 +107,13 @@ public final class SQLiteDB {
         }
     }
 
+    /// 表是否存在（外部库跨版本换表时用：查不存在的表会直接报错）
+    public func tableExists(_ name: String) -> Bool {
+        ((try? query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [.text(name)]) { _ in true }) ?? []).isEmpty == false
+    }
+
     public func query<T>(
         _ sql: String, _ bindings: [SQLiteValue] = [], map: (SQLiteRow) -> T
     ) throws -> [T] {
