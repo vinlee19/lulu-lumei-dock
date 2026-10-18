@@ -3,7 +3,7 @@ import EurekaStore
 import Foundation
 
 /// 审计记录按 UTC 日物化为 Parquet（脱敏后），交给备份引擎上传到
-/// `<prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/part-0000.parquet`（Hive 分区，Athena / DuckDB 直接查）。
+/// `<prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/audit-events-YYYY-MM-DD.parquet`（Hive 分区，Athena / DuckDB 直接查）。
 ///
 /// 与 EurekaDBSnapshot 同一模式：本地先写临时文件再原子移动，备份引擎按 size+mtime 增量上传。
 /// 关键约束：
@@ -11,8 +11,41 @@ import Foundation
 /// - **已上传、且早于保留期的日期不再重写**——本地清理会删掉那些行，重写只会用更少的行覆盖远端；
 /// - 本地清理只删"已上传且指纹未变"的日期（`prunableDays`），上传失败宁可超期保留。
 public enum AuditArchive {
-    /// 单文件行数上限（超出拆 part-0001…）
+    /// Row cap per file; overflow goes to `audit-events-<day>-2.parquet`, `-3`, …
     public static let rowsPerFile = 200_000
+
+    /// Self-describing file name: a file downloaded on its own still says what it holds and which day.
+    /// The first chunk has no suffix; later chunks (only past `rowsPerFile` rows in one day) get `-2`, `-3`, …
+    public static func fileName(day: String, chunk: Int) -> String {
+        chunk == 0 ? "audit-events-\(day).parquet" : "audit-events-\(day)-\(chunk + 1).parquet"
+    }
+
+    static let filePrefix = "audit-events-"
+
+    /// Renames the `part-NNNN.parquet` files that 0.35.0 wrote to the self-describing names.
+    /// Idempotent. If the new name already exists the legacy file is a stale duplicate and is dropped,
+    /// so a half-finished run can never overwrite a newer file. Returns the number of files renamed.
+    @discardableResult
+    public static func migrateLegacyFileNames(in outDir: URL) -> Int {
+        let fm = FileManager.default
+        var renamed = 0
+        for dirName in (try? fm.contentsOfDirectory(atPath: outDir.path)) ?? [] where dirName.hasPrefix("dt=") {
+            let day = String(dirName.dropFirst(3))
+            let dir = outDir.appendingPathComponent(dirName, isDirectory: true)
+            for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] {
+                guard name.hasPrefix("part-"), name.hasSuffix(".parquet"),
+                      let chunk = Int(name.dropFirst(5).dropLast(8)) else { continue }
+                let legacy = dir.appendingPathComponent(name)
+                let target = dir.appendingPathComponent(fileName(day: day, chunk: chunk))
+                if fm.fileExists(atPath: target.path) {
+                    try? fm.removeItem(at: legacy)
+                } else if (try? fm.moveItem(at: legacy, to: target)) != nil {
+                    renamed += 1
+                }
+            }
+        }
+        return renamed
+    }
 
     public struct Outcome: Equatable {
         public var writtenDays: [String] = []
@@ -26,6 +59,7 @@ public enum AuditArchive {
         cutoff: Date?, now: Date = Date()
     ) -> Outcome {
         var outcome = Outcome()
+        migrateLegacyFileNames(in: outDir)
         guard let fingerprints = try? store.audit.dayFingerprints(),
               let ledgerRows = try? store.auditArchive.all()
         else {
@@ -41,13 +75,13 @@ public enum AuditArchive {
             let dir = outDir.appendingPathComponent("dt=\(day.day)", isDirectory: true)
             // 早于保留期且已上传：定稿，不再动
             if let cutoffDay, day.day < cutoffDay, entry?.uploadedAt != nil { continue }
-            let fileMissing = !fm.fileExists(atPath: dir.appendingPathComponent("part-0000.parquet").path)
+            let fileMissing = !fm.fileExists(atPath: dir.appendingPathComponent(fileName(day: day.day, chunk: 0)).path)
             let needsWrite = entry?.fingerprint != day.fingerprint
                 || (fileMissing && entry?.uploadedFingerprint != day.fingerprint)
             guard needsWrite else { continue }
             do {
                 let events = try store.audit.events(onDay: day.day)
-                try writeDay(events, to: dir, host: host, appVersion: appVersion)
+                try writeDay(events, day: day.day, to: dir, host: host, appVersion: appVersion)
                 try store.auditArchive.recordWritten(
                     day: day.day, fingerprint: day.fingerprint, rows: events.count,
                     filePath: dir.path, at: now)
@@ -122,7 +156,7 @@ public enum AuditArchive {
 
     // MARK: - 写文件
 
-    static func writeDay(_ events: [AuditEvent], to dir: URL, host: String, appVersion: String) throws {
+    static func writeDay(_ events: [AuditEvent], day: String, to dir: URL, host: String, appVersion: String) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let chunks = stride(from: 0, to: max(events.count, 1), by: rowsPerFile).map {
@@ -130,7 +164,7 @@ public enum AuditArchive {
         }
         var keep: Set<String> = []
         for (index, chunk) in chunks.enumerated() {
-            let name = String(format: "part-%04d.parquet", index)
+            let name = fileName(day: day, chunk: index)
             keep.insert(name)
             let data = try encode(chunk, host: host, appVersion: appVersion)
             let target = dir.appendingPathComponent(name)
@@ -176,7 +210,7 @@ public enum AuditArchive {
     /// 它会把 /var 解析成 /private/var，与 sync_state 里记的路径对不上
     static func partFiles(in dir: URL) -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
-            .filter { $0.hasPrefix("part-") && $0.hasSuffix(".parquet") }
+            .filter { $0.hasPrefix(filePrefix) && $0.hasSuffix(".parquet") }
             .sorted()
             .map { dir.appendingPathComponent($0) }
     }

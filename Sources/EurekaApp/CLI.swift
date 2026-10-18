@@ -47,6 +47,25 @@ enum EurekaCLI {
             usageSnapshot()
         case "--pricing-resolve":
             pricingResolve(args: Array(args.dropFirst()))
+        case "--parquet-inspect":
+            // Debug: decode Parquet files written by the audit archive and print rows / schema per file
+            let files = Array(args.dropFirst())
+            guard !files.isEmpty else {
+                print("usage: --parquet-inspect <file.parquet>…")
+                exit(2)
+            }
+            var failed = false
+            for path in files {
+                do {
+                    let table = try ParquetReader.read(contentsOf: URL(fileURLWithPath: path))
+                    let schema = table.columns.map { "\($0.name)\($0.required ? "" : "?")" }.joined(separator: ",")
+                    print("\(path)\t\(table.rowCount) rows\t\(table.createdBy ?? "-")\t[\(schema)]")
+                } catch {
+                    failed = true
+                    print("\(path)\tERROR: \(error)")
+                }
+            }
+            if failed { exit(1) }
         case "--audit-archive":
             // 调试：把审计记录按 UTC 日物化为 Parquet（已脱敏）到指定目录；不上传、不动台账以外的数据
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-audit-archive"
@@ -128,6 +147,24 @@ enum EurekaCLI {
             let dir = args.count > 1 ? args[1] : "/tmp/eureka-lineage"
             MainActor.assumeIsolated {
                 PreviewRenderer.renderLineage(to: dir)
+            }
+        case "--render-pages":
+            // Same argument parsing as --render-shell: the value of --style is not positional
+            var positional = [String]()
+            var styleRaw = "classic"
+            var index = 1
+            while index < args.count {
+                if args[index] == "--style", args.indices.contains(index + 1) {
+                    styleRaw = args[index + 1]
+                    index += 2
+                    continue
+                }
+                if !args[index].hasPrefix("--") { positional.append(args[index]) }
+                index += 1
+            }
+            let dir = positional.first ?? "/tmp/eureka-pages"
+            MainActor.assumeIsolated {
+                PreviewRenderer.renderPages(to: dir, style: ThemeStyle.resolve(styleRaw))
             }
         case "--mcp-inspect":
             // 走真实探测路径（remote 握手 / stdio 深探），结果落真缓存——
@@ -507,6 +544,7 @@ enum EurekaCLI {
           --uninstall-codex-notify  卸载 Codex notify
           --hooks-status            查看安装状态
           --audit-snapshot          扫描并输出 agent 操作审计流水（--risk-only 仅风险 / --limit N）
+          --parquet-inspect <文件…>  解码 Parquet 归档文件，打印每个文件的行数与列（只读）
           --pricing-resolve [模型…]  打印价格解析结果与出处（--provider p；不给模型则解析本地账本全部模型）
           --build-pricing-catalog <litellm> <models.dev> <输出>  生成随包价格目录快照
           --pricing-refresh         用 app 同一套网络代码拉一次价格目录（只打印结果，不写缓存）

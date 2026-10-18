@@ -22,13 +22,25 @@ struct UsageDashboardView: View {
     @State private var customTo = Date()
     @State private var pageInput = ""
 
-    private enum SubTab: String, CaseIterable {
+    enum SubTab: String, CaseIterable {
         case log = "请求日志"
         case models = "模型统计"
         case projects = "项目统计"
         case sessions = "按会话"
         case tools = "技能/插件"
         case weekly = "周报"
+    }
+
+    /// Offscreen-render / preview injection: pick the initial period and sub-tab
+    /// (same convention as `PlansView(initialLayout:)`).
+    init(
+        usageService: UsageService, sessionBrowser: SessionBrowserService,
+        initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .log
+    ) {
+        self._usageService = ObservedObject(wrappedValue: usageService)
+        self._sessionBrowser = ObservedObject(wrappedValue: sessionBrowser)
+        self._period = State(initialValue: initialPeriod)
+        self._subTab = State(initialValue: initialSubTab)
     }
 
     /// 周报周偏移：0 = 本周，1 = 上周…
@@ -136,7 +148,7 @@ struct UsageDashboardView: View {
             page: page, pageSize: pageSize, source: sourceFilter,
             from: range.from, to: range.to)
         usageService.loadModelTotals(from: range.from, to: range.to)
-        usageService.loadProjectTotals(from: range.from, to: range.to)
+        usageService.loadProjectTotals(from: range.from, to: range.to, source: sourceFilter)
         usageService.loadToolCalls(source: sourceFilter, from: range.from, to: range.to)
         usageService.loadTrend(from: range.from, to: range.to)
         usageService.loadSessionTotals(from: range.from, to: range.to, source: sourceFilter)
@@ -314,7 +326,10 @@ struct UsageDashboardView: View {
             emptyChart("该时段暂无用量")
         } else {
             let sources = orderedSources(points.map(\.source))
-            let rangeDays = range.to.timeIntervalSince(range.from) / 86400
+            // "All" starts at 1970: clamp the domain to the first data day, scale ticks to the span
+            let axis = TrendAxis.layout(
+                rangeFrom: range.from, rangeTo: range.to,
+                firstBucket: points.map(\.bucket).min())
             Chart(points) { point in
                 BarMark(
                     x: .value("时间", point.bucket, unit: hourly ? .hour : .day),
@@ -325,7 +340,7 @@ struct UsageDashboardView: View {
             }
             .chartForegroundStyleScale(domain: sources.map(\.displayName),
                                        range: sources.map(brandColor))
-            .chartXScale(domain: range.from...range.to)  // 固定轴域，防单柱铺满
+            .chartXScale(domain: axis.domain)  // fixed domain so a lone bar cannot fill the axis
             .chartYAxis {
                 AxisMarks { value in
                     AxisGridLine()
@@ -345,9 +360,13 @@ struct UsageDashboardView: View {
                         AxisValueLabel(format: .dateTime.hour(.twoDigits(amPM: .omitted)))
                     }
                 } else {
-                    AxisMarks(values: .stride(by: .day, count: rangeDays <= 8 ? 1 : 5)) { _ in
+                    AxisMarks(values: .stride(by: .day, count: axis.strideDays)) { _ in
                         AxisGridLine()
-                        AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                        if axis.showsYear {
+                            AxisValueLabel(format: .dateTime.year(.twoDigits).month(.defaultDigits))
+                        } else {
+                            AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                        }
                     }
                 }
             }
@@ -633,20 +652,9 @@ struct UsageDashboardView: View {
 
     // MARK: - 周报
 
-    /// 周区间：[周一零点, 下周一零点)，weekOffset 往回翻
-    private func weekRange(offset: Int) -> (start: Date, end: Date) {
-        let calendar = Calendar.current
-        let interval = calendar.dateInterval(of: .weekOfYear, for: Date())
-            ?? DateInterval(start: Date(), duration: 7 * 86400)
-        let start = calendar.date(
-            byAdding: .weekOfYear, value: -offset, to: interval.start) ?? interval.start
-        let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start)
-            ?? start.addingTimeInterval(7 * 86400)
-        return (start, end)
-    }
-
     private var weeklySection: some View {
-        let range = weekRange(offset: weekOffset)
+        // Monday-based, same seven days as the "本周" period above (UsageAggregator pins Monday)
+        let range = UsageAggregator.weekRange(offset: weekOffset)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Button {
@@ -665,6 +673,13 @@ struct UsageDashboardView: View {
                 } label: { Image(systemName: "chevron.right").font(.system(size: 10)) }
                 .buttonStyle(.borderless)
                 .disabled(weekOffset == 0)
+                // The report is a whole-week digest with its own 按来源 breakdown; say so instead of
+                // letting a highlighted source chip imply the numbers below are filtered.
+                if sourceFilter != nil {
+                    Text("周报按全部来源统计，不受来源筛选影响")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 if let note = weeklyExportNote {
                     Text(note)
@@ -820,7 +835,7 @@ struct UsageDashboardView: View {
     }
 
     private func loadWeekly() {
-        let range = weekRange(offset: weekOffset)
+        let range = UsageAggregator.weekRange(offset: weekOffset)
         usageService.loadWeeklyReport(weekStart: range.start, weekEnd: range.end)
     }
 

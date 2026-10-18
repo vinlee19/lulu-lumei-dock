@@ -355,7 +355,7 @@ All data lives in `~/Library/Application Support/Eureka/`:
 |---|---|
 | `eureka.sqlite` | history / usage / sessions / audit (inspect directly with `sqlite3`) |
 | `events/` | event spool (hooks → relay writes here atomically, app consumes) |
-| `bin/eureka-relay` | the stable path referenced by hooks/notify (re‑synced by hash on launch) |
+| `bin/lululumei-relay` | the stable path referenced by hooks/notify (re‑synced by hash on launch); `bin/eureka-relay` is kept as a symlink to it for configs written before 0.36 |
 | `pricing.json` (optional) | highest-priority price overrides (USD / million tokens, prefix match) plus optional `providers` aliases, e.g. `{"providers": {"my-proxy": {"vendor": "openai"}}}` |
 | `pricing-catalog-cache.json` | last successfully fetched LiteLLM + models.dev price catalog (kept indefinitely) |
 | `context-windows.json` (optional) | override per‑model context window size, e.g. `{"claude-opus": 1000000}` |
@@ -425,8 +425,11 @@ usage scanners (10 in all — every agent except Antigravity/Qoder) ─→ SQLit
 
 - **`eureka-relay`** is a tiny, fully independent binary: it always `exit 0`, keeps stdout silent,
   runs in <50ms, and writes to `tmp/` then atomically `rename`s into the spool. Hooks/notify configs
-  only ever reference the stable path `~/Library/Application Support/Eureka/bin/eureka-relay`, which
-  the app re‑syncs by hash on launch so upgrades never break the link.
+  only ever reference the stable path `~/Library/Application Support/Eureka/bin/lululumei-relay`, which
+  the app re‑syncs by hash on launch so upgrades never break the link. Codex allows a single
+  top‑level `notify`; when another program already holds it, installing *chains* instead of
+  refusing — the relay hands the payload to the original command first, then records the event,
+  and uninstalling restores the original line.
 - **Module dependency graph** (SwiftPM targets, strictly one‑directional):
   `app → {EurekaIngest, EurekaUsage, EurekaInstall, EurekaSync} → EurekaStore → EurekaKit`.
   `eureka-relay` is dependency‑free.

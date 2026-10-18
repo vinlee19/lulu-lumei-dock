@@ -1,11 +1,15 @@
 import Foundation
 
 // eureka-relay：被 Claude Code hooks / Codex notify 调用的转发器。
+// Built as `eureka-relay`; the app installs it at the stable path as `lululumei-relay`
+// (the old name is kept there as a symlink so pre-0.36 configs keep working).
 //
 // 子命令：
 //   eureka-relay claude-hook            # 读 stdin 的 hook JSON
 //   eureka-relay trae-hook              # 同上（Trae CN 的 hooks 是 Claude 兼容实现）
 //   eureka-relay codex-notify '<json>'  # 读 argv 的 notify JSON
+//   eureka-relay codex-notify --chain <原 notify argv…> '<json>'
+//                                       # 同上，并先把 JSON 原样转给被串联的原 notify 程序
 //   eureka-relay inject --event <名> --session <id> [--source claude|codex|trae]
 //                       [--cwd <路径>] [--title <文本>]   # 测试注入
 //
@@ -124,6 +128,27 @@ func writeEvent(channel: String, payloadJSON: Data) {
         try fm.moveItem(at: tmpURL, to: eventsDir.appendingPathComponent(name))
     } catch {
         logError("writeEvent(\(channel)): \(error)")
+    }
+}
+
+/// Launches the chained notify command with the payload appended, exactly as Codex would
+/// have launched it, and does not wait for it.
+///
+/// This is the one place the relay starts a process, and only for a notify slot it shares:
+/// Codex allows a single top-level `notify`, so when another program held it the installer
+/// wrapped that program's argv behind `--chain`. Not waiting keeps the <50ms budget; once the
+/// relay exits, launchd adopts and reaps the child. stdio is inherited — it is whatever Codex
+/// handed the notify slot, i.e. what the original program would have received anyway.
+func spawnChained(_ argv: [String]) {
+    guard let program = argv.first, !program.isEmpty else { return }
+    var cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) }
+    cArgs.append(nil)
+    defer { cArgs.forEach { free($0) } }
+    var pid: pid_t = 0
+    // posix_spawnp: Codex resolves a bare program name through PATH, so must we.
+    let status = posix_spawnp(&pid, program, nil, nil, cArgs, environ)
+    if status != 0 {
+        logError("codex-notify --chain: 无法启动 \(program): \(String(cString: strerror(status)))")
     }
 }
 
@@ -251,8 +276,20 @@ case "codex-hook":
         }
     }
 case "codex-notify":
-    // notify 程序收到的 JSON 是最后一个参数
-    if let json = arguments.dropFirst().last, !json.isEmpty {
+    // notify 程序收到的 JSON 是最后一个参数（Codex 只在配置的 argv 末尾追加这一个）
+    var rest = Array(arguments.dropFirst())
+    let chained = rest.first == "--chain"
+    if chained {
+        rest.removeFirst()
+        // rest = [original argv…, json]. Forward first, so the original program is notified
+        // even if recording our own event fails.
+        guard rest.count >= 2 else {
+            logError("codex-notify --chain: 缺少被串联的命令或载荷")
+            break
+        }
+        spawnChained(rest)
+    }
+    if let json = rest.last, !json.isEmpty {
         writeEvent(channel: "codex-notify", payloadJSON: Data(json.utf8))
     }
 case "inject":

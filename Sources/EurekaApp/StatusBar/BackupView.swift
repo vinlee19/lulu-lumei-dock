@@ -96,10 +96,24 @@ struct BackupView: View {
                     ProgressView()
                         .controlSize(.small)
                 }
-                if let test = service.testResult {
-                    Text(test)
+                switch service.connectionTest {
+                case .running:
+                    ProgressView().controlSize(.mini)
+                    Text("测试中…")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                case .success:
+                    Label("连接成功", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.enabledGreen)
+                case .failure(let message):
+                    Label(message, systemImage: "xmark.octagon.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.failureRed)
+                        .lineLimit(2)
+                        .help(message)
+                case nil:
+                    EmptyView()
                 }
             }
             if let error = service.lastError {
@@ -611,6 +625,8 @@ private struct BackupConfigSheet: View {
     @State private var secretId = ""
     @State private var secretKey = ""
     @State private var credentialsSaved = false
+    /// Keychain write failure shown inside the sheet; the status card's `lastError` is behind it.
+    @State private var credentialsError: String?
 
     private var provider: StorageProvider {
         StorageProvider(rawValue: settings.storageProvider) ?? .tencentCOS
@@ -719,6 +735,7 @@ private struct BackupConfigSheet: View {
                                 secretId: secretId.trimmingCharacters(in: .whitespaces),
                                 secretKey: secretKey.trimmingCharacters(in: .whitespaces)
                             ) { ok in
+                                credentialsError = ok ? nil : "密钥写入钥匙串失败，请检查钥匙串访问权限后重试"
                                 if ok {
                                     secretId = ""
                                     secretKey = ""
@@ -735,6 +752,11 @@ private struct BackupConfigSheet: View {
                         Text(service.credentialsConfigured ? "钥匙串：已配置" : "钥匙串：未配置")
                             .font(.system(size: 10))
                             .foregroundStyle(service.credentialsConfigured ? .green : .secondary)
+                        if let credentialsError {
+                            Text(credentialsError)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.failureRed)
+                        }
                     }
 
                     Divider().padding(.vertical, 2)

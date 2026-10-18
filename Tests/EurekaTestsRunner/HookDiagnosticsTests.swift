@@ -167,15 +167,34 @@ func hookDiagnosticsTests(_ t: TestRunner) {
 
     // MARK: - Codex notify
 
-    t.test("Codex：他人占用顶层 notify → foreignOccupied 且拒绝自动写") {
+    t.test("Codex：他人占用顶层 notify 且能解析 → chainable，允许手动串联、不算已安装") {
         let toml = "notify = [\"/opt/homebrew/bin/other-tool\", \"notify\"]\n\n[tui]\n"
+        let diagnosis = CodexNotifyInstaller.diagnose(
+            toml: toml, expectedRelayPath: stable, relayIsExecutable: present)
+        try expectEqual(diagnosis, .chainable(owner: "other-tool"))
+        try expect(!diagnosis.blocksAutomaticWrite, "串联不覆盖原程序，可以由用户手动打开")
+        try expect(!diagnosis.isInstalledInSomeForm, "自动更新绝不能顺手把它装上")
+    }
+
+    t.test("Codex：他人 notify 解析不了（跨多行）→ foreignOccupied 且拒绝写") {
+        let toml = "notify = [\n  \"/opt/bin/other-tool\",\n  \"notify\",\n]\n\n[tui]\n"
         let diagnosis = CodexNotifyInstaller.diagnose(
             toml: toml, expectedRelayPath: stable, relayIsExecutable: present)
         guard case .foreignOccupied = diagnosis else {
             throw ExpectationError(description: "应为 foreignOccupied，实际 \(diagnosis)")
         }
-        try expect(diagnosis.blocksAutomaticWrite, "notify 只能有一个，不许覆盖别人的")
-        try expect(!diagnosis.isInstalledInSomeForm)
+        try expect(diagnosis.blocksAutomaticWrite, "看不懂的 notify 不许改")
+        do {
+            _ = try CodexNotifyInstaller.install(into: toml, relayPath: stable)
+            throw ExpectationError(description: "应抛 foreignConfig")
+        } catch InstallError.foreignConfig {}
+    }
+
+    t.test("Codex：他人写的 notify = [] 等于没配置") {
+        try expectEqual(
+            CodexNotifyInstaller.diagnose(
+                toml: "notify = []\n", expectedRelayPath: stable, relayIsExecutable: present),
+            .notInstalled)
     }
 
     t.test("Codex：未配置 / 装好 / 路径歪了 / relay 缺失") {
@@ -207,7 +226,8 @@ func hookDiagnosticsTests(_ t: TestRunner) {
         let cases: [HookDiagnosis] = [
             .stale(missing: ["Stop"]), .driftedPath(found: ["x"]),
             .relayMissing(path: "/x"), .unparseable(reason: "坏了"),
-            .foreignOccupied(detail: "被占"),
+            .foreignOccupied(detail: "被占"), .legacyRelayName(found: ["x"]),
+            .chainable(owner: "other-tool"),
         ]
         for diagnosis in cases {
             try expect(!diagnosis.label.isEmpty, "\(diagnosis) 缺标签")
@@ -216,6 +236,73 @@ func hookDiagnosticsTests(_ t: TestRunner) {
         // 正常态不该有噪音说明
         try expect(HookDiagnosis.installed.detail == nil)
         try expect(HookDiagnosis.notInstalled.detail == nil)
+    }
+
+    // MARK: - relay 改名（eureka-relay → lululumei-relay）
+
+    let renamedStable = "/Users/demo/Library/Application Support/Eureka/bin/lululumei-relay"
+    let legacyStable = "/Users/demo/Library/Application Support/Eureka/bin/eureka-relay"
+
+    t.test("旧名稳定路径 → legacyRelayName：可自动迁移，不算漂移") {
+        let claude = ClaudeHooksInstaller.diagnose(
+            json: try installedJSON(relayPath: legacyStable),
+            expectedRelayPath: renamedStable, relayIsExecutable: present)
+        guard case .legacyRelayName(let found) = claude else {
+            throw ExpectationError(description: "应为 legacyRelayName，实际 \(claude)")
+        }
+        try expectEqual(found.count, ClaudeHooksInstaller.managedEvents.count)
+        try expect(!claude.blocksAutomaticWrite, "我们自己的旧路径，自动更新可以迁移")
+        try expect(claude.isInstalledInSomeForm, "旧名条目仍然在工作，算已安装")
+
+        let codexHooks = try CodexHooksInstaller.install(into: "{}", relayPath: legacyStable)
+        guard case .legacyRelayName = CodexHooksInstaller.diagnose(
+            json: codexHooks, expectedRelayPath: renamedStable, relayIsExecutable: present) else {
+            throw ExpectationError(description: "Codex hooks 旧名应判为 legacyRelayName")
+        }
+        let trae = try TraeHooksInstaller.install(into: "{}", relayPath: legacyStable)
+        guard case .legacyRelayName = TraeHooksInstaller.diagnose(
+            json: trae, expectedRelayPath: renamedStable, relayIsExecutable: present) else {
+            throw ExpectationError(description: "Trae hooks 旧名应判为 legacyRelayName")
+        }
+        let notify = try CodexNotifyInstaller.install(into: "[tui]\n", relayPath: legacyStable)
+        guard case .legacyRelayName = CodexNotifyInstaller.diagnose(
+            toml: notify, expectedRelayPath: renamedStable, relayIsExecutable: present) else {
+            throw ExpectationError(description: "Codex notify 旧名应判为 legacyRelayName")
+        }
+    }
+
+    t.test("旧名但不在稳定目录（旧 app-bundle）→ 仍是 driftedPath") {
+        let diagnosis = ClaudeHooksInstaller.diagnose(
+            json: try installedJSON(relayPath: "/Applications/old.app/Contents/MacOS/eureka-relay"),
+            expectedRelayPath: renamedStable, relayIsExecutable: present)
+        guard case .driftedPath = diagnosis else {
+            throw ExpectationError(description: "应为 driftedPath，实际 \(diagnosis)")
+        }
+    }
+
+    t.test("重装把旧名条目替换为新名，不留重复；卸载新旧都清干净") {
+        let old = try installedJSON(relayPath: legacyStable, withForeign: true)
+        let migrated = try ClaudeHooksInstaller.install(into: old, relayPath: renamedStable)
+        try expect(!migrated.contains(RelayIdentity.legacyBinaryName), "旧名条目应被替换")
+        try expectEqual(
+            ClaudeHooksInstaller.diagnose(
+                json: migrated, expectedRelayPath: renamedStable, relayIsExecutable: present),
+            .installed)
+        try expect(migrated.contains("otty-cli"), "他人条目原样保留")
+
+        let uninstalled = try ClaudeHooksInstaller.uninstall(from: old)
+        try expect(!uninstalled.contains(RelayIdentity.legacyBinaryName), "旧名条目卸载要认得")
+        try expect(uninstalled.contains("otty-cli"))
+    }
+
+    t.test("RelayIdentity：只认我们的两个名字") {
+        try expect(RelayIdentity.isOurs("\"/x/lululumei-relay\" claude-hook"))
+        try expect(RelayIdentity.isOurs("\"/x/eureka-relay\" claude-hook"))
+        try expect(!RelayIdentity.isOurs("'/opt/homebrew/bin/otty-cli' hook"))
+        try expect(RelayIdentity.isLegacyStablePath(legacyStable, expected: renamedStable))
+        try expect(!RelayIdentity.isLegacyStablePath(legacyStable, expected: legacyStable),
+                   "期望路径本身就是旧名时不算迁移")
+        try expect(!RelayIdentity.isLegacyStablePath("/elsewhere/eureka-relay", expected: renamedStable))
     }
 }
 

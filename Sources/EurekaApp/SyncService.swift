@@ -13,7 +13,7 @@ final class SyncService: ObservableObject {
     @Published private(set) var lastResult: String?
     @Published private(set) var lastError: String?
     @Published private(set) var credentialsConfigured = false
-    @Published private(set) var testResult: String?
+    @Published private(set) var connectionTest: ConnectionTest?
     /// 同步进行中的实时进度（nil = 空闲）
     @Published private(set) var progress: SyncProgress?
     /// 同步历史当前页（持久化，倒序）与总轮数（分页用）
@@ -161,20 +161,28 @@ final class SyncService: ObservableObject {
         }
     }
 
+    /// Outcome of the last HEAD-bucket probe. A typed state rather than a message string so the
+    /// view can give success, failure and "still running" different colours and a spinner.
+    enum ConnectionTest: Equatable {
+        case running
+        case success
+        case failure(String)
+    }
+
     /// HEAD Bucket 测试连接/凭证
     func testConnection() {
-        publish { $0.testResult = "测试中…" }
+        publish { $0.connectionTest = .running }
         queue.async { [weak self] in
             guard let self else { return }
             guard let client = self.makeClient() else {
-                self.publish { $0.testResult = "配置不完整：请填写地域、存储桶并保存密钥" }
+                self.publish { $0.connectionTest = .failure("配置不完整：请填写地域、存储桶并保存密钥") }
                 return
             }
             do {
                 try client.headBucket()
-                self.publish { $0.testResult = "连接成功 ✓" }
+                self.publish { $0.connectionTest = .success }
             } catch {
-                self.publish { $0.testResult = "连接失败：\(error)" }
+                self.publish { $0.connectionTest = .failure("连接失败：\(error)") }
             }
         }
     }
@@ -357,7 +365,7 @@ final class SyncService: ObservableObject {
             antigravitySkills: AntigravityPaths.userSkillsRoot())
     }
 
-    /// 审计归档的本地落点（export/audit/dt=YYYY-MM-DD/part-*.parquet）
+    /// 审计归档的本地落点（export/audit/dt=YYYY-MM-DD/audit-events-*.parquet）
     static func auditArchiveDir() -> URL {
         EurekaStore.defaultURL().deletingLastPathComponent()
             .appendingPathComponent("export/audit", isDirectory: true)

@@ -20,10 +20,16 @@ public enum StatusTitleComposer {
         }
     }
 
-    /// 所有可用来源 5h 窗口用量取最大（最先见顶的才要紧）
-    public static func maxPrimaryPercent(_ snapshots: [RateLimitSnapshot?]) -> Double? {
+    /// 所有可用来源 5h 窗口用量取最大（最先见顶的才要紧）。
+    /// Windows whose reset time has passed are skipped: a week-old Codex snapshot would
+    /// otherwise pin a dead "9%" on the menu bar and the sidebar badge.
+    public static func maxPrimaryPercent(
+        _ snapshots: [RateLimitSnapshot?], now: Date = Date()
+    ) -> Double? {
         snapshots
-            .compactMap { $0?.primary?.usedPercent }
+            .compactMap { $0?.primary }
+            .filter { !$0.hasReset(at: now) }
+            .map(\.usedPercent)
             .max()
     }
 

@@ -41,7 +41,12 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
   panel 固定 expanded 最大尺寸，展开/收起全靠 SwiftUI spring 动画 + hitTest 让透明区点击穿透。
 - **零第三方依赖**；SQLite 用系统 libsqlite3 + 薄封装，可直接 `sqlite3` 查库调试。
 - **relay 稳定路径**：hooks/notify 配置永远只写
-  `~/Library/Application Support/Eureka/bin/eureka-relay`，app 启动按 hash 同步，升级不断链。
+  `~/Library/Application Support/Eureka/bin/lululumei-relay`，app 启动按 hash 同步，升级不断链。
+  0.36 之前的旧名 `bin/eureka-relay` 保留为指向它的软链；旧名条目诊断为 `legacyRelayName`，
+  「更新」或自动更新时改为新名。
+- **Codex notify 串联**：顶层 `notify` 只能有一个。被他人占用且值能确定解析（单行字符串数组）时，
+  安装改写为 `["<relay>", "codex-notify", "--chain", <原 argv…>]`，relay 先把载荷原样转给原程序
+  （不等待），再记录事件；卸载时恢复原 argv。解析不了的值仍拒绝改写。
 - **relay 硬约束**：永远 exit 0、stdout 绝对静默（UserPromptSubmit 的 stdout 会注入模型上下文）、
   <50ms、stdin 限读 1MB。
 - **Claude OAuth usage 接口（非官方）默认关闭、opt-in**，任何失败 → 返回 nil → UI 整块隐藏。

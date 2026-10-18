@@ -209,17 +209,28 @@ public final class UsageRepo {
             [.int(Int64(outputTokens)), .int(recordId)])
     }
 
-    /// 时间区间内按 (project, source, model) 聚合（按项目统计/费用折算用）
-    public func totalsByProject(from: Date, to: Date) throws -> [(project: String?, totals: UsageTotals)] {
-        try db.query("""
+    /// 时间区间内按 (project, source, model) 聚合（按项目统计/费用折算用）；
+    /// `source` 与 `totalsBySession` 同义：nil = 全部来源。
+    public func totalsByProject(
+        from: Date, to: Date, source: AgentSource? = nil
+    ) throws -> [(project: String?, totals: UsageTotals)] {
+        var conditions = ["ts >= ?", "ts < ?"]
+        var bindings: [SQLiteValue] = [
+            .real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970),
+        ]
+        if let source {
+            conditions.append("source = ?")
+            bindings.append(.text(source.rawValue))
+        }
+        return try db.query("""
         SELECT project, source, model,
                SUM(input_tokens), SUM(output_tokens),
                SUM(cache_creation_tokens), SUM(cache_creation_1h_tokens),
                SUM(cache_read_tokens), COUNT(*), provider, SUM(reported_cost_usd)
         FROM usage_records
-        WHERE ts >= ? AND ts < ?
+        WHERE \(conditions.joined(separator: " AND "))
         GROUP BY project, source, model, provider
-        """, [.real(from.timeIntervalSince1970), .real(to.timeIntervalSince1970)]) { row in
+        """, bindings) { row in
             (row.text(0), UsageTotals(
                 source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,
                 model: row.text(2) ?? "?",

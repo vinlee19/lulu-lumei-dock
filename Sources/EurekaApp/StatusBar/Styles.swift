@@ -343,23 +343,25 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
     @State private var hovering = false
 
     var body: some View {
+        let hardEdged = ThemeStyle.current.isHardEdged
         content()
             .padding(12)
             .frame(minHeight: minHeight, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // brutal dims the content and keeps the fill opaque, so the hard shadow underneath can
+            // never show through a disabled card; classic keeps dimming the fill as it always did.
+            .opacity(hardEdged && !enabled ? 0.6 : 1)
             .background(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .fill(Theme.surface)
-                    .opacity(enabled ? 1 : 0.6))
+                    .opacity(!hardEdged && !enabled ? 0.6 : 1))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius.card)
                     .strokeBorder(
-                        ThemeStyle.current.isHardEdged
+                        hardEdged
                             ? (hovering ? Theme.ink : Theme.cardBorder)
                             : (hovering ? Theme.brand.opacity(0.6) : Theme.cardBorder),
-                        lineWidth: ThemeStyle.current.isHardEdged
-                            ? Theme.cardBorderWidth
-                            : (hovering ? 1 : 0.5)))
+                        lineWidth: hardEdged ? Theme.cardBorderWidth : (hovering ? 1 : 0.5)))
             .overlay(alignment: .bottomTrailing) {
                 if hovering, !actions.isEmpty {
                     KnowledgeCardActions(actions: actions)
@@ -368,11 +370,20 @@ struct KnowledgeCard<Content: View, Menu: View>: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius.card))
+            // brutal hard shadow: a pure ink shape offset 4/4 *behind* the clipped card, not
+            // `.shadow` on the composite — that one was cast by the text too and ghosted every
+            // glyph of a disabled card 4pt away. Nothing is added here for classic.
+            .background {
+                if let shadow = Theme.cardShadow {
+                    RoundedRectangle(cornerRadius: Theme.radius.card)
+                        .fill(shadow.color)
+                        .offset(x: shadow.x, y: shadow.y)
+                }
+            }
             .shadow(
-                color: ThemeStyle.current.isHardEdged ? .clear : .black.opacity(0.06),
-                radius: ThemeStyle.current.isHardEdged ? 0 : 3,
-                y: ThemeStyle.current.isHardEdged ? 0 : 1.5)
-            .themeCardShadow()
+                color: hardEdged ? .clear : .black.opacity(0.06),
+                radius: hardEdged ? 0 : 3,
+                y: hardEdged ? 0 : 1.5)
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.card))
             .onTapGesture { onOpen() }
             .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }

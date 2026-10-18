@@ -133,13 +133,17 @@ private struct WindowGauge: View {
     /// 按最近用量速度外推的预计打满时刻（无风险 = nil，不显示）
     var fullAt: Date?
 
+    /// The window rolled over after the snapshot was taken: its percentage is history, not
+    /// state. Draw it dimmed and say "已重置" instead of a past-tense "上周 重置".
+    private var hasReset: Bool { window.hasReset() }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(label)
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
-                if let fullAt {
+                if let fullAt, !hasReset {
                     Text("⏳ 预计 \(fullAt, format: .dateTime.hour().minute()) 打满")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.orange)
@@ -147,8 +151,13 @@ private struct WindowGauge: View {
                 Spacer()
                 Text("\(Int(window.usedPercent.rounded()))%")
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(barColor)
-                if let resets = window.resetsAt {
+                    .foregroundStyle(hasReset ? Color.secondary : barColor)
+                if hasReset {
+                    Text("· 已重置，快照过期")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .help("快照晚于这个窗口的重置时刻，百分比已不代表当前用量；跑一次该 CLI 会刷新")
+                } else if let resets = window.resetsAt {
                     Text("· \(resets, format: .relative(presentation: .named)) 重置")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -163,6 +172,7 @@ private struct WindowGauge: View {
                             startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(
                             4, proxy.size.width * min(window.usedPercent, 100) / 100))
+                        .opacity(hasReset ? 0.3 : 1)
                 }
             }
             .frame(height: 6)

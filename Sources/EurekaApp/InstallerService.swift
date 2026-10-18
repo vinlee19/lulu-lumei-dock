@@ -6,7 +6,9 @@ import Foundation
 ///
 /// 安全约定（用户明确要求「不要乱改用户配置 / 检测到异常要告知」）：
 /// - **永不主动安装**用户没点过的集成，且一次只碰一个集成的配置文件（见文件末尾说明）。
-/// - 只增删 command 含 `eureka-relay` 的自有条目，他人 hook 逐字不动。
+/// - 只增删 command 含 `lululumei-relay`（或旧名 `eureka-relay`）的自有条目，他人 hook 逐字不动。
+/// - Codex 的顶层 notify 只能有一个：被他人占用时串联（relay 先转发给原程序再记录），
+///   卸载时恢复原值；解析不了的值仍然拒绝改写。
 /// - 写前一律经 `ConfigFile.backupThenWrite` 留 `*.bak.eureka.<时间戳>`。
 /// - 诊断出 `blocksAutomaticWrite` 的异常（路径被手改 / 配置解析不了 / 他人占用）时，
 ///   自动更新整体跳过并把原因显示出来 —— 看不懂的配置绝不猜着改。
@@ -77,6 +79,8 @@ final class InstallerService: ObservableObject {
     @Published private(set) var diagnoses: [Integration: HookDiagnosis] = [:]
     /// 同一份配置里他人的 hook（只告知，不据此改动）
     @Published private(set) var foreignHooks = ForeignHookReport()
+    /// Short name of the program our Codex notify forwards to, when it is chained.
+    @Published private(set) var codexNotifyChainedTo: String?
     @Published private(set) var message: String?
     /// 最近一次自动更新是否因异常被跳过（跳过原因要让用户看见，不能静悄悄）
     @Published private(set) var autoUpdateSkipped: [Integration] = []
@@ -85,8 +89,8 @@ final class InstallerService: ObservableObject {
     var claudeStatus: InstallStatus {
         switch diagnoses[.claudeHooks] {
         case .installed: return .installed
-        case .stale, .driftedPath, .relayMissing: return .partial
-        case .foreignOccupied: return .foreign
+        case .stale, .legacyRelayName, .driftedPath, .relayMissing: return .partial
+        case .foreignOccupied, .chainable: return .foreign
         case .notInstalled, .unparseable, .none: return .none
         }
     }
@@ -110,9 +114,12 @@ final class InstallerService: ObservableObject {
         diagnoses[.claudeHooks] = ClaudeHooksInstaller.diagnose(
             json: claudeJSON, expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
+        let codexToml = ConfigFile.read(codexConfigURL)
         diagnoses[.codexNotify] = CodexNotifyInstaller.diagnose(
-            toml: ConfigFile.read(codexConfigURL), expectedRelayPath: relay,
+            toml: codexToml, expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
+        codexNotifyChainedTo = CodexNotifyInstaller.chainedCommand(in: codexToml)?.first
+            .map { URL(fileURLWithPath: $0).lastPathComponent }
         let codexHooksJSON = ConfigFile.read(codexHooksURL)
         diagnoses[.codexHooks] = CodexHooksInstaller.diagnose(
             json: codexHooksJSON, expectedRelayPath: relay,
@@ -159,7 +166,13 @@ final class InstallerService: ObservableObject {
         }
         do {
             try write(integration, relayPath: relay.path)
-            message = "\(integration.title) 已安装/更新（原配置已备份到 "
+            let chainNote: String
+            if case .chainable(let owner) = diagnosis {
+                chainNote = "，已与 \(owner) 串联"
+            } else {
+                chainNote = ""
+            }
+            message = "\(integration.title) 已安装/更新\(chainNote)（原配置已备份到 "
                 + "\(integration.configURL.lastPathComponent).bak.eureka.*）"
         } catch {
             message = "\(integration.title) 失败：\(error)（未改动原文件）"
@@ -183,7 +196,9 @@ final class InstallerService: ObservableObject {
             case .traeHooks: updated = try TraeHooksInstaller.uninstall(from: original)
             }
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
-            message = "\(integration.title) 已卸载（只移除了我们自己的条目）"
+            let restored = integration == .codexNotify && codexNotifyChainedTo != nil
+            message = "\(integration.title) 已卸载（只移除了我们自己的条目"
+                + (restored ? "，已恢复原来的 notify）" : "）")
         } catch {
             message = "\(integration.title) 卸载失败：\(error)（未改动原文件）"
         }

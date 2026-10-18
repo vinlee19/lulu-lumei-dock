@@ -59,6 +59,25 @@ func usageSessionTotalsTests(_ t: TestRunner) {
         try expectEqual(codexOnly.map(\.sessionId), ["sess-b"])
     }
 
+    t.test("totalsByProject：来源过滤只返回该来源的项目行") {
+        let (store, path) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: path) }
+        try store.usage.insert([
+            makeRecord(project: "proj-a", sessionId: "s1", ts: 100),
+            makeRecord(source: .codex, project: "proj-b", sessionId: "s2", ts: 150),
+            makeRecord(source: .codex, project: "proj-a", sessionId: "s3", ts: 160),
+        ])
+        let from = Date(timeIntervalSince1970: 50)
+        let to = Date(timeIntervalSince1970: 1000)
+
+        let all = try store.usage.totalsByProject(from: from, to: to)
+        try expectEqual(all.count, 3, "(project, source, model) 三组")
+
+        let codexOnly = try store.usage.totalsByProject(from: from, to: to, source: .codex)
+        try expectEqual(codexOnly.compactMap(\.project).sorted(), ["proj-a", "proj-b"])
+        try expect(codexOnly.allSatisfy { $0.totals.source == .codex }, "不得混入 claude 行")
+    }
+
     t.test("hourlyHeatmap：落格正确（Calendar 反推期望，避免时区耦合）、同格合并、来源过滤") {
         let (store, path) = try makeStore()
         defer { try? FileManager.default.removeItem(at: path) }

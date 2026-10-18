@@ -1,6 +1,6 @@
 import Foundation
 
-/// 把 eureka-relay 装进 Codex 的 `~/.codex/hooks.json`（Codex 0.145.0 实勘）。
+/// 把 lululumei-relay 装进 Codex 的 `~/.codex/hooks.json`（Codex 0.145.0 实勘）。
 ///
 /// 与 `ClaudeHooksInstaller` **结构完全同构**：`{"hooks": {事件: [{"hooks": [{type, command}]}]}}`。
 /// 差别只有三处：
@@ -13,7 +13,7 @@ import Foundation
 ///
 /// 安全口径逐条照搬 Claude 那份，一条都不能松：
 ///  - **绝不整段覆盖 `hooks[event]`**：本机这份文件正被别的 app（Otty）占用，
-///    事件值是条目数组，我们只增删含 `eureka-relay` marker 的那一条，别人的原样留着。
+///    事件值是条目数组，我们只增删含 relay 名（`RelayIdentity.isOurs`）的那一条，别人的原样留着。
 ///  - 认不出的形态（事件值不是条目数组）→ 直接拒绝改写并报错，宁可什么都不做，
 ///    也不能把看不懂的内容删掉。
 ///  - **`PermissionRequest` 的 stdout 极可能被 Codex 当作放行/拦截决策**（同 Claude 的
@@ -23,8 +23,6 @@ public enum CodexHooksInstaller {
     public static let managedEvents = [
         "UserPromptSubmit", "Stop", "SessionStart", "PermissionRequest",
     ]
-
-    static let marker = "eureka-relay"
 
     /// 每个事件一条独立命令（事件名要带在命令行上）
     public static func hookCommand(relayPath: String, event: String) -> String {
@@ -118,15 +116,16 @@ public enum CodexHooksInstaller {
         let ourCommands = eurekaCommands(in: hooks)
         guard !ourCommands.isEmpty else { return .notInstalled }
 
-        let drifted = ourCommands.compactMap { command -> String? in
-            guard let path = HookCommandPath.extract(from: command) else { return command }
-            return path == expectedRelayPath ? nil : command
-        }
-        if !drifted.isEmpty { return .driftedPath(found: drifted.sorted()) }
+        // Path drift: our entries point somewhere other than the stable path. The legacy
+        // name in the same directory is our own previous path, so it is split out as migratable.
+        let paths = RelayIdentity.classify(
+            commands: ourCommands, expectedRelayPath: expectedRelayPath)
+        if !paths.drifted.isEmpty { return .driftedPath(found: paths.drifted) }
 
         if !relayIsExecutable(expectedRelayPath) {
             return .relayMissing(path: expectedRelayPath)
         }
+        if !paths.legacy.isEmpty { return .legacyRelayName(found: paths.legacy) }
 
         let missing = managedEvents.filter { event in
             !entriesOf(hooks, event).contains(where: isEurekaEntry)
@@ -161,7 +160,7 @@ public enum CodexHooksInstaller {
         for (event, _) in hooks {
             for entry in entriesOf(hooks, event) {
                 for command in entry["hooks"] as? [[String: Any]] ?? [] {
-                    if let text = command["command"] as? String, text.contains(marker) {
+                    if let text = command["command"] as? String, RelayIdentity.isOurs(text) {
                         result.append(text)
                     }
                 }
@@ -178,7 +177,7 @@ public enum CodexHooksInstaller {
 
     private static func isEurekaEntry(_ entry: [String: Any]) -> Bool {
         let commands = entry["hooks"] as? [[String: Any]] ?? []
-        return commands.contains { ($0["command"] as? String)?.contains(marker) == true }
+        return commands.contains { ($0["command"] as? String).map(RelayIdentity.isOurs) == true }
     }
 
     static func parse(_ json: String) throws -> [String: Any] {

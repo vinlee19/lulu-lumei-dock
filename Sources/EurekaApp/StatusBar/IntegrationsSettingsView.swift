@@ -49,7 +49,8 @@ struct IntegrationsSettingsView: View {
     private var riskNotice: some View {
         VStack(alignment: .leading, spacing: 3) {
             noticeLine("doc.on.doc", "写入前自动备份为 *.bak.eureka.<时间戳>（保留最近 5 份）")
-            noticeLine("scissors", "只增删 command 含 eureka-relay 的条目，其它工具的配置逐字不动")
+            noticeLine("scissors", "只增删 command 含 lululumei-relay（及旧名 eureka-relay）的条目，其它工具的配置逐字不动")
+            noticeLine("link", "Codex notify 只能有一个：被占用时串联转发给原程序，两者都生效，关闭即恢复原值")
             noticeLine("arrow.uturn.backward", "随时可关闭开关，卸载同样只移除我们自己的条目")
         }
         .padding(8)
@@ -118,6 +119,12 @@ struct IntegrationsSettingsView: View {
                     // 配置解析不了 / 他人占用时，开关不该给人"点一下就好"的错觉
                     .disabled(blocksToggle(diagnosis))
             }
+            if integration == .codexNotify, diagnosis.isInstalledInSomeForm,
+               let chained = installer.codexNotifyChainedTo {
+                Text("已串联：每次通知先原样转给 \(chained)，再记录事件")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             if let detail = diagnosis.detail {
                 Text(detail)
                     .font(.system(size: 10))
@@ -138,14 +145,14 @@ struct IntegrationsSettingsView: View {
     /// 路径漂移刻意**不**自动改 —— 那可能是用户手改的，我们无权覆盖。
     private func needsRepair(_ diagnosis: HookDiagnosis) -> Bool {
         switch diagnosis {
-        case .stale, .driftedPath, .relayMissing: return true
+        case .stale, .legacyRelayName, .driftedPath, .relayMissing: return true
         default: return false
         }
     }
 
     private func repairLabel(_ diagnosis: HookDiagnosis) -> String {
         switch diagnosis {
-        case .stale: return "更新"
+        case .stale, .legacyRelayName: return "更新"
         case .driftedPath: return "改为稳定路径"
         case .relayMissing: return "重建转发器"
         default: return "修复"
@@ -185,7 +192,8 @@ struct IntegrationsSettingsView: View {
         VStack(alignment: .leading, spacing: 5) {
             Toggle("应用升级后自动更新已安装的 hook", isOn: $settings.hookAutoUpdate)
             Text("只会刷新你已经装过的那几项；永远不会安装你没开过的集成。"
-                + "遇到无法安全改写的配置（路径被手改、解析失败、他人占用）会整体跳过并在此提示。")
+                + "遇到无法安全改写的配置（路径被手改、解析失败、他人占用）会整体跳过并在此提示；"
+                + "仍引用旧名 eureka-relay 的条目会顺带改为 lululumei-relay。")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

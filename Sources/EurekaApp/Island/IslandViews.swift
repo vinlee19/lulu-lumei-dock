@@ -87,18 +87,17 @@ struct CompactPillView: View {
     var scale: CGFloat = 1
 
     var body: some View {
+        // Each wing is a fixed share of a fixed-width pill, and nothing in it may wrap: a
+        // two-digit count once became a vertical "3/0" and a cross-day start time a two-line
+        // date. Every text is `fixedSize`, and when a wing still cannot fit, ViewThatFits drops
+        // its least important piece (the "claude" word on the left, the subagent marker on the
+        // right) instead of letting SwiftUI break a line.
         HStack(spacing: 0) {
-            HStack(spacing: 6 * scale) {
-                if hasWaiting {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: 14 * scale, weight: .semibold))
-                        .foregroundStyle(.orange)
-                }
-                // 在场来源各一枚「logo + claude/codex」标签
-                PulsingSourceBadges(sources: distinctSources, scale: scale)
-                Text("\(tasks.count)")
-                    .font(.system(size: 14 * scale, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white)
+            ViewThatFits(in: .horizontal) {
+                leftWing(showSourceLabel: true, spacing: 6 * scale)
+                // A notched wing is 1pt short of "! + logo + claude + 2": tighten before dropping
+                leftWing(showSourceLabel: true, spacing: 4 * scale)
+                leftWing(showSourceLabel: false, spacing: 6 * scale)
             }
             .frame(maxWidth: .infinity)
 
@@ -106,33 +105,63 @@ struct CompactPillView: View {
                 Color.clear.frame(width: centerGap, height: 1)
             }
 
-            HStack(spacing: 5 * scale) {
-                // 子 agent 聚合标识（有就显示总数，无则不占位）
-                if subagentTotal > 0 {
-                    HStack(spacing: 2 * scale) {
-                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                            .font(.system(size: 11 * scale, weight: .semibold))
-                        Text("\(subagentTotal)")
-                            .font(.system(size: 12 * scale, weight: .semibold).monospacedDigit())
-                    }
-                    .foregroundStyle(.white.opacity(0.75))
-                }
-                if let earliest = tasks.first {
-                    if showStartTime {
-                        // 会话最初创建的时间（跨 turn/resume），缺数据退当前 turn 开始
-                        Text(formatStartTime(earliest.sessionStartedAt ?? earliest.startedAt))
-                            .font(.system(size: 13 * scale, weight: .medium).monospacedDigit())
-                            .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
-                    } else {
-                        Text(timerInterval: earliest.startedAt...Date.distantFuture, countsDown: false)
-                            .font(.system(size: 13 * scale, weight: .medium).monospacedDigit())
-                            .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
-                    }
-                }
+            ViewThatFits(in: .horizontal) {
+                rightWing(showSubagents: true)
+                rightWing(showSubagents: false)
             }
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 14 * scale)
+    }
+
+    /// 左翼：等待标记 + 在场来源 + 数量
+    private func leftWing(showSourceLabel: Bool, spacing: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            if hasWaiting {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 14 * scale, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+            // 在场来源各一枚「logo + claude/codex」标签
+            PulsingSourceBadges(
+                sources: distinctSources, scale: scale, showLabel: showSourceLabel)
+            Text("\(tasks.count)")
+                .font(.system(size: 14 * scale, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    /// 右翼：子 agent 聚合标识 + 最早任务的计时 / 开始时间
+    private func rightWing(showSubagents: Bool) -> some View {
+        HStack(spacing: 5 * scale) {
+            // 子 agent 聚合标识（有就显示总数，无则不占位）
+            if showSubagents, subagentTotal > 0 {
+                HStack(spacing: 2 * scale) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 11 * scale, weight: .semibold))
+                    Text("\(subagentTotal)")
+                        .font(.system(size: 12 * scale, weight: .semibold).monospacedDigit())
+                }
+                .foregroundStyle(.white.opacity(0.75))
+                .fixedSize()
+            }
+            if let earliest = tasks.first {
+                Group {
+                    if showStartTime {
+                        // 会话最初创建的时间（跨 turn/resume），缺数据退当前 turn 开始
+                        Text(formatStartTime(earliest.sessionStartedAt ?? earliest.startedAt))
+                    } else {
+                        Text(timerInterval: earliest.startedAt...Date.distantFuture, countsDown: false)
+                    }
+                }
+                .font(.system(size: 13 * scale, weight: .medium).monospacedDigit())
+                .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
+                .lineLimit(1)
+                .fixedSize()
+            }
+        }
     }
 
     /// 在场来源（保持稳定顺序：claude 前 codex 后）
@@ -614,6 +643,8 @@ struct SourceLabelBadge: View {
 struct PulsingSourceBadges: View {
     let sources: [AgentSource]
     var scale: CGFloat = 1
+    /// Single-source word label ("claude"); the pill turns it off when the wing is out of room.
+    var showLabel = true
     @State private var on = false
 
     var body: some View {
@@ -621,7 +652,7 @@ struct PulsingSourceBadges: View {
             ForEach(sources, id: \.self) { source in
                 // 单来源：logo + 文字（胶囊够宽）；多来源并存：只放 logo（刘海两翼放不下两组文字，
                 // 完整 claude/codex 文字在展开任务列表里每行都有）
-                if sources.count == 1 {
+                if sources.count == 1, showLabel {
                     SourceLabelBadge(source: source, size: 13 * scale)
                 } else {
                     SourceBadge(source: source, size: 13 * scale, onDark: true)

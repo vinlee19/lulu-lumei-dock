@@ -28,6 +28,80 @@ this project uses [Semantic Versioning](https://semver.org/).
 - Packs without gaze frames (any custom pack) no longer freeze their caption
   and motion while the pointer is near the companion.
 
+## [0.36.0] - 2026-10-16
+
+### Added
+
+- **Codex notify no longer refuses an occupied slot — it chains.** Codex
+  allows a single top-level `notify`. When another program already holds it
+  and its value is a plain single-line string array, installing rewrites it
+  to `["<relay>", "codex-notify", "--chain", <original argv…>]`: the relay
+  hands the payload to the original program first (without waiting for it),
+  then records the event. Uninstalling restores the original line. A value
+  that cannot be parsed with certainty is still left untouched.
+- **Parquet reader and `eureka --parquet-inspect <file>…`** to decode the
+  audit archive locally and print rows and schema per file; the archive is
+  now verified round-trip in the test suite.
+
+### Changed
+
+- **The relay is installed as `bin/lululumei-relay`.** The stable path that
+  hooks and notify configs reference is now
+  `~/Library/Application Support/Eureka/bin/lululumei-relay`, a
+  product-prefixed name nothing else on the machine is likely to share. The
+  old `bin/eureka-relay` is kept as a symlink to it, so configs written by
+  earlier versions keep working; the Integrations page shows them as
+  "legacy name" and switches them to the new name on update (or on the
+  automatic post-upgrade refresh). Any other path mismatch is still never
+  rewritten without asking.
+- **Audit archive files are named after their day**:
+  `dt=YYYY-MM-DD/audit-events-YYYY-MM-DD.parquet` (chunks past the row cap
+  get `-2`, `-3`, …) instead of `part-NNNN.parquet`, so a file downloaded on
+  its own still says what it holds. Files written by 0.35.0 are renamed in
+  place; a stale legacy duplicate never overwrites a newer file.
+
+### Fixed
+
+- **Usage trend chart fits its data on the "All" period.** The axis domain
+  started at 1970, crushing every bar against the right edge under thousands
+  of overlapping ticks. The domain now starts at the first day with data,
+  ticks are spaced to at most eight labels, and spans longer than a year are
+  labelled by month and year.
+
+## [0.35.2] - 2026-10-16
+
+### Fixed
+
+- **Dynamic Island pill never wraps its text again.** A two-digit task count
+  used to render as a vertical "3/0", a cross-day start time such as
+  `10/10 13:49` broke onto a second line, and in the waiting state the count
+  could be pushed out of the pill entirely. Each wing now drops its least
+  important piece (the "claude" word label, then the subagent marker) before
+  anything wraps.
+- **Usage page: the source filter now applies to 项目统计.** Picking a source
+  chip left the project table on all-source numbers while the chip stayed
+  highlighted. The weekly report keeps its own per-source breakdown and says
+  so in its header instead of silently ignoring the chip.
+- **Weekly report weeks start on Monday**, matching the "本周" period above
+  it. On a Sunday-first calendar the report covered a different seven days
+  than the dashboard period on the same page.
+- **Expired rate-limit snapshots are no longer shown as live.** A week-old
+  Codex snapshot drew 9% / 26% bars with past-tense reset labels and pinned
+  the same dead 9% on the sidebar badge and menu bar. Windows whose reset
+  time has passed are dimmed and marked "已重置，快照过期", and the badge
+  skips them.
+- **Backup "test connection" shows running, success and failure as distinct
+  states** (spinner / green / red) instead of one grey line; a keychain write
+  failure is reported inside the configuration sheet.
+- **Clearing the full-text search index asks for confirmation**, like the
+  audit page's clear does.
+- **Disabled Skills / MCP / Agents cards no longer ghost their text** in the
+  Neo-Brutalism style. The hard shadow was cast by the whole card including
+  its text; it is now a plain shape behind the card. The classic style is
+  pixel-identical.
+- **Settings → 通用 no longer shifts off the window** on narrower windows: the
+  interface-style picker wraps instead of forcing a single ~900pt row.
+
 ## [0.35.1] - 2026-10-14
 
 ### Fixed
@@ -1838,6 +1912,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.36.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.36.0
+[0.35.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.2
 [0.35.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.1
 [0.35.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.0
 [0.34.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.34.1
