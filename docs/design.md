@@ -91,7 +91,12 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
     `message.model`、`requestId`、`sessionId`、`isSidechain`；**(requestId,message.id) 流式重复严重，
     必须跨文件持久化去重**（resume/fork 会把旧行复制进新文件）
   - `{"type":"ai-title","aiTitle":"...","sessionId":"..."}` 现成任务标题
-  - `{"type":"system","subtype":"turn_duration","durationMs":...}` 官方耗时（可校验 hook 配对计时）
+  - `{"type":"system","subtype":"turn_duration","durationMs":...}` 官方耗时（可校验 hook 配对计时）；
+    **只有 CLI 入口写**，桌面端（`entrypoint: claude-desktop`，2.1.197–2.1.299 共 566 个样本）一行都没有
+  - turn 结束标记（transcript 监视器无 hooks 时的唯一完成信号，任一出现在最后一个真实 prompt 之后即判空闲）：
+    主链 assistant 行 `message.stop_reason == "end_turn"`（`tool_use` = 还要调工具，`null` = 流式中间块）、
+    用户中断行（user 行 content 数组里 text 以 `[Request interrupted by user` 开头 → 结局记中断）、
+    API 错误行、`turn_duration`
   - API 错误行：`message.model=="<synthetic>"`、`isApiErrorMessage:true`、`apiErrorStatus`、`error`
 - **Codex rollout** `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`（行 = `{timestamp,type,payload}`）：
   - `session_meta`（id/cwd/cli_version）、`event_msg/task_started`（turn_id、started_at 秒级 epoch）、
