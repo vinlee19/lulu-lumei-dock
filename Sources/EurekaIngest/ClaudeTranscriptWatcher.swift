@@ -20,6 +20,8 @@ public final class ClaudeTranscriptWatcher {
     private struct FileState {
         var mtime: Date
         var running: Bool
+        /// 上次看到的最后一个真实 prompt 时间：两次轮询都空闲但它变了 = 中间跑完了一整个短 turn
+        var promptAt: Date?
         var knownTitle: String?
         var contextBucket: Int?
         var lastSubagents: [SubagentInfo] = []
@@ -85,6 +87,13 @@ public final class ClaudeTranscriptWatcher {
             ), false)
         }
 
+        func emitFinished() {
+            let outcome = snapshot.turnEndOutcome ?? .success
+            emit(.taskFinished(outcome: outcome, title: nil,
+                               detail: outcome == .interrupted ? "已中断" : nil),
+                 at: snapshot.turnEndAt ?? mtime)
+        }
+
         let wasRunning = previous?.running
         if snapshot.running {
             if wasRunning == true {
@@ -92,7 +101,7 @@ public final class ClaudeTranscriptWatcher {
                 emit(.activity(tool: nil), at: mtime)
             } else {
                 // 初见即在跑 / 空闲后开新 turn
-                emit(.taskStarted(title: snapshot.promptText.flatMap { summarizeTitle($0) }),
+                emit(.taskStarted(title: snapshot.promptTitle),
                      at: snapshot.promptAt ?? snapshot.earliestAt ?? mtime)
             }
         } else if wasRunning == nil {
@@ -100,8 +109,13 @@ public final class ClaudeTranscriptWatcher {
         } else if wasRunning == true {
             // turn 收尾：对无 hooks 会话这是唯一的完成信号；
             // 有 hooks 时 Stop 先到、会话已转空闲 → store 抑制重复卡
-            emit(.taskFinished(outcome: .success, title: nil, detail: nil),
-                 at: snapshot.turnEndAt ?? mtime)
+            emitFinished()
+        } else if let promptAt = snapshot.promptAt, promptAt != previous?.promptAt {
+            // 短于一个轮询间隔的 turn：开始和结束落在两次扫描之间。
+            // 只发完成会被 store 当作空闲会话的重复信号丢弃 → 先补开始
+            emit(.taskStarted(title: snapshot.promptTitle),
+                 at: promptAt)
+            emitFinished()
         }
 
         // 标题/上下文有变化才发
@@ -129,6 +143,7 @@ public final class ClaudeTranscriptWatcher {
         states[path] = FileState(
             mtime: mtime,
             running: snapshot.running,
+            promptAt: snapshot.promptAt,
             knownTitle: snapshot.aiTitle ?? previous?.knownTitle,
             contextBucket: bucket ?? previous?.contextBucket,
             lastSubagents: subagents

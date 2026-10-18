@@ -5,8 +5,9 @@ import EurekaKit
 /// app 启动前就在跑的会话，其 UserPromptSubmit 早已消费/丢失，
 /// 心跳又要等下一次工具调用结束才来——长命令/纯生成期间会一直隐形。
 ///
-/// 判定：transcript 尾部最后一个真实用户 prompt 之后，
-/// 没有 turn_duration（turn 结束标记）/ API 错误行 → turn 仍在飞行中。
+/// 判定：transcript 尾部最后一个真实用户 prompt 之后，没有 turn 结束标记 → turn 仍在飞行中。
+/// 结束标记：`stop_reason == "end_turn"` 的主链 assistant 行 / 用户中断行 / API 错误行 /
+/// `turn_duration`（只有 CLI 入口写；桌面端 `entrypoint: claude-desktop` 从不写）。
 public enum ClaudeSessionBootstrap {
     /// 默认 ~/.claude/projects（EUREKA_CLAUDE_PROJECTS 覆盖，与用量扫描器同约定）
     public static func defaultProjectsRoot(
@@ -51,9 +52,18 @@ public enum ClaudeSessionBootstrap {
         public var promptAt: Date?
         public var promptText: String?
         public var turnEndAt: Date?
+        /// 最近一个结束标记代表的结局（用户中断 → interrupted，其余 → success；
+        /// API 错误由 EventPipeline 的 ClaudeErrorSniffer 升级为 error）
+        public var turnEndOutcome: TaskOutcome?
         public var aiTitle: String?
         public var contextPercent: Double?
         public var earliestAt: Date?
+
+        /// 任务名：剥掉注入块（后台任务回报 `<task-notification>` 等）后再摘要；
+        /// 剥空 → nil，TaskStore 沿用会话上一个标题
+        public var promptTitle: String? {
+            promptText.flatMap { TurnSlicer.realPrompt($0) }.flatMap { summarizeTitle($0) }
+        }
     }
 
     /// 单个 transcript 的现场判定（公开供测试）。
@@ -70,7 +80,7 @@ public enum ClaudeSessionBootstrap {
 
         var events: [TaskEvent] = []
         if snapshot.running {
-            let title = snapshot.promptText.flatMap { summarizeTitle($0) }
+            let title = snapshot.promptTitle
             // 开始时间：prompt 时间 → 尾窗最早时间（至少不低估时长）→ mtime
             events.append(event(
                 .taskStarted(title: title),
@@ -109,6 +119,7 @@ public enum ClaudeSessionBootstrap {
         var lastPromptAt: Date?
         var lastPromptText: String?
         var lastTurnEndAt: Date?
+        var lastTurnEndOutcome: TaskOutcome?
         var contextPercent: Double?
         /// 尾部是否有主链执行痕迹（assistant/tool_result）——超长 turn 中段的判据
         var hasMainChainActivity = false
@@ -139,6 +150,10 @@ public enum ClaudeSessionBootstrap {
                 if let content = message["content"] as? String {
                     lastPromptAt = timestamp
                     lastPromptText = content
+                } else if isInterruptMarker(message["content"]) {
+                    // 用户按 Esc 中断：之后不会再有 end_turn / Stop
+                    lastTurnEndAt = timestamp ?? lastTurnEndAt
+                    lastTurnEndOutcome = .interrupted
                 } else {
                     hasMainChainActivity = true
                 }
@@ -146,6 +161,7 @@ public enum ClaudeSessionBootstrap {
             case "system":
                 if root["subtype"] as? String == "turn_duration" {
                     lastTurnEndAt = timestamp
+                    lastTurnEndOutcome = .success
                 }
 
             case "assistant":
@@ -156,9 +172,15 @@ public enum ClaudeSessionBootstrap {
                 if root["isApiErrorMessage"] as? Bool == true
                     || message["model"] as? String == "<synthetic>" {
                     lastTurnEndAt = timestamp ?? lastTurnEndAt
+                    lastTurnEndOutcome = .success
                     continue
                 }
                 hasMainChainActivity = true
+                // 模型主动收尾（不再调工具）= turn 结束；桌面端没有 turn_duration，这是它唯一的结束标记
+                if message["stop_reason"] as? String == "end_turn" {
+                    lastTurnEndAt = timestamp ?? lastTurnEndAt
+                    lastTurnEndOutcome = .success
+                }
                 if let usage = message["usage"] as? [String: Any] {
                     let used = (usage["input_tokens"] as? Int ?? 0)
                         + (usage["cache_read_input_tokens"] as? Int ?? 0)
@@ -194,9 +216,20 @@ public enum ClaudeSessionBootstrap {
             promptAt: lastPromptAt,
             promptText: lastPromptText,
             turnEndAt: lastTurnEndAt,
+            turnEndOutcome: lastTurnEndOutcome,
             aiTitle: aiTitle,
             contextPercent: contextPercent,
             earliestAt: earliestAt
         )
+    }
+
+    /// 中断行：content 数组里的 text 以 "[Request interrupted by user" 开头
+    /// （含 "... for tool use]" 变体）
+    private static func isInterruptMarker(_ content: Any?) -> Bool {
+        guard let items = content as? [[String: Any]] else { return false }
+        return items.contains {
+            $0["type"] as? String == "text"
+                && ($0["text"] as? String)?.hasPrefix("[Request interrupted by user") == true
+        }
     }
 }

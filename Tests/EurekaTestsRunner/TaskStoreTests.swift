@@ -124,6 +124,21 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.sortedIdleTasks.count, 1, "会话仍是空闲，不被移除")
     }
 
+    t.test("双源短 turn：hooks 已收尾，transcript 补报的开始+完成不复活、不出第二张卡") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "任务"), at: 100))
+        store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 103))
+        // transcript 监视下一次轮询才看到这个 turn：开始时间是 prompt 时间（早于收尾）
+        try expectEqual(store.apply(event(.taskStarted(title: "任务"), at: 100)), [])
+        try expectEqual(
+            store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 103)),
+            [])
+        try expectEqual(store.sortedIdleTasks.count, 1, "仍是空闲")
+        // 真正的新 prompt 晚于上次收尾 → 正常开新 turn
+        store.apply(event(.taskStarted(title: "下一轮"), at: 200))
+        try expectEqual(store.sortedActiveTasks.first?.title, "下一轮")
+    }
+
     t.test("空闲会话再提交 prompt：计时重置、标题换新") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "第一轮"), at: 100))
