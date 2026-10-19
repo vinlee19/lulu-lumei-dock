@@ -481,29 +481,31 @@ private struct PromptRow: View {
                 }
             }
             Spacer(minLength: 8)
-            if hovering {
-                HStack(spacing: 10) {
-                    if let onRun {
-                        Button(action: onRun) {
-                            Image(systemName: "play.fill").font(Theme.font.themed(10))
-                        }
-                        .buttonStyle(.borderless)
-                        .help(L10n.format("Start a new session in Terminal with this prompt (%@)", zhHans: "在终端以此提问启动新会话（%@）", String(entry.source.displayName)))
-                    }
-                    Button(action: onCopy) {
-                        Image(systemName: "doc.on.doc").font(Theme.font.themed(10))
+            // Always laid out and only faded in on hover: inserting the buttons on hover used to
+            // take width from the title and make it re-truncate under the pointer
+            HStack(spacing: 10) {
+                if let onRun {
+                    Button(action: onRun) {
+                        Image(systemName: "play.fill").font(Theme.font.themed(10))
                     }
                     .buttonStyle(.borderless)
-                    .help(L10n.text("Copy the prompt text", zhHans: "复制提问原文"))
-                    Button(action: onJump) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(Theme.font.themed(10))
-                    }
-                    .buttonStyle(.borderless)
-                    .help(L10n.text("View in its session", zhHans: "在所属会话中查看"))
+                    .help(L10n.format("Start a new session in Terminal with this prompt (%@)", zhHans: "在终端以此提问启动新会话（%@）", String(entry.source.displayName)))
                 }
-                .foregroundStyle(.secondary)
+                Button(action: onCopy) {
+                    Image(systemName: "doc.on.doc").font(Theme.font.themed(10))
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.text("Copy the prompt text", zhHans: "复制提问原文"))
+                Button(action: onJump) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(Theme.font.themed(10))
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.text("View in its session", zhHans: "在所属会话中查看"))
             }
+            .foregroundStyle(.secondary)
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
