@@ -249,48 +249,8 @@ struct SettingsView: View {
                 .controlSize(.small)
             }
 
-            settingCard(L10n.text("Desktop companion", zhHans: "桌面伙伴")) {
-                Toggle(
-                    L10n.text("Show the desktop companions (Lulu & Lumei)", zhHans: "显示桌面吉祥物（噜噜 & 噜妹）"),
-                    isOn: $settings.mascotEnabled)
-                if settings.mascotEnabled {
-                    HStack {
-                        Text(L10n.text("Animation pack", zhHans: "动画包"))
-                        Spacer()
-                        Picker("", selection: $settings.mascotPack) {
-                            ForEach(MascotPackLoader.availablePacks(), id: \.id) { pack in
-                                Text(pack.name).tag(pack.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 180)
-                    }
-                    Button(L10n.text("Open the animation-pack folder", zhHans: "打开动画包文件夹")) {
-                        MascotPackLoader.revealCustomFolder()
-                    }
-                        .controlSize(.small)
-                    if settings.mascotPack == MascotPackLoader.builtInID {
-                        let builtIn = MascotPackLoader.builtIn()
-                        let idleCount = builtIn.variants(for: .idle).count
-                        let workingCount = builtIn.variants(for: .working).count
-                        let waitingCount = builtIn.variants(for: .waiting).count
-                        Text(L10n.format(
-                            "%1$@ frequent poses: idle %2$@ · working %3$@ · waiting %4$@ · %5$@ gaze directions",
-                            zhHans: "高频行为共 %1$@ 种：空闲 %2$@ · 工作 %3$@ · 等待 %4$@ · %5$@ 向视线",
-                            String(idleCount + workingCount + waitingCount),
-                            String(idleCount),
-                            String(workingCount),
-                            String(waitingCount),
-                            String(builtIn.lookDirections.count)))
-                            .font(Theme.font.themed(9.5, .medium))
-                            .foregroundStyle(Theme.brandFg)
-                    }
-                    Text(L10n.text(
-                        "Put a custom pack in mascots/<name>/ plus manifest.json (the folder has notes and an example). Drag to move, it looks toward the pointer when idle, and right-click hides it.",
-                        zhHans: "自定义包放 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）；拖动可移动位置，空闲时会看向鼠标，右键可隐藏。"))
-                        .font(Theme.font.themed(9.5))
-                        .foregroundStyle(.tertiary)
-                }
+            settingCard("桌面伙伴") {
+                MascotSettingsSection(settings: settings)
             }
 
             settingCard(L10n.text("Startup", zhHans: "启动")) {
