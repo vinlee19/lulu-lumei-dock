@@ -108,6 +108,13 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
+    /// 任务列表展开时点了岛外（其他 app / 桌面 / 本 app 其他窗口）→ 立即收起。
+    /// 只管点击展开的任务列表；卡片是定时通知，岛外点击不撤卡
+    func dismissTaskList() {
+        guard case .taskList = display else { return }
+        refresh(collapseTaskList: true)
+    }
+
     /// 行内展开/收起某任务的子 agent 框（任务列表里的内层按钮调用）
     func toggleSubagentExpansion(_ taskId: String) {
         expandedSubagentTaskId = (expandedSubagentTaskId == taskId) ? nil : taskId

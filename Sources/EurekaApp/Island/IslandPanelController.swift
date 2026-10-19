@@ -22,6 +22,8 @@ final class IslandPanelController {
     private var isProgrammaticMove = false
     /// 吸附判定半径（pt）
     private let snapDistance: CGFloat = 40
+    /// 任务列表展开期间的岛外点击监听（global + local），收起即移除
+    private var outsideClickMonitors: [Any] = []
 
     init() {
         panel = NSPanel(
@@ -200,6 +202,11 @@ final class IslandPanelController {
     }
 
     private func displayChanged(_ display: IslandViewModel.Display) {
+        if display == .taskList {
+            installOutsideClickMonitors()
+        } else {
+            removeOutsideClickMonitors()
+        }
         orderOutWorkItem?.cancel()
         orderOutWorkItem = nil
         if display == .hidden {
@@ -217,6 +224,42 @@ final class IslandPanelController {
             // 不抢焦点地置顶展示
             panel.orderFrontRegardless()
         }
+    }
+
+    // MARK: - 岛外点击收起
+
+    /// panel 是 nonactivating 且岛外 hitTest 穿透，几乎不会成为 key window，
+    /// resignKey / didResignActive 都等不到 → 「失焦」只能靠监听岛外的鼠标按下。
+    /// global 监听落到其他 app 的点击（鼠标事件不需要辅助功能权限），
+    /// local 监听落到本 app 窗口（状态栏 popover、主窗口、岛自身）的点击。
+    private func installOutsideClickMonitors() {
+        guard outsideClickMonitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleMouseDown() }
+        }) {
+            outsideClickMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.handleMouseDown() }
+            return event  // 只观察不拦截，点击照常送达
+        }) {
+            outsideClickMonitors.append(local)
+        }
+    }
+
+    private func removeOutsideClickMonitors() {
+        outsideClickMonitors.forEach(NSEvent.removeMonitor)
+        outsideClickMonitors.removeAll()
+    }
+
+    /// 点在岛的可视范围内交给 SwiftUI tap / 拖拽处理；范围外收起任务列表
+    private func handleMouseDown() {
+        // interactiveRect 是 panel 坐标（原点左下），平移到全局屏幕坐标再比
+        let islandRect = viewModel.interactiveRect.offsetBy(
+            dx: panel.frame.minX, dy: panel.frame.minY)
+        guard !islandRect.contains(NSEvent.mouseLocation) else { return }
+        viewModel.dismissTaskList()
     }
 }
 
