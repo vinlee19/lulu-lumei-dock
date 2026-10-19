@@ -122,6 +122,14 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
+    /// A click outside the island (another app, the desktop, another window of this app) while
+    /// the task list is open closes it at once. Only the click-opened task list is affected;
+    /// cards are timed notifications and an outside click does not dismiss them.
+    func dismissTaskList() {
+        guard case .taskList = display else { return }
+        refresh(collapseTaskList: true)
+    }
+
     /// Expand/collapse a task's subagent box inline (called by the inner button in the task list)
     func toggleSubagentExpansion(_ taskId: String) {
         expandedSubagentTaskId = (expandedSubagentTaskId == taskId) ? nil : taskId
