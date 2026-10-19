@@ -64,7 +64,9 @@ final class IslandQuestionBridge {
         do {
             try inbox.writeHeartbeat()
         } catch {
-            log("灵动岛答题心跳写入失败: \(error)")
+            log(L10n.format(
+                "Writing the island question heartbeat failed: %@",
+                zhHans: "灵动岛答题心跳写入失败: %@", String(describing: error)))
         }
     }
 
@@ -98,7 +100,9 @@ final class IslandQuestionBridge {
             try inbox.send(message, to: id)
             log("question-reply=\(id) \(reply == .dismiss ? "dismiss" : "answer")")
         } catch {
-            log("灵动岛答题回写失败 \(id): \(error)")
+            log(L10n.format(
+                "Writing the island answer %@ failed: %@",
+                zhHans: "灵动岛答题回写失败 %@: %@", id, String(describing: error)))
         }
     }
 

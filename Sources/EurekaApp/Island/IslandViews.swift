@@ -215,9 +215,9 @@ struct CompactPillView: View {
     private func alertStyle(_ alert: IslandPill.Alert) -> (icon: String, text: String, color: Color) {
         switch alert {
         case .waiting(.permission):
-            return ("hand.raised.fill", "等待授权", .orange)
+            return ("hand.raised.fill", L10n.text("Needs permission", zhHans: "等待授权"), .orange)
         case .waiting(.idle):
-            return ("ellipsis.bubble.fill", "等待输入", .orange)
+            return ("ellipsis.bubble.fill", L10n.text("Waiting for input", zhHans: "等待输入"), .orange)
         case .context(let percent):
             return ("exclamationmark.triangle.fill", "ctx \(Int(percent.rounded()))%", Self.alertRed)
         case .unread(let count, .success):
@@ -995,7 +995,7 @@ struct TaskListCardView: View {
                 }
             }
             if tasks.count > M.maxActiveRows {
-                Text("…等 \(tasks.count) 个")
+                Text(L10n.format("…%@ total", zhHans: "…等 %@ 个", "\(tasks.count)"))
                     .font(.system(size: 11 * scale))
                     .foregroundStyle(Self.labelGray)
                     .padding(.leading, 16 * scale)
@@ -1035,8 +1035,8 @@ struct TaskListCardView: View {
     private var header: some View {
         HStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
-                headerTitle("进行中任务")
-                headerTitle("进行中")
+                headerTitle(L10n.text("Running tasks", zhHans: "进行中任务"))
+                headerTitle(L10n.text("In progress", zhHans: "进行中"))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1075,7 +1075,7 @@ struct TaskListCardView: View {
                 Image(systemName: showStartTime ? "calendar" : "stopwatch")
                     .font(.system(size: 12 * scale))
                 if showLabel {
-                    Text(showStartTime ? "开始时间" : "耗时")
+                    Text(showStartTime ? L10n.text("Start time", zhHans: "开始时间") : L10n.text("Duration", zhHans: "耗时"))
                         .font(.system(size: 12 * scale))
                 }
                 if showChevron {
@@ -1089,7 +1089,9 @@ struct TaskListCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(showStartTime ? "改为显示耗时" : "改为显示开始时间")
+        .help(showStartTime
+            ? L10n.text("Show elapsed time instead", zhHans: "改为显示耗时")
+            : L10n.text("Show start time instead", zhHans: "改为显示开始时间"))
     }
 
     // MARK: 进行中行
@@ -1178,7 +1180,7 @@ struct TaskListCardView: View {
     private func activityLine(_ task: AgentTask) -> some View {
         if task.isCompacting {
             // 压缩期间没有别的事件，不标出来就像卡死了
-            Text("压缩上下文")
+            Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
                 .font(.system(size: 10 * scale))
                 .foregroundStyle(Theme.gold.opacity(0.85))
                 .lineLimit(1)
@@ -1196,7 +1198,7 @@ struct TaskListCardView: View {
 
     private var idleHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
-            Text("空闲会话")
+            Text(L10n.text("Idle sessions", zhHans: "空闲会话"))
                 .font(.system(size: 11 * scale, weight: .semibold))
                 .tracking(0.4)
                 .foregroundStyle(Self.labelGray)

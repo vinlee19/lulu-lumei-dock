@@ -1,3 +1,4 @@
+import EurekaKit
 import Foundation
 
 /// 灵动岛答题 hook（`lululumei-ask`）在 ~/.claude/settings.json 里的那一条：
@@ -25,13 +26,20 @@ public enum ClaudeAskHookInstaller {
         "\"\(askPath)\""
     }
 
+    /// Computed on each throw so it follows the current interface language
+    private static var unrecognizedShapeMessage: String {
+        L10n.text(
+            "The hooks structure in settings.json is not recognized; nothing was changed",
+            zhHans: "settings.json 的 hooks 结构无法识别，不做改动")
+    }
+
     /// 装上（或替换成指向 `askPath` 的那一条）。其余条目逐字不动。
     /// 先清掉**所有事件**下的答题条目：挂在 `PreToolUse` 下的一条就足以挡住确认界面
     public static func install(into json: String, askPath: String) throws -> String {
         var root = try ClaudeHooksInstaller.parse(json)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         if ClaudeHooksInstaller.unsupportedShapeEvent(in: hooks) != nil {
-            throw InstallError.foreignConfig("settings.json 的 hooks 结构无法识别，不做改动")
+            throw InstallError.foreignConfig(unrecognizedShapeMessage)
         }
         hooks = removingAskEntries(from: hooks)
         var entries = hooks[event] as? [[String: Any]] ?? []
@@ -54,7 +62,7 @@ public enum ClaudeAskHookInstaller {
             return try ClaudeHooksInstaller.serialize(root)
         }
         if ClaudeHooksInstaller.unsupportedShapeEvent(in: hooks) != nil {
-            throw InstallError.foreignConfig("settings.json 的 hooks 结构无法识别，不做改动")
+            throw InstallError.foreignConfig(unrecognizedShapeMessage)
         }
         hooks = removingAskEntries(from: hooks)
         if hooks.isEmpty {

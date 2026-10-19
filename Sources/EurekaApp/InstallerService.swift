@@ -245,7 +245,9 @@ final class InstallerService: ObservableObject {
         guard askHookEnabled() else { return try ClaudeAskHookInstaller.uninstall(from: json) }
         guard let ask = RelaySyncer.syncAsk() else {
             throw CocoaError(.fileNoSuchFile, userInfo: [
-                NSLocalizedDescriptionKey: "找不到 eureka-ask（应与应用同目录）",
+                NSLocalizedDescriptionKey: L10n.text(
+                    "eureka-ask not found (it should sit next to the app)",
+                    zhHans: "找不到 eureka-ask（应与应用同目录）"),
             ])
         }
         return try ClaudeAskHookInstaller.install(into: json, askPath: ask.path)
@@ -262,7 +264,10 @@ final class InstallerService: ObservableObject {
             in: ConfigFile.read(EurekaCLI.claudeSettingsURL))
         guard diagnosis.isInstalledInSomeForm || askEntryPresent else { return }
         guard !diagnosis.blocksAutomaticWrite else {
-            message = "Claude Code hooks：\(diagnosis.detail ?? "配置异常")，未改动答题 hook"
+            message = L10n.format(
+                "Claude Code hooks: %@; the question hook was left unchanged",
+                zhHans: "Claude Code hooks：%@，未改动答题 hook",
+                diagnosis.detail ?? L10n.text("configuration problem", zhHans: "配置异常"))
             return
         }
         let url = EurekaCLI.claudeSettingsURL
@@ -272,10 +277,16 @@ final class InstallerService: ObservableObject {
             guard updated != original else { return }
             try ConfigFile.backupThenWrite(path: url, newContent: updated)
             message = askHookEnabled()
-                ? "已开启在灵动岛上回答 Claude 的提问（原配置已备份）"
-                : "已关闭在灵动岛上回答 Claude 的提问，提问回到终端（原配置已备份）"
+                ? L10n.text(
+                    "Answering Claude's questions on the island is on (the original config was backed up)",
+                    zhHans: "已开启在灵动岛上回答 Claude 的提问（原配置已备份）")
+                : L10n.text(
+                    "Answering Claude's questions on the island is off; questions go back to Claude (the original config was backed up)",
+                    zhHans: "已关闭在灵动岛上回答 Claude 的提问，提问回到终端（原配置已备份）")
         } catch {
-            message = "答题 hook 更新失败：\(error)（未改动原文件）"
+            message = L10n.format(
+                "Updating the question hook failed: %@ (the original file was not changed)",
+                zhHans: "答题 hook 更新失败：%@（未改动原文件）", String(describing: error))
         }
         refresh()
     }
@@ -312,7 +323,7 @@ final class InstallerService: ObservableObject {
             }
         }
         if syncStandaloneAskEntry() {
-            updated.append("灵动岛答题 hook")
+            updated.append(L10n.text("Island question hook", zhHans: "灵动岛答题 hook"))
         }
         autoUpdateSkipped = skipped
         if !updated.isEmpty {

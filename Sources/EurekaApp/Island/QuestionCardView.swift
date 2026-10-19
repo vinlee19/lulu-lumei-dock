@@ -165,7 +165,9 @@ struct QuestionCardView: View {
     private var otherRow: some View {
         if draft.isTypingOther {
             HStack(spacing: 8 * scale) {
-                TextField("输入你的回答，回车发送", text: $otherText)
+                TextField(
+                    L10n.text("Type your answer, Return to send", zhHans: "输入你的回答，回车发送"),
+                    text: $otherText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5 * scale))
                     .foregroundStyle(.white)
@@ -187,7 +189,7 @@ struct QuestionCardView: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
-                .help("取消输入")
+                .help(L10n.text("Cancel typing", zhHans: "取消输入"))
             }
             .padding(.horizontal, 10 * scale)
             .frame(maxHeight: .infinity)
@@ -206,7 +208,9 @@ struct QuestionCardView: View {
                 HStack(spacing: 8 * scale) {
                     Image(systemName: "pencil")
                         .font(.system(size: 11 * scale, weight: .medium))
-                    Text(question.multiSelect ? "其他…（与已勾选的一起提交）" : "其他…")
+                    Text(question.multiSelect
+                        ? L10n.text("Other… (sent with the checked options)", zhHans: "其他…（与已勾选的一起提交）")
+                        : L10n.text("Other…", zhHans: "其他…"))
                         .font(.system(size: 12 * scale))
                     Spacer(minLength: 0)
                 }
@@ -227,7 +231,7 @@ struct QuestionCardView: View {
     private var footer: some View {
         HStack(spacing: 8 * scale) {
             Button(action: onDismiss) {
-                Text("在 Claude 里回答")
+                Text(L10n.text("Answer in Claude", zhHans: "在 Claude 里回答"))
                     .font(.system(size: 11.5 * scale, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
                     .padding(.horizontal, 10 * scale)
@@ -235,12 +239,16 @@ struct QuestionCardView: View {
                     .background(Capsule().fill(Color.white.opacity(0.1)))
             }
             .buttonStyle(.plain)
-            .help("收起这张卡，到 Claude 的确认框里回答")
+            .help(L10n.text(
+                "Close this card and answer in Claude's own dialog",
+                zhHans: "收起这张卡，到 Claude 的确认框里回答"))
             Spacer(minLength: 0)
             if question.multiSelect {
                 let count = draft.selected.count
                 Button(action: onConfirm) {
-                    Text(count > 0 ? "确定（\(count)）" : "确定")
+                    Text(count > 0
+                        ? L10n.format("Confirm (%@)", zhHans: "确定（%@）", String(count))
+                        : L10n.text("Confirm", zhHans: "确定"))
                         .font(.system(size: 11.5 * scale, weight: .semibold))
                         .foregroundStyle(count > 0 ? Color.black : .white.opacity(0.35))
                         .padding(.horizontal, 14 * scale)

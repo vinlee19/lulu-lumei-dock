@@ -339,14 +339,18 @@ struct SettingsView: View {
     /// 答题 hook 的实际状态：开关开着不等于装上了（要先装 Claude Code hooks）
     private var askHookHint: String {
         guard settings.answerQuestionsOnIsland else {
-            return "关闭时 Claude 的选择题只在 Claude 自己的确认界面里回答。"
+            return L10n.text(
+                "When off, Claude's multiple-choice questions are answered only in Claude's own dialog.",
+                zhHans: "关闭时 Claude 的选择题只在 Claude 自己的确认界面里回答。")
         }
         if installer.askHookInstalled {
-            return "已生效：Claude 提问时岛上同时弹出选项，岛上或 Claude 里哪边先答用哪边；"
-                + "岛上的卡最多保留 10 分钟。"
+            return L10n.text(
+                "Active: when Claude asks, the options also pop up on the island and whichever side answers first wins. The island card stays up to 10 minutes.",
+                zhHans: "已生效：Claude 提问时岛上同时弹出选项，岛上或 Claude 里哪边先答用哪边；岛上的卡最多保留 10 分钟。")
         }
-        return "尚未生效：需要先在「集成」页安装 Claude Code hooks，会一并在 settings.json 加一条"
-            + " AskUserQuestion 专用 hook。"
+        return L10n.text(
+            "Not active yet: install Claude Code hooks on the Integrations page first; that also adds an AskUserQuestion hook to settings.json.",
+            zhHans: "尚未生效：需要先在「集成」页安装 Claude Code hooks，会一并在 settings.json 加一条 AskUserQuestion 专用 hook。")
     }
 
     /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）

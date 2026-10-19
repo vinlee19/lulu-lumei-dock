@@ -244,7 +244,7 @@ enum PreviewRenderer {
             var idleTasks: [AgentTask] = []
             for index in 0..<5 {
                 var idle = AgentTask(
-                    source: .codex, sessionId: "idle-\(index)", title: "空闲会话 \(index)",
+                    source: .codex, sessionId: "idle-\(index)", title: L10n.format("Idle sessions %@", zhHans: "空闲会话 %@", "\(index)"),
                     cwd: "/Users/me/work/idle", startedAt: now.addingTimeInterval(-7200),
                     phase: .idle)
                 idle.lastActivityAt = now.addingTimeInterval(-Double(index + 1) * 360)
