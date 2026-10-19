@@ -52,10 +52,11 @@ let package = Package(
         ),
         // Lightweight forwarding CLI invoked by hooks/notify: silent, always exit 0
         .executableTarget(name: "eureka-relay", path: "Sources/eureka-relay"),
-        // AskUserQuestion 的 PreToolUse hook：挂起等灵动岛上的回答，再把答案写到 stdout。
-        // 与 relay 约束相反，所以是独立程序（零依赖）
+        // PreToolUse hook for AskUserQuestion: blocks waiting for the answer on the island, then
+        // writes it to stdout. The opposite of the relay's constraints, hence a separate program
+        // (zero dependencies)
         .executableTarget(name: "eureka-ask", path: "Sources/eureka-ask"),
-        // 测试 runner（CLT 无 XCTest，自建 harness）
+        // Test runner (CLT has no XCTest, so a hand-rolled harness)
         .executableTarget(
             name: "eureka-tests",
             dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall", "EurekaSync"],

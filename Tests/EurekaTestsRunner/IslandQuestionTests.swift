@@ -4,8 +4,9 @@ import EurekaInstall
 import EurekaKit
 import Foundation
 
-// 灵动岛回答 Claude 提问（AskUserQuestion）：作答进度、卡片队列、问题文件解析、
-// settings.json 里的答题 hook 条目，以及真实运行 eureka-ask 的端到端往返。
+// Answering Claude's questions (AskUserQuestion) on the island: answer progress, card queue,
+// question file parsing, the answer hook entry in settings.json, and an end-to-end round trip
+// actually running eureka-ask.
 
 private func pendingQuestion(
     _ id: String, _ questions: [AskQuestion], pid: Int32 = getpid()
@@ -31,7 +32,7 @@ func questionDraftTests(_ t: TestRunner) {
         var draft = QuestionDraft(
             question: pendingQuestion("q", [frameworkQuestion, sectionsQuestion]))
         try expectEqual(draft.progress.current, 1)
-        draft.choose("Angular")  // 不在选项里
+        draft.choose("Angular")  // not among the options
         try expectEqual(draft.answers, [:])
         draft.choose("Vue")
         try expectEqual(draft.answers, ["用哪个框架？": "Vue"])
@@ -46,8 +47,8 @@ func questionDraftTests(_ t: TestRunner) {
         draft.toggle("结论")
         draft.toggle("引言")
         draft.toggle("方法")
-        draft.toggle("方法")  // 取消
-        draft.choose("引言")  // 多选题不接受单选操作
+        draft.toggle("方法")  // uncheck
+        draft.choose("引言")  // multi-select doesn't accept a single-select action
         try expectEqual(draft.selected, ["结论", "引言"])
         draft.confirmSelection()
         try expectEqual(draft.answers, ["要哪些章节？": "引言, 结论"])
@@ -152,7 +153,7 @@ func questionInboxTests(_ t: TestRunner) {
 func questionTranscriptProbeTests(_ t: TestRunner) {
     t.suite("QuestionTranscriptProbe · Claude 里作答后撤卡")
 
-    /// 提问时刻：2026-10-19T07:00:00Z
+    /// Question time: 2026-10-19T07:00:00Z
     let askedAt = Date(timeIntervalSince1970: 1_792_393_200)
     func stamp(_ offset: TimeInterval) -> String {
         let formatter = ISO8601DateFormatter()
@@ -295,7 +296,8 @@ func claudeAskHookInstallerTests(_ t: TestRunner) {
         try expectEqual(try entries(migrated, "PermissionRequest").count, 1)
         try expect(ClaudeAskHookInstaller.isInstalled(in: migrated, askPath: askPath))
 
-        // 两处都有：PermissionRequest 那条是对的，PreToolUse 那条照样挡住确认界面
+        // Present in both: the PermissionRequest one is correct, but the PreToolUse one still
+        // blocks the confirmation UI
         let both = #"{"hooks":{"PreToolUse":["# + askEntry + #"],"PermissionRequest":["# + askEntry + "]}}"
         try expect(!ClaudeAskHookInstaller.isInstalled(in: both, askPath: askPath))
         let cleaned = try ClaudeAskHookInstaller.install(into: both, askPath: askPath)
@@ -328,7 +330,7 @@ func claudeAskHookInstallerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 端到端：真实运行 eureka-ask
+// MARK: - End to end: actually running eureka-ask
 
 func askHookEndToEndTests(_ t: TestRunner) {
     t.suite("eureka-ask 端到端")
@@ -342,7 +344,7 @@ func askHookEndToEndTests(_ t: TestRunner) {
         ]],
     ]
 
-    /// 仓库内的沙箱目录（.build 已被 gitignore）
+    /// Sandbox directory inside the repo (.build is already gitignored)
     func sandbox(_ name: String) throws -> URL {
         let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".build/test-sandbox/ask-\(name)", isDirectory: true)
@@ -351,7 +353,7 @@ func askHookEndToEndTests(_ t: TestRunner) {
         return url
     }
 
-    /// PermissionRequest 的 stdin：没有 tool_use_id
+    /// PermissionRequest stdin: no tool_use_id
     func hookInput(tool: String = "AskUserQuestion") throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "hook_event_name": "PermissionRequest", "session_id": "sess-e2e",

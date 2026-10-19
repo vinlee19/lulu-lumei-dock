@@ -7,23 +7,26 @@ extension Notification.Name {
     static let eurekaResetIslandPosition = Notification.Name("eureka.resetIslandPosition")
 }
 
-/// borderless 窗口默认 `canBecomeKey == false`，提问卡的「其他…」输入框就收不到键盘。
-/// 放开它不会抢焦点：`becomesKeyOnlyIfNeeded` 下只有点到输入框这类控件才成为 key，
-/// 点按钮照旧不碰焦点；nonactivatingPanel 也保证成为 key 时不激活本 app
+/// A borderless window defaults to `canBecomeKey == false`, so the question card's "Other…" field
+/// gets no keyboard input. Allowing it doesn't steal focus: with `becomesKeyOnlyIfNeeded`, only
+/// clicking a control like a text field makes it key, clicking buttons still leaves focus alone;
+/// nonactivatingPanel also ensures becoming key doesn't activate this app
 final class IslandPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-/// 灵动岛 NSPanel 控制器：panel 固定为最大尺寸，默认贴刘海屏顶部居中；
-/// 支持按住拖拽到任意位置（含外接屏），位置持久化，拖回默认位置附近自动吸附回融合形态。
-/// 展开/收起全靠 SwiftUI 动画，透明区域 hitTest 穿透。
+/// Dynamic Island NSPanel controller: the panel is fixed at max size, by default pinned top-center
+/// under the notch; can be dragged to any position (including external displays), position is
+/// persisted, and dragging back near the default snaps back to the fused form. Expand/collapse is
+/// all SwiftUI animation; transparent areas pass hitTest through.
 @MainActor
 final class IslandPanelController {
     let viewModel = IslandViewModel()
 
     private let panel: IslandPanel
     private let hostingView: IslandHostingView<IslandRootView>
-    /// 为了输入「其他」把键盘拿过来之前，用户正在用的应用（输完还给它）
+    /// The app the user was in before we took the keyboard for "Other" input (handed back once
+    /// typing is done)
     private var keyboardOwnerBeforeTyping: NSRunningApplication?
     private var orderOutWorkItem: DispatchWorkItem?
     private var moveSettleWorkItem: DispatchWorkItem?
@@ -31,7 +34,8 @@ final class IslandPanelController {
     private var isProgrammaticMove = false
     /// Snap radius (pt)
     private let snapDistance: CGFloat = 40
-    /// 任务列表展开期间的岛外点击监听（global + local），收起即移除
+    /// Outside-island click monitors while the task list is expanded (global + local), removed on
+    /// collapse
     private var outsideClickMonitors: [Any] = []
 
     init() {
@@ -257,9 +261,10 @@ final class IslandPanelController {
         }
     }
 
-    // MARK: - 提问卡输入
+    // MARK: - Question card input
 
-    /// 提问卡展开「其他…」输入框时让 panel 成为 key（不激活本 app），输完把键盘还给原来的应用
+    /// When the question card opens its "Other…" field, make the panel key (without activating this
+    /// app); hand the keyboard back to the previous app when done
     private func keyboardChanged(_ wantsKeyboard: Bool) {
         if wantsKeyboard {
             let front = NSWorkspace.shared.frontmostApplication
@@ -274,12 +279,13 @@ final class IslandPanelController {
         }
     }
 
-    // MARK: - 岛外点击收起
+    // MARK: - Collapse on outside click
 
-    /// panel 是 nonactivating 且岛外 hitTest 穿透，几乎不会成为 key window，
-    /// resignKey / didResignActive 都等不到 → 「失焦」只能靠监听岛外的鼠标按下。
-    /// global 监听落到其他 app 的点击（鼠标事件不需要辅助功能权限），
-    /// local 监听落到本 app 窗口（状态栏 popover、主窗口、岛自身）的点击。
+    /// The panel is nonactivating and passes hitTest through outside the island, so it almost never
+    /// becomes key window; resignKey / didResignActive never arrive → "losing focus" can only be
+    /// detected by monitoring mouse-downs outside the island. The global monitor catches clicks
+    /// landing in other apps (mouse events need no Accessibility permission); the local monitor
+    /// catches clicks in this app's windows (status bar popover, main window, the island itself).
     private func installOutsideClickMonitors() {
         guard outsideClickMonitors.isEmpty else { return }
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -290,7 +296,7 @@ final class IslandPanelController {
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.handleMouseDown() }
-            return event  // 只观察不拦截，点击照常送达
+            return event  // observe only, never intercept; the click is delivered as usual
         }) {
             outsideClickMonitors.append(local)
         }
@@ -301,9 +307,11 @@ final class IslandPanelController {
         outsideClickMonitors.removeAll()
     }
 
-    /// 点在岛的可视范围内交给 SwiftUI tap / 拖拽处理；范围外收起任务列表
+    /// Clicks within the island's visible area go to SwiftUI tap / drag handling; outside it,
+    /// collapse the task list
     private func handleMouseDown() {
-        // interactiveRect 是 panel 坐标（原点左下），平移到全局屏幕坐标再比
+        // interactiveRect is in panel coordinates (origin bottom-left); translate to global screen
+        // coordinates before comparing
         let islandRect = viewModel.interactiveRect.offsetBy(
             dx: panel.frame.minX, dy: panel.frame.minY)
         guard !islandRect.contains(NSEvent.mouseLocation) else { return }

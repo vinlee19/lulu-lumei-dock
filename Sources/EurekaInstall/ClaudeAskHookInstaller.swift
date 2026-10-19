@@ -1,21 +1,25 @@
 import EurekaKit
 import Foundation
 
-/// 灵动岛答题 hook（`lululumei-ask`）在 ~/.claude/settings.json 里的那一条：
-/// `PermissionRequest` + `matcher: "AskUserQuestion"`。
+/// The island answer hook (`lululumei-ask`) entry in ~/.claude/settings.json:
+/// `PermissionRequest` + `matcher: "AskUserQuestion"`.
 ///
-/// 必须挂 `PermissionRequest`：Claude Code 先跑完 `PreToolUse` 才进入确认流程，挂在那里等岛上作答，
-/// 桌面端的确认卡和终端里的选择框在等待期间都出不来；`PermissionRequest` 的 hook 与确认界面同时运行，
-/// 谁先给出回答用谁（Claude Code 2.1.299 实测）。
+/// It must hang on `PermissionRequest`: Claude Code finishes `PreToolUse` before entering the
+/// confirmation flow, so waiting there for the island answer would keep both the desktop
+/// confirmation card and the terminal picker from appearing; a `PermissionRequest` hook runs
+/// alongside the confirmation UI, and whichever answers first wins (verified on Claude Code
+/// 2.1.299).
 ///
-/// 和 relay 的条目分开管：relay 必须静默，而它要把答案写到 stdout，
-/// 所以只能挂在 AskUserQuestion 上 —— matcher 必须精确，绝不能是 `*`。
-/// 设置里「在灵动岛上回答 Claude 的提问」单独开关它，装卸 Claude hooks 时随之装卸。
+/// Managed separately from the relay entries: the relay must stay silent, whereas this writes the
+/// answer to stdout, so it may only hang on AskUserQuestion -- the matcher must be exact, never
+/// `*`. The "Answer Claude's questions on the island" setting toggles it on its own, and it is
+/// installed/removed along with Claude hooks.
 public enum ClaudeAskHookInstaller {
     public static let binaryName = "lululumei-ask"
     public static let event = "PermissionRequest"
     public static let matcher = "AskUserQuestion"
-    /// hook 自己最多等 600 秒，这里多给 10 秒让它从容收尾（超时会被 Claude 杀掉）
+    /// The hook itself waits at most 600 seconds; give 10 more here so it can wrap up calmly (on
+    /// timeout Claude kills it)
     public static let timeoutSeconds = 610
 
     public static func isOurs(_ command: String) -> Bool {
@@ -33,8 +37,9 @@ public enum ClaudeAskHookInstaller {
             zhHans: "settings.json 的 hooks 结构无法识别，不做改动")
     }
 
-    /// 装上（或替换成指向 `askPath` 的那一条）。其余条目逐字不动。
-    /// 先清掉**所有事件**下的答题条目：挂在 `PreToolUse` 下的一条就足以挡住确认界面
+    /// Installs it (or replaces it with the entry pointing at `askPath`). All other entries are
+    /// left verbatim. First clears answer entries under **every event**: a single one under
+    /// `PreToolUse` is enough to block the confirmation UI
     public static func install(into json: String, askPath: String) throws -> String {
         var root = try ClaudeHooksInstaller.parse(json)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
@@ -73,8 +78,9 @@ public enum ClaudeAskHookInstaller {
         return try ClaudeHooksInstaller.serialize(root)
     }
 
-    /// 是否已装着、且指向 `askPath`、matcher 精确，别的事件下也没有答题条目
-    /// （有就算没装好，启动时的自动更新会重写，把它清掉）
+    /// Whether it is installed, points at `askPath`, has the exact matcher, and no other event
+    /// holds an answer entry (if one does, it counts as not properly installed; the auto-update at
+    /// launch rewrites and clears it)
     public static func isInstalled(in json: String, askPath: String) -> Bool {
         guard let root = try? ClaudeHooksInstaller.parse(json),
               let hooks = root["hooks"] as? [String: Any] else { return false }
@@ -90,7 +96,7 @@ public enum ClaudeAskHookInstaller {
         }
     }
 
-    /// 是否有任何一条我们的答题条目（不论路径）
+    /// Whether any of our answer entries exists (regardless of path)
     public static func hasAnyEntry(in json: String) -> Bool {
         guard let root = try? ClaudeHooksInstaller.parse(json),
               let hooks = root["hooks"] as? [String: Any] else { return false }
@@ -99,7 +105,8 @@ public enum ClaudeAskHookInstaller {
         }
     }
 
-    /// 去掉每个事件下的答题条目；某个事件因此变空就连键一起删掉，其余条目逐字不动
+    /// Removes the answer entries under each event; an event left empty as a result is deleted
+    /// along with its key; all other entries are left verbatim
     private static func removingAskEntries(from hooks: [String: Any]) -> [String: Any] {
         var result = hooks
         for (name, value) in hooks {

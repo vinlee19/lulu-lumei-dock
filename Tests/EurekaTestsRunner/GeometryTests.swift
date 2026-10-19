@@ -168,7 +168,7 @@ func geometryTests(_ t: TestRunner) {
         try expectEqual(
             IslandGeometry.taskListHeight(activeCount: 2, idleCount: 0),
             headerOnly + 2 * M.activeRowHeight + M.activeRowSpacing)
-        // 只有空闲会话：没有进行中行可分隔，不画分隔线
+        // Only idle sessions: no running rows to separate, so no divider is drawn
         try expectEqual(
             IslandGeometry.taskListHeight(activeCount: 0, idleCount: 1),
             headerOnly + M.idleHeaderHeight + M.idleRowHeight)
@@ -215,7 +215,7 @@ func geometryTests(_ t: TestRunner) {
                 + M.subagentBoxGap + IslandGeometry.subagentBoxHeight(count: 9))
         let tallest = max(
             expanded, IslandGeometry.taskListHeight(activeCount: 9, idleCount: 9))
-        // 卡片阴影 radius 12、下移 5：底部还要留 17pt
+        // Card shadow radius 12, offset down 5: 17pt must still be left at the bottom
         try expect(
             tallest + 17 <= IslandGeometry.Layout.standard.panelSize.height,
             "最高 \(tallest) 放不进 panel")
@@ -392,7 +392,7 @@ func unreadFinishedTests(_ t: TestRunner) {
         unread.add(finished("b", at: 200))
         unread.reconcile(activeTaskIds: [running("a").id])
         try expectEqual(unread.tasks, [finished("b", at: 200)])
-        // 同 sessionId、不同来源是另一个会话
+        // Same sessionId from a different source is a different session
         unread.reconcile(activeTaskIds: [running("b", source: .codex).id])
         try expectEqual(unread.count, 1)
     }

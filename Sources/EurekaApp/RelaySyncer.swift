@@ -35,12 +35,13 @@ enum RelaySyncer {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
-    /// 灵动岛答题 hook 的稳定路径 `bin/lululumei-ask`（settings.json 只引用这里）
+    /// Stable path of the island answer hook, `bin/lululumei-ask` (settings.json only references
+    /// this)
     static var stableAskURL: URL {
         binDirectory.appendingPathComponent(ClaudeAskHookInstaller.binaryName)
     }
 
-    /// 与当前可执行文件同目录的 eureka-ask
+    /// eureka-ask in the same directory as the current executable
     static var bundledAskURL: URL? {
         guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
             return nil
@@ -50,7 +51,8 @@ enum RelaySyncer {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
-    /// 同步 relay（内容不同才覆盖），返回稳定路径；找不到源时返回 nil
+    /// Syncs the relay (overwrites only when content differs) and returns the stable path; nil when
+    /// the source can't be found
     @discardableResult
     static func sync() -> URL? {
         guard let source = bundledRelayURL else { return nil }
@@ -59,7 +61,7 @@ enum RelaySyncer {
         return target
     }
 
-    /// 同步答题 hook，返回稳定路径；找不到源时返回 nil
+    /// Syncs the answer hook and returns the stable path; nil when the source can't be found
     @discardableResult
     static func syncAsk() -> URL? {
         guard let source = bundledAskURL else { return nil }
@@ -74,7 +76,7 @@ enum RelaySyncer {
             if let existing = try? Data(contentsOf: target),
                let fresh = try? Data(contentsOf: source),
                SHA256.hash(data: existing) == SHA256.hash(data: fresh) {
-                return target  // 已是最新
+                return target  // already up to date
             }
             // Write a temp file first, then replace, to avoid overwriting a binary that is
             // currently executing

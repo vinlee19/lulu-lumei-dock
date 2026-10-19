@@ -59,7 +59,8 @@ enum PreviewRenderer {
             vm.updateScreen(screen)
             configure(vm)
             if vm.display == .taskList {
-                // 排版高度须与 IslandGeometry.taskListHeight 一致：小了内容被裁，大了卡底留空
+                // Layout height must match IslandGeometry.taskListHeight: too small clips content,
+                // too large leaves empty space at the card bottom
                 let card = TaskListCardView(
                     tasks: vm.activeTasks, idleTasks: vm.idleTasks,
                     showStartTime: vm.showStartTime, scale: vm.uiScale,
@@ -110,12 +111,14 @@ enum PreviewRenderer {
         snapshot("5-card-error", screen: notched) {
             $0.enqueueFinished(errored)
         }
-        // 完成卡按时收起、没有运行中任务：胶囊留下未读完成标记，不再整个隐藏
+        // Finished card auto-dismissed on time with no running tasks: the pill keeps an
+        // unread-finished mark instead of hiding entirely
         snapshot("5b-compact-unread", screen: notched) {
             $0.enqueueFinished(finished)
             $0.expireCurrentCard()
         }
-        // 提问卡（AskUserQuestion）：单选 4 项 / 两题中的多选第二题 / 「其他」输入中
+        // Question cards (AskUserQuestion): single-select with 4 options / multi-select second of
+        // two questions / "Other" being typed
         let pickFramework = AskQuestion(
             question: "这个页面用哪个前端框架重写？会影响后面组件库和构建配置的选择。",
             header: "框架",
@@ -140,7 +143,8 @@ enum PreviewRenderer {
                 hookPid: ProcessInfo.processInfo.processIdentifier, createdAt: now,
                 questions: questions)
         }
-        // 实测时的那道题：一行问题、两个选项，问题与选项之间不该留出第二行的空白
+        // The question from live testing: a one-line question and two options; no second-line gap
+        // should appear between question and options
         snapshot("14d-card-question-one-line", screen: notched) {
             $0.updatePendingQuestions([asking([AskQuestion(
                 question: "Which framework?", header: "Framework",
@@ -166,7 +170,8 @@ enum PreviewRenderer {
             $0.beginOther()
         }
 
-        // 设计稿收缩态：两个来源在跑（亮 + 青点），一个来源只剩空闲会话（变暗），空闲会话 ctx 92% 亮右翼告警
+        // Design mock compact state: two sources running (lit + cyan dot), one source with only
+        // idle sessions (dimmed), an idle session at ctx 92% lights the right-wing alert
         snapshot("5d-compact-ctx-alert", screen: notched) {
             var hot = AgentTask(
                 source: .gemini, sessionId: "hot-idle", title: "方案需要继续增加",

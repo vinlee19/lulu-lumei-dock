@@ -1,9 +1,13 @@
 #!/bin/bash
-# 灵动岛演示：用独立 spool 注入各场景事件，肉眼走查视觉与交互。
-# 用法: Scripts/demo-island.sh [eureka 可执行文件]
-#   不带参数跑 swift build 出的 debug 版；传 /Applications/lulu-lumei-dock.app/Contents/MacOS/eureka 走查已安装的版本。
-# 演示实例与本机真实数据隔离：独立的数据库、spool，以及空的 Claude / Codex / opencode 目录 ——
-# 否则演示任务会写进真实历史，本机正在跑的会话也会混进岛里。正在运行的 app 请先退出，免得两个岛叠在一起。
+# Dynamic Island demo: injects events for each scenario via a separate spool, for eyeballing visuals
+# and interaction.
+# Usage: Scripts/demo-island.sh [eureka executable]
+#   With no argument it runs the debug build from swift build; pass
+#   /Applications/lulu-lumei-dock.app/Contents/MacOS/eureka to walk through the installed version.
+# The demo instance is isolated from real local data: its own database and spool, plus empty Claude
+# / Codex / opencode directories -- otherwise demo tasks would be written into the real history and
+# sessions running on this machine would leak into the island. Quit any running app first so two
+# islands don't stack up.
 set -e
 cd "$(dirname "$0")/.."
 

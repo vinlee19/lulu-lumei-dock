@@ -85,7 +85,8 @@ public enum ClaudeHooksInstaller {
         for (event, _) in hooks {
             var entries = entriesOf(hooks, event)
             let before = entries.count
-            // 灵动岛答题那条（lululumei-ask）也是我们的：卸 Claude hooks 时一起卸
+            // The island answer entry (lululumei-ask) is ours too: remove it together when
+            // uninstalling Claude hooks
             entries.removeAll { isEurekaEntry($0) || ClaudeAskHookInstaller.isAskEntry($0) }
             if entries.isEmpty && before > 0 {
                 hooks.removeValue(forKey: event)

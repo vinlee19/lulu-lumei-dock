@@ -1,16 +1,19 @@
 import Foundation
 
-/// 未读完成：完成卡自动收起后留在胶囊上的「✓ N」标记。
+/// Unread finished: the "✓ N" mark left on the pill after a finished card auto-dismisses.
 ///
-/// 完成卡按时收起不等于用户看见了 —— 没有它，唯一在跑的会话一完成，卡片收起后岛就整个隐藏，
-/// 错过那几秒就什么都找不回来。所以：
-/// - 卡片**按时收起**不算已读，标记留在胶囊上；
-/// - **点了那张卡** / **点开任务列表**才算已读；
-/// - 该会话**开始新一轮 turn**（又进了运行/等待）也清掉：用户已经回到会话里了。
+/// A finished card dismissing on time doesn't mean the user saw it -- without this, when the only
+/// running session finishes, the island hides entirely once the card dismisses, and missing those
+/// few seconds means nothing can be recovered. Hence:
+/// - a card **dismissing on time** doesn't count as read; the mark stays on the pill;
+/// - only **clicking that card** / **opening the task list** counts as read;
+/// - the session **starting a new turn** (running/waiting again) also clears it: the user is
+///   already back in the session.
 ///
-/// 每个会话只记最近一次完成（同会话连跑几轮只算 1 个未读）。纯逻辑；展示由 IslandViewModel 投影。
+/// Only the latest finish per session is kept (several turns in a row in one session count as 1
+/// unread). Pure logic; IslandViewModel projects it for display.
 public struct IslandUnreadFinished: Equatable, Sendable {
-    /// 按完成时间升序，每个会话（`AgentTask.key`）一条
+    /// Ascending by finish time, one entry per session (`AgentTask.key`)
     public private(set) var tasks: [FinishedTask] = []
 
     public init() {}
@@ -18,7 +21,8 @@ public struct IslandUnreadFinished: Equatable, Sendable {
     public var count: Int { tasks.count }
     public var isEmpty: Bool { tasks.isEmpty }
     public var latest: FinishedTask? { tasks.last }
-    /// 未读里最严重的结果（出错 > 中断 > 成功），决定胶囊标记的图标与颜色；无未读为 nil
+    /// The most severe unread result (error > interrupted > success), deciding the pill mark's icon
+    /// and color; nil when nothing is unread
     public var worstOutcome: TaskOutcome? {
         let outcomes = Set(tasks.map(\.outcome))
         for outcome in [TaskOutcome.error, .interrupted, .success] where outcomes.contains(outcome) {
@@ -33,18 +37,19 @@ public struct IslandUnreadFinished: Equatable, Sendable {
         tasks.append(task)
     }
 
-    /// 用户点了这张完成卡
+    /// The user clicked this finished card
     public mutating func markRead(_ task: FinishedTask) {
         let key = Self.sessionKey(of: task)
         tasks.removeAll { Self.sessionKey(of: $0) == key }
     }
 
-    /// 用户点开了任务列表
+    /// The user opened the task list
     public mutating func markAllRead() {
         tasks.removeAll()
     }
 
-    /// 与运行/等待中的任务对账：会话开始了新一轮 turn 就不再算未读
+    /// Reconcile with running/waiting tasks: a session that started a new turn no longer counts as
+    /// unread
     public mutating func reconcile(activeTaskIds: Set<String>) {
         tasks.removeAll { activeTaskIds.contains(Self.sessionKey(of: $0)) }
     }

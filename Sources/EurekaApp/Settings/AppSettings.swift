@@ -32,13 +32,14 @@ final class AppSettings: ObservableObject {
     @Published var notifyError: Bool {
         didSet { defaults.set(notifyError, forKey: "notifyError") }
     }
-    /// 在灵动岛上回答 Claude 的提问（AskUserQuestion）。默认开；
-    /// 开着且装了 Claude hooks 时，settings.json 里多一条 `lululumei-ask` hook
+    /// Answer Claude's questions (AskUserQuestion) on the island. On by default; when on and Claude
+    /// hooks are installed, settings.json gets an extra `lululumei-ask` hook
     @Published var answerQuestionsOnIsland: Bool {
         didSet { defaults.set(answerQuestionsOnIsland, forKey: "answerQuestionsOnIsland") }
     }
-    /// 关键事件（完成/等待/出错）同时发系统通知（锁屏/其他桌面可见）。
-    /// 默认关，opt-in，开启时才请求授权；仍受上方按类型开关门控。
+    /// Also send a system notification for key events (finished/waiting/error), visible on the lock
+    /// screen / other desktops. Off by default, opt-in; authorization is requested only when
+    /// enabled; still gated by the per-type toggles above.
     @Published var eventSystemNotifyEnabled: Bool {
         didSet { defaults.set(eventSystemNotifyEnabled, forKey: "eventSystemNotifyEnabled") }
     }

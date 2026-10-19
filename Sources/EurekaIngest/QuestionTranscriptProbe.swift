@@ -1,21 +1,26 @@
 import EurekaKit
 import Foundation
 
-/// 等待中的提问是否已在 Claude 自己的确认界面里了结（答了 / 拒了）：盯着会话转录，等这道题的 tool_result。
+/// Whether a pending question was already settled (answered / declined) in Claude's own
+/// confirmation UI: watches the session transcript for that question's tool_result.
 ///
-/// 用户在 Claude 里先答时，Claude 不会终止等待中的 `lululumei-ask`，岛上的卡要靠这里撤掉。
-/// 转录不依赖 relay hooks，没装 Claude hooks 时同样成立。
-/// - 这道题的 tool_use：主链 assistant 行里 `name == "AskUserQuestion"`、问题原文与 hook 收到的一致；
-/// - 了结：主链 user 行里出现指向它的 tool_result，且行时间不早于提问
-///   （同样的题问过两次时，上一次的 tool_result 也在转录里，靠时间排除）。
+/// When the user answers first in Claude, Claude doesn't terminate the waiting `lululumei-ask`, so
+/// the island card has to be withdrawn from here. The transcript doesn't depend on relay hooks, so
+/// this holds even without Claude hooks installed.
+/// - the question's tool_use: a main-chain assistant line with `name == "AskUserQuestion"` whose
+///   question text matches what the hook received;
+/// - settled: a main-chain user line contains a tool_result pointing at it, with a line time no
+///   earlier than the question (if the same question was asked twice, the earlier tool_result is in
+///   the transcript too; the time check excludes it).
 ///
-/// 每道题首次只读转录尾部 `initialTailBytes`（tool_use 在 hook 启动前就已写入），之后每次只读新追加的字节。
+/// For each question, the first read covers only the transcript tail `initialTailBytes` (the
+/// tool_use is written before the hook starts); each later read only covers newly appended bytes.
 public final class QuestionTranscriptProbe {
     private struct Cursor {
         var offset: UInt64
-        /// 从文件中间开始读时，第一段是半截行，要丢掉
+        /// When reading starts mid-file, the first chunk is a partial line and must be dropped
         var skipPartialLine: Bool
-        /// 上次读到的不完整行，等下次补齐
+        /// The incomplete line from the last read, waiting to be completed next time
         var carry = Data()
         var toolUseIds: Set<String> = []
         var settled = false
@@ -40,7 +45,7 @@ public final class QuestionTranscriptProbe {
         let tailStart = size > initialTailBytes ? size - initialTailBytes : 0
         var cursor = cursors[question.id] ?? Cursor(offset: tailStart, skipPartialLine: tailStart > 0)
         if size < cursor.offset {
-            // 文件被重写：重新从尾部读，已认出的 tool_use 保留
+            // File was rewritten: read again from the tail, keeping already-recognized tool_uses
             cursor.offset = tailStart
             cursor.skipPartialLine = tailStart > 0
             cursor.carry = Data()
@@ -68,7 +73,7 @@ public final class QuestionTranscriptProbe {
         return cursor.settled
     }
 
-    /// 只保留还在等待的题的读取进度
+    /// Keep read progress only for questions still pending
     public func retain(only ids: Set<String>) {
         cursors = cursors.filter { ids.contains($0.key) }
     }
@@ -77,7 +82,7 @@ public final class QuestionTranscriptProbe {
     private static let toolResult = Data("tool_result".utf8)
 
     private func scan(_ line: Data, question: PendingQuestion, cursor: inout Cursor) {
-        // 绝大多数行两样都不含：先按字节筛，省掉 JSON 解析
+        // The vast majority of lines contain neither: filter by bytes first to skip JSON parsing
         let mentionsTool = line.range(of: Self.toolName) != nil
         guard mentionsTool || line.range(of: Self.toolResult) != nil,
               let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],

@@ -62,10 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The brutal theme's fonts (Space Grotesk/Mono) must be registered before any UI renders
         ThemeFonts.register()
-        // 每次启动把随包 relay / 答题 hook 同步到稳定路径（升级 app 后 hooks 不断链）
+        // On every launch, sync the bundled relay / answer hook to their stable paths (hooks stay
+        // linked across app upgrades)
         RelaySyncer.sync()
         RelaySyncer.syncAsk()
-        // 模型上下文窗口覆盖表（ctx% 的分母；启动时一次性加载）
+        // Per-model context-window overrides (the denominator for ctx%; loaded once at launch)
         ContextWindows.loadOverrides(
             from: SpoolPaths.root().appendingPathComponent("context-windows.json"))
 
@@ -251,9 +252,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings?.showStartTime.toggle()
         }
 
-        // 在灵动岛上回答 Claude 的提问：开关同时管心跳/轮询与 settings.json 里的答题 hook。
-        // 改 settings.json 只在用户真的拨动开关时做（dropFirst）；启动时补装交给 autoUpdateInstalled，
-        // 那里受「自动更新 hooks」开关约束
+        // Answering Claude's questions on the island: the toggle governs both the heartbeat/polling
+        // and the answer hook in settings.json. settings.json is only edited when the user actually
+        // flips the toggle (dropFirst); installing at launch is left to autoUpdateInstalled, which
+        // is gated by the "auto-update hooks" toggle
         let questionBridge = IslandQuestionBridge(viewModel: island.viewModel)
         self.questionBridge = questionBridge
         installer.askHookEnabled = { [weak settings] in settings?.answerQuestionsOnIsland ?? true }
@@ -263,12 +265,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$answerQuestionsOnIsland
             .dropFirst()
             .sink { [weak installer] _ in
-                // @Published 在 willSet 时发出：等值真正写入后再读开关
+                // @Published fires on willSet: read the toggle only after the value is actually
+                // written
                 DispatchQueue.main.async { installer?.applyAskHookSetting() }
             }
             .store(in: &cancellables)
 
-        // 健康提示：vibe coding 过久/会话过多/深夜关怀
+        // Wellbeing nudges: vibe coding too long / too many sessions / late-night care
         let wellness = WellnessMonitor(settings: settings, store: store) { [weak island, weak mascot] notice in
             island?.viewModel.enqueueNotice(notice)
             mascot?.viewModel.showNotice(notice.headline)

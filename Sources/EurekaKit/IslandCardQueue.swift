@@ -43,14 +43,16 @@ public struct IslandCardQueue: Equatable, Sendable {
             }
         case .question(let question):
             guard !questionIds.contains(question.id) else { return }
-            // agent 正停着等答案：正在展示的知会型卡让位（放回队首，答完再看）
+            // The agent is paused waiting for an answer: the informational card on display yields
+            // (back to the queue head, seen after answering)
             if let shown = current, Self.isPassive(shown) {
                 pending.insert(shown, at: 0)
                 current = card
             } else if current == nil {
                 current = card
             } else {
-                // 排在已有的提问卡之后、其余卡之前（多个提问按到达顺序答）
+                // After any existing question cards, before all other cards (multiple questions are
+                // answered in arrival order)
                 let index = pending.firstIndex { if case .question = $0 { return false } else { return true } }
                 pending.insert(card, at: index ?? pending.count)
             }
@@ -71,7 +73,7 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 队列（当前 + 待显）中所有提问卡的 id
+    /// Ids of all question cards in the queue (current + pending)
     public var questionIds: [String] {
         ([current].compactMap { $0 } + pending).compactMap {
             if case .question(let question) = $0 { return question.id }
@@ -79,7 +81,7 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 答完 / 收起 / hook 已放弃：撤掉这张提问卡
+    /// Answered / dismissed / hook gave up: withdraw this question card
     public mutating func removeQuestion(id: String) {
         pending.removeAll {
             if case .question(let question) = $0 { return question.id == id }

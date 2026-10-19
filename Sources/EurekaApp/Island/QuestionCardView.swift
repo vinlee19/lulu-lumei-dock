@@ -1,23 +1,29 @@
 import EurekaKit
 import SwiftUI
 
-/// 提问卡：agent 的选择题（AskUserQuestion），在岛上点选作答。
+/// Question card: the agent's multiple-choice question (AskUserQuestion), answered by clicking on
+/// the island.
 ///
-/// - 单选题点一下选项就记下答案；多选题勾选后点「确定」；
-/// - 「其他…」展开成输入框（这时岛临时接管键盘，回车发送）；
-/// - 多个问题逐个回答，全部答完才交给 hook，agent 随即继续；
-/// - Claude 自己的确认界面（终端选择框 / 桌面端确认卡）同时开着，哪边先答用哪边；
-///   「在 Claude 里回答」只收起岛上这张卡。
+/// - single-select: one click on an option records the answer; multi-select: check options, then
+///   click "Confirm";
+/// - "Other…" expands into a text field (the island temporarily takes the keyboard; Return sends);
+/// - multiple questions are answered one by one and handed to the hook only when all are answered;
+///   the agent then continues;
+/// - Claude's own confirmation UI (terminal picker / desktop confirmation card) stays open at the
+///   same time; whichever side answers first wins; "Answer in Claude" only dismisses this card on
+///   the island.
 ///
-/// 行高与间距来自 `IslandGeometry.QuestionCard`，卡片高度按同一组值算。
+/// Row heights and spacing come from `IslandGeometry.QuestionCard`; the card height is computed
+/// from the same values.
 struct QuestionCardView: View {
     let draft: QuestionDraft
-    /// 哪个会话在问（会话标题 / 项目名）
+    /// Which session is asking (session title / project name)
     var sessionLabel: String?
     var scale: CGFloat = 1
-    /// 让开刘海的高度（1.0× 基准；不与刘海融合时 0）
+    /// Height to clear the notch (1.0× baseline; 0 when not fused with the notch)
     var topInset: CGFloat = 0
-    /// 问题原文排出来的行数（IslandViewModel.questionLines 测量），问题区按它定高
+    /// Number of lines the question text lays out to (measured by IslandViewModel.questionLines);
+    /// the question area height follows it
     var questionLines = 1
     var onChoose: (String) -> Void = { _ in }
     var onToggle: (String) -> Void = { _ in }
@@ -31,7 +37,8 @@ struct QuestionCardView: View {
     @FocusState private var otherFocused: Bool
 
     private typealias M = IslandGeometry.QuestionCard
-    /// 左右内边距（1.0× 基准）；IslandViewModel 量问题行数时按同一宽度
+    /// Horizontal padding (1.0× baseline); IslandViewModel uses the same width when measuring
+    /// question lines
     static let horizontalPadding: CGFloat = 14
     private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)  // #5AC8FA
     private static let secondaryText = Color(red: 0.596, green: 0.596, blue: 0.616)  // #98989D
@@ -73,7 +80,7 @@ struct QuestionCardView: View {
         .onChange(of: draft.index) { _, _ in otherText = "" }
     }
 
-    // MARK: 标题行
+    // MARK: Title row
 
     private var header: some View {
         HStack(spacing: 7 * scale) {
@@ -109,7 +116,7 @@ struct QuestionCardView: View {
         }
     }
 
-    // MARK: 选项
+    // MARK: Options
 
     private func optionRow(_ option: AskOption) -> some View {
         let isSelected = question.multiSelect && draft.selected.contains(option.label)
@@ -159,7 +166,7 @@ struct QuestionCardView: View {
         return "circle"
     }
 
-    // MARK: 其他（自由输入）
+    // MARK: Other (free-form input)
 
     @ViewBuilder
     private var otherRow: some View {
@@ -200,7 +207,8 @@ struct QuestionCardView: View {
                 RoundedRectangle(cornerRadius: 9 * scale, style: .continuous)
                     .stroke(Self.accent.opacity(0.6), lineWidth: 1))
             .onAppear {
-                // panel 刚成为 key window，下一轮 runloop 再给焦点才接得住
+                // The panel just became key window; focus only sticks if given on the next runloop
+                // turn
                 DispatchQueue.main.async { otherFocused = true }
             }
         } else {
@@ -226,7 +234,7 @@ struct QuestionCardView: View {
         }
     }
 
-    // MARK: 底部按钮
+    // MARK: Bottom buttons
 
     private var footer: some View {
         HStack(spacing: 8 * scale) {

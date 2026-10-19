@@ -2,13 +2,17 @@ import AppKit
 import EurekaIngest
 import EurekaKit
 
-/// 灵动岛答题的 app 侧调度：心跳、轮询等待中的问题、把回答交给 hook。
+/// App-side scheduling for island answering: heartbeat, polling pending questions, handing answers
+/// to the hook.
 ///
-/// - 心跳每 5 秒一次：hook 只在心跳新鲜时才挂起等岛上的回答，否则立刻退出；
-///   关掉功能 / app 退出时删掉心跳，正在等的 hook 2 秒内放手；
-/// - 每 0.5 秒看一眼 `questions/`：hook 挂起后用户能马上看到卡片，hook 放弃（超时 / 这一轮被中断）也能马上撤卡；
-/// - 用户在 Claude 自己的确认界面里先答时 hook 不会被终止：轮询时顺带看会话转录（`QuestionTranscriptProbe`），
-///   题已了结就撤卡并让 hook 放手。
+/// - Heartbeat every 5 seconds: the hook only blocks for an island answer while the heartbeat is
+///   fresh, otherwise it exits at once; turning the feature off / quitting the app deletes the
+///   heartbeat, and a waiting hook lets go within 2 seconds;
+/// - Look at `questions/` every 0.5 seconds: the user sees the card as soon as the hook blocks, and
+///   it is withdrawn just as fast when the hook gives up (timeout / turn interrupted);
+/// - If the user answers first in Claude's own confirmation UI, the hook is not terminated: polling
+///   also checks the session transcript (`QuestionTranscriptProbe`), and once the question is
+///   settled, withdraws the card and lets the hook go.
 @MainActor
 final class IslandQuestionBridge {
     private let inbox: QuestionInbox
@@ -16,9 +20,10 @@ final class IslandQuestionBridge {
     private weak var viewModel: IslandViewModel?
     private var pollTimer: Timer?
     private var heartbeatTimer: Timer?
-    /// 上次轮询看到的等待中问题
+    /// Pending questions seen on the last poll
     private var pending: [PendingQuestion] = []
-    /// 已在 Claude 里了结、让 hook 放手的题：hook 退出前文件还在，别重复写「收起」
+    /// Questions already settled in Claude whose hook was released: the file lingers until the hook
+    /// exits, so don't write "dismiss" again
     private var settledIds: Set<String> = []
     private(set) var isEnabled = false
 
@@ -55,7 +60,7 @@ final class IslandQuestionBridge {
         }
     }
 
-    /// app 退出前调用：等待中的 hook 立刻知道岛不在了
+    /// Call before the app quits: waiting hooks learn immediately that the island is gone
     func stop() {
         inbox.removeHeartbeat()
     }
@@ -106,7 +111,7 @@ final class IslandQuestionBridge {
         }
     }
 
-    /// 开发模式可观测性：stdout 单行日志，与 AppDelegate.logLine 同格式
+    /// Dev-mode observability: single-line stdout log, same format as AppDelegate.logLine
     private func log(_ message: String) {
         print("[eureka] \(message)")
         fflush(stdout)

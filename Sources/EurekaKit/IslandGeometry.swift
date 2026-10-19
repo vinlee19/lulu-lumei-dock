@@ -113,57 +113,63 @@ public enum IslandGeometry {
         return rows + gaps + overflow + 16   // 16 = box top + bottom padding
     }
 
-    /// 任务列表卡片的行高与间距（1.0× 基准，未乘 scale）。
-    /// `TaskListCardView` 按这些值排版，`taskListHeight` 按同一组值算卡片高度 —— 两边共用这一份。
+    /// Row heights and spacing of the task list card (1.0× baseline, not multiplied by scale).
+    /// `TaskListCardView` lays out with these values and `taskListHeight` computes the card height
+    /// from the same set -- both sides share this one copy.
     public enum TaskList {
         public static let maxActiveRows = 4
         public static let maxIdleRows = 3
         public static let topPadding: CGFloat = 10
-        /// 标题行：「进行中任务 N」+ 时间模式切换（刘海屏上分居刘海两侧）
+        /// Title row: "Running tasks N" + time-mode toggle (split across both sides of the notch on
+        /// notched screens)
         public static let headerHeight: CGFloat = 24
         public static let headerGap: CGFloat = 8
         public static let activeRowHeight: CGFloat = 42
         public static let activeRowSpacing: CGFloat = 6
-        /// 子 agent 框与所属行之间的间距
+        /// Spacing between a subagent box and its row
         public static let subagentBoxGap: CGFloat = 4
-        /// 进行中超过 maxActiveRows 时的「…等 N 个」
+        /// The "…N total" row when running tasks exceed maxActiveRows
         public static let overflowLineHeight: CGFloat = 16
-        /// 进行中与空闲分区之间的分隔线（1pt 线 + 上下各 9）
+        /// Divider between the running and idle sections (1pt line + 9 above and below)
         public static let dividerHeight: CGFloat = 19
         public static let idleHeaderHeight: CGFloat = 20
         public static let idleRowHeight: CGFloat = 34
         public static let bottomPadding: CGFloat = 10
     }
 
-    /// 提问卡的行高与间距（1.0× 基准，未乘 scale）。`QuestionCardView` 按这些值排版，
-    /// `questionCardHeight` 按同一组值算高度。
+    /// Row heights and spacing of the question card (1.0× baseline, not multiplied by scale).
+    /// `QuestionCardView` lays out with these values, and `questionCardHeight` computes the height
+    /// from the same set.
     public enum QuestionCard {
-        /// 刘海融合时内容要从刘海下沿开始（`topInset` 由调用方传入刘海高度），其余情况的上边距
+        /// When fused with the notch, content starts at the notch's bottom edge (`topInset` is the
+        /// notch height passed by the caller); otherwise this is the top margin
         public static let plainTopPadding: CGFloat = 14
-        /// 来源 + header 标签 + 进度「1/2」
+        /// Source + header label + progress "1/2"
         public static let headerHeight: CGFloat = 20
-        /// 问题原文每行的高度；按实际行数（1–2 行）排，一行的问题不留第二行的空白
+        /// Height of each line of question text; laid out by the actual line count (1–2), so a
+        /// one-line question leaves no second-line gap
         public static let questionLineHeight: CGFloat = 20
         public static let maxQuestionLines = 2
         public static let sectionGap: CGFloat = 8
         public static let optionHeight: CGFloat = 38
         public static let optionSpacing: CGFloat = 6
-        /// 「其他…」行（展开后是输入框，同高）
+        /// The "Other…" row (same height once expanded into a text field)
         public static let otherRowHeight: CGFloat = 32
-        /// 「在终端回答」/「确定」按钮行
+        /// The "Answer in terminal" / "Confirm" button row
         public static let footerHeight: CGFloat = 28
         public static let bottomPadding: CGFloat = 12
-        /// 选项再多也只排这么多行（AskUserQuestion 约定 2–4 个）
+        /// No matter how many options, only this many rows are laid out (AskUserQuestion specifies
+        /// 2–4)
         public static let maxOptions = 4
     }
 
-    /// 问题区高度（1.0× 基准）：行数限制在 1–2 行
+    /// Question area height (1.0× baseline): line count clamped to 1–2
     public static func questionTextHeight(lines: Int) -> CGFloat {
         CGFloat(min(max(lines, 1), QuestionCard.maxQuestionLines)) * QuestionCard.questionLineHeight
     }
 
-    /// 提问卡高度（1.0× 基准）。`questionLines`：问题原文排出来的行数；
-    /// `topInset`：刘海融合时为刘海高度，否则 0
+    /// Question card height (1.0× baseline). `questionLines`: number of lines the question text
+    /// lays out to; `topInset`: the notch height when fused with the notch, otherwise 0
     public static func questionCardHeight(
         optionCount: Int, questionLines: Int, topInset: CGFloat
     ) -> CGFloat {
@@ -177,14 +183,15 @@ public enum IslandGeometry {
             + M.bottomPadding
     }
 
-    /// 展开子 agent 框时不显示空闲分区：两者同时出现会超出 panel 高度（panel 不能加高 ——
-    /// 自定义位置存的是 panel 左下角，改高度会让用户拖好的悬浮岛整体上移）
+    /// The idle section is hidden while a subagent box is expanded: showing both would exceed the
+    /// panel height (the panel can't grow -- a custom position stores the panel's bottom-left
+    /// corner, so changing the height would shift the user's placed floating island upward)
     public static func taskListShowsIdle(idleCount: Int, expandedSubagentCount: Int) -> Bool {
         idleCount > 0 && expandedSubagentCount == 0
     }
 
-    /// 任务列表卡片高度（1.0× 基准，未乘 scale）。
-    /// `expandedSubagentCount`：展开的子 agent 框里的子 agent 数（0 = 没有展开）
+    /// Task list card height (1.0× baseline, not multiplied by scale). `expandedSubagentCount`:
+    /// number of subagents in the expanded subagent box (0 = none expanded)
     public static func taskListHeight(
         activeCount: Int, idleCount: Int, expandedSubagentCount: Int = 0
     ) -> CGFloat {
@@ -207,9 +214,11 @@ public enum IslandGeometry {
         return height + M.bottomPadding
     }
 
-    /// 自定义位置是否仍然可用：面板顶部的「胶囊带」（顶部 72pt × 中央半宽）须完整落在某块屏内。
-    /// 仅擦边相交（如外接屏拔掉/重排后残留的旧坐标）判不可用 → 调用方清存档回默认位。
-    /// 纯函数（screens 传 frame 数组），便于单测。
+    /// Whether a custom position is still usable: the "pill band" at the top of the panel (top 72pt
+    /// × central half-width) must lie entirely within one screen. A mere edge intersection (e.g.
+    /// stale coordinates left after unplugging / rearranging an external display) counts as
+    /// unusable → the caller clears the saved value and returns to the default position. Pure
+    /// function (screens are passed as an array of frames), easy to unit test.
     public static func positionUsable(
         origin: CGPoint, panelSize: CGSize, screens: [CGRect]
     ) -> Bool {

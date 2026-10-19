@@ -1,16 +1,19 @@
 import Foundation
 
-/// agent 抛给用户的选择题（Claude Code 的 AskUserQuestion），正等着在灵动岛上回答。
-/// 由 `lululumei-ask` hook 写入 `<spool>/questions/<id>.json`，hook 进程挂起直到收到答案。
+/// A multiple-choice question the agent put to the user (Claude Code's AskUserQuestion), waiting to
+/// be answered on the island. Written by the `lululumei-ask` hook to `<spool>/questions/<id>.json`;
+/// the hook process blocks until it receives the answer.
 public struct PendingQuestion: Equatable, Sendable, Identifiable {
-    /// 文件名 id（hook 每次等待生成的 UUID）
+    /// File name id (a UUID the hook generates for each wait)
     public var id: String
     public var source: AgentSource
     public var sessionId: String?
     public var cwd: String?
-    /// 会话转录：用户在 Claude 自己的确认界面里先答时，靠它发现这道题已了结
+    /// Session transcript: when the user answers first in Claude's own confirmation UI, this is how
+    /// we find the question was settled
     public var transcriptPath: String?
-    /// 等待中的 hook 进程；它不在了说明 Claude 已经放弃这次等待（超时 / 用户中断了这一轮）
+    /// The waiting hook process; if it's gone, Claude has abandoned this wait (timeout / user
+    /// interrupted the turn)
     public var hookPid: Int32
     public var createdAt: Date
     public var questions: [AskQuestion]
@@ -29,16 +32,16 @@ public struct PendingQuestion: Equatable, Sendable, Identifiable {
         self.questions = questions
     }
 
-    /// 与 TaskStore 的任务 id 同口径，用来找会话标题 / 终端
+    /// Same scheme as TaskStore's task id; used to find the session title / terminal
     public var taskId: String? {
         sessionId.map { AgentTask.key(source: source, sessionId: $0) }
     }
 }
 
 public struct AskQuestion: Equatable, Sendable {
-    /// 问题原文。也是回答的键：Claude 按问题原文对答案
+    /// The question text. Also the answer key: Claude matches answers by question text
     public var question: String
-    /// 短标签（Claude 限 12 字符），可能为空
+    /// Short label (Claude limits it to 12 characters); may be empty
     public var header: String
     public var options: [AskOption]
     public var multiSelect: Bool

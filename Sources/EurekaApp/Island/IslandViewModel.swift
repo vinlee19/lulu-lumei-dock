@@ -22,9 +22,11 @@ final class IslandViewModel: ObservableObject {
     /// capsule
     @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
-    /// 按时收起、用户还没点开看过的完成卡：胶囊上的「✓ N」，有它时即使没有运行中任务岛也不隐藏
+    /// Finished cards that auto-dismissed on time and the user hasn't opened yet: the pill's "✓ N";
+    /// while present, the island stays visible even with no running tasks
     @Published private(set) var unreadFinished = IslandUnreadFinished()
-    /// 任务列表里当前展开子 agent 框的任务 id（nil = 全收起；单开，几何有界）
+    /// Id of the task whose subagent box is expanded in the task list (nil = all collapsed; one at
+    /// a time, bounded geometry)
     @Published private(set) var expandedSubagentTaskId: String?
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
@@ -52,19 +54,22 @@ final class IslandViewModel: ObservableObject {
     /// Presentation-change callback (the panel controller shows/hides the window from it)
     var onDisplayChange: (@MainActor (Display) -> Void)?
 
-    /// 当前提问卡的作答进度（当前卡不是提问卡时为 nil）
+    /// Answer progress of the current question card (nil when the current card isn't a question
+    /// card)
     @Published private(set) var questionDraft: QuestionDraft?
-    /// 正在提问卡里输入「其他」：panel 要临时成为 key window 才收得到键盘
+    /// Typing "Other" in the question card: the panel must temporarily become key window to receive
+    /// the keyboard
     @Published private(set) var wantsKeyboard = false
-    /// 把回答交给 hook（AppDelegate 接到 QuestionInbox）
+    /// Hands the answer to the hook (AppDelegate wires it to QuestionInbox)
     var onQuestionReply: (@MainActor (_ questionId: String, _ reply: QuestionReply) -> Void)?
-    /// 键盘焦点需求变化（panel 控制器据此 makeKey / 交还焦点）
+    /// Keyboard focus demand changed (the panel controller calls makeKey / hands focus back
+    /// accordingly)
     var onKeyboardChange: (@MainActor (Bool) -> Void)?
 
     enum QuestionReply: Equatable {
-        /// 键是问题原文
+        /// Keys are the question text
         case answer([String: String])
-        /// 岛上收起，到 Claude 自己的确认界面里回答
+        /// Dismissed on the island; answer in Claude's own confirmation UI instead
         case dismiss
     }
 
@@ -97,9 +102,9 @@ final class IslandViewModel: ObservableObject {
         for id in queue.waitingTaskIds where !stillWaiting.contains(id) {
             queue.removeWaiting(taskId: id)
         }
-        // 会话开始新一轮 turn：之前那次完成不再算未读
+        // The session started a new turn: the previous finish no longer counts as unread
         unreadFinished.reconcile(activeTaskIds: Set(tasks.map(\.id)))
-        // 展开的任务消失了就收起（防停在已不存在的会话上）
+        // Collapse if the expanded task disappeared (don't stay on a session that no longer exists)
         if let id = expandedSubagentTaskId, !tasks.contains(where: { $0.id == id }) {
             expandedSubagentTaskId = nil
         }
@@ -127,9 +132,10 @@ final class IslandViewModel: ObservableObject {
         refresh()
     }
 
-    // MARK: - 提问卡
+    // MARK: - Question card
 
-    /// 与 hook 那边等待中的问题对账：新来的入队，已不在等待的（hook 超时 / 这一轮被中断）撤卡
+    /// Reconcile with the hook's pending questions: enqueue new ones, withdraw cards no longer
+    /// pending (hook timed out / turn interrupted)
     func updatePendingQuestions(_ questions: [PendingQuestion]) {
         let waiting = Set(questions.map(\.id))
         let queued = Set(queue.questionIds)
@@ -167,13 +173,15 @@ final class IslandViewModel: ObservableObject {
         mutateDraft { $0.submitOther(text) }
     }
 
-    /// 「在 Claude 里回答」：收起岛上的卡，hook 静默退出，Claude 自己的确认界面一直都在
+    /// "Answer in Claude": dismiss the card on the island; the hook exits silently, and Claude's
+    /// own confirmation UI is there all along
     func dismissQuestion() {
         guard let draft = questionDraft else { return }
         finishQuestion(id: draft.question.id, reply: .dismiss)
     }
 
-    /// 这道题已在 Claude 里了结（IslandQuestionBridge 判定）：撤卡，不再回写 hook
+    /// This question was already settled in Claude (as judged by IslandQuestionBridge): withdraw
+    /// the card, don't write back to the hook
     func withdrawQuestion(id: String) {
         queue.removeQuestion(id: id)
         refresh()
@@ -196,7 +204,8 @@ final class IslandViewModel: ObservableObject {
         refresh()
     }
 
-    /// 提问卡在不在台上决定作答进度：换到另一张提问卡就从头答它，离开提问卡就清掉
+    /// Whether a question card is on stage decides the answer progress: switching to another
+    /// question card starts it from scratch, leaving question cards clears it
     private func syncQuestionDraft() {
         if case .card(.question(let question)) = display {
             if questionDraft?.question.id != question.id {
@@ -219,14 +228,16 @@ final class IslandViewModel: ObservableObject {
         case .compact:
             unreadFinished.markAllRead()
             if activeTasks.isEmpty && idleTasks.isEmpty {
-                // 只剩未读标记且会话都已退出：列表没东西可看，点一下即清掉标记
+                // Only the unread mark is left and all sessions have exited: the list has nothing
+                // to show, so one click clears the mark
                 refresh()
                 return
             }
             setDisplay(.taskList)
             scheduleAutoDismiss()
         case .card(let card):
-            // 提问卡只认里面的按钮：点到空白处不能把 agent 正在等的问题划走
+            // Question cards only honor their buttons: a click on blank space must not swipe away a
+            // question the agent is waiting on
             if case .question = card { return }
             if case .finished(let task) = card {
                 unreadFinished.markRead(task)
@@ -321,7 +332,7 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// 提问卡标题行里的「哪个会话在问」：会话标题 → 项目名
+    /// "Which session is asking" in the question card's title row: session title → project name
     var questionSessionLabel: String? {
         guard let question = questionDraft?.question else { return nil }
         if let id = question.taskId,
@@ -331,8 +342,10 @@ final class IslandViewModel: ObservableObject {
         return question.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
     }
 
-    /// 当前问题原文排出来的行数（1–2），提问卡高度与问题区高度都按它算。
-    /// 用与视图相同的字号、宽度测量；宽度少算 4pt 留余量 —— 估少了第二行会被压缩，估多了只是多一行空
+    /// Number of lines the current question text lays out to (1–2); both the question card height
+    /// and the question area height derive from it. Measured with the same font size and width as
+    /// the view; width is reduced by 4pt as margin -- underestimating squeezes the second line,
+    /// overestimating only leaves an empty line
     var questionLines: Int {
         guard let text = questionDraft?.current.question else { return 1 }
         let font = NSFont.systemFont(ofSize: 14 * uiScale, weight: .semibold)
@@ -342,19 +355,22 @@ final class IslandViewModel: ObservableObject {
             with: CGSize(width: max(width, 1), height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font])
-        // 行高用排版引擎自己的口径；ascender/descender 算出的值比它小，一行会被除成 1.x 行再进位成 2
+        // Use the layout engine's own line height; the ascender/descender value is smaller, so one
+        // line would divide into 1.x lines and round up to 2
         let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
         let lines = Int((bounds.height / lineHeight - 0.25).rounded(.up))
         return min(max(lines, 1), IslandGeometry.QuestionCard.maxQuestionLines)
     }
 
-    /// 提问卡内容要让开的刘海高度（1.0× 基准；不与刘海融合时为 0）。
-    /// 提问卡按钮多，顶部那一行若钻到刘海后面就点不到
+    /// Notch height the question card content must clear (1.0× baseline; 0 when not fused with the
+    /// notch). The question card has many buttons; if the top row slid behind the notch it couldn't
+    /// be clicked
     var questionTopInset: CGFloat {
         fuseWithNotch ? screen.safeAreaTopInset / uiScale : 0
     }
 
-    /// 展开的子 agent 框里的子 agent 数（仅当展开任务在可见的前几行且确有子 agent；否则 0）
+    /// Number of subagents in the expanded subagent box (only when the expanded task is in the
+    /// first visible rows and does have subagents; otherwise 0)
     var expandedSubagentCount: Int {
         guard let id = expandedSubagentTaskId,
               let task = activeTasks.prefix(IslandGeometry.TaskList.maxActiveRows)
@@ -363,13 +379,13 @@ final class IslandViewModel: ObservableObject {
         return task.subagents.count
     }
 
-    /// panel 坐标系中的可交互区域（hitTest 穿透 + hover 跟踪）
+    /// Interactive area in panel coordinates (hitTest pass-through + hover tracking)
     var interactiveRect: CGRect {
         IslandGeometry.interactiveRect(
             contentSize: contentSize, topInset: topInset, layout: layout)
     }
 
-    // MARK: - 内部
+    // MARK: - Internal
 
     private func refresh(collapseTaskList: Bool = false) {
         if case .taskList = display, !collapseTaskList,
@@ -457,7 +473,8 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// 卡片按时收起：不算已读，完成卡在胶囊上留下未读标记（预览渲染也走这里）
+    /// Card auto-dismissed on time: not counted as read; a finished card leaves an unread mark on
+    /// the pill (preview rendering goes through here too)
     func expireCurrentCard() {
         guard case .card = display else { return }
         advanceCard()

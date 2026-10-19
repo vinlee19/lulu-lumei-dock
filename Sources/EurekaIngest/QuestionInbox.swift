@@ -2,14 +2,19 @@ import Darwin
 import EurekaKit
 import Foundation
 
-/// 灵动岛答题的 app 一端（另一端是 `lululumei-ask` hook，见 Sources/eureka-ask/main.swift）。
+/// The app end of island answering (the other end is the `lululumei-ask` hook, see
+/// Sources/eureka-ask/main.swift).
 ///
-/// 目录约定（都在 spool 根目录下）：
-/// - `island-heartbeat`：app 每 5 秒写入自己的 pid。hook 看它判断岛在不在，不在就立刻退出，只留 Claude 自己的确认界面；
-/// - `questions/<id>.json`：hook 等待期间存在，退出时自己删掉；
-/// - `answers/<id>.json`：这里写入答案（或「收起」），hook 读到后删掉。
+/// Directory conventions (all under the spool root):
+/// - `island-heartbeat`: the app writes its own pid every 5 seconds. The hook reads it to tell
+///   whether the island is there; if not, it exits at once, leaving only Claude's own confirmation
+///   UI;
+/// - `questions/<id>.json`: exists while the hook waits; the hook deletes it on exit;
+/// - `answers/<id>.json`: the answer (or "dismiss") is written here; the hook deletes it after
+///   reading.
 ///
-/// hook 被 SIGKILL 之类收不到的信号终止时不会删问题文件 → 这里按文件里的 pid 判活，死了就清掉。
+/// When the hook is killed by an uncatchable signal like SIGKILL it can't delete the question file
+/// → liveness is checked here via the pid in the file, and dead ones are cleaned up.
 public struct QuestionInbox {
     public let root: URL
 
@@ -21,21 +26,23 @@ public struct QuestionInbox {
     public var answersDir: URL { root.appendingPathComponent("answers", isDirectory: true) }
     public var heartbeatURL: URL { root.appendingPathComponent("island-heartbeat") }
 
-    // MARK: 心跳
+    // MARK: Heartbeat
 
     public func writeHeartbeat(pid: Int32 = getpid()) throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data("\(pid)\n".utf8).write(to: heartbeatURL, options: .atomic)
     }
 
-    /// 功能关闭 / app 退出时调用：hook 立刻知道岛不在
+    /// Called when the feature is turned off / the app quits: the hook learns immediately that the
+    /// island is gone
     public func removeHeartbeat() {
         try? FileManager.default.removeItem(at: heartbeatURL)
     }
 
-    // MARK: 读取
+    // MARK: Reading
 
-    /// 等待中的问题（按创建时间）。hook 进程已不在的顺手清掉；读不懂的文件跳过（hook 会自己删）。
+    /// Pending questions (by creation time). Ones whose hook process is gone are cleaned up along
+    /// the way; unreadable files are skipped (the hook deletes them itself).
     public func pending(isProcessAlive: (Int32) -> Bool = QuestionInbox.processIsAlive) -> [PendingQuestion] {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: questionsDir.path) else { return [] }
@@ -54,7 +61,8 @@ public struct QuestionInbox {
         return result.sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// 解析 hook 写的问题文件。id 以文件名为准（与答案文件名一致），不信文件内容里的 id。
+    /// Parses a question file written by the hook. The id comes from the file name (matching the
+    /// answer file name); the id inside the file content is not trusted.
     public static func decode(_ data: Data, fileName: String) -> PendingQuestion? {
         guard
             let id = questionId(fromFileName: fileName),
@@ -65,7 +73,8 @@ public struct QuestionInbox {
             let rawQuestions = toolInput["questions"] as? [[String: Any]]
         else { return nil }
         let questions = rawQuestions.compactMap(decodeQuestion)
-        // 有一个问题读不懂就整张不接：漏答任何一个问题，hook 都不会放行，用户白点
+        // If any question is unreadable, reject the whole card: with any question unanswered the
+        // hook never lets it through, and the user's clicks are wasted
         guard !questions.isEmpty, questions.count == rawQuestions.count else { return nil }
         let createdMs = record["createdAtMs"] as? Double ?? 0
         return PendingQuestion(
@@ -96,7 +105,8 @@ public struct QuestionInbox {
             multiSelect: raw["multiSelect"] as? Bool ?? false)
     }
 
-    /// `<id>.json` → id；只接受字母数字、`-`、`_`（hook 生成的 UUID 只含这些），其余（路径分隔符等）一律拒绝
+    /// `<id>.json` → id; only letters, digits, `-` and `_` are accepted (the UUIDs the hook
+    /// generates contain only these); anything else (path separators etc.) is rejected
     static func questionId(fromFileName name: String) -> String? {
         guard name.hasSuffix(".json") else { return nil }
         let id = String(name.dropLast(".json".count))
@@ -107,12 +117,13 @@ public struct QuestionInbox {
         return id
     }
 
-    // MARK: 回答
+    // MARK: Answering
 
     public enum Reply: Equatable, Sendable {
-        /// 键是问题原文
+        /// Keys are the question text
         case answer([String: String])
-        /// 岛上收起这道题，或它已在 Claude 自己的确认界面里答完：hook 静默退出
+        /// The question was dismissed on the island, or already answered in Claude's own
+        /// confirmation UI: the hook exits silently
         case dismiss
     }
 
@@ -128,7 +139,7 @@ public struct QuestionInbox {
         let data = try JSONSerialization.data(withJSONObject: body)
         let fm = FileManager.default
         try fm.createDirectory(at: answersDir, withIntermediateDirectories: true)
-        // 先写临时文件再 rename：hook 每 100ms 读一次，绝不能读到半个文件
+        // Write a temp file then rename: the hook reads every 100ms and must never see half a file
         let target = answersDir.appendingPathComponent("\(questionId).json")
         let tmp = answersDir.appendingPathComponent(".\(questionId).\(UUID().uuidString).tmp")
         try data.write(to: tmp)

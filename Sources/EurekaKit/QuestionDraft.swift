@@ -1,18 +1,20 @@
 import Foundation
 
-/// 灵动岛上一张提问卡的作答进度：多个问题逐个回答，全部答完才交给 hook。
+/// Answer progress of one question card on the island: multiple questions are answered one by one
+/// and handed to the hook only when all are answered.
 ///
-/// 答案的格式照 AskUserQuestion 的约定：键是问题原文；单选是选项 label；
-/// 多选是选中 label 按选项顺序用「, 」连接；自由输入是用户打的文字（多选时接在已选项后面）。
-/// 纯逻辑；视图与 IslandViewModel 只调用这里的操作。
+/// Answers follow AskUserQuestion's convention: keys are the question text; single-select is the
+/// option label; multi-select is the checked labels joined with ", " in option order; free-form
+/// input is the user's text (appended after the checked options for multi-select). Pure logic; the
+/// view and IslandViewModel only call the operations here.
 public struct QuestionDraft: Equatable, Sendable {
     public let question: PendingQuestion
-    /// 当前在答第几个问题
+    /// Index of the question currently being answered
     public private(set) var index = 0
     public private(set) var answers: [String: String] = [:]
-    /// 当前多选题已勾选的 label
+    /// Labels checked so far in the current multi-select question
     public private(set) var selected: Set<String> = []
-    /// 正在输入「其他」
+    /// Typing "Other"
     public private(set) var isTypingOther = false
 
     public init(question: PendingQuestion) {
@@ -21,12 +23,13 @@ public struct QuestionDraft: Equatable, Sendable {
 
     public var current: AskQuestion { question.questions[index] }
     public var progress: (current: Int, total: Int) { (index + 1, question.questions.count) }
-    /// 所有问题都有答案：可以交给 hook 了
+    /// Every question has an answer: ready to hand to the hook
     public var isComplete: Bool {
         question.questions.allSatisfy { !(answers[$0.question] ?? "").isEmpty }
     }
 
-    /// 单选题点了某个选项：记下答案并进入下一题
+    /// An option was clicked in a single-select question: record the answer and move to the next
+    /// question
     public mutating func choose(_ label: String) {
         guard !current.multiSelect, current.options.contains(where: { $0.label == label }) else {
             return
@@ -34,7 +37,7 @@ public struct QuestionDraft: Equatable, Sendable {
         record(label)
     }
 
-    /// 多选题勾选 / 取消
+    /// Multi-select check / uncheck
     public mutating func toggle(_ label: String) {
         guard current.multiSelect, current.options.contains(where: { $0.label == label }) else {
             return
@@ -46,7 +49,7 @@ public struct QuestionDraft: Equatable, Sendable {
         }
     }
 
-    /// 多选题点「确定」：至少勾了一个才算数
+    /// "Confirm" clicked in a multi-select question: counts only if at least one is checked
     public mutating func confirmSelection() {
         guard current.multiSelect, !selected.isEmpty else { return }
         record(selectedLabelsInOrder.joined(separator: ", "))
@@ -60,7 +63,7 @@ public struct QuestionDraft: Equatable, Sendable {
         isTypingOther = false
     }
 
-    /// 提交「其他」输入的文字；空白不算
+    /// Submit the text typed into "Other"; whitespace-only doesn't count
     public mutating func submitOther(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

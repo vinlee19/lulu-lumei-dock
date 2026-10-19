@@ -336,7 +336,8 @@ struct SettingsView: View {
         }
     }
 
-    /// 答题 hook 的实际状态：开关开着不等于装上了（要先装 Claude Code hooks）
+    /// Actual state of the answer hook: the toggle being on doesn't mean it's installed (Claude
+    /// Code hooks must be installed first)
     private var askHookHint: String {
         guard settings.answerQuestionsOnIsland else {
             return L10n.text(
@@ -353,7 +354,8 @@ struct SettingsView: View {
             zhHans: "尚未生效：需要先在「集成」页安装 Claude Code hooks，会一并在 settings.json 加一条 AskUserQuestion 专用 hook。")
     }
 
-    /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）
+    /// System notification fallback hint: reflects the real authorization state (unavailable in dev
+    /// / denied / OK)
     private var notificationHint: String? {
         switch notificationService.availability {
         case .unavailableNotBundled:

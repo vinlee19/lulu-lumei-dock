@@ -1,27 +1,34 @@
 import Foundation
 
-// eureka-ask：Claude Code 的 PermissionRequest(matcher: AskUserQuestion) hook，让用户在灵动岛上回答提问。
+// eureka-ask: Claude Code's PermissionRequest(matcher: AskUserQuestion) hook, letting the user
+// answer questions on the Dynamic Island.
 // Built as `eureka-ask`; the app installs it at the stable path as `lululumei-ask`.
 //
-// PermissionRequest 的 hook 与 Claude 自己的确认界面（终端选择框 / 桌面端确认卡）同时运行，
-// 谁先给出回答用谁：岛上答了，Claude 撤掉自己的界面；在 Claude 里答了，这里的输出不再被采用。
+// A PermissionRequest hook runs alongside Claude's own confirmation UI (terminal picker / desktop
+// confirmation card), and whichever answers first wins: answered on the island, Claude withdraws
+// its own UI; answered in Claude, the output here is no longer used.
 //
-// 它和 relay 是**两个程序**，约束正好相反：relay 永远静默、<50ms、只报告；
-// 这里要挂起等用户点选，再把答案写到 stdout —— Claude 读到
-// `decision.behavior: "allow"` + 带 `answers` 的 `updatedInput` 就按这份答案执行。
-// 所以它只注册在 AskUserQuestion 上，绝不能挂到别的工具（stdout 会被当成放行决定）。
+// It and the relay are **two programs** with exactly opposite constraints: the relay is always
+// silent, <50ms, report-only; this one blocks waiting for the user's click, then writes the answer
+// to stdout -- when Claude reads `decision.behavior: "allow"` + an `updatedInput` carrying
+// `answers`, it proceeds with those answers. So it is registered only on AskUserQuestion and must
+// never hang on any other tool (stdout would be read as an allow decision).
 //
-// 与 app 的约定（`EurekaIngest.QuestionInbox` 是另一端）：
-//   <root>/island-heartbeat          app 每 5 秒写入自己的 pid；超过 15 秒没更新 = 岛不在
-//   <root>/questions/<id>.json       本进程等待期间存在；退出时删除
-//   <root>/answers/<id>.json         app 写入 {"action":"answer","answers":{问题:答案}}
-//                                    或 {"action":"dismiss"}（岛上收起这道题 / 已在 Claude 里答完）
+// Contract with the app (`EurekaIngest.QuestionInbox` is the other end):
+//   <root>/island-heartbeat          the app writes its own pid every 5 seconds;
+//                                    not updated for over 15 seconds = island gone
+//   <root>/questions/<id>.json       exists while this process waits; deleted on exit
+//   <root>/answers/<id>.json         the app writes {"action":"answer","answers":{question:answer}}
+//                                    or {"action":"dismiss"} (question dismissed on the island /
+//                                    already answered in Claude)
 //
-// 任何不满足的情况（不是 AskUserQuestion / 岛不在 / 超时 / 收起 / 出错 / 被信号终止）
-// 都**静默 exit 0、stdout 不写一个字节** —— 交给 Claude 自己的确认界面，绝不会被代答。
+// In every case that doesn't qualify (not AskUserQuestion / island gone / timeout / dismissed /
+// error / terminated by a signal) it **silently exits 0 and writes not a single byte to stdout** --
+// leaving it to Claude's own confirmation UI, never answering on the user's behalf.
 
 let maxStdinBytes = 1_048_576
-/// 最多等 10 分钟；settings.json 里给这条 hook 的 timeout 是 610 秒，留出收尾余量
+/// Wait at most 10 minutes; the timeout given to this hook in settings.json is 610 seconds, leaving
+/// margin to wrap up
 let answerDeadline: TimeInterval = 600
 let heartbeatMaxAge: TimeInterval = 15
 let pollInterval: useconds_t = 100_000
@@ -45,7 +52,8 @@ func readStdin(limit: Int) -> Data {
     return data
 }
 
-/// 岛在不在：心跳文件够新，且里面记的 app 进程还活着
+/// Whether the island is there: the heartbeat file is fresh enough and the app process recorded in
+/// it is still alive
 func islandIsAlive(root: URL) -> Bool {
     let url = root.appendingPathComponent("island-heartbeat")
     guard
@@ -68,9 +76,11 @@ func writeAtomically(_ data: Data, to url: URL) throws {
     }
 }
 
-/// 被 Claude 终止（超时 / 用户在终端中断）时删掉问题文件，岛上的卡随之撤掉。
-/// 信号处理里只能用 async-signal-safe 调用：路径预先转成 C 字符串，处理函数里只有 unlink + _exit。
-/// app 另有兜底：问题文件里的 pid 不在了也会清掉，SIGKILL 这类收不到的信号也不会留下孤卡。
+/// When terminated by Claude (timeout / user interrupts in the terminal), delete the question file
+/// so the island card is withdrawn. Only async-signal-safe calls are allowed in the signal handler:
+/// the path is converted to a C string up front, and the handler does only unlink + _exit. The app
+/// has its own fallback: it also cleans up when the pid in the question file is gone, so
+/// uncatchable signals like SIGKILL leave no orphan card.
 var pendingQuestionCPath: UnsafeMutablePointer<CChar>?
 
 func installSignalCleanup(path: String) {
@@ -104,7 +114,7 @@ func run() {
         (try? fm.createDirectory(at: answersDir, withIntermediateDirectories: true)) != nil
     else { return }
 
-    // PermissionRequest 的输入里没有 tool_use_id，每次等待用一个新 id
+    // The PermissionRequest input has no tool_use_id, so each wait uses a fresh id
     let id = UUID().uuidString
     let questionURL = questionsDir.appendingPathComponent("\(id).json")
     let answerURL = answersDir.appendingPathComponent("\(id).json")
@@ -134,7 +144,8 @@ func run() {
             emitAnswer(data, toolInput: toolInput)
             return
         }
-        // 等待期间 app 退出 / 卡死：岛上的卡已经没人显示，进程没必要再挂 10 分钟
+        // The app quit / hung during the wait: nobody is showing the island card anymore, so
+        // there's no point blocking for 10 minutes
         if Date().timeIntervalSince(lastAliveCheck) >= 2 {
             lastAliveCheck = Date()
             guard islandIsAlive(root: root) else { return }
@@ -143,7 +154,8 @@ func run() {
     }
 }
 
-/// 只有 `action == "answer"` 且每个问题都有非空答案才输出；否则静默（交给 Claude 自己的确认界面）
+/// Emits output only when `action == "answer"` and every question has a non-empty answer; otherwise
+/// stays silent (leaving it to Claude's own confirmation UI)
 func emitAnswer(_ data: Data, toolInput: [String: Any]) {
     guard
         let object = try? JSONSerialization.jsonObject(with: data),
@@ -158,7 +170,8 @@ func emitAnswer(_ data: Data, toolInput: [String: Any]) {
         asked.allSatisfy({ !(answers[$0] ?? "").isEmpty })
     else { return }
 
-    // updatedInput 会整个替换工具输入：原样带回 questions，只补上 answers
+    // updatedInput replaces the whole tool input: carry questions back unchanged, only adding
+    // answers
     var updatedInput = toolInput
     updatedInput["answers"] = answers
     let output: [String: Any] = [

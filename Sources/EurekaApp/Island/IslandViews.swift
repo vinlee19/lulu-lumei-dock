@@ -6,7 +6,7 @@ import SwiftUI
 struct IslandRootView: View {
     @ObservedObject var viewModel: IslandViewModel
 
-    /// 悬浮/无刘海屏的底色 #1C1C20（设计稿 agent-dock-final）
+    /// Background for floating / no-notch screens #1C1C20 (design mock agent-dock-final)
     private static let floatingFill = Color(red: 0.110, green: 0.110, blue: 0.125)
 
     var body: some View {
@@ -28,12 +28,13 @@ struct IslandRootView: View {
     }
 
     private func island(size: CGSize) -> some View {
-        // 拖拽在 IslandHostingView（performDrag）；点按回到 SwiftUI——
-        // 内部按钮优先消费，背景 tap 才走 islandTapped
+        // Dragging lives in IslandHostingView (performDrag); clicks go back to SwiftUI -- inner
+        // buttons consume first, only background taps reach islandTapped
         let shape = UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
         let fused = viewModel.fuseWithNotch
         return shape
-            // 与刘海融合时必须纯黑（顶边接物理刘海）；悬浮/无刘海屏用深灰底 + 细边框
+            // Must be pure black when fused with the notch (top edge meets the physical notch);
+            // floating / no-notch screens use a dark gray fill + thin border
             .fill(fused ? Color.black : Self.floatingFill)
             .overlay(shape.stroke(Color.white.opacity(fused ? 0 : 0.09), lineWidth: 1))
             .frame(width: size.width, height: size.height)
@@ -107,9 +108,12 @@ struct IslandRootView: View {
     }
 }
 
-/// compact 胶囊（设计稿 agent-dock-final 的「菜单栏窄条」），中部为物理刘海留空：
-/// - 左翼：在场来源图标（有运行中会话的亮并带青色圆点，只剩空闲会话的变暗）+ 运行中计数；
-/// - 右翼：告警位，等待授权/输入 > ctx ≥ 90% > 未读完成，见 `IslandPill.alert`；没有告警时显示最早任务的计时。
+/// Compact pill (the "menu bar strip" in design mock agent-dock-final), with the middle left empty
+/// for the physical notch:
+/// - left wing: present source icons (lit with a cyan dot when a session is running, dimmed when
+///   only idle sessions remain) + running count;
+/// - right wing: alert slot, waiting for permission/input > ctx ≥ 90% > unread finished, see
+///   `IslandPill.alert`; with no alert it shows the oldest task's timer.
 struct CompactPillView: View {
     let tasks: [AgentTask]
     var idleTasks: [AgentTask] = []
@@ -159,7 +163,7 @@ struct CompactPillView: View {
         .padding(.horizontal, 14 * scale)
     }
 
-    /// 左翼：来源图标 + 运行中计数（没有运行中任务时不显示计数）
+    /// Left wing: source icons + running count (count hidden when nothing is running)
     private func leftWing(_ marks: [IslandPill.SourceMark]) -> some View {
         HStack(spacing: 7 * scale) {
             ForEach(marks, id: \.source) { mark in
@@ -189,7 +193,7 @@ struct CompactPillView: View {
             }
     }
 
-    /// 右翼告警徽标；放不下时先去图标，再只留图标
+    /// Right-wing alert badge; when it doesn't fit, drop the icon first, then keep only the icon
     private func alertBadge(
         _ alert: IslandPill.Alert, showIcon: Bool, showText: Bool
     ) -> some View {
@@ -211,7 +215,8 @@ struct CompactPillView: View {
         .fixedSize()
     }
 
-    /// 未读完成的图标与颜色同完成卡（成功绿 ✓ / 出错红 / 中断灰）
+    /// Unread-finished icon and color match the finished card (success green ✓ / error red /
+    /// interrupted gray)
     private func alertStyle(_ alert: IslandPill.Alert) -> (icon: String, text: String, color: Color) {
         switch alert {
         case .waiting(.permission):
@@ -261,13 +266,14 @@ struct CompactPillView: View {
         }
     }
 
-    /// 在场子 agent 总数（compact 胶囊聚合标识）
+    /// Total present subagents (aggregate marker on the compact pill)
     private var subagentTotal: Int {
         tasks.reduce(0) { $0 + $1.subagents.count }
     }
 }
 
-/// 胶囊来源图标右上角的运行中圆点：外圈描一道底色把它从图标上「切」出来，发光并缓慢呼吸
+/// Running dot at the top-right of a pill source icon: an outer ring in the background color "cuts"
+/// it out of the icon; it glows and breathes slowly
 struct RunningSourceDot: View {
     let color: Color
     let size: CGFloat
@@ -285,7 +291,7 @@ struct RunningSourceDot: View {
     }
 }
 
-/// 运行中呼吸点
+/// Breathing running dot
 struct PulsingDot: View {
     var color: Color = .cyan
     var size: CGFloat = 7
@@ -844,7 +850,7 @@ struct ExpandedCardView: View {
         case .alert:
             return "exclamationmark.shield.fill"
         case .question:
-            return "questionmark.bubble.fill"  // 提问卡由 QuestionCardView 渲染，这里只为穷尽
+            return "questionmark.bubble.fill"  // rendered by QuestionCardView; here only for exhaustiveness
         case .notice:
             return "heart.fill"  // Never reached (notices render an emoji); fallback
         }
@@ -956,21 +962,22 @@ struct TaskListCardView: View {
     var idleTasks: [AgentTask] = []
     var showStartTime = false
     var scale: CGFloat = 1
-    /// 物理刘海宽度：标题行分居刘海两侧（浮动/无刘海为 0）
+    /// Physical notch width: the title row is split across both sides of the notch (0 when floating
+    /// / no notch)
     var centerGap: CGFloat = 0
-    /// 当前展开子 agent 框的任务 id（nil = 全收起）
+    /// Id of the task whose subagent box is currently expanded (nil = all collapsed)
     var expandedTaskId: String? = nil
     var onToggleTimeMode: () -> Void = {}
     var onToggleSubagents: (String) -> Void = { _ in }
 
-    /// 行高/间距与 `IslandGeometry.taskListHeight` 共用
+    /// Row heights/spacing shared with `IslandGeometry.taskListHeight`
     private typealias M = IslandGeometry.TaskList
 
-    // 配色（设计稿 agent-dock-final）
-    private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)        // #5AC8FA 进行中
-    private static let labelGray = Color(red: 0.557, green: 0.557, blue: 0.576)     // #8E8E93 分区标题
+    // Palette (design mock agent-dock-final)
+    private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)        // #5AC8FA running
+    private static let labelGray = Color(red: 0.557, green: 0.557, blue: 0.576)     // #8E8E93 section header
     private static let primaryText = Color(red: 0.961, green: 0.961, blue: 0.969)   // #F5F5F7
-    private static let secondaryText = Color(red: 0.596, green: 0.596, blue: 0.616) // #98989D 计时
+    private static let secondaryText = Color(red: 0.596, green: 0.596, blue: 0.616) // #98989D timer
     private static let sourceText = Color(red: 0.780, green: 0.780, blue: 0.800)    // #C7C7CC
     private static let idleText = Color(red: 0.820, green: 0.820, blue: 0.839)      // #D1D1D6
     private static let idleSourceText = Color(red: 0.682, green: 0.682, blue: 0.698) // #AEAEB2
@@ -1022,16 +1029,18 @@ struct TaskListCardView: View {
         .padding(.bottom, M.bottomPadding * scale)
     }
 
-    /// 与 IslandViewModel.expandedSubagentCount 同口径：展开的任务须在可见行里
+    /// Same rule as IslandViewModel.expandedSubagentCount: the expanded task must be in the visible
+    /// rows
     private var expandedSubagentCount: Int {
         guard let id = expandedTaskId else { return 0 }
         return tasks.prefix(M.maxActiveRows).first { $0.id == id }?.subagents.count ?? 0
     }
 
-    // MARK: 标题行
+    // MARK: Title row
 
-    /// 刘海屏上标题行落在刘海两侧（内容贴屏幕顶），中间留出刘海宽度；
-    /// 两翼放不下时 ViewThatFits 先缩短文字，绝不让文字钻到刘海后面
+    /// On notched screens the title row sits on both sides of the notch (content flush to the
+    /// screen top), leaving the notch width in the middle; when the wings don't fit, ViewThatFits
+    /// shortens the text first, never letting text slide behind the notch
     private var header: some View {
         HStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
@@ -1068,7 +1077,8 @@ struct TaskListCardView: View {
         }
     }
 
-    /// 切换右侧时间显示：已持续时长 ↔ 开始时间（内层按钮消费点击，不触发整岛收起）
+    /// Toggle the right-side time display: elapsed duration ↔ start time (the inner button consumes
+    /// the click, so the island doesn't collapse)
     private func timeModeToggle(showLabel: Bool, showChevron: Bool) -> some View {
         Button(action: onToggleTimeMode) {
             HStack(spacing: 5 * scale) {
@@ -1094,9 +1104,10 @@ struct TaskListCardView: View {
             : L10n.text("Show start time instead", zhHans: "改为显示开始时间"))
     }
 
-    // MARK: 进行中行
+    // MARK: Running rows
 
-    /// 进行中行：浅色底 + 左侧发光竖条 + 状态点；等待中的任务整行换成橙色
+    /// Running row: light fill + glowing left bar + status dot; a waiting task turns the whole row
+    /// orange
     private func activeRow(_ task: AgentTask) -> some View {
         let tint = rowTint(task)
         let shape = RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
@@ -1111,19 +1122,21 @@ struct TaskListCardView: View {
                 activityLine(task)
             }
             Spacer(minLength: 6 * scale)
-            // 跳到会话所在终端（只在知道终端且它还在运行时出现）
+            // Jump to the session's terminal (only shown when the terminal is known and still
+            // running)
             if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
                 terminalJumpButton(terminal)
             }
-            // 子 agent 数量徽标（可点开/收起；无子 agent 不显示）
+            // Subagent count badge (click to expand/collapse; hidden with no subagents)
             if !task.subagents.isEmpty {
                 subagentBadge(task)
             }
             if let context = task.contextUsedPercent, context >= 60 {
                 contextBadge(context)
             }
-            // 尾部必须 fixedSize：否则中间的标题会把它挤到换行
-            // （Plans 行踩过同一个坑 —— 该固定的是尾部，让中间去让位）
+            // The trailing part must be fixedSize: otherwise the title in the middle pushes it onto
+            // a new line (the Plans row hit the same pitfall -- fix the trailing part and let the
+            // middle give way)
             Group {
                 if showStartTime {
                     Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
@@ -1154,7 +1167,8 @@ struct TaskListCardView: View {
         return Self.accent
     }
 
-    /// 状态标记：运行中为带光圈的圆点，等待确认为橙色感叹号（同宽，标题列对齐）
+    /// Status marker: a haloed dot when running, an orange exclamation mark when awaiting
+    /// confirmation (same width, title column aligned)
     @ViewBuilder
     private func statusMark(_ task: AgentTask, tint: Color) -> some View {
         Group {
@@ -1175,17 +1189,19 @@ struct TaskListCardView: View {
         .frame(width: 15 * scale)
     }
 
-    /// 标题下的第二行：压缩上下文 / 当前工具（没有就不占行，标题垂直居中）
+    /// Second line under the title: compacting context / current tool (takes no line if neither,
+    /// title vertically centered)
     @ViewBuilder
     private func activityLine(_ task: AgentTask) -> some View {
         if task.isCompacting {
-            // 压缩期间没有别的事件，不标出来就像卡死了
+            // No other events arrive while compacting; without a marker it would look frozen
             Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
                 .font(.system(size: 10 * scale))
                 .foregroundStyle(Theme.gold.opacity(0.85))
                 .lineLimit(1)
         } else if let activity = task.currentActivity {
-            // 有具体对象就一起显示：「Edit main.swift」比光「Edit」有用得多
+            // Show the target too when there is one: "Edit main.swift" is far more useful than just
+            // "Edit"
             Text(compactToolLabel(tool: activity, detail: task.currentToolDetail))
                 .font(.system(size: 10 * scale).monospaced())
                 .foregroundStyle(.white.opacity(0.45))
@@ -1194,7 +1210,7 @@ struct TaskListCardView: View {
         }
     }
 
-    // MARK: 空闲分区
+    // MARK: Idle section
 
     private var idleHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
@@ -1235,9 +1251,9 @@ struct TaskListCardView: View {
         .frame(height: M.idleRowHeight * scale)
     }
 
-    // MARK: 行内部件
+    // MARK: Inline parts
 
-    /// 来源：品牌色 logo + 灰色小写来源名
+    /// Source: brand-color logo + gray lowercase source name
     private func sourceLabel(
         _ source: AgentSource, textColor: Color, weight: Font.Weight
     ) -> some View {
@@ -1251,7 +1267,7 @@ struct TaskListCardView: View {
         .fixedSize()
     }
 
-    /// 上下文占用徽标（≥60% 才出现）：80% 起橙
+    /// Context usage badge (appears only at ≥60%): orange from 80%
     private func contextBadge(_ percent: Double) -> some View {
         let color = contextColor(percent)
         return Text("ctx \(Int(percent.rounded()))%")
@@ -1350,7 +1366,8 @@ struct TaskListCardView: View {
         }
     }
 
-    /// 列表里 80% 起就用橙色；红色留给收缩胶囊右翼的 ctx ≥ 90% 告警
+    /// In the list, orange from 80%; red is reserved for the compact pill's right-wing ctx ≥ 90%
+    /// alert
     private func contextColor(_ percent: Double) -> Color {
         percent < 80 ? Self.secondaryText : Self.contextOrange
     }
