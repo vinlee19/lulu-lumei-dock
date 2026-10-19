@@ -19,6 +19,7 @@ public final class EurekaStore {
     public let limitSamples: LimitSamplesRepo
     public let sessionTerminals: SessionTerminalsRepo
     public let prompts: PromptsRepo
+    public let summaryRuns: SummaryRunsRepo
 
     public init(path: URL) throws {
         try FileManager.default.createDirectory(
@@ -39,6 +40,7 @@ public final class EurekaStore {
         limitSamples = LimitSamplesRepo(db: db)
         sessionTerminals = SessionTerminalsRepo(db: db)
         prompts = PromptsRepo(db: db)
+        summaryRuns = SummaryRunsRepo(db: db)
     }
 
     /// Defaults to ~/Library/Application Support/Eureka/eureka.sqlite (overridden by

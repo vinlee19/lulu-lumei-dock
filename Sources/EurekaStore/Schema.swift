@@ -1,6 +1,8 @@
 import Foundation
 
 enum Schema {
+    /// (table added within v24, no version bump) summary_runs: AI session summaries and their
+    ///      generation history. User-requested output, not re-derivable → never DROPped on upgrade.
     /// (column added within v24, no version bump) prompts gains hidden_at (user "remove" =
     /// soft-delete timestamp).
     ///      A hard delete would be revived by the next incremental extraction upsert (an active session is rewritten in batches), so removal must,
@@ -340,6 +342,10 @@ enum Schema {
         CREATE INDEX IF NOT EXISTS idx_prompt_eval_severity
             ON prompt_eval(severity) WHERE severity > 0;
         """)
+
+        // AI session summaries (user-requested artifacts with generation history): created
+        // idempotently with no version bump, and never part of the DROP block above
+        try db.execute(SummaryRunsRepo.createSQL)
 
         // task_history takes no part in drop/rebuild (real history); old DBs get missing columns
         // via idempotent ALTER
