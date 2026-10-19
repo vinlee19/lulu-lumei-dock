@@ -75,7 +75,9 @@ public struct SessionSummaryEngine {
             if let tokens = result.outputTokens { outputTokens = (outputTokens ?? 0) + tokens }
         }
         func invoke(_ prompt: String, stage: SummaryStage, done: Int, total: Int) -> SummaryInvocationResult {
-            progress(.stage(.launching, done: done, total: total))
+            // Merge passes stay in `merging` throughout, so the UI never shows "part n+1 of n"
+            let merging = stage == .merging
+            progress(.stage(merging ? .merging : .launching, done: done, total: total))
             progress(.text(""))
             // Events arrive serially from the stdout reader, so plain locals are safe here
             var reported = false
@@ -87,7 +89,7 @@ public struct SessionSummaryEngine {
                 progress(.activity)
                 switch event {
                 case .started:
-                    progress(.stage(.waiting, done: done, total: total))
+                    if !merging { progress(.stage(.waiting, done: done, total: total)) }
                     return
                 case .delta(let text):
                     live += text

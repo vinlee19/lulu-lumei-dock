@@ -246,8 +246,6 @@ public final class SessionSummaryCoordinator {
             finish(job, kind: .launchFailed, message: "\(error)", markdown: nil)
             return
         }
-        defer { try? FileManager.default.removeItem(at: workingDirectory) }
-
         let engine = SessionSummaryEngine(
             invoker: SummaryInvoker(launcher: launcher, timeout: configuration.invocationTimeout),
             budget: configuration.budget)
@@ -258,6 +256,9 @@ public final class SessionSummaryCoordinator {
         let result = engine.run(input, cancel: job.cancel) { [weak self] progress in
             self?.handle(progress, job: job)
         }
+        // Clean up before publishing the outcome: observers may act (or the process may exit)
+        // as soon as `finish` reports it
+        try? FileManager.default.removeItem(at: workingDirectory)
 
         job.record.coverage = result.coverage
         job.record.model = result.model ?? job.request.model
