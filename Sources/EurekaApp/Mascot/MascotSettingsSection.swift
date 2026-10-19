@@ -15,28 +15,37 @@ struct MascotSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.row) {
-            Toggle("显示桌面吉祥物", isOn: $settings.mascotEnabled)
+            Toggle(
+                L10n.text("Show the desktop companion", zhHans: "显示桌面吉祥物"),
+                isOn: $settings.mascotEnabled)
             if settings.mascotEnabled {
-                packGrid(title: "预设形象", packs: library.presetPacks, showsUpload: false)
-                packGrid(title: "我的形象", packs: library.customPacks, showsUpload: true)
-                Toggle("上传时自动去除纯色背景（适合白底 / 纯色底的图）", isOn: $removeBackground)
-                    .font(.system(size: 11))
+                packGrid(
+                    title: L10n.text("Presets", zhHans: "预设形象"),
+                    packs: library.presetPacks, showsUpload: false)
+                packGrid(
+                    title: L10n.text("My companions", zhHans: "我的形象"),
+                    packs: library.customPacks, showsUpload: true)
+                Toggle(
+                    L10n.text(
+                        "Remove a solid background on upload (for images on white or a flat color)",
+                        zhHans: "上传时自动去除纯色背景（适合白底 / 纯色底的图）"),
+                    isOn: $removeBackground)
+                    .font(Theme.font.themed(11))
                 if let error = library.lastError {
                     Text(error)
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.orange)
                 }
                 if let editing = library.editing, editing.id == settings.mascotPack {
                     editor(editing)
                 }
                 builtInSummary
-                Button("打开动画包文件夹") { MascotPackLoader.revealCustomFolder() }
+                Button(L10n.text("Open the animation-pack folder", zhHans: "打开动画包文件夹")) { MascotPackLoader.revealCustomFolder() }
                     .controlSize(.small)
-                Text("上传一张图即可替换噜噜，各状态共用这张图并配合动作区分；"
-                    + "也可以给工作中 / 等你确认 / 完成 / 出错 / 睡觉单独换图。"
-                    + "多帧动画请用 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）。"
-                    + "拖动可移动位置，右键可隐藏。")
-                    .font(.system(size: 9.5))
+                Text(L10n.text(
+                    "Upload one image to replace Lulu; every state shares it and the motions tell them apart. You can also set separate images for working / waiting / done / error / sleeping. For multi-frame animation use mascots/<name>/ + manifest.json (the folder has notes and an example). Drag to move it, right-click to hide it.",
+                    zhHans: "上传一张图即可替换噜噜，各状态共用这张图并配合动作区分；也可以给工作中 / 等你确认 / 完成 / 出错 / 睡觉单独换图。多帧动画请用 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）。拖动可移动位置，右键可隐藏。"))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -47,12 +56,16 @@ struct MascotSettingsSection: View {
         }
         .onChange(of: settings.mascotPack) { _, _ in syncSelection() }
         .confirmationDialog(
-            confirmingDelete.map { "删除形象「\($0.name)」？图片会移到废纸篓。" } ?? "",
+            confirmingDelete.map {
+                L10n.format(
+                    "Delete the companion \"%@\"? Its images move to the Trash.",
+                    zhHans: "删除形象「%@」？图片会移到废纸篓。", $0.name)
+            } ?? "",
             isPresented: Binding(
                 get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 if let info = confirmingDelete {
                     if settings.mascotPack == info.id {
                         settings.mascotPack = MascotPackLoader.builtInID
@@ -60,7 +73,7 @@ struct MascotSettingsSection: View {
                     library.delete(packID: info.id)
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -69,7 +82,7 @@ struct MascotSettingsSection: View {
     @ViewBuilder
     private func packGrid(title: String, packs: [MascotPackInfo], showsUpload: Bool) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(Theme.font.themed(11, .semibold))
             .foregroundStyle(.secondary)
         LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
             ForEach(packs) { info in
@@ -88,7 +101,9 @@ struct MascotSettingsSection: View {
     }
 
     private func upload() {
-        guard let url = Self.pickImage(message: "选择一张图片作为桌面伙伴形象（PNG / JPG / GIF…，≤ 20MB）")
+        guard let url = Self.pickImage(message: L10n.text(
+            "Choose an image for the desktop companion (PNG / JPG / GIF…, up to 20 MB)",
+            zhHans: "选择一张图片作为桌面伙伴形象（PNG / JPG / GIF…，≤ 20MB）"))
         else { return }
         if let id = library.createPack(from: url, removeBackground: removeBackground) {
             settings.mascotPack = id
@@ -101,18 +116,20 @@ struct MascotSettingsSection: View {
     private func editor(_ editing: MascotLibrary.Editing) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("名称")
-                    .font(.system(size: 11))
-                TextField("形象名称", text: $nameDraft)
+                Text(L10n.text("Name", zhHans: "名称"))
+                    .font(Theme.font.themed(11))
+                TextField(L10n.text("Companion name", zhHans: "形象名称"), text: $nameDraft)
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.small)
                     .frame(maxWidth: 160)
                     .onSubmit { library.rename(packID: editing.id, to: nameDraft) }
                 Spacer()
-                Button("删除此形象", role: .destructive) {
+                SecondaryButton(
+                    title: L10n.text("Delete companion", zhHans: "删除此形象"),
+                    destructive: true, classic: .push
+                ) {
                     confirmingDelete = library.customPacks.first { $0.id == editing.id }
                 }
-                .controlSize(.small)
             }
             ForEach(MascotManifestEditor.editableStates, id: \.self) { state in
                 stateRow(state, editing: editing)
@@ -140,31 +157,35 @@ struct MascotSettingsSection: View {
             .frame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(Self.title(for: state))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.font.themed(11, .medium))
                 Text(detail(for: state, editing: editing))
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("更换…") {
-                guard let url = Self.pickImage(message: "选择「\(Self.title(for: state))」时显示的图片")
+            SecondaryButton(title: L10n.text("Change…", zhHans: "更换…"), classic: .push) {
+                guard let url = Self.pickImage(message: L10n.format(
+                    "Choose the image shown for \"%@\"",
+                    zhHans: "选择「%@」时显示的图片", Self.title(for: state)))
                 else { return }
                 library.setImage(
                     for: state, packID: editing.id, from: url, removeBackground: removeBackground)
             }
-            .controlSize(.small)
             if state != .idle, editing.files[state] != nil {
-                Button("恢复") { library.resetImage(for: state, packID: editing.id) }
-                    .controlSize(.small)
+                SecondaryButton(title: L10n.text("Reset", zhHans: "恢复"), classic: .push) {
+                    library.resetImage(for: state, packID: editing.id)
+                }
             }
         }
     }
 
     private func detail(for state: MascotState, editing: MascotLibrary.Editing) -> String {
-        if state == .idle { return "基础形象，其他状态默认都用它" }
-        if editing.files[state] != nil { return "已单独设置" }
+        if state == .idle {
+            return L10n.text("The base image; other states use it by default", zhHans: "基础形象，其他状态默认都用它")
+        }
+        if editing.files[state] != nil { return L10n.text("Set separately", zhHans: "已单独设置") }
         let source = MascotManifestEditor.effectiveSource(for: state, files: editing.files) ?? .idle
-        return "沿用「\(Self.title(for: source))」"
+        return L10n.format("Uses \"%@\"", zhHans: "沿用「%@」", Self.title(for: source))
     }
 
     // MARK: - 其他
@@ -176,10 +197,15 @@ struct MascotSettingsSection: View {
             let idleCount = builtIn.variants(for: .idle).count
             let workingCount = builtIn.variants(for: .working).count
             let waitingCount = builtIn.variants(for: .waiting).count
-            Text("高频行为共 \(idleCount + workingCount + waitingCount) 种："
-                + "空闲 \(idleCount) · 工作 \(workingCount) · 等待 \(waitingCount) · "
-                + "\(builtIn.lookDirections.count) 向视线")
-                .font(.system(size: 9.5, weight: .medium))
+            Text(L10n.format(
+                "%1$@ frequent poses: idle %2$@ · working %3$@ · waiting %4$@ · %5$@ gaze directions",
+                zhHans: "高频行为共 %1$@ 种：空闲 %2$@ · 工作 %3$@ · 等待 %4$@ · %5$@ 向视线",
+                String(idleCount + workingCount + waitingCount),
+                String(idleCount),
+                String(workingCount),
+                String(waitingCount),
+                String(builtIn.lookDirections.count)))
+                .font(Theme.font.themed(9.5, .medium))
                 .foregroundStyle(Theme.brandFg)
         }
     }
@@ -192,16 +218,16 @@ struct MascotSettingsSection: View {
 
     static func title(for state: MascotState) -> String {
         switch state {
-        case .idle: return "平时"
-        case .working: return "工作中"
-        case .waiting: return "等你确认"
-        case .success: return "完成"
-        case .error: return "出错"
-        case .sleeping: return "睡觉"
-        case .relax: return "放松"
-        case .night: return "深夜"
-        case .poke: return "被戳"
-        case .wake: return "醒来"
+        case .idle: return L10n.text("Idle", zhHans: "平时")
+        case .working: return L10n.text("Working", zhHans: "工作中")
+        case .waiting: return L10n.text("Waiting for you", zhHans: "等你确认")
+        case .success: return L10n.text("Done", zhHans: "完成")
+        case .error: return L10n.text("Error", zhHans: "出错")
+        case .sleeping: return L10n.text("Sleeping", zhHans: "睡觉")
+        case .relax: return L10n.text("Relax", zhHans: "放松")
+        case .night: return L10n.text("Late night", zhHans: "深夜")
+        case .poke: return L10n.text("Poked", zhHans: "被戳")
+        case .wake: return L10n.text("Waking up", zhHans: "醒来")
         }
     }
 
@@ -247,7 +273,7 @@ private struct PackTile: View {
                             isSelected ? Theme.brand : Theme.hairline,
                             lineWidth: isSelected ? 2 : 1))
                 Text(name)
-                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                    .font(Theme.font.themed(10, isSelected ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -271,12 +297,12 @@ private struct UploadTile: View {
                             Theme.hairline,
                             style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(Theme.font.themed(18, .medium))
                         .foregroundStyle(.secondary)
                 }
                 .frame(height: 66)
-                Text("上传图片")
-                    .font(.system(size: 10))
+                Text(L10n.text("Upload image", zhHans: "上传图片"))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
             }
             .contentShape(Rectangle())

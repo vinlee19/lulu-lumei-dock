@@ -18,11 +18,21 @@ enum MascotImportError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unreadable: return "无法读取所选文件"
-        case .tooLarge: return "图片超过 \(MascotImageImporter.maxFileBytes / 1_048_576)MB，请换一张小一点的"
-        case .notAnImage: return "所选文件不是可识别的图片"
-        case .writeFailed: return "保存图片失败"
-        case .notEditable: return "这个形象不是在界面上传的，请到动画包文件夹里手动修改"
+        case .unreadable:
+            return L10n.text("The selected file could not be read", zhHans: "无法读取所选文件")
+        case .tooLarge:
+            return L10n.format(
+                "The image is larger than %@ MB; pick a smaller one",
+                zhHans: "图片超过 %@MB，请换一张小一点的",
+                String(MascotImageImporter.maxFileBytes / 1_048_576))
+        case .notAnImage:
+            return L10n.text("The selected file is not a recognised image", zhHans: "所选文件不是可识别的图片")
+        case .writeFailed:
+            return L10n.text("Saving the image failed", zhHans: "保存图片失败")
+        case .notEditable:
+            return L10n.text(
+                "This companion was not uploaded in the app; edit it in the animation-pack folder",
+                zhHans: "这个形象不是在界面上传的，请到动画包文件夹里手动修改")
         }
     }
 }

@@ -249,7 +249,7 @@ struct SettingsView: View {
                 .controlSize(.small)
             }
 
-            settingCard("桌面伙伴") {
+            settingCard(L10n.text("Desktop companion", zhHans: "桌面伙伴")) {
                 MascotSettingsSection(settings: settings)
             }
 
