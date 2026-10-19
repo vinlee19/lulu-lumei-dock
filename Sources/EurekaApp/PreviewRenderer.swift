@@ -715,6 +715,9 @@ enum PreviewRenderer {
         snap("pages-sessions", sessionsPage(), width: 1270)
         snap("pages-sessions-min", sessionsPage(), width: 675, height: 512)
         snap("pages-sessions-dark", sessionsPage(), dark: true, width: 1270)
+        renderSummaryPages(sessions: sessions, settings: settings, skillMemory: skillMemory, plans: plans) { name, view, dark, width, height in
+            snap(name, view, dark: dark, width: width, height: height)
+        }
         if sessions.selected != nil {
             snap("pages-session-lineage-list",
                  TurnLineageView(

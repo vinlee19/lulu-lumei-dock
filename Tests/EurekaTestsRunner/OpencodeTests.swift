@@ -59,6 +59,27 @@ func opencodeSessionIndexerTests(_ t: TestRunner) {
         try expectEqual(s.lastActiveAt, Date(timeIntervalSince1970: Double(nowMs) / 1000))
     }
 
+    t.test("Eureka 内部总结运行（目录在总结工作区下）不进入会话索引") {
+        let fm = FileManager.default
+        let dir = tempDir("ocsummary")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+        let dbURL = dir.appendingPathComponent("opencode.db")
+        let root = dir.appendingPathComponent("summaries", isDirectory: true)
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        try makeOpencodeDB(at: dbURL) { db in
+            try db.run("INSERT INTO session VALUES (?,?,?,?,?,?)",
+                [.text("ses_user"), .null, .text("/Users/me/proj"), .text("用户会话"),
+                 .int(nowMs - 60000), .int(nowMs)])
+            try db.run("INSERT INTO session VALUES (?,?,?,?,?,?)",
+                [.text("ses_summary"), .null, .text(root.appendingPathComponent("run-1").path),
+                 .text("内部总结"), .int(nowMs - 30000), .int(nowMs - 20000)])
+        }
+        let sessions = OpencodeSessionIndexer.index(dbPath: dbURL, now: now, summaryRoot: root)
+        try expectEqual(sessions.map(\.id), ["ses_user"])
+    }
+
     t.test("db 不存在 → 空") {
         let missing = tempDir("ocmiss").appendingPathComponent("nope.db")
         try expect(OpencodeSessionIndexer.index(dbPath: missing).isEmpty)

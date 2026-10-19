@@ -456,6 +456,13 @@ final class SessionBrowserService: ObservableObject {
         loadTranscript(session, maxMessages: Int.max)
     }
 
+    /// Summary citation pointing past the loaded budget: load everything, then jump (consumed by
+    /// the detail page's existing pending-jump path)
+    func loadFullTranscript(thenJumpTo messageId: Int) {
+        pendingJumpMessageId = messageId
+        loadFullTranscript()
+    }
+
     private func loadTranscript(
         _ session: AgentSessionInfo,
         maxMessages: Int = TranscriptReader.defaultMaxMessages

@@ -11,7 +11,8 @@ import Foundation
 ///     OpenChamber's bundled `opencode serve` write only this generation; `event` stays at 0 rows
 /// Opens the external database read-only; the first scan baselines to the current max rowid and
 /// doesn't replay history (same as Codex initialScan).
-/// Child-session (subagent) events are filtered out by parent_id.
+/// Child-session (subagent) events are filtered out by parent_id, and so are Eureka's own summary
+/// runs (OpenCode has no ephemeral mode; those sessions live under `SummaryWorkspacePaths.root()`).
 public final class OpencodeEventTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -39,8 +40,15 @@ public final class OpencodeEventTailer {
 
     static let healthName = "opencode 事件监视"
 
-    public init(dbPath: URL, handler: @escaping Handler) {
+    /// Root of the app-managed summary workspace; sessions under it are internal
+    private let summaryRoot: URL
+
+    public init(
+        dbPath: URL, summaryRoot: URL = SummaryWorkspacePaths.root(),
+        handler: @escaping Handler
+    ) {
         self.dbPath = dbPath
+        self.summaryRoot = summaryRoot
         self.handler = handler
     }
 
@@ -119,21 +127,24 @@ public final class OpencodeEventTailer {
                   let object = try? JSONSerialization.jsonObject(with: dataBytes),
                   let data = object as? [String: Any] else { continue }
             for event in OpencodeEventDecoder.decode(type: type, data: data)
-            where !isChildSession(event.sessionId, db: db) {
+            where !isIgnoredSession(event.sessionId, db: db) {
                 emit(event, now: now)
             }
         }
     }
 
-    /// Whether the session is a subagent (session.parent_id non-empty). The table is queried once
-    /// per session id and cached.
-    private func isChildSession(_ sessionID: String, db: SQLiteDB) -> Bool {
+    /// Whether the session emits no events: a subagent (session.parent_id non-empty) or an internal
+    /// summary run (directory under the summary workspace). The table is queried once per session
+    /// id and cached.
+    private func isIgnoredSession(_ sessionID: String, db: SQLiteDB) -> Bool {
         if knownChild.contains(sessionID) { return true }
         if knownTopLevel.contains(sessionID) { return false }
-        let parents = (try? db.query(
-            "SELECT parent_id FROM session WHERE id = ?", [.text(sessionID)]) { $0.text(0) }) ?? []
-        let parent = parents.first ?? nil
+        let rows = (try? db.query(
+            "SELECT parent_id, directory FROM session WHERE id = ?",
+            [.text(sessionID)]) { row in (row.text(0), row.text(1)) }) ?? []
+        let parent = rows.first?.0 ?? nil
         let child = (parent?.isEmpty == false)
+            || SummaryWorkspacePaths.isInternal(rows.first?.1 ?? nil, under: summaryRoot)
         if child { knownChild.insert(sessionID) } else { knownTopLevel.insert(sessionID) }
         return child
     }
@@ -179,7 +190,9 @@ public final class OpencodeEventTailer {
         // Message visible before its session row (shouldn't happen): treat it as top-level, don't
         // cache, look it up again next time
         guard let (parent, directory) = rows.first else { return .live(cwd: nil) }
-        let resolved: V2Session = parent?.isEmpty == false ? .ignored : .live(cwd: directory)
+        let internalRun = SummaryWorkspacePaths.isInternal(directory, under: summaryRoot)
+        let resolved: V2Session = parent?.isEmpty == false || internalRun
+            ? .ignored : .live(cwd: directory)
         v2Sessions[sessionID] = resolved
         return resolved
     }

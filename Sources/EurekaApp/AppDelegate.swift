@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Service instances shared by the main window and the menu bar (owned here, injected into both
     // so state stays consistent)
     private let sessionBrowser = SessionBrowserService()
+    /// Root of the summary workspace, resolved once for the per-event check
+    private let summaryWorkspaceRoot = SummaryWorkspacePaths.root()
     private let skillMemory = SkillMemoryService()
     private let plans = PlansService()
     // The prompt library depends on sessionBrowser's session index, so construct it lazily (same
@@ -57,6 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Release a hook waiting for an island answer right away, leaving only Claude's own dialog
         questionBridge?.stop()
+        // Stop managed summary processes and keep their drafts
+        SessionSummaryService.shared.shutdown()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -155,6 +159,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         usageService.start()
         limitsService.start()
+        // AI session summaries: reconciles runs a previous process left unfinished, probes CLIs
+        SessionSummaryService.shared.start()
         // Model pricing catalog: recompute costs after a price change (usage summary + sessions
         // page)
         PricingCatalogService.shared.onPricingChanged = { [weak self] in
@@ -451,7 +457,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             userInfo: windowWasKey ? nil : ["forceOpen": true])
     }
 
+
     private func handle(_ event: TaskEvent, isStale: Bool) {
+        // Eureka's own summary runs execute in the app-managed workspace; whatever channel still
+        // reports them (a CLI that ignored the hook / persistence switches) must not reach the
+        // island, history or terminal bindings
+        if SummaryWorkspacePaths.isInternal(event.cwd, under: summaryWorkspaceRoot) { return }
         // Persist terminal ownership first, and **regardless of isStale**: it is a historical fact
         // (this session really did run in that terminal), treated the same as history writes. It
         // sits before the staleness gate, otherwise bindings carried by backlogged events would be

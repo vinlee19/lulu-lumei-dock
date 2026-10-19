@@ -14,7 +14,19 @@ struct SessionDetailView: View {
     /// Opens the lineage drill-down (provided by SessionsView -- the drill-down must replace the
     /// whole content area to get enough width)
     var onOpenLineage: ((TurnLineageView.Pane) -> Void)?
+    /// AI summaries (a shared, app-lifetime service so runs survive navigation)
+    @ObservedObject var summaries: SessionSummaryService = .shared
 
+    /// Detail tabs: the original conversation, or its AI summary
+    enum DetailTab: Hashable {
+        case conversation
+        case summary
+    }
+
+    /// Tab shown until the user picks one (offscreen renders start on the summary tab)
+    var initialTab: DetailTab = .conversation
+    @State private var chosenTab: DetailTab?
+    private var detailTab: DetailTab { chosenTab ?? initialTab }
     @State private var showTOC = true
     @State private var confirmingDelete = false
     @State private var copiedCommand = false
@@ -60,24 +72,32 @@ struct SessionDetailView: View {
                 VStack(spacing: 0) {
                     header(session)
                     overviewCard(session)
-                    // Context usage card: not rendered when nil (trae/antigravity/not computed
-                    // yet); .id resets the collapsed state on session switch (same guard idea as
-                    // artifactsExpanded)
-                    if let breakdown = service.contextBreakdown {
-                        ContextUsageCard(breakdown: breakdown)
-                            .id(session.id)
-                    }
-                    searchBar
-                    Divider()
-                    // The outline pane uses HSplitView: the divider is draggable to resize (same
-                    // interaction as the left session list), minWidth keeps timestamps intact at
-                    // the narrowest, maxWidth stops it from swallowing the transcript
-                    HSplitView {
-                        transcriptPane(session)
-                            .frame(maxWidth: .infinity)
-                        if showTOC && !userMessages.isEmpty {
-                            tocPane
-                                .frame(minWidth: 160, idealWidth: 230, maxWidth: 560)
+                    detailTabBar(session)
+                    if detailTab == .summary {
+                        Divider()
+                        SessionSummaryPane(summaries: summaries, session: session) { id in
+                            jumpToCitedMessage(id)
+                        }
+                    } else {
+                        // Context usage card: not rendered when nil (trae/antigravity/not computed
+                        // yet); .id resets the collapsed state on session switch (same guard idea
+                        // as artifactsExpanded)
+                        if let breakdown = service.contextBreakdown {
+                            ContextUsageCard(breakdown: breakdown)
+                                .id(session.id)
+                        }
+                        searchBar
+                        Divider()
+                        // The outline pane uses HSplitView: the divider is draggable to resize
+                        // (same interaction as the left session list), minWidth keeps timestamps
+                        // intact at the narrowest, maxWidth stops it from swallowing the transcript
+                        HSplitView {
+                            transcriptPane(session)
+                                .frame(maxWidth: .infinity)
+                            if showTOC && !userMessages.isEmpty {
+                                tocPane
+                                    .frame(minWidth: 160, idealWidth: 230, maxWidth: 560)
+                            }
                         }
                     }
                 }
@@ -110,6 +130,20 @@ struct SessionDetailView: View {
         .onChange(of: service.selected?.id) { _, _ in
             expandedTrails = []
             artifactsExpanded = false
+            if let session = service.selected { summaries.load(session) }
+        }
+        .onAppear {
+            if let session = service.selected { summaries.load(session) }
+        }
+        // Row context menu / split button asked for the summary of the selected session
+        .onChange(of: summaries.tabRequest) { _, request in
+            guard let request, let session = service.selected,
+                  request.sessionKey == summaries.key(session) else { return }
+            chosenTab = .summary
+        }
+        // The saved summary arrived (or changed): compare it with the conversation as loaded
+        .onChange(of: service.selected.flatMap { summaries.completed[summaries.key($0)]?.id }) { _, _ in
+            checkSummaryFreshness()
         }
         // Full-text hit jump: once the transcript finishes loading, scroll to the target message
         // (delayed a beat for LazyVStack layout)
@@ -118,6 +152,7 @@ struct SessionDetailView: View {
             // First load / session switch / "load all" all recompute search hits against the new
             // body here
             recomputeMatches(debounce: false)
+            checkSummaryFreshness()
             guard let pending = service.consumePendingJump() else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 NotificationCenter.default.post(name: .eurekaJumpToMessage, object: pending)
@@ -169,6 +204,61 @@ struct SessionDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Detail tabs (conversation / AI summary)
+
+    private func detailTabBar(_ session: AgentSessionInfo) -> some View {
+        HStack(spacing: 10) {
+            CapsuleTabTray {
+                CapsuleTabButton(
+                    title: L10n.text("Conversation", zhHans: "对话"), icon: "text.bubble",
+                    fillWidth: false, isSelected: detailTab == .conversation
+                ) {
+                    chosenTab = .conversation
+                }
+                CapsuleTabButton(
+                    title: L10n.text("AI Summary", zhHans: "AI 总结"), icon: "sparkles",
+                    fillWidth: false, isSelected: detailTab == .summary
+                ) {
+                    chosenTab = .summary
+                }
+            }
+            .fixedSize()
+            Spacer(minLength: 0)
+            // The full title when it fits, the compact one in narrow windows
+            ViewThatFits(in: .horizontal) {
+                SummarizeSplitButton(summaries: summaries, session: session) {
+                    chosenTab = .summary
+                }
+                SummarizeSplitButton(summaries: summaries, session: session, onStart: {
+                    chosenTab = .summary
+                }, compact: true)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    /// A `[#n]` citation was clicked: show that message in the conversation. Ids are the
+    /// transcript reader's own, so they match; a message past the loaded budget loads all first.
+    private func jumpToCitedMessage(_ id: Int) {
+        chosenTab = .conversation
+        roleFilter = .all
+        if service.transcript.contains(where: { $0.id == id }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NotificationCenter.default.post(name: .eurekaJumpToMessage, object: id)
+            }
+        } else if service.transcriptTruncated {
+            service.loadFullTranscript(thenJumpTo: id)
+        }
+    }
+
+    private func checkSummaryFreshness() {
+        guard let session = service.selected, !service.transcriptLoading,
+              !service.transcript.isEmpty else { return }
+        summaries.checkFreshness(
+            session, transcript: service.transcript, truncated: service.transcriptTruncated)
     }
 
     // MARK: - Header

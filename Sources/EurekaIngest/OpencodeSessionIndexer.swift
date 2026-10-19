@@ -8,14 +8,15 @@ import Foundation
 /// On upgrade, 1.x sessions are copied into `session_v2` under their original ids; only one row per
 /// id is kept (the 2.x one).
 /// Only top-level sessions (empty parent_id) are taken; child sessions are opencode subagents and
-/// stay out of the browse list.
+/// stay out of the browse list, as do Eureka's internal summary runs.
 /// Times are epoch milliseconds; opencode has no transcript file, so sizeBytes is recorded as 0.
 public enum OpencodeSessionIndexer {
     public static func index(
         dbPath: URL,
         window: TimeInterval = 30 * 86400,
         maxSessions: Int = 300,
-        now: Date = Date()
+        now: Date = Date(),
+        summaryRoot: URL = SummaryWorkspacePaths.root()
     ) -> [AgentSessionInfo] {
         guard FileManager.default.fileExists(atPath: dbPath.path),
               let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return [] }
@@ -46,8 +47,11 @@ public enum OpencodeSessionIndexer {
         let v2 = query("session_v2")
         let v2Ids = Set(v2.map(\.id))
         let merged = v2 + query("session").filter { !v2Ids.contains($0.id) }
+        // Eureka's own summary runs are recorded as OpenCode sessions (no ephemeral mode); they
+        // stay out of browsing, prompt extraction and project discovery
         return Array(merged
             .filter { !$0.id.isEmpty }
+            .filter { !SummaryWorkspacePaths.isInternal($0.cwd, under: summaryRoot) }
             .sorted { $0.lastActiveAt > $1.lastActiveAt }
             .prefix(maxSessions))
     }
