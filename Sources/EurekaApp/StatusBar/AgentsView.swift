@@ -465,15 +465,16 @@ private struct AgentCard: View {
                         Text(item.name)
                             .font(Theme.font.monoSkillName(13))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
-                            .lineLimit(1).truncationMode(.middle)
+                            .lineLimit(1).truncationMode(.tail)
+                            .help(item.name)
                         HStack(spacing: 5) {
                             RoleTag(role: item.role)
                             SourceBadge(source: item.source, size: 12)
-                            if item.builtin { TagChip(L10n.text("Built-in", zhHans: "内置"), neutral: true) }
+                            AgentScopeChips(item: item)
                         }
                     }
                     Spacer(minLength: 4)
-                    MiniSwitch(isOn: item.enabled) { onToggle() }
+                    AgentEnableControl(item: item, onToggle: onToggle)
                 }
                 Text(item.description ?? "")
                     .font(Theme.font.themed(11)).foregroundStyle(.secondary)
@@ -523,7 +524,7 @@ private struct AgentRow: View {
                             .lineLimit(1).truncationMode(.tail)
                         SourceBadge(source: item.source, size: 12)
                         RoleTag(role: item.role)
-                        if item.builtin { TagChip(L10n.text("Built-in", zhHans: "内置"), neutral: true) }
+                        AgentScopeChips(item: item)
                     }
                     if let desc = item.description, !desc.isEmpty {
                         Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.tertiary).lineLimit(1)
@@ -545,8 +546,48 @@ private struct AgentRow: View {
                 Text(L10n.format("Called %@ times", zhHans: "调用 %@ 次", String(calls)))
                     .font(Theme.font.themedMono(10.5)).foregroundStyle(.tertiary)
             }
-            MiniSwitch(isOn: item.enabled) { onToggle() }
+            AgentEnableControl(item: item, onToggle: onToggle)
         }
+    }
+}
+
+/// Where an agent comes from beyond its CLI: built-in, a plugin, or a project. Same-name agents
+/// from different places stay separate rows, and these chips are what tells them apart.
+private struct AgentScopeChips: View {
+    let item: AgentItem
+
+    var body: some View {
+        if item.builtin { TagChip(L10n.text("Built-in", zhHans: "内置"), neutral: true) }
+        if let plugin = item.pluginName {
+            TagChip(L10n.format("Plugin · %@", zhHans: "插件 · %@", plugin), neutral: true)
+        }
+        if let project = item.projectName { TagChip(project) }
+    }
+}
+
+/// The enable switch only where enabling can actually change; built-in, plugin-provided and
+/// file-less entries show a read-only label instead of a switch that would do nothing.
+private struct AgentEnableControl: View {
+    let item: AgentItem
+    let onToggle: () -> Void
+
+    var body: some View {
+        if item.canToggle {
+            MiniSwitch(isOn: item.enabled) { onToggle() }
+        } else {
+            TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true)
+                .help(readOnlyReason)
+        }
+    }
+
+    private var readOnlyReason: String {
+        if item.builtin {
+            return L10n.text("Built into the CLI; it cannot be turned off here", zhHans: "CLI 内置，不能在这里停用")
+        }
+        if item.pluginName != nil {
+            return L10n.text("Provided by a plugin; manage it with the plugin", zhHans: "由插件提供，请在插件里管理")
+        }
+        return L10n.text("No definition file to change", zhHans: "没有可修改的定义文件")
     }
 }
 
