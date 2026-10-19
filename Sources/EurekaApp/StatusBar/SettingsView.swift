@@ -174,7 +174,7 @@ struct SettingsView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceSecondary))
             }
 
-            settingCard(L10n.text("Island notifications", zhHans: "灵动岛通知")) {
+            settingCard(L10n.text("Task notifications", zhHans: "任务通知")) {
                 Toggle(L10n.text("Task finished", zhHans: "任务完成"), isOn: $settings.notifyCompletion)
                 Toggle(
                     L10n.text("Waiting for confirmation / input", zhHans: "等待确认 / 等待输入"),
@@ -201,7 +201,9 @@ struct SettingsView: View {
                 }
                 HStack {
                     Text(L10n.text("Auto-hide", zhHans: "自动收起"))
+                    Spacer(minLength: 8)
                     Slider(value: $settings.autoDismissSeconds, in: 3...15, step: 1)
+                        .frame(maxWidth: 240)
                     Text(L10n.format(
                         "%@s", zhHans: "%@ 秒",
                         String(Int(settings.autoDismissSeconds))))
@@ -219,6 +221,9 @@ struct SettingsView: View {
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            settingCard(L10n.text("Display and limits", zhHans: "显示与限额")) {
                 Toggle(
                     L10n.text(
                         "Show the task start time (instead of the elapsed time)",
@@ -240,13 +245,15 @@ struct SettingsView: View {
                     zhHans: "按住岛拖拽可移到任意位置（含外接屏）；拖回刘海附近会自动吸附复位。"))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
-                Button(L10n.text(
-                    "Reset to the default position (centered on the notch)",
-                    zhHans: "恢复默认位置（刘海居中）")) {
+                SecondaryButton(
+                    title: L10n.text(
+                        "Reset to the default position (centered on the notch)",
+                        zhHans: "恢复默认位置（刘海居中）"),
+                    classic: .push
+                ) {
                     NotificationCenter.default.post(
                         name: .eurekaResetIslandPosition, object: nil)
                 }
-                .controlSize(.small)
             }
 
             settingCard(L10n.text("Desktop companion", zhHans: "桌面伙伴")) {
@@ -280,7 +287,9 @@ struct SettingsView: View {
             if settings.wellnessEnabled {
                 HStack {
                     Text(L10n.text("Continuous activity", zhHans: "连续活跃"))
+                    Spacer(minLength: 8)
                     Slider(value: $settings.wellnessThresholdHours, in: 1...4, step: 0.5)
+                        .frame(maxWidth: 240)
                     Text(L10n.format(
                         "%@ h", zhHans: "%@ 小时",
                         String(format: "%.1f", settings.wellnessThresholdHours)))

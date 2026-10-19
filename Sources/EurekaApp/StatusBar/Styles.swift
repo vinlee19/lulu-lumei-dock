@@ -773,16 +773,22 @@ struct MiniSwitch: View {
     }
 }
 
-/// Toggle style for every on/off setting: classic delegates to the system switch (so classic
-/// is pixel-identical to `.toggleStyle(.switch)`), brutal draws the label followed by the
-/// ink-outlined MiniSwitch used on list rows, instead of a system-blue switch.
+/// Toggle style for every on/off setting. The label sits on the left and the switch is pinned
+/// to the trailing edge, so a card's switches line up in one column however long their labels
+/// are. Classic uses the system switch; brutal uses the ink-outlined MiniSwitch from list rows.
 struct ThemedSwitchToggleStyle: ToggleStyle {
     @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
         if ThemeStyle.current.isHardEdged {
             BrutalSwitchRow(configuration: configuration)
         } else {
-            SwitchToggleStyle().makeBody(configuration: configuration)
+            HStack(spacing: 8) {
+                configuration.label
+                Spacer(minLength: 8)
+                Toggle("", isOn: configuration.$isOn)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
         }
     }
 }
@@ -798,6 +804,7 @@ private struct BrutalSwitchRow: View {
     var body: some View {
         HStack(spacing: 8) {
             configuration.label
+            Spacer(minLength: 8)
             MiniSwitch(isOn: configuration.isOn) { configuration.isOn.toggle() }
         }
         .opacity(isEnabled ? 1 : 0.45)
