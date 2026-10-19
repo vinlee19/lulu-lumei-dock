@@ -29,7 +29,11 @@ jobs:
           [[ "$GITHUB_REF_NAME" == "v$repository_version" ]]
 
       - name: Build test runner
-        run: swift build --jobs "$LULU_SWIFT_JOBS" --product eureka-tests
+        # The answer-hook end-to-end suite runs the real eureka-ask binary, which is not a
+        # dependency of eureka-tests (same as `make test`)
+        run: |
+          swift build --jobs "$LULU_SWIFT_JOBS" --product eureka-ask
+          swift build --jobs "$LULU_SWIFT_JOBS" --product eureka-tests
 
       - name: Run all tests
         shell: bash
