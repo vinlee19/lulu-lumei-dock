@@ -161,7 +161,15 @@ final class CommandPaletteService: ObservableObject {
             DispatchQueue.main.async {
                 guard self.query.trimmingCharacters(in: .whitespacesAndNewlines) == query
                 else { return }  // query has changed; drop stale results
-                var merged = CommandPalette.merge(metadata + content, perKindCap: 6)
+                // Harness background calls (memory compaction etc.) match almost any body query;
+                // move them behind real sessions before the per-kind cap so they cannot crowd the
+                // six session slots. Order is otherwise kept.
+                let ranked = (metadata + content).enumerated().sorted { lhs, rhs in
+                    let left = self.isHarnessSession(lhs.element)
+                    let right = self.isHarnessSession(rhs.element)
+                    return left != right ? !left : lhs.offset < rhs.offset
+                }.map(\.element)
+                var merged = CommandPalette.merge(ranked, perKindCap: 6)
                 // fill in real names for session hits
                 merged = merged.map { hit in
                     var hit = hit
@@ -175,5 +183,11 @@ final class CommandPaletteService: ObservableObject {
                 self.searching = false
             }
         }
+    }
+
+    private func isHarnessSession(_ hit: Hit) -> Bool {
+        guard hit.kind == .session, let id = hit.sessionId,
+              let info = sessionBrowser.sessionsById[id] else { return false }
+        return PromptClassifier.isHarnessUtility(info.displayName)
     }
 }

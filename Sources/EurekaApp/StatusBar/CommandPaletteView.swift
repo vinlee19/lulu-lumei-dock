@@ -97,7 +97,13 @@ struct CommandPaletteView: View {
         .padding(.horizontal, 8).padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: Theme.radius.tile)
-                .fill(selected ? Theme.brandFill(0.12) : .clear))
+                .fill(selected ? Theme.brandFill(0.18) : .clear))
+        // A solid leading bar marks the keyboard selection; the tint alone was too faint to find
+        .overlay(alignment: .leading) {
+            if selected {
+                Capsule().fill(Theme.brand).frame(width: 3).padding(.vertical, 4)
+            }
+        }
         .contentShape(Rectangle())
     }
 
