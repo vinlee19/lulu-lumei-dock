@@ -168,7 +168,8 @@ public enum ContextBreakdownEstimator {
         }
         return reconcile(
             estimates: estimates,
-            windowTokens: windowOverride ?? ContextWindows.window(forModel: model),
+            windowTokens: windowOverride
+                ?? ContextWindows.window(forModel: model, observed: lastTurnTotalTokens),
             lastTurnTotalTokens: lastTurnTotalTokens)
     }
 

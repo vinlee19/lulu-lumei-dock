@@ -454,6 +454,21 @@ func contextEstimatorTests(_ t: TestRunner) {
         try expectEqual(ContextWindows.window(forModel: "claude-haiku-4-5"), 500_000)
     }
 
+    t.test("ContextWindows：实测用量超过表内窗口 → 窗口上调，占比不超过 100%") {
+        // Both ran past 200K on this account, so their table entry is 1M
+        try expectEqual(ContextWindows.window(forModel: "claude-opus-4-7"), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: "claude-sonnet-5-5"), 1_000_000)
+        // Within the listed window the observation changes nothing
+        try expectEqual(ContextWindows.window(forModel: "claude-opus-4-1", observed: 150_000), 200_000)
+        // Claude only ships 200K and 1M, so a Claude model past 200K is on the 1M window
+        try expectEqual(ContextWindows.window(forModel: "claude-opus-4-1", observed: 211_818), 1_000_000)
+        try expectEqual(ContextWindows.window(forModel: nil, observed: 211_818), 262_144)
+        // Other models step to the smallest common tier that holds the usage
+        try expectEqual(ContextWindows.window(forModel: "glm-5.2", observed: 300_000), 400_000)
+        try expectEqual(ContextWindows.window(forModel: "glm-5.2", observed: 2_500_000), 2_500_000)
+        try expect(ContextWindows.percent(used: 211_818, model: "claude-opus-4-1") < 22)
+    }
+
     t.test("ContextWindows：gemini-2.5/3 → 1M；glm/qwen 刻意落默认 200k") {
         // Prefix match against the built-in table (no exact full name needed)
         try expectEqual(ContextWindows.window(forModel: "gemini-2.5-pro"), 1_000_000)
@@ -470,9 +485,10 @@ func contextEstimatorTests(_ t: TestRunner) {
         defer { ContextWindows.overrides = [:] }
         try expectEqual(ContextWindows.window(forModel: "gemini-3-pro-preview"), 500_000)
         try expectEqual(ContextWindows.window(forModel: "gemini-3.5-flash"), 1_000_000)
-        // percent semantics: used ÷ matched window
+        // percent semantics: used ÷ matched window; usage past the listed window bumps the
+        // window to the next tier (glm 250k → 256K tier), so the result never passes 100
         try expectEqual(ContextWindows.percent(used: 250_000, model: "gemini-2.5-pro"), 25.0)
-        try expectEqual(ContextWindows.percent(used: 250_000, model: "glm-5.2"), 125.0)
+        try expect(abs(ContextWindows.percent(used: 250_000, model: "glm-5.2") - 95.367) < 0.01)
     }
 
     t.test("ContextWindows：kimi k3 → 1M，k3-256k / k2 系 → 256K（最长前缀优先）") {

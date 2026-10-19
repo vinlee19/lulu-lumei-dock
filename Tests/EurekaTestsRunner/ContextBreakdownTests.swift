@@ -152,6 +152,19 @@ func contextBreakdownTests(_ t: TestRunner) {
         try expectEqual(sum, 1_000)
     }
 
+    t.test("真实总量超过表内窗口：分母随之上调，不出现超过 100% 的占比") {
+        let messages = [
+            TranscriptMessage(id: 0, role: .user, text: String(repeating: "a", count: 400)),
+        ]
+        // A Claude model missing from the 1M table that ran to 211,818 tokens
+        let breakdown = ContextBreakdownEstimator.estimate(
+            source: .claude, cwd: nil, messages: messages, model: "claude-opus-4-1",
+            lastTurnTotalTokens: 211_818,
+            home: URL(fileURLWithPath: "/tmp/nonexistent-home"))
+        try expectEqual(breakdown.totalTokens, 211_818)
+        try expectEqual(breakdown.windowTokens, 1_000_000)
+    }
+
     // MARK: - Window denominator: real values carried by session data win
 
     t.test("windowOverride 优先于内建表；nil 回退按模型查表") {

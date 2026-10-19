@@ -105,7 +105,9 @@ struct ContextUsageCard: View {
     private var stackedBar: some View {
         let hard = ThemeStyle.current.isHardEdged
         return GeometryReader { geo in
-            let window = max(1, breakdown.windowTokens)
+            // Never narrower than the total: a session-carried window that is still smaller than
+            // the usage would otherwise push the segments past the card edge
+            let window = max(1, breakdown.windowTokens, breakdown.totalTokens)
             HStack(spacing: 0) {
                 ForEach(breakdown.entries) { entry in
                     let width = geo.size.width * CGFloat(entry.tokens) / CGFloat(window)
