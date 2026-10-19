@@ -630,7 +630,7 @@ enum PreviewRenderer {
             + "sessions=\(usage.sessionTotals.count) heatmap=\(usage.heatmapCells.count) "
             + "weekly=\(usage.weeklyReport != nil)")
         let subTabs: [(UsageDashboardView.SubTab, String)] = [
-            (.log, "log"), (.models, "models"), (.projects, "projects"),
+            (.overview, "overview"), (.log, "log"), (.models, "models"), (.projects, "projects"),
             (.sessions, "sessions"), (.tools, "tools"), (.weekly, "weekly"),
         ]
         for (tab, suffix) in subTabs {

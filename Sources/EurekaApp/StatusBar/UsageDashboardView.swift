@@ -15,7 +15,7 @@ struct UsageDashboardView: View {
 
     @State private var period: UsageService.DashboardPeriod = .today
     @State private var sourceFilter: AgentSource?  // nil = all
-    @State private var subTab: SubTab = .log
+    @State private var subTab: SubTab = .overview
     @State private var page = 1
     @State private var trendMode: TrendMode = .byDate
     @State private var trendMetric: TrendMetric = .tokens
@@ -24,6 +24,7 @@ struct UsageDashboardView: View {
     @State private var pageInput = ""
 
     enum SubTab: String, CaseIterable {
+        case overview = "概览"
         case log = "请求日志"
         case models = "模型统计"
         case projects = "项目统计"
@@ -33,6 +34,7 @@ struct UsageDashboardView: View {
 
         var title: String {
             switch self {
+            case .overview: return L10n.text("Overview", zhHans: "概览")
             case .log: return L10n.text("Request log", zhHans: "请求日志")
             case .models: return L10n.text("Models", zhHans: "模型统计")
             case .projects: return L10n.text("Projects", zhHans: "项目统计")
@@ -47,7 +49,7 @@ struct UsageDashboardView: View {
     /// (same convention as `PlansView(initialLayout:)`).
     init(
         usageService: UsageService, sessionBrowser: SessionBrowserService,
-        initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .log
+        initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .overview
     ) {
         self._usageService = ObservedObject(wrappedValue: usageService)
         self._sessionBrowser = ObservedObject(wrappedValue: sessionBrowser)
@@ -95,13 +97,17 @@ struct UsageDashboardView: View {
                         .foregroundStyle(.red)
                 }
                 if usageService.summary != nil {
-                    heroCard
-                    metricGrid
-                    cacheHitCard
-                    trendCard
-                    UsageHeatmapView(cells: usageService.heatmapCells)
+                    // Tabs sit right under the shared filters so a detail table is one click
+                    // away; the charts live on Overview instead of above every table, and the
+                    // headline total stays on top of each tab for context.
                     subTabBar
+                    heroCard
                     switch subTab {
+                    case .overview:
+                        metricGrid
+                        cacheHitCard
+                        trendCard
+                        UsageHeatmapView(cells: usageService.heatmapCells)
                     case .log: requestLog
                     case .models: modelStats
                     case .projects: projectStats
@@ -1223,8 +1229,10 @@ struct UsageDashboardView: View {
         }
     }
 
-    /// Subtitle in Chinese magnitude units (wan = 10^4 / yi = 10^8)
+    /// Readable magnitude next to the exact total: Chinese units (wan = 10^4 / yi = 10^8) in the
+    /// Chinese UI, the usual k / M / B in English (a "×100M" unit reads oddly there)
     private func chineseUnit(_ value: Int) -> String {
+        if L10n.current == .english { return formatTokens(value) }
         switch value {
         case ..<10_000: return "\(value)"
         case ..<100_000_000:
