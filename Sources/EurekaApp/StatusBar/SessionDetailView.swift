@@ -28,6 +28,14 @@ struct SessionDetailView: View {
     @State private var chosenTab: DetailTab?
     private var detailTab: DetailTab { chosenTab ?? initialTab }
     @State private var showTOC = true
+    /// Width of the detail pane; below `tocMinDetailWidth` the outline hides itself so the
+    /// transcript keeps a readable width, unless the user opens it explicitly
+    @State private var detailWidth: CGFloat = .infinity
+    @State private var tocShownWhenNarrow = false
+    private static let tocMinDetailWidth: CGFloat = 640
+
+    private var tocFits: Bool { detailWidth >= Self.tocMinDetailWidth }
+    private var tocVisible: Bool { tocFits ? showTOC : tocShownWhenNarrow }
     @State private var confirmingDelete = false
     @State private var copiedCommand = false
     @State private var roleFilter: RoleFilter = .all
@@ -91,16 +99,25 @@ struct SessionDetailView: View {
                         // The outline pane uses HSplitView: the divider is draggable to resize
                         // (same interaction as the left session list), minWidth keeps timestamps
                         // intact at the narrowest, maxWidth stops it from swallowing the transcript
-                        HSplitView {
-                            transcriptPane(session)
-                                .frame(maxWidth: .infinity)
-                            if showTOC && !userMessages.isEmpty {
-                                tocPane
-                                    .frame(minWidth: 160, idealWidth: 230, maxWidth: 560)
+                        // The width is read in the same layout pass, so the outline is already
+                        // gone on the first frame of a narrow window
+                        GeometryReader { proxy in
+                            let fits = proxy.size.width >= Self.tocMinDetailWidth
+                            HSplitView {
+                                transcriptPane(session)
+                                    .frame(maxWidth: .infinity)
+                                if (fits ? showTOC : tocShownWhenNarrow) && !userMessages.isEmpty {
+                                    tocPane
+                                        .frame(minWidth: 160, idealWidth: 230, maxWidth: 560)
+                                }
                             }
                         }
                     }
                 }
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: DetailWidthKey.self, value: proxy.size.width)
+                })
+                .onPreferenceChange(DetailWidthKey.self) { detailWidth = $0 }
                 .confirmationDialog(
                     L10n.format(
                         "Delete session “%@”? The transcript file moves to the Trash and can be restored.",
@@ -263,46 +280,86 @@ struct SessionDetailView: View {
 
     // MARK: - Header
 
+    // MARK: - Header actions (one primary, the rest secondary, all from the shared kit)
+
+    private func resumeButton(_ session: AgentSessionInfo) -> some View {
+        PrimaryButton(title: L10n.text("Resume Session", zhHans: "恢复会话"), icon: "play.fill", help: L10n.text("Run the resume command in Terminal", zhHans: "在 Terminal 中执行恢复命令")) {
+            service.resumeInTerminal(session)
+        }
+    }
+
+    private func deleteHelp(_ session: AgentSessionInfo) -> String {
+        session.source.supportsSessionDeletion
+            ? L10n.text("Moves to the Trash and can be restored", zhHans: "移入废纸篓，可恢复")
+            : L10n.format("%@ sessions live in a shared database and can't be deleted yet", zhHans: "%@ 会话存于共享数据库，暂不支持删除", "\(session.source.displayName)")
+    }
+
+    @ViewBuilder
+    private func fullActions(_ session: AgentSessionInfo) -> some View {
+        SecondaryButton(
+            title: L10n.text("Delete Session", zhHans: "删除会话"), icon: "trash", destructive: true,
+            help: deleteHelp(session)
+        ) {
+            confirmingDelete = true
+        }
+        .disabled(!session.source.supportsSessionDeletion)
+        MenuButton(title: L10n.text("Export", zhHans: "导出"), icon: "square.and.arrow.up", help: L10n.text("Export the conversation", zhHans: "导出对话记录")) {
+            Button(L10n.text("Copy as Markdown", zhHans: "复制为 Markdown")) { copyMarkdown(session) }
+            Button(L10n.text("Export as .md File…", zhHans: "导出为 .md 文件…")) { exportMarkdown(session) }
+        }
+        if let onOpenLineage {
+            SecondaryButton(
+                title: L10n.text("Turn lineage", zhHans: "轮次血缘"), icon: "point.3.filled.connected.trianglepath.dotted",
+                help: L10n.text("See what it did each turn, and which prompt to change", zhHans: "按轮次看它做了什么、哪一轮的提示词该改")
+            ) {
+                onOpenLineage(.list)
+            }
+        }
+    }
+
+    /// Narrow-window form of `fullActions`: the same actions in one menu
+    private func moreMenu(_ session: AgentSessionInfo) -> some View {
+        MenuButton(title: L10n.text("More", zhHans: "更多"), icon: "ellipsis.circle", help: L10n.text("Export, turn lineage and delete", zhHans: "导出、轮次血缘与删除")) {
+            Button(L10n.text("Copy as Markdown", zhHans: "复制为 Markdown")) { copyMarkdown(session) }
+            Button(L10n.text("Export as .md File…", zhHans: "导出为 .md 文件…")) { exportMarkdown(session) }
+            if let onOpenLineage {
+                Button(L10n.text("Turn lineage", zhHans: "轮次血缘")) { onOpenLineage(.list) }
+            }
+            Divider()
+            Button(L10n.text("Delete Session", zhHans: "删除会话"), role: .destructive) {
+                confirmingDelete = true
+            }
+            .disabled(!session.source.supportsSessionDeletion)
+            .help(deleteHelp(session))
+        }
+    }
+
     private func header(_ session: AgentSessionInfo) -> some View {
         VStack(alignment: .leading, spacing: 7) {
+            // The title gets its own row so a long prompt title can use two full lines instead
+            // of fighting the buttons for width
             HStack(spacing: 8) {
                 SourceBadge(source: session.source, size: 14)
                 Text(session.displayName)
                     .font(Theme.font.themed(13, .semibold))
                     .lineLimit(2)
                     .help(session.displayName)
-                Spacer(minLength: 8)
-                // One primary, the rest secondary, all from the shared kit so brutal gets its
-                // ink capsules here instead of five system bezels
-                PrimaryButton(title: L10n.text("Resume Session", zhHans: "恢复会话"), icon: "play.fill", help: L10n.text("Run the resume command in Terminal", zhHans: "在 Terminal 中执行恢复命令")) {
-                    service.resumeInTerminal(session)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                // Every action when they fit; otherwise Resume stays and the rest move into More
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { resumeButton(session); fullActions(session) }
+                    HStack(spacing: 8) { resumeButton(session); moreMenu(session) }
                 }
-                SecondaryButton(
-                    title: L10n.text("Delete Session", zhHans: "删除会话"), icon: "trash", destructive: true,
-                    help: session.source.supportsSessionDeletion
-                        ? L10n.text("Moves to the Trash and can be restored", zhHans: "移入废纸篓，可恢复")
-                        : L10n.format("%@ sessions live in a shared database and can't be deleted yet", zhHans: "%@ 会话存于共享数据库，暂不支持删除", "\(session.source.displayName)")
-                ) {
-                    confirmingDelete = true
-                }
-                .disabled(!session.source.supportsSessionDeletion)
-                MenuButton(title: L10n.text("Export", zhHans: "导出"), icon: "square.and.arrow.up", help: L10n.text("Export the conversation", zhHans: "导出对话记录")) {
-                    Button(L10n.text("Copy as Markdown", zhHans: "复制为 Markdown")) { copyMarkdown(session) }
-                    Button(L10n.text("Export as .md File…", zhHans: "导出为 .md 文件…")) { exportMarkdown(session) }
-                }
-                if let onOpenLineage {
-                    SecondaryButton(
-                        title: L10n.text("Turn lineage", zhHans: "轮次血缘"), icon: "point.3.filled.connected.trianglepath.dotted",
-                        help: L10n.text("See what it did each turn, and which prompt to change", zhHans: "按轮次看它做了什么、哪一轮的提示词该改")
-                    ) {
-                        onOpenLineage(.list)
-                    }
-                }
+                Spacer(minLength: 0)
                 CardActionButton(
                     icon: "list.bullet.rectangle", size: 26,
-                    help: showTOC ? L10n.text("Hide the conversation outline", zhHans: "隐藏对话目录") : L10n.text("Show the conversation outline", zhHans: "显示对话目录")
+                    help: tocVisible ? L10n.text("Hide the conversation outline", zhHans: "隐藏对话目录") : L10n.text("Show the conversation outline", zhHans: "显示对话目录")
                 ) {
-                    withAnimation(.easeInOut(duration: 0.15)) { showTOC.toggle() }
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if tocFits { showTOC.toggle() } else { tocShownWhenNarrow.toggle() }
+                    }
                 }
             }
             if let note = exportNote {
@@ -517,7 +574,8 @@ struct SessionDetailView: View {
     @ViewBuilder
     private func overviewCard(_ session: AgentSessionInfo) -> some View {
         let cost = service.costs[session.id]
-        HStack(spacing: 24) {
+        // Wraps onto a second line in a narrow pane instead of squeezing labels and values
+        FlowLayout(spacing: 24, lineSpacing: 8) {
             overviewStat(L10n.text("Messages", zhHans: "消息"), "\(service.transcript.count)")
             overviewStat(L10n.text("Prompts", zhHans: "提问"), "\(userMessages.count)")
             if let cost {
@@ -529,8 +587,8 @@ struct SessionDetailView: View {
             if let span = session.duration, span >= 60 {
                 overviewStat(L10n.text("Duration", zhHans: "时长"), formatDuration(span))
             }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.top, 2)
         .padding(.bottom, 10)
@@ -543,6 +601,8 @@ struct SessionDetailView: View {
             Text(label)
                 .font(Theme.font.themed(10.5, .medium))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
             Text(value)
                 .font(Theme.font.themedMono(15, .semibold))
                 .foregroundStyle(color)

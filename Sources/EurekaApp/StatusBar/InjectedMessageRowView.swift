@@ -74,3 +74,9 @@ struct InjectedMessageRowView: View {
         .padding(.vertical, 2)
     }
 }
+
+/// Width of the session detail pane, read to decide whether the outline still fits
+struct DetailWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
