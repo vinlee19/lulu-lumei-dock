@@ -41,6 +41,21 @@ public struct IslandCardQueue: Equatable, Sendable {
             } else {
                 pending.insert(card, at: 0)
             }
+        case .question(let question):
+            guard !questionIds.contains(question.id) else { return }
+            // The agent is paused waiting for an answer: the informational card on display yields
+            // (back to the queue head, seen after answering)
+            if let shown = current, Self.isPassive(shown) {
+                pending.insert(shown, at: 0)
+                current = card
+            } else if current == nil {
+                current = card
+            } else {
+                // After any existing question cards, before all other cards (multiple questions are
+                // answered in arrival order)
+                let index = pending.firstIndex { if case .question = $0 { return false } else { return true } }
+                pending.insert(card, at: index ?? pending.count)
+            }
         case .finished, .notice:
             if current == nil {
                 current = card
@@ -54,7 +69,26 @@ public struct IslandCardQueue: Equatable, Sendable {
     private static func isPassive(_ card: IslandState.Card) -> Bool {
         switch card {
         case .finished, .notice: return true
-        case .waiting, .alert: return false
+        case .waiting, .alert, .question: return false
+        }
+    }
+
+    /// Ids of all question cards in the queue (current + pending)
+    public var questionIds: [String] {
+        ([current].compactMap { $0 } + pending).compactMap {
+            if case .question(let question) = $0 { return question.id }
+            return nil
+        }
+    }
+
+    /// Answered / dismissed / hook gave up: withdraw this question card
+    public mutating func removeQuestion(id: String) {
+        pending.removeAll {
+            if case .question(let question) = $0 { return question.id == id }
+            return false
+        }
+        if case .question(let question) = current, question.id == id {
+            current = pending.isEmpty ? nil : pending.removeFirst()
         }
     }
 

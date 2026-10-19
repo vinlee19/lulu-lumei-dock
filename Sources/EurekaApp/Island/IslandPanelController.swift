@@ -7,25 +7,39 @@ extension Notification.Name {
     static let eurekaResetIslandPosition = Notification.Name("eureka.resetIslandPosition")
 }
 
-/// Dynamic Island NSPanel controller: the panel is fixed at max size, by default top-centered
-/// against the notched screen; supports press-and-drag to any position (including external
-/// screens), persists the position, and snaps back to the merged form when dragged near the
-/// default. Expand/collapse is all SwiftUI animation; transparent areas pass hitTest through.
+/// A borderless window defaults to `canBecomeKey == false`, so the question card's "Other…" field
+/// gets no keyboard input. Allowing it doesn't steal focus: with `becomesKeyOnlyIfNeeded`, only
+/// clicking a control like a text field makes it key, clicking buttons still leaves focus alone;
+/// nonactivatingPanel also ensures becoming key doesn't activate this app
+final class IslandPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+/// Dynamic Island NSPanel controller: the panel is fixed at max size, by default pinned top-center
+/// under the notch; can be dragged to any position (including external displays), position is
+/// persisted, and dragging back near the default snaps back to the fused form. Expand/collapse is
+/// all SwiftUI animation; transparent areas pass hitTest through.
 @MainActor
 final class IslandPanelController {
     let viewModel = IslandViewModel()
 
-    private let panel: NSPanel
+    private let panel: IslandPanel
     private let hostingView: IslandHostingView<IslandRootView>
+    /// The app the user was in before we took the keyboard for "Other" input (handed back once
+    /// typing is done)
+    private var keyboardOwnerBeforeTyping: NSRunningApplication?
     private var orderOutWorkItem: DispatchWorkItem?
     private var moveSettleWorkItem: DispatchWorkItem?
     /// Ignore didMove during programmatic setFrame (only respond to user drags)
     private var isProgrammaticMove = false
     /// Snap radius (pt)
     private let snapDistance: CGFloat = 40
+    /// Outside-island click monitors while the task list is expanded (global + local), removed on
+    /// collapse
+    private var outsideClickMonitors: [Any] = []
 
     init() {
-        panel = NSPanel(
+        panel = IslandPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -67,6 +81,9 @@ final class IslandPanelController {
         }
         viewModel.onDisplayChange = { [weak self] display in
             self?.displayChanged(display)
+        }
+        viewModel.onKeyboardChange = { [weak self] wantsKeyboard in
+            self?.keyboardChanged(wantsKeyboard)
         }
         NotificationCenter.default.addObserver(
             self,
@@ -220,6 +237,11 @@ final class IslandPanelController {
     }
 
     private func displayChanged(_ display: IslandViewModel.Display) {
+        if display == .taskList {
+            installOutsideClickMonitors()
+        } else {
+            removeOutsideClickMonitors()
+        }
         orderOutWorkItem?.cancel()
         orderOutWorkItem = nil
         if display == .hidden {
@@ -237,6 +259,63 @@ final class IslandPanelController {
             // Bring to front without stealing focus
             panel.orderFrontRegardless()
         }
+    }
+
+    // MARK: - Question card input
+
+    /// When the question card opens its "Other…" field, make the panel key (without activating this
+    /// app); hand the keyboard back to the previous app when done
+    private func keyboardChanged(_ wantsKeyboard: Bool) {
+        if wantsKeyboard {
+            let front = NSWorkspace.shared.frontmostApplication
+            if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                keyboardOwnerBeforeTyping = front
+            }
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            guard panel.isKeyWindow else { return }
+            keyboardOwnerBeforeTyping?.activate()
+            keyboardOwnerBeforeTyping = nil
+        }
+    }
+
+    // MARK: - Collapse on outside click
+
+    /// The panel is nonactivating and passes hitTest through outside the island, so it almost never
+    /// becomes key window; resignKey / didResignActive never arrive → "losing focus" can only be
+    /// detected by monitoring mouse-downs outside the island. The global monitor catches clicks
+    /// landing in other apps (mouse events need no Accessibility permission); the local monitor
+    /// catches clicks in this app's windows (status bar popover, main window, the island itself).
+    private func installOutsideClickMonitors() {
+        guard outsideClickMonitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleMouseDown() }
+        }) {
+            outsideClickMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.handleMouseDown() }
+            return event  // observe only, never intercept; the click is delivered as usual
+        }) {
+            outsideClickMonitors.append(local)
+        }
+    }
+
+    private func removeOutsideClickMonitors() {
+        outsideClickMonitors.forEach(NSEvent.removeMonitor)
+        outsideClickMonitors.removeAll()
+    }
+
+    /// Clicks within the island's visible area go to SwiftUI tap / drag handling; outside it,
+    /// collapse the task list
+    private func handleMouseDown() {
+        // interactiveRect is in panel coordinates (origin bottom-left); translate to global screen
+        // coordinates before comparing
+        let islandRect = viewModel.interactiveRect.offsetBy(
+            dx: panel.frame.minX, dy: panel.frame.minY)
+        guard !islandRect.contains(NSEvent.mouseLocation) else { return }
+        viewModel.dismissTaskList()
     }
 }
 

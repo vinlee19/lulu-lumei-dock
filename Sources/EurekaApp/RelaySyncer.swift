@@ -35,12 +35,40 @@ enum RelaySyncer {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
-    /// Syncs (overwrites only when the content differs) and returns the stable path; nil when no
-    /// source is found
+    /// Stable path of the island answer hook, `bin/lululumei-ask` (settings.json only references
+    /// this)
+    static var stableAskURL: URL {
+        binDirectory.appendingPathComponent(ClaudeAskHookInstaller.binaryName)
+    }
+
+    /// eureka-ask in the same directory as the current executable
+    static var bundledAskURL: URL? {
+        guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
+            return nil
+        }
+        let candidate = executable.deletingLastPathComponent()
+            .appendingPathComponent("eureka-ask")
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+    }
+
+    /// Syncs the relay (overwrites only when content differs) and returns the stable path; nil when
+    /// the source can't be found
     @discardableResult
     static func sync() -> URL? {
         guard let source = bundledRelayURL else { return nil }
-        let target = stableRelayURL
+        let target = syncBinary(from: source, to: stableRelayURL)
+        if target != nil { linkLegacyName() }
+        return target
+    }
+
+    /// Syncs the answer hook and returns the stable path; nil when the source can't be found
+    @discardableResult
+    static func syncAsk() -> URL? {
+        guard let source = bundledAskURL else { return nil }
+        return syncBinary(from: source, to: stableAskURL)
+    }
+
+    private static func syncBinary(from source: URL, to target: URL) -> URL? {
         let fm = FileManager.default
         do {
             try fm.createDirectory(
@@ -48,13 +76,12 @@ enum RelaySyncer {
             if let existing = try? Data(contentsOf: target),
                let fresh = try? Data(contentsOf: source),
                SHA256.hash(data: existing) == SHA256.hash(data: fresh) {
-                linkLegacyName()
-                return target  // Already up to date
+                return target  // already up to date
             }
             // Write a temp file first, then replace, to avoid overwriting a binary that is
             // currently executing
             let tmp = target.deletingLastPathComponent()
-                .appendingPathComponent(".\(RelayIdentity.binaryName).tmp")
+                .appendingPathComponent(".\(target.lastPathComponent).tmp")
             try? fm.removeItem(at: tmp)
             try fm.copyItem(at: source, to: tmp)
             if fm.fileExists(atPath: target.path) {
@@ -63,10 +90,11 @@ enum RelaySyncer {
                 try fm.moveItem(at: tmp, to: target)
             }
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
-            linkLegacyName()
             return target
         } catch {
-            fputs(L10n.format("[eureka] relay sync failed: %@\n", zhHans: "[eureka] relay 同步失败: %@\n", String(describing: error)), stderr)
+            fputs(L10n.format(
+                "[eureka] %@ sync failed: %@\n", zhHans: "[eureka] %@ 同步失败: %@\n",
+                target.lastPathComponent, String(describing: error)), stderr)
             return fm.fileExists(atPath: target.path) ? target : nil
         }
     }

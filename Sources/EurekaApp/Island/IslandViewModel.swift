@@ -22,8 +22,11 @@ final class IslandViewModel: ObservableObject {
     /// capsule
     @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
-    /// Task id whose subagent box is expanded in the task list (nil = all collapsed; one at a time,
-    /// bounded geometry)
+    /// Finished cards that auto-dismissed on time and the user hasn't opened yet: the pill's "✓ N";
+    /// while present, the island stays visible even with no running tasks
+    @Published private(set) var unreadFinished = IslandUnreadFinished()
+    /// Id of the task whose subagent box is expanded in the task list (nil = all collapsed; one at
+    /// a time, bounded geometry)
     @Published private(set) var expandedSubagentTaskId: String?
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
         frame: CGRect(x: 0, y: 0, width: 1512, height: 982))
@@ -50,6 +53,25 @@ final class IslandViewModel: ObservableObject {
 
     /// Presentation-change callback (the panel controller shows/hides the window from it)
     var onDisplayChange: (@MainActor (Display) -> Void)?
+
+    /// Answer progress of the current question card (nil when the current card isn't a question
+    /// card)
+    @Published private(set) var questionDraft: QuestionDraft?
+    /// Typing "Other" in the question card: the panel must temporarily become key window to receive
+    /// the keyboard
+    @Published private(set) var wantsKeyboard = false
+    /// Hands the answer to the hook (AppDelegate wires it to QuestionInbox)
+    var onQuestionReply: (@MainActor (_ questionId: String, _ reply: QuestionReply) -> Void)?
+    /// Keyboard focus demand changed (the panel controller calls makeKey / hands focus back
+    /// accordingly)
+    var onKeyboardChange: (@MainActor (Bool) -> Void)?
+
+    enum QuestionReply: Equatable {
+        /// Keys are the question text
+        case answer([String: String])
+        /// Dismissed on the island; answer in Claude's own confirmation UI instead
+        case dismiss
+    }
 
     private var queue = IslandCardQueue()
     private var hovering = false
@@ -80,8 +102,9 @@ final class IslandViewModel: ObservableObject {
         for id in queue.waitingTaskIds where !stillWaiting.contains(id) {
             queue.removeWaiting(taskId: id)
         }
-        // Collapse if the expanded task disappeared (avoid sticking on a session that no longer
-        // exists)
+        // The session started a new turn: the previous finish no longer counts as unread
+        unreadFinished.reconcile(activeTaskIds: Set(tasks.map(\.id)))
+        // Collapse if the expanded task disappeared (don't stay on a session that no longer exists)
         if let id = expandedSubagentTaskId, !tasks.contains(where: { $0.id == id }) {
             expandedSubagentTaskId = nil
         }
@@ -90,6 +113,7 @@ final class IslandViewModel: ObservableObject {
 
     func enqueueFinished(_ task: FinishedTask) {
         queue.enqueue(.finished(task))
+        unreadFinished.add(task)
         refresh()
     }
 
@@ -108,18 +132,130 @@ final class IslandViewModel: ObservableObject {
         refresh()
     }
 
+    // MARK: - Question card
+
+    /// Reconcile with the hook's pending questions: enqueue new ones, withdraw cards no longer
+    /// pending (hook timed out / turn interrupted)
+    func updatePendingQuestions(_ questions: [PendingQuestion]) {
+        let waiting = Set(questions.map(\.id))
+        let queued = Set(queue.questionIds)
+        guard waiting != queued else { return }
+        for id in queued.subtracting(waiting) {
+            queue.removeQuestion(id: id)
+        }
+        for question in questions where !queued.contains(question.id) {
+            queue.enqueue(.question(question))
+        }
+        refresh()
+    }
+
+    func chooseOption(_ label: String) {
+        mutateDraft { $0.choose(label) }
+    }
+
+    func toggleOption(_ label: String) {
+        mutateDraft { $0.toggle(label) }
+    }
+
+    func confirmSelection() {
+        mutateDraft { $0.confirmSelection() }
+    }
+
+    func beginOther() {
+        mutateDraft { $0.beginOther() }
+    }
+
+    func cancelOther() {
+        mutateDraft { $0.cancelOther() }
+    }
+
+    func submitOther(_ text: String) {
+        mutateDraft { $0.submitOther(text) }
+    }
+
+    /// "Answer in Claude": dismiss the card on the island; the hook exits silently, and Claude's
+    /// own confirmation UI is there all along
+    func dismissQuestion() {
+        guard let draft = questionDraft else { return }
+        finishQuestion(id: draft.question.id, reply: .dismiss)
+    }
+
+    /// This question was already settled in Claude (as judged by IslandQuestionBridge): withdraw
+    /// the card, don't write back to the hook
+    func withdrawQuestion(id: String) {
+        queue.removeQuestion(id: id)
+        refresh()
+    }
+
+    private func mutateDraft(_ change: (inout QuestionDraft) -> Void) {
+        guard var draft = questionDraft else { return }
+        change(&draft)
+        if draft.isComplete {
+            finishQuestion(id: draft.question.id, reply: .answer(draft.answers))
+            return
+        }
+        questionDraft = draft
+        setWantsKeyboard(draft.isTypingOther)
+    }
+
+    private func finishQuestion(id: String, reply: QuestionReply) {
+        onQuestionReply?(id, reply)
+        queue.removeQuestion(id: id)
+        refresh()
+    }
+
+    /// Whether a question card is on stage decides the answer progress: switching to another
+    /// question card starts it from scratch, leaving question cards clears it
+    private func syncQuestionDraft() {
+        if case .card(.question(let question)) = display {
+            if questionDraft?.question.id != question.id {
+                questionDraft = QuestionDraft(question: question)
+            }
+        } else {
+            questionDraft = nil
+        }
+        setWantsKeyboard(questionDraft?.isTypingOther ?? false)
+    }
+
+    private func setWantsKeyboard(_ value: Bool) {
+        guard wantsKeyboard != value else { return }
+        wantsKeyboard = value
+        onKeyboardChange?(value)
+    }
+
     func islandTapped() {
         switch display {
         case .compact:
+            unreadFinished.markAllRead()
+            if activeTasks.isEmpty && idleTasks.isEmpty {
+                // Only the unread mark is left and all sessions have exited: the list has nothing
+                // to show, so one click clears the mark
+                refresh()
+                return
+            }
             setDisplay(.taskList)
             scheduleAutoDismiss()
-        case .card:
+        case .card(let card):
+            // Question cards only honor their buttons: a click on blank space must not swipe away a
+            // question the agent is waiting on
+            if case .question = card { return }
+            if case .finished(let task) = card {
+                unreadFinished.markRead(task)
+            }
             advanceCard()
         case .taskList:
             refresh(collapseTaskList: true)
         case .hidden:
             break
         }
+    }
+
+    /// A click outside the island (another app, the desktop, another window of this app) while
+    /// the task list is open closes it at once. Only the click-opened task list is affected;
+    /// cards are timed notifications and an outside click does not dismiss them.
+    func dismissTaskList() {
+        guard case .taskList = display else { return }
+        refresh(collapseTaskList: true)
     }
 
     /// Expand/collapse a task's subagent box inline (called by the inner button in the task list)
@@ -179,36 +315,74 @@ final class IslandViewModel: ObservableObject {
             return .zero
         case .compact:
             return pillSize
+        case .card(.question(let question)):
+            let current = questionDraft?.current ?? question.questions.first
+            let height = IslandGeometry.questionCardHeight(
+                optionCount: current?.options.count ?? 0,
+                questionLines: questionLines,
+                topInset: questionTopInset)
+            return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         case .card:
             return layout.expandedCardSize
         case .taskList:
-            let activeRows = min(activeTasks.count, 4)
-            let idleRows = min(idleTasks.count, 3)
-            let idleHeader = idleRows > 0 ? 18 : 0
-            // Expanded subagent box (only when the expanded task is among the visible first 4 and
-            // actually has subagents)
-            var expanded: CGFloat = 0
-            if let id = expandedSubagentTaskId,
-               let task = activeTasks.prefix(4).first(where: { $0.id == id }),
-               !task.subagents.isEmpty {
-                expanded = IslandGeometry.subagentBoxHeight(count: task.subagents.count)
-            }
-            let base = CGFloat(34 + activeRows * 30 + idleHeader + idleRows * 24 + 10) + expanded
-            return CGSize(width: layout.expandedCardSize.width, height: base * uiScale)
+            let height = IslandGeometry.taskListHeight(
+                activeCount: activeTasks.count, idleCount: idleTasks.count,
+                expandedSubagentCount: expandedSubagentCount)
+            return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         }
     }
 
-    /// Interactive region in panel coordinates (hitTest pass-through + hover tracking)
+    /// "Which session is asking" in the question card's title row: session title → project name
+    var questionSessionLabel: String? {
+        guard let question = questionDraft?.question else { return nil }
+        if let id = question.taskId,
+           let task = (activeTasks + idleTasks).first(where: { $0.id == id }) {
+            return taskDisplayName(task)
+        }
+        return question.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+    }
+
+    /// Number of lines the current question text lays out to (1–2); both the question card height
+    /// and the question area height derive from it. Measured with the same font size and width as
+    /// the view; width is reduced by 4pt as margin -- underestimating squeezes the second line,
+    /// overestimating only leaves an empty line
+    var questionLines: Int {
+        guard let text = questionDraft?.current.question else { return 1 }
+        let font = NSFont.systemFont(ofSize: 14 * uiScale, weight: .semibold)
+        let width = layout.expandedCardSize.width
+            - 2 * QuestionCardView.horizontalPadding * uiScale - 4
+        let bounds = (text as NSString).boundingRect(
+            with: CGSize(width: max(width, 1), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        // Use the layout engine's own line height; the ascender/descender value is smaller, so one
+        // line would divide into 1.x lines and round up to 2
+        let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+        let lines = Int((bounds.height / lineHeight - 0.25).rounded(.up))
+        return min(max(lines, 1), IslandGeometry.QuestionCard.maxQuestionLines)
+    }
+
+    /// Notch height the question card content must clear (1.0× baseline; 0 when not fused with the
+    /// notch). The question card has many buttons; if the top row slid behind the notch it couldn't
+    /// be clicked
+    var questionTopInset: CGFloat {
+        fuseWithNotch ? screen.safeAreaTopInset / uiScale : 0
+    }
+
+    /// Number of subagents in the expanded subagent box (only when the expanded task is in the
+    /// first visible rows and does have subagents; otherwise 0)
+    var expandedSubagentCount: Int {
+        guard let id = expandedSubagentTaskId,
+              let task = activeTasks.prefix(IslandGeometry.TaskList.maxActiveRows)
+                  .first(where: { $0.id == id })
+        else { return 0 }
+        return task.subagents.count
+    }
+
+    /// Interactive area in panel coordinates (hitTest pass-through + hover tracking)
     var interactiveRect: CGRect {
         IslandGeometry.interactiveRect(
             contentSize: contentSize, topInset: topInset, layout: layout)
-    }
-
-    var hasWaiting: Bool {
-        activeTasks.contains {
-            if case .waiting = $0.phase { return true }
-            return false
-        }
     }
 
     // MARK: - Internal
@@ -246,7 +420,7 @@ final class IslandViewModel: ObservableObject {
             }
         } else {
             timerCard = nil
-            setDisplay(activeTasks.isEmpty ? .hidden : .compact)
+            setDisplay(activeTasks.isEmpty && unreadFinished.isEmpty ? .hidden : .compact)
         }
         queuedCount = queue.pendingCount
     }
@@ -262,6 +436,7 @@ final class IslandViewModel: ObservableObject {
         // stale expanded state
         if case .taskList = new {} else { expandedSubagentTaskId = nil }
         display = new
+        syncQuestionDraft()
         logIsland(new)
         onDisplayChange?(new)
     }
@@ -290,12 +465,19 @@ final class IslandViewModel: ObservableObject {
                 }
                 self.hoverExtensions = 0
                 switch self.display {
-                case .card: self.advanceCard()
+                case .card: self.expireCurrentCard()
                 case .taskList: self.refresh(collapseTaskList: true)
                 default: break
                 }
             }
         }
+    }
+
+    /// Card auto-dismissed on time: not counted as read; a finished card leaves an unread mark on
+    /// the pill (preview rendering goes through here too)
+    func expireCurrentCard() {
+        guard case .card = display else { return }
+        advanceCard()
     }
 
     private func cancelAutoDismiss() {
@@ -313,6 +495,7 @@ final class IslandViewModel: ObservableObject {
         case .card(.waiting): name = "card-waiting"
         case .card(.notice): name = "card-notice"
         case .card(.alert(let alert)): name = "card-alert(\(alert.ruleId))"
+        case .card(.question(let question)): name = "card-question(\(question.questions.count))"
         case .taskList: name = "taskList"
         }
         print("[eureka] island=\(name)")

@@ -52,6 +52,10 @@ let package = Package(
         ),
         // Lightweight forwarding CLI invoked by hooks/notify: silent, always exit 0
         .executableTarget(name: "eureka-relay", path: "Sources/eureka-relay"),
+        // PreToolUse hook for AskUserQuestion: blocks waiting for the answer on the island, then
+        // writes it to stdout. The opposite of the relay's constraints, hence a separate program
+        // (zero dependencies)
+        .executableTarget(name: "eureka-ask", path: "Sources/eureka-ask"),
         // Test runner (CLT has no XCTest, so a hand-rolled harness)
         .executableTarget(
             name: "eureka-tests",

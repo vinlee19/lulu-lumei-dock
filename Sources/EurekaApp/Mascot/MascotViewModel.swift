@@ -131,7 +131,9 @@ final class MascotViewModel: ObservableObject {
     /// or when not idle, back to the plain pose.
     func setLookDirection(_ direction: Int?) {
         let normalized = direction.map { (($0 % 16) + 16) % 16 }
-        let next = state == .idle ? normalized : nil
+        // Packs without gaze assets (single uploaded images, etc.) don't enter gaze mode; otherwise
+        // the captions and motion freeze when the mouse comes near.
+        let next = state == .idle && !pack.lookDirections.isEmpty ? normalized : nil
         if lookDirection != next { lookDirection = next }
     }
 

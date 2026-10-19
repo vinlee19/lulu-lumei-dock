@@ -6,7 +6,7 @@
 ## 目标
 
 1. **灵动岛通知**：Claude Code / Codex CLI 任务运行中顶部常驻小胶囊（任务数+计时）；
-   完成/等待确认/出错时展开卡片（简述+耗时），数秒自动收起、悬停暂停、点击详情；无任务完全隐藏。
+   完成/等待确认/出错时展开卡片（简述+耗时），数秒自动收起、悬停暂停、点击详情；按时收起的完成卡在胶囊上留下未读完成标记（点开卡片或任务列表、或该会话开始新一轮 turn 时清除）；无任务且无未读完成时完全隐藏。
    四类卡的停留时长 = 用户设置的基准秒数（默认 6，设置页 3–15）+ 各自偏移：完成 +0 / 等待 +4 /
    健康提示 +5 / 安全告警 +6。偏移定义在 `IslandState.Card.autoDismissExtraSeconds`，
    入卡计时与悬停后重排计时**共用**它（两处曾各写一份 switch，漏改一边就会让卡片退回常驻）。
@@ -251,6 +251,55 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
   Stop→finished(success)（ErrorSniffer 嗅 transcript 尾部可升级为 error）；SessionEnd→清理/interrupted
 - Codex：task_started→running；task_complete→finished(success)；turn_aborted→interrupted；error→error
 - 兜底：running 超 4h 无心跳 → interrupted（防 hook 丢失泄漏）
+
+## 在灵动岛上回答提问（Claude AskUserQuestion）
+
+作答 hook 注册在 `PermissionRequest` 事件、`matcher: "AskUserQuestion"` 上。这个事件的 hook 与 Claude 自己的确认界面（终端选择框 / 桌面端确认卡）同时运行，哪边先给出回答用哪边：hook 返回 `decision: {behavior: "allow", updatedInput}`，`updatedInput` 带上 `answers`，Claude 撤掉自己的界面，拿答案继续。`PreToolUse` 不能用：Claude 要等 `PreToolUse` 的 hook 全部结束才进入确认流程，挂在那里等岛上作答，桌面端确认卡和终端选择框在等待期间都出不来。relay 必须静默，所以作答由独立程序 `eureka-ask`（稳定路径 `bin/lululumei-ask`）承担。
+
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+sequenceDiagram
+    participant C as Claude Code
+    participant H as lululumei-ask
+    participant F as spool 目录
+    participant A as Eureka app
+    A->>F: 每 5 秒写 island-heartbeat（pid）
+    C->>C: 弹出自己的确认界面
+    C->>H: 同时触发 PermissionRequest(AskUserQuestion) stdin
+    H->>F: 心跳新鲜？写 questions/<id>.json
+    A->>F: 每 0.5 秒读 questions/
+    A->>A: 提问卡插队展示
+    alt 岛上先答
+        A->>F: 写 answers/<id>.json（rename 原子落盘）
+        H->>F: 每 100ms 读到答案，删掉两份文件
+        H->>C: stdout：allow + updatedInput(questions 原样 + answers)
+        C->>C: 撤掉自己的确认界面，拿答案继续
+    else Claude 里先答
+        C->>C: 转录追加这道题的 tool_result
+        A->>A: 每 0.5 秒读转录新增的行，认出 tool_result
+        A->>F: 写 answers/<id>.json = dismiss，撤卡
+        H->>F: 读到 dismiss，删掉两份文件，静默退出
+    end
+```
+
+| 情况 | hook 行为 | 岛上 / Claude 看到的 |
+|---|---|---|
+| 岛上答完所有问题 | 输出 allow + answers | Claude 撤掉确认界面，直接继续 |
+| Claude 里先答或拒绝（转录出现这道题的 tool_result） | app 写 dismiss，hook 静默 exit 0 | 岛上撤卡 |
+| 点「在 Claude 里回答」/ 答案缺题 | 静默 exit 0 | 岛上撤卡，Claude 的确认界面一直在 |
+| app 没运行、功能关闭、心跳超过 15 秒 | 立即静默 exit 0（等待中则 2 秒内放手） | 只有 Claude 的确认界面 |
+| 等满 600 秒 | 静默 exit 0 | 岛上撤卡，Claude 的确认界面一直在 |
+| 这一轮被中断 / 被信号终止 | 删问题文件后退出；SIGKILL 时 app 按 pid 判活清卡 | 按 Claude 自己的中断处理 |
+
+Claude 那边先答完时不会终止等待中的 hook，所以撤卡靠 app 读会话转录（`QuestionTranscriptProbe`，hook 把 stdin 里的 `transcript_path` 写进问题文件）：主链 assistant 行里认出 `name == "AskUserQuestion"`、问题原文一致的 tool_use，再等主链 user 行里指向它、时间不早于提问的 tool_result。同样的题问过两次时，上一次的 tool_result 早于这次提问，靠时间排除。首次只读转录尾部 1 MB，之后只读新追加的字节。转录不依赖 relay hooks，没装 Claude hooks 时撤卡照样成立。`PermissionRequest` 的 stdin 里没有 `tool_use_id`，题目 id 由 hook 每次生成 UUID。
+
+答案格式：键是问题原文；单选是选项 label；多选按选项顺序用「, 」连接；「其他」是输入的文字（多选时接在已勾选项后面）。提问卡不自动收起，到达时顶掉正在展示的完成卡 / 健康提示卡；点卡片空白处不会划走它。输入「其他」时 panel 临时成为 key window（不激活 app），提交后把键盘还给原来的应用。
+
+Codex 的 `request_user_input` 只在 Plan 模式下由主线程可用，且没有 hook 在它调用时触发，app 无法替它作答，因此不在范围内。
 
 ## 里程碑
 

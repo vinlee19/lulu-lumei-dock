@@ -85,7 +85,9 @@ public enum ClaudeHooksInstaller {
         for (event, _) in hooks {
             var entries = entriesOf(hooks, event)
             let before = entries.count
-            entries.removeAll(where: isEurekaEntry)
+            // The island answer entry (lululumei-ask) is ours too: remove it together when
+            // uninstalling Claude hooks
+            entries.removeAll { isEurekaEntry($0) || ClaudeAskHookInstaller.isAskEntry($0) }
             if entries.isEmpty && before > 0 {
                 hooks.removeValue(forKey: event)
             } else {
@@ -163,7 +165,8 @@ public enum ClaudeHooksInstaller {
         var events: Set<String> = []
         var tools: Set<String> = []
         for (event, _) in hooks {
-            for entry in entriesOf(hooks, event) where !isEurekaEntry(entry) {
+            for entry in entriesOf(hooks, event)
+            where !isEurekaEntry(entry) && !ClaudeAskHookInstaller.isAskEntry(entry) {
                 for command in entry["hooks"] as? [[String: Any]] ?? [] {
                     guard let text = command["command"] as? String,
                           let name = HookCommandPath.shortName(of: text) else { continue }

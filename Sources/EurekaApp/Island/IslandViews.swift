@@ -6,6 +6,9 @@ import SwiftUI
 struct IslandRootView: View {
     @ObservedObject var viewModel: IslandViewModel
 
+    /// Background for floating / no-notch screens #1C1C20 (design mock agent-dock-final)
+    private static let floatingFill = Color(red: 0.110, green: 0.110, blue: 0.125)
+
     var body: some View {
         let size = viewModel.contentSize
         VStack(spacing: 0) {
@@ -25,12 +28,17 @@ struct IslandRootView: View {
     }
 
     private func island(size: CGSize) -> some View {
-        // Drag lives in IslandHostingView (performDrag); taps go back to SwiftUI --
-        // inner buttons consume first, only background taps reach islandTapped
-        UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
-            .fill(Color.black)
+        // Dragging lives in IslandHostingView (performDrag); clicks go back to SwiftUI -- inner
+        // buttons consume first, only background taps reach islandTapped
+        let shape = UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
+        let fused = viewModel.fuseWithNotch
+        return shape
+            // Must be pure black when fused with the notch (top edge meets the physical notch);
+            // floating / no-notch screens use a dark gray fill + thin border
+            .fill(fused ? Color.black : Self.floatingFill)
+            .overlay(shape.stroke(Color.white.opacity(fused ? 0 : 0.09), lineWidth: 1))
             .frame(width: size.width, height: size.height)
-            .overlay(content.clipShape(UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)))
+            .overlay(content.clipShape(shape))
             .shadow(color: .black.opacity(0.38), radius: 12, y: 5)
             .contentShape(Rectangle())
             .onTapGesture { viewModel.islandTapped() }
@@ -61,11 +69,28 @@ struct IslandRootView: View {
         case .compact:
             CompactPillView(
                 tasks: viewModel.activeTasks,
-                hasWaiting: viewModel.hasWaiting,
+                idleTasks: viewModel.idleTasks,
+                unread: viewModel.unreadFinished,
                 centerGap: viewModel.pillCenterGap,
                 showStartTime: viewModel.showStartTime,
                 scale: scale
             )
+        case .card(.question):
+            if let draft = viewModel.questionDraft {
+                QuestionCardView(
+                    draft: draft,
+                    sessionLabel: viewModel.questionSessionLabel,
+                    scale: scale,
+                    topInset: viewModel.questionTopInset,
+                    questionLines: viewModel.questionLines,
+                    onChoose: { viewModel.chooseOption($0) },
+                    onToggle: { viewModel.toggleOption($0) },
+                    onConfirm: { viewModel.confirmSelection() },
+                    onBeginOther: { viewModel.beginOther() },
+                    onCancelOther: { viewModel.cancelOther() },
+                    onSubmitOther: { viewModel.submitOther($0) },
+                    onDismiss: { viewModel.dismissQuestion() })
+            }
         case .card(let card):
             ExpandedCardView(card: card, queuedCount: viewModel.queuedCount, scale: scale)
         case .taskList:
@@ -74,6 +99,7 @@ struct IslandRootView: View {
                 idleTasks: viewModel.idleTasks,
                 showStartTime: viewModel.showStartTime,
                 scale: scale,
+                centerGap: viewModel.pillCenterGap,
                 expandedTaskId: viewModel.expandedSubagentTaskId,
                 onToggleTimeMode: { viewModel.onToggleTimeMode?() },
                 onToggleSubagents: { viewModel.toggleSubagentExpansion($0) }
@@ -82,27 +108,35 @@ struct IslandRootView: View {
     }
 }
 
-/// Compact capsule: left wing state + count, right wing earliest task's timer / start time; middle
-/// left empty for the physical notch
+/// Compact pill (the "menu bar strip" in design mock agent-dock-final), with the middle left empty
+/// for the physical notch:
+/// - left wing: present source icons (lit with a cyan dot when a session is running, dimmed when
+///   only idle sessions remain) + running count;
+/// - right wing: alert slot, waiting for permission/input > ctx ≥ 90% > unread finished, see
+///   `IslandPill.alert`; with no alert it shows the oldest task's timer.
 struct CompactPillView: View {
     let tasks: [AgentTask]
-    let hasWaiting: Bool
+    var idleTasks: [AgentTask] = []
+    var unread = IslandUnreadFinished()
     let centerGap: CGFloat
     var showStartTime = false
     var scale: CGFloat = 1
+
+    private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)      // #5AC8FA
+    private static let alertRed = Color(red: 1.0, green: 0.420, blue: 0.392)      // #FF6B64
 
     var body: some View {
         // Each wing is a fixed share of a fixed-width pill, and nothing in it may wrap: a
         // two-digit count once became a vertical "3/0" and a cross-day start time a two-line
         // date. Every text is `fixedSize`, and when a wing still cannot fit, ViewThatFits drops
-        // its least important piece (the "claude" word on the left, the subagent marker on the
-        // right) instead of letting SwiftUI break a line.
+        // its least important piece (dimmed idle sources on the left, the alert icon or the
+        // subagent marker on the right) instead of letting SwiftUI break a line.
+        let marks = IslandPill.sourceMarks(active: tasks, idle: idleTasks)
         HStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
-                leftWing(showSourceLabel: true, spacing: 6 * scale)
-                // A notched wing is 1pt short of "! + logo + claude + 2": tighten before dropping
-                leftWing(showSourceLabel: true, spacing: 4 * scale)
-                leftWing(showSourceLabel: false, spacing: 6 * scale)
+                leftWing(marks)
+                leftWing(marks.filter(\.isActive))
+                leftWing([])
             }
             .frame(maxWidth: .infinity)
 
@@ -110,31 +144,93 @@ struct CompactPillView: View {
                 Color.clear.frame(width: centerGap, height: 1)
             }
 
-            ViewThatFits(in: .horizontal) {
-                rightWing(showSubagents: true)
-                rightWing(showSubagents: false)
+            Group {
+                if let alert = IslandPill.alert(active: tasks, idle: idleTasks, unread: unread) {
+                    ViewThatFits(in: .horizontal) {
+                        alertBadge(alert, showIcon: true, showText: true)
+                        alertBadge(alert, showIcon: false, showText: true)
+                        alertBadge(alert, showIcon: true, showText: false)
+                    }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        rightWing(showSubagents: true)
+                        rightWing(showSubagents: false)
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 14 * scale)
     }
 
-    /// Left wing: waiting marker + sources present + task count
-    private func leftWing(showSourceLabel: Bool, spacing: CGFloat) -> some View {
-        HStack(spacing: spacing) {
-            if hasWaiting {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 14 * scale, weight: .semibold))
-                    .foregroundStyle(.orange)
+    /// Left wing: source icons + running count (count hidden when nothing is running)
+    private func leftWing(_ marks: [IslandPill.SourceMark]) -> some View {
+        HStack(spacing: 7 * scale) {
+            ForEach(marks, id: \.source) { mark in
+                sourceIcon(mark)
             }
-            // One "logo + claude/codex" label per present source
-            PulsingSourceBadges(
-                sources: distinctSources, scale: scale, showLabel: showSourceLabel)
-            Text("\(tasks.count)")
-                .font(.system(size: 14 * scale, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .fixedSize()
+            if !tasks.isEmpty {
+                Text("\(tasks.count)")
+                    .font(.system(size: 11 * scale, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Self.accent)
+                    .padding(.horizontal, 6 * scale)
+                    .padding(.vertical, 1 * scale)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5 * scale).fill(Self.accent.opacity(0.14)))
+                    .fixedSize()
+            }
+        }
+    }
+
+    private func sourceIcon(_ mark: IslandPill.SourceMark) -> some View {
+        SourceBadge(source: mark.source, size: 15 * scale, onDark: true)
+            .opacity(mark.isActive ? 1 : 0.4)
+            .overlay(alignment: .topTrailing) {
+                if mark.isActive {
+                    RunningSourceDot(color: Self.accent, size: 6.5 * scale)
+                        .offset(x: 1 * scale, y: -1 * scale)
+                }
+            }
+    }
+
+    /// Right-wing alert badge; when it doesn't fit, drop the icon first, then keep only the icon
+    private func alertBadge(
+        _ alert: IslandPill.Alert, showIcon: Bool, showText: Bool
+    ) -> some View {
+        let style = alertStyle(alert)
+        return HStack(spacing: 4 * scale) {
+            if showIcon {
+                Image(systemName: style.icon)
+                    .font(.system(size: 10 * scale, weight: .bold))
+            }
+            if showText {
+                Text(style.text)
+            }
+        }
+        .font(.system(size: 11 * scale, weight: .semibold).monospacedDigit())
+        .foregroundStyle(style.color)
+        .padding(.horizontal, 7 * scale)
+        .padding(.vertical, 2 * scale)
+        .background(RoundedRectangle(cornerRadius: 6 * scale).fill(style.color.opacity(0.16)))
+        .fixedSize()
+    }
+
+    /// Unread-finished icon and color match the finished card (success green ✓ / error red /
+    /// interrupted gray)
+    private func alertStyle(_ alert: IslandPill.Alert) -> (icon: String, text: String, color: Color) {
+        switch alert {
+        case .waiting(.permission):
+            return ("hand.raised.fill", L10n.text("Needs permission", zhHans: "等待授权"), .orange)
+        case .waiting(.idle):
+            return ("ellipsis.bubble.fill", L10n.text("Waiting for input", zhHans: "等待输入"), .orange)
+        case .context(let percent):
+            return ("exclamationmark.triangle.fill", "ctx \(Int(percent.rounded()))%", Self.alertRed)
+        case .unread(let count, .success):
+            return ("checkmark.circle.fill", "\(count)", .green)
+        case .unread(let count, .error):
+            return ("xmark.octagon.fill", "\(count)", Self.alertRed)
+        case .unread(let count, .interrupted):
+            return ("minus.circle.fill", "\(count)", .gray)
         }
     }
 
@@ -163,27 +259,39 @@ struct CompactPillView: View {
                     }
                 }
                 .font(.system(size: 13 * scale, weight: .medium).monospacedDigit())
-                .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
+                .foregroundStyle(Color(white: 0.85))
                 .lineLimit(1)
                 .fixedSize()
             }
         }
     }
 
-    /// Present sources (stable order: claude before codex)
-    private var distinctSources: [AgentSource] {
-        var seen = Set<AgentSource>()
-        for task in tasks { seen.insert(task.source) }
-        return AgentSource.allCases.filter { seen.contains($0) }
-    }
-
-    /// Total present subagents (compact capsule aggregated marker)
+    /// Total present subagents (aggregate marker on the compact pill)
     private var subagentTotal: Int {
         tasks.reduce(0) { $0 + $1.subagents.count }
     }
 }
 
-/// Breathing dot while running
+/// Running dot at the top-right of a pill source icon: an outer ring in the background color "cuts"
+/// it out of the icon; it glows and breathes slowly
+struct RunningSourceDot: View {
+    let color: Color
+    let size: CGFloat
+    @State private var on = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .overlay(Circle().stroke(Color.black, lineWidth: size * 0.23))
+            .shadow(color: color.opacity(0.9), radius: size * 0.4)
+            .opacity(on ? 1 : 0.55)
+            .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: on)
+            .onAppear { on = true }
+    }
+}
+
+/// Breathing running dot
 struct PulsingDot: View {
     var color: Color = .cyan
     var size: CGFloat = 7
@@ -670,32 +778,6 @@ struct SourceLabelBadge: View {
     }
 }
 
-/// Capsule left wing: breathing source labels (one logo + text per present source)
-struct PulsingSourceBadges: View {
-    let sources: [AgentSource]
-    var scale: CGFloat = 1
-    /// Single-source word label ("claude"); the pill turns it off when the wing is out of room.
-    var showLabel = true
-    @State private var on = false
-
-    var body: some View {
-        HStack(spacing: 5 * scale) {
-            ForEach(sources, id: \.self) { source in
-                // Single source: logo + text (capsule is wide enough); multiple sources: logos only
-                // (the notch wings can't fit two sets of text; the full claude/codex text appears
-                // on every row of the expanded task list)
-                if sources.count == 1, showLabel {
-                    SourceLabelBadge(source: source, size: 13 * scale)
-                } else {
-                    SourceBadge(source: source, size: 13 * scale, onDark: true)
-                }
-            }
-        }
-        .opacity(on ? 1 : 0.45)
-        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: on)
-        .onAppear { on = true }
-    }
-}
 
 /// Expanded card: finished / error / interrupted / awaiting confirmation.
 /// φ golden-ratio vertical layout: icon + source label on top, text centered below.
@@ -749,6 +831,7 @@ struct ExpandedCardView: View {
         case .finished(let task): return task.source
         case .waiting(let task): return task.source
         case .alert(let alert): return alert.source
+        case .question(let question): return question.source
         case .notice: return nil
         }
     }
@@ -766,6 +849,8 @@ struct ExpandedCardView: View {
             return "ellipsis.bubble.fill"
         case .alert:
             return "exclamationmark.shield.fill"
+        case .question:
+            return "questionmark.bubble.fill"  // rendered by QuestionCardView; here only for exhaustiveness
         case .notice:
             return "heart.fill"  // Never reached (notices render an emoji); fallback
         }
@@ -781,6 +866,7 @@ struct ExpandedCardView: View {
             }
         case .waiting: return .orange
         case .alert: return .red
+        case .question: return .cyan
         case .notice: return .pink
         }
     }
@@ -803,6 +889,8 @@ struct ExpandedCardView: View {
             return L10n.text("Waiting", zhHans: "等待中")
         case .alert(let alert):
             return L10n.format("High-risk operation · %@", zhHans: "高危操作 · %@", String(alert.ruleTitle))
+        case .question:
+            return L10n.text("Waiting for your answer", zhHans: "等你回答")
         case .notice(let notice):
             return notice.headline
         }
@@ -825,6 +913,7 @@ struct ExpandedCardView: View {
             let firstLine = alert.detail.split(separator: "\n", maxSplits: 1).first.map(String.init)
                 ?? alert.detail
             return L10n.format("%@: %@", zhHans: "%@：%@", String(alert.tool), String(firstLine))
+        case .question(let question): return question.questions.first?.question
         case .notice(let notice): return notice.body
         }
     }
@@ -850,6 +939,9 @@ struct ExpandedCardView: View {
             var parts = [L10n.text("lulu-lumei-dock wellness tip", zhHans: "lulu-lumei-dock 健康提示")]
             if queuedCount > 0 { parts.append(L10n.format("%@ more notifications", zhHans: "还有 %@ 条通知", String(queuedCount))) }
             return parts.joined(separator: " · ")
+        case .question(let question):
+            project = question.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+            sessionId = question.sessionId ?? question.id
         }
         var parts: [String] = []
         if let project { parts.append(project) }
@@ -870,156 +962,321 @@ struct TaskListCardView: View {
     var idleTasks: [AgentTask] = []
     var showStartTime = false
     var scale: CGFloat = 1
-    /// Task id whose subagent box is expanded (nil = all collapsed)
+    /// Physical notch width: the title row is split across both sides of the notch (0 when floating
+    /// / no notch)
+    var centerGap: CGFloat = 0
+    /// Id of the task whose subagent box is currently expanded (nil = all collapsed)
     var expandedTaskId: String? = nil
     var onToggleTimeMode: () -> Void = {}
     var onToggleSubagents: (String) -> Void = { _ in }
 
+    /// Row heights/spacing shared with `IslandGeometry.taskListHeight`
+    private typealias M = IslandGeometry.TaskList
+
+    // Palette (design mock agent-dock-final)
+    private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)        // #5AC8FA running
+    private static let labelGray = Color(red: 0.557, green: 0.557, blue: 0.576)     // #8E8E93 section header
+    private static let primaryText = Color(red: 0.961, green: 0.961, blue: 0.969)   // #F5F5F7
+    private static let secondaryText = Color(red: 0.596, green: 0.596, blue: 0.616) // #98989D timer
+    private static let sourceText = Color(red: 0.780, green: 0.780, blue: 0.800)    // #C7C7CC
+    private static let idleText = Color(red: 0.820, green: 0.820, blue: 0.839)      // #D1D1D6
+    private static let idleSourceText = Color(red: 0.682, green: 0.682, blue: 0.698) // #AEAEB2
+    private static let idleDot = Color(red: 0.282, green: 0.282, blue: 0.298)       // #48484C
+    private static let contextOrange = Color(red: 1.0, green: 0.624, blue: 0.039)   // #FF9F0A
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(L10n.format("%@ tasks in progress", zhHans: "进行中 %@ 个任务", String(tasks.count)))
-                    .font(.system(size: 11 * scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Spacer()
-                // Toggle the right-hand time display: elapsed duration ↔ start time
-                Button(action: onToggleTimeMode) {
-                    HStack(spacing: 3 * scale) {
-                        Image(systemName: showStartTime ? "calendar.badge.clock" : "stopwatch")
-                            .font(.system(size: 9 * scale))
-                        Text(showStartTime ? L10n.text("Start time", zhHans: "开始时间") : L10n.text("Duration", zhHans: "耗时"))
-                            .font(.system(size: 9.5 * scale))
-                    }
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.horizontal, 6 * scale)
-                    .padding(.vertical, 2 * scale)
-                    .background(Capsule().fill(Color.white.opacity(0.1)))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 18 * scale)
-            .padding(.top, 10 * scale)
-            .padding(.bottom, 4 * scale)
+            header
+                .frame(height: M.headerHeight * scale)
+                .padding(.top, M.topPadding * scale)
+                .padding(.bottom, M.headerGap * scale)
 
-            ForEach(tasks.prefix(4)) { task in
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 8 * scale) {
-                        statusIcon(task)
-                        SourceLabelBadge(source: task.source, size: 10 * scale)
-                        Text(taskDisplayName(task))
-                            .font(.system(size: 12 * scale))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
-                        Spacer(minLength: 8 * scale)
-                        // Jump to the session's terminal (only shown when the terminal is known and
-                        // still running)
-                        if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
-                            terminalJumpButton(terminal)
+            VStack(spacing: M.activeRowSpacing * scale) {
+                ForEach(tasks.prefix(M.maxActiveRows)) { task in
+                    VStack(spacing: M.subagentBoxGap * scale) {
+                        activeRow(task)
+                        if expandedTaskId == task.id, !task.subagents.isEmpty {
+                            subagentBox(task)
                         }
-                        // Subagent count badge (click to expand/collapse; hidden when there are no
-                        // subagents)
-                        if !task.subagents.isEmpty {
-                            subagentBadge(task)
-                        }
-                        if task.isCompacting {
-                            // No other events arrive during compaction; without a marker it looks
-                            // frozen
-                            Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
-                                .font(.system(size: 9.5 * scale))
-                                .foregroundStyle(Theme.gold.opacity(0.85))
-                                .lineLimit(1)
-                                .fixedSize()
-                        } else if let activity = task.currentActivity {
-                            // Show the target when there is one: "Edit main.swift" is far more
-                            // useful than just "Edit"
-                            Text(compactToolLabel(
-                                tool: activity, detail: task.currentToolDetail))
-                                .font(.system(size: 9.5 * scale).monospaced())
-                                .foregroundStyle(.white.opacity(0.45))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        if let context = task.contextUsedPercent, context >= 60 {
-                            Text("ctx \(Int(context.rounded()))%")
-                                .font(.system(size: 9.5 * scale, weight: .medium).monospacedDigit())
-                                .foregroundStyle(contextColor(context))
-                                .fixedSize()
-                        }
-                        // The trailing part must be fixedSize, or the middle tool label pushes it
-                        // onto a new line (the Plans row hit the same pitfall -- pin the trailing
-                        // part and let the middle yield)
-                        if showStartTime {
-                            Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
-                                .font(.system(size: 11 * scale).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.5))
-                                .fixedSize()
-                        } else {
-                            Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
-                                .font(.system(size: 11 * scale).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.5))
-                                .fixedSize()
-                        }
-                    }
-                    .frame(height: 30 * scale)
-
-                    if expandedTaskId == task.id, !task.subagents.isEmpty {
-                        subagentBox(task)
                     }
                 }
-                .padding(.horizontal, 18 * scale)
             }
-            if tasks.count > 4 {
-                Text(L10n.format("…%@ total", zhHans: "…等 %@ 个", String(tasks.count)))
+            if tasks.count > M.maxActiveRows {
+                Text(L10n.format("…%@ total", zhHans: "…等 %@ 个", "\(tasks.count)"))
                     .font(.system(size: 11 * scale))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .padding(.horizontal, 18 * scale)
+                    .foregroundStyle(Self.labelGray)
+                    .padding(.leading, 16 * scale)
+                    .frame(height: M.overflowLineHeight * scale)
             }
 
-            if !idleTasks.isEmpty {
-                Text(L10n.format("Idle sessions %@", zhHans: "空闲会话 %@", String(idleTasks.count)))
-                    .font(.system(size: 10 * scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.horizontal, 18 * scale)
-                    .padding(.top, 5 * scale)
-                ForEach(idleTasks.prefix(3)) { task in
-                    HStack(spacing: 8 * scale) {
-                        Circle()
-                            .fill(Color.white.opacity(0.45))
-                            .frame(width: 6 * scale, height: 6 * scale)
-                        SourceLabelBadge(source: task.source, size: 9 * scale)
-                            .opacity(0.75)
-                        Text(taskDisplayName(task))
-                            .font(.system(size: 11 * scale))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
-                        Spacer(minLength: 8 * scale)
-                        if let context = task.contextUsedPercent, context >= 60 {
-                            Text("ctx \(Int(context.rounded()))%")
-                                .font(.system(size: 9.5 * scale).monospacedDigit())
-                                .foregroundStyle(contextColor(context).opacity(0.7))
-                        }
-                        Text(relativeFormatter.localizedString(
-                            for: task.lastActivityAt, relativeTo: Date()))
-                            .font(.system(size: 10 * scale))
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                    .padding(.horizontal, 18 * scale)
-                    .frame(height: 24 * scale)
+            if IslandGeometry.taskListShowsIdle(
+                idleCount: idleTasks.count, expandedSubagentCount: expandedSubagentCount) {
+                if !tasks.isEmpty {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.07))
+                        .frame(height: 1)
+                        .padding(.horizontal, 4 * scale)
+                        .frame(height: M.dividerHeight * scale)
+                }
+                idleHeader
+                ForEach(idleTasks.prefix(M.maxIdleRows)) { task in
+                    idleRow(task)
                 }
             }
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 12 * scale)
+        .padding(.bottom, M.bottomPadding * scale)
     }
 
-    @ViewBuilder
-    private func statusIcon(_ task: AgentTask) -> some View {
-        if case .waiting = task.phase {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 10 * scale))
-                .foregroundStyle(.orange)
-        } else {
-            Circle().fill(Color.cyan).frame(width: 6 * scale, height: 6 * scale)
+    /// Same rule as IslandViewModel.expandedSubagentCount: the expanded task must be in the visible
+    /// rows
+    private var expandedSubagentCount: Int {
+        guard let id = expandedTaskId else { return 0 }
+        return tasks.prefix(M.maxActiveRows).first { $0.id == id }?.subagents.count ?? 0
+    }
+
+    // MARK: Title row
+
+    /// On notched screens the title row sits on both sides of the notch (content flush to the
+    /// screen top), leaving the notch width in the middle; when the wings don't fit, ViewThatFits
+    /// shortens the text first, never letting text slide behind the notch
+    private var header: some View {
+        HStack(spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                headerTitle(L10n.text("Running tasks", zhHans: "进行中任务"))
+                headerTitle(L10n.text("In progress", zhHans: "进行中"))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if centerGap > 0 {
+                Color.clear.frame(width: centerGap, height: 1)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                timeModeToggle(showLabel: true, showChevron: true)
+                timeModeToggle(showLabel: true, showChevron: false)
+                timeModeToggle(showLabel: false, showChevron: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .padding(.horizontal, 4 * scale)
+    }
+
+    private func headerTitle(_ label: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8 * scale) {
+            Text(label)
+                .font(.system(size: 11 * scale, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(Self.labelGray)
+                .fixedSize()
+            Text("\(tasks.count)")
+                .font(.system(size: 22 * scale, weight: .bold).monospacedDigit())
+                .foregroundStyle(Self.primaryText)
+                .fixedSize()
+        }
+    }
+
+    /// Toggle the right-side time display: elapsed duration ↔ start time (the inner button consumes
+    /// the click, so the island doesn't collapse)
+    private func timeModeToggle(showLabel: Bool, showChevron: Bool) -> some View {
+        Button(action: onToggleTimeMode) {
+            HStack(spacing: 5 * scale) {
+                Image(systemName: showStartTime ? "calendar" : "stopwatch")
+                    .font(.system(size: 12 * scale))
+                if showLabel {
+                    Text(showStartTime ? L10n.text("Start time", zhHans: "开始时间") : L10n.text("Duration", zhHans: "耗时"))
+                        .font(.system(size: 12 * scale))
+                }
+                if showChevron {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8 * scale, weight: .semibold))
+                        .foregroundStyle(Self.secondaryText.opacity(0.7))
+                }
+            }
+            .foregroundStyle(Self.secondaryText)
+            .fixedSize()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(showStartTime
+            ? L10n.text("Show elapsed time instead", zhHans: "改为显示耗时")
+            : L10n.text("Show start time instead", zhHans: "改为显示开始时间"))
+    }
+
+    // MARK: Running rows
+
+    /// Running row: light fill + glowing left bar + status dot; a waiting task turns the whole row
+    /// orange
+    private func activeRow(_ task: AgentTask) -> some View {
+        let tint = rowTint(task)
+        let shape = RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+        return HStack(spacing: 10 * scale) {
+            statusMark(task, tint: tint)
+            sourceLabel(task.source, textColor: Self.sourceText, weight: .medium)
+            VStack(alignment: .leading, spacing: 1 * scale) {
+                Text(taskDisplayName(task))
+                    .font(.system(size: 13 * scale))
+                    .foregroundStyle(Self.primaryText)
+                    .lineLimit(1)
+                activityLine(task)
+            }
+            Spacer(minLength: 6 * scale)
+            // Jump to the session's terminal (only shown when the terminal is known and still
+            // running)
+            if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
+                terminalJumpButton(terminal)
+            }
+            // Subagent count badge (click to expand/collapse; hidden with no subagents)
+            if !task.subagents.isEmpty {
+                subagentBadge(task)
+            }
+            if let context = task.contextUsedPercent, context >= 60 {
+                contextBadge(context)
+            }
+            // The trailing part must be fixedSize: otherwise the title in the middle pushes it onto
+            // a new line (the Plans row hit the same pitfall -- fix the trailing part and let the
+            // middle give way)
+            Group {
+                if showStartTime {
+                    Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
+                } else {
+                    Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
+                }
+            }
+            .font(.system(size: 12 * scale).monospacedDigit())
+            .foregroundStyle(Self.secondaryText)
+            .fixedSize()
+        }
+        .padding(.leading, 14 * scale)
+        .padding(.trailing, 12 * scale)
+        .frame(height: M.activeRowHeight * scale)
+        .background(shape.fill(tint.opacity(0.08)))
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(tint)
+                .frame(width: 3 * scale)
+                .padding(.vertical, 8 * scale)
+                .shadow(color: tint.opacity(0.9), radius: 5 * scale)
+        }
+        .clipShape(shape)
+    }
+
+    private func rowTint(_ task: AgentTask) -> Color {
+        if case .waiting = task.phase { return .orange }
+        return Self.accent
+    }
+
+    /// Status marker: a haloed dot when running, an orange exclamation mark when awaiting
+    /// confirmation (same width, title column aligned)
+    @ViewBuilder
+    private func statusMark(_ task: AgentTask, tint: Color) -> some View {
+        Group {
+            if case .waiting = task.phase {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 12 * scale, weight: .semibold))
+                    .foregroundStyle(tint)
+            } else {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 9 * scale, height: 9 * scale)
+                    .background(
+                        Circle()
+                            .fill(tint.opacity(0.18))
+                            .frame(width: 15 * scale, height: 15 * scale))
+            }
+        }
+        .frame(width: 15 * scale)
+    }
+
+    /// Second line under the title: compacting context / current tool (takes no line if neither,
+    /// title vertically centered)
+    @ViewBuilder
+    private func activityLine(_ task: AgentTask) -> some View {
+        if task.isCompacting {
+            // No other events arrive while compacting; without a marker it would look frozen
+            Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
+                .font(.system(size: 10 * scale))
+                .foregroundStyle(Theme.gold.opacity(0.85))
+                .lineLimit(1)
+        } else if let activity = task.currentActivity {
+            // Show the target too when there is one: "Edit main.swift" is far more useful than just
+            // "Edit"
+            Text(compactToolLabel(tool: activity, detail: task.currentToolDetail))
+                .font(.system(size: 10 * scale).monospaced())
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    // MARK: Idle section
+
+    private var idleHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
+            Text(L10n.text("Idle sessions", zhHans: "空闲会话"))
+                .font(.system(size: 11 * scale, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(Self.labelGray)
+            Text("\(idleTasks.count)")
+                .font(.system(size: 13 * scale, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Self.idleSourceText)
+        }
+        .padding(.horizontal, 4 * scale)
+        .frame(height: M.idleHeaderHeight * scale)
+    }
+
+    private func idleRow(_ task: AgentTask) -> some View {
+        HStack(spacing: 10 * scale) {
+            Circle()
+                .fill(Self.idleDot)
+                .frame(width: 9 * scale, height: 9 * scale)
+                .frame(width: 15 * scale)
+            sourceLabel(task.source, textColor: Self.idleSourceText, weight: .regular)
+            Text(taskDisplayName(task))
+                .font(.system(size: 13 * scale))
+                .foregroundStyle(Self.idleText)
+                .lineLimit(1)
+            Spacer(minLength: 6 * scale)
+            if let context = task.contextUsedPercent, context >= 60 {
+                contextBadge(context)
+            }
+            Text(relativeFormatter.localizedString(for: task.lastActivityAt, relativeTo: Date()))
+                .font(.system(size: 12 * scale).monospacedDigit())
+                .foregroundStyle(Self.labelGray)
+                .fixedSize()
+        }
+        .padding(.leading, 14 * scale)
+        .padding(.trailing, 12 * scale)
+        .frame(height: M.idleRowHeight * scale)
+    }
+
+    // MARK: Inline parts
+
+    /// Source: brand-color logo + gray lowercase source name
+    private func sourceLabel(
+        _ source: AgentSource, textColor: Color, weight: Font.Weight
+    ) -> some View {
+        HStack(spacing: 5 * scale) {
+            SourceBadge(source: source, size: 14 * scale, onDark: true)
+            Text(source.rawValue)
+                .font(.system(size: 12 * scale, weight: weight))
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+        }
+        .fixedSize()
+    }
+
+    /// Context usage badge (appears only at ≥60%): orange from 80%
+    private func contextBadge(_ percent: Double) -> some View {
+        let color = contextColor(percent)
+        return Text("ctx \(Int(percent.rounded()))%")
+            .font(.system(size: 10 * scale, weight: .semibold).monospacedDigit())
+            .foregroundStyle(color)
+            .padding(.horizontal, 6 * scale)
+            .padding(.vertical, 2 * scale)
+            .background(RoundedRectangle(cornerRadius: 5 * scale).fill(color.opacity(0.16)))
+            .fixedSize()
     }
 
     /// Trailing jump badge: brings the session's terminal app to the front (inner button consumes
@@ -1109,12 +1366,10 @@ struct TaskListCardView: View {
         }
     }
 
+    /// In the list, orange from 80%; red is reserved for the compact pill's right-wing ctx ≥ 90%
+    /// alert
     private func contextColor(_ percent: Double) -> Color {
-        switch percent {
-        case ..<80: return .white.opacity(0.45)
-        case ..<90: return .orange
-        default: return .red
-        }
+        percent < 80 ? Self.secondaryText : Self.contextOrange
     }
 }
 

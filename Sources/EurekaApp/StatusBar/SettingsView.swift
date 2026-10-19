@@ -180,6 +180,13 @@ struct SettingsView: View {
                     L10n.text("Waiting for confirmation / input", zhHans: "等待确认 / 等待输入"),
                     isOn: $settings.notifyWaiting)
                 Toggle(
+                    L10n.text("Answer Claude's questions on the island", zhHans: "在灵动岛上回答 Claude 的提问"),
+                    isOn: $settings.answerQuestionsOnIsland)
+                Text(askHookHint)
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle(
                     L10n.text("Task failed / interrupted", zhHans: "任务出错 / 中断"),
                     isOn: $settings.notifyError)
                 Toggle(
@@ -243,47 +250,7 @@ struct SettingsView: View {
             }
 
             settingCard(L10n.text("Desktop companion", zhHans: "桌面伙伴")) {
-                Toggle(
-                    L10n.text("Show the desktop companions (Lulu & Lumei)", zhHans: "显示桌面吉祥物（噜噜 & 噜妹）"),
-                    isOn: $settings.mascotEnabled)
-                if settings.mascotEnabled {
-                    HStack {
-                        Text(L10n.text("Animation pack", zhHans: "动画包"))
-                        Spacer()
-                        Picker("", selection: $settings.mascotPack) {
-                            ForEach(MascotPackLoader.availablePacks(), id: \.id) { pack in
-                                Text(pack.name).tag(pack.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 180)
-                    }
-                    Button(L10n.text("Open the animation-pack folder", zhHans: "打开动画包文件夹")) {
-                        MascotPackLoader.revealCustomFolder()
-                    }
-                        .controlSize(.small)
-                    if settings.mascotPack == MascotPackLoader.builtInID {
-                        let builtIn = MascotPackLoader.builtIn()
-                        let idleCount = builtIn.variants(for: .idle).count
-                        let workingCount = builtIn.variants(for: .working).count
-                        let waitingCount = builtIn.variants(for: .waiting).count
-                        Text(L10n.format(
-                            "%1$@ frequent poses: idle %2$@ · working %3$@ · waiting %4$@ · %5$@ gaze directions",
-                            zhHans: "高频行为共 %1$@ 种：空闲 %2$@ · 工作 %3$@ · 等待 %4$@ · %5$@ 向视线",
-                            String(idleCount + workingCount + waitingCount),
-                            String(idleCount),
-                            String(workingCount),
-                            String(waitingCount),
-                            String(builtIn.lookDirections.count)))
-                            .font(Theme.font.themed(9.5, .medium))
-                            .foregroundStyle(Theme.brandFg)
-                    }
-                    Text(L10n.text(
-                        "Put a custom pack in mascots/<name>/ plus manifest.json (the folder has notes and an example). Drag to move, it looks toward the pointer when idle, and right-click hides it.",
-                        zhHans: "自定义包放 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）；拖动可移动位置，空闲时会看向鼠标，右键可隐藏。"))
-                        .font(Theme.font.themed(9.5))
-                        .foregroundStyle(.tertiary)
-                }
+                MascotSettingsSection(settings: settings)
             }
 
             settingCard(L10n.text("Startup", zhHans: "启动")) {
@@ -329,8 +296,26 @@ struct SettingsView: View {
         }
     }
 
-    /// System notification degradation hint: reflects the real authorization state (unavailable in
-    /// dev / denied / OK)
+    /// Actual state of the answer hook: the toggle being on doesn't mean it's installed (Claude
+    /// Code hooks must be installed first)
+    private var askHookHint: String {
+        guard settings.answerQuestionsOnIsland else {
+            return L10n.text(
+                "When off, Claude's multiple-choice questions are answered only in Claude's own dialog.",
+                zhHans: "关闭时 Claude 的选择题只在 Claude 自己的确认界面里回答。")
+        }
+        if installer.askHookInstalled {
+            return L10n.text(
+                "Active: when Claude asks, the options also pop up on the island and whichever side answers first wins. The island card stays up to 10 minutes.",
+                zhHans: "已生效：Claude 提问时岛上同时弹出选项，岛上或 Claude 里哪边先答用哪边；岛上的卡最多保留 10 分钟。")
+        }
+        return L10n.text(
+            "Not active yet: install Claude Code hooks on the Integrations page first; that also adds an AskUserQuestion hook to settings.json.",
+            zhHans: "尚未生效：需要先在「集成」页安装 Claude Code hooks，会一并在 settings.json 加一条 AskUserQuestion 专用 hook。")
+    }
+
+    /// System notification fallback hint: reflects the real authorization state (unavailable in dev
+    /// / denied / OK)
     private var notificationHint: String? {
         switch notificationService.availability {
         case .unavailableNotBundled:

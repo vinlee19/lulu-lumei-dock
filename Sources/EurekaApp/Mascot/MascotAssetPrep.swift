@@ -229,7 +229,9 @@ enum MascotAssetPrep {
         print(L10n.format("✓ v3 atlas %@×%@: %@", zhHans: "✓ v3 图集 %@×%@: %@", String(atlasWidth), String(atlasHeight), String(outputURL.path)))
     }
 
-    private static func hasTransparentCorners(_ image: CGImage) -> Bool {
+    /// All four corners nearly transparent → already a cut-out transparent image (uploading a
+    /// mascot skips background removal on this basis)
+    static func hasTransparentCorners(_ image: CGImage) -> Bool {
         let bitmap = NSBitmapImageRep(cgImage: image)
         guard bitmap.hasAlpha else { return false }
         let points = [

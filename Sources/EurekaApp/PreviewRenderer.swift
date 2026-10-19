@@ -58,6 +58,25 @@ enum PreviewRenderer {
             let vm = IslandViewModel()
             vm.updateScreen(screen)
             configure(vm)
+            if vm.display == .taskList {
+                // Layout height must match IslandGeometry.taskListHeight: too small clips content,
+                // too large leaves empty space at the card bottom
+                let card = TaskListCardView(
+                    tasks: vm.activeTasks, idleTasks: vm.idleTasks,
+                    showStartTime: vm.showStartTime, scale: vm.uiScale,
+                    centerGap: vm.pillCenterGap, expandedTaskId: vm.expandedSubagentTaskId)
+                let measured = NSHostingView(rootView: card.frame(width: vm.contentSize.width))
+                    .fittingSize.height
+                print("任务列表高度 \(name)：排版 \(measured) / 计算 \(vm.contentSize.height)")
+            }
+            if let draft = vm.questionDraft {
+                let card = QuestionCardView(
+                    draft: draft, sessionLabel: vm.questionSessionLabel, scale: vm.uiScale,
+                    topInset: vm.questionTopInset, questionLines: vm.questionLines)
+                let measured = NSHostingView(rootView: card.frame(width: vm.contentSize.width))
+                    .fittingSize.height
+                print("提问卡高度 \(name)：\(vm.questionLines) 行问题，排版 \(measured) / 计算 \(vm.contentSize.height)")
+            }
             let root = IslandRootView(viewModel: vm)
                 .frame(width: vm.layout.panelSize.width, height: vm.layout.panelSize.height)
             let renderer = ImageRenderer(content: root)
@@ -91,6 +110,80 @@ enum PreviewRenderer {
         }
         snapshot("5-card-error", screen: notched) {
             $0.enqueueFinished(errored)
+        }
+        // Finished card auto-dismissed on time with no running tasks: the pill keeps an
+        // unread-finished mark instead of hiding entirely
+        snapshot("5b-compact-unread", screen: notched) {
+            $0.enqueueFinished(finished)
+            $0.expireCurrentCard()
+        }
+        // Question cards (AskUserQuestion): single-select with 4 options / multi-select second of
+        // two questions / "Other" being typed
+        let pickFramework = AskQuestion(
+            question: "这个页面用哪个前端框架重写？会影响后面组件库和构建配置的选择。",
+            header: "框架",
+            options: [
+                AskOption(label: "React", description: "生态最大，团队已有组件库"),
+                AskOption(label: "Vue", description: "模板语法上手快"),
+                AskOption(label: "Svelte", description: "编译期框架，包体最小"),
+                AskOption(label: "保持现状", description: "只修 bug，不重写"),
+            ],
+            multiSelect: false)
+        let pickSections = AskQuestion(
+            question: "周报里要包含哪些章节？",
+            header: "章节",
+            options: [
+                AskOption(label: "本周进展"), AskOption(label: "风险与阻塞"),
+                AskOption(label: "下周计划", description: "按优先级排序"),
+            ],
+            multiSelect: true)
+        func asking(_ questions: [AskQuestion]) -> PendingQuestion {
+            PendingQuestion(
+                id: "toolu_preview", sessionId: "p1", cwd: "/Users/me/work/auth-service",
+                hookPid: ProcessInfo.processInfo.processIdentifier, createdAt: now,
+                questions: questions)
+        }
+        // The question from live testing: a one-line question and two options; no second-line gap
+        // should appear between question and options
+        snapshot("14d-card-question-one-line", screen: notched) {
+            $0.updatePendingQuestions([asking([AskQuestion(
+                question: "Which framework?", header: "Framework",
+                options: [
+                    AskOption(label: "React", description: "Component library"),
+                    AskOption(label: "Vue", description: "Template syntax"),
+                ],
+                multiSelect: false)])])
+        }
+        snapshot("14-card-question", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.updatePendingQuestions([asking([pickFramework])])
+        }
+        snapshot("14b-card-question-multi", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.updatePendingQuestions([asking([pickFramework, pickSections])])
+            $0.chooseOption("React")
+            $0.toggleOption("风险与阻塞")
+            $0.toggleOption("本周进展")
+        }
+        snapshot("14c-card-question-other-plain", screen: plain) {
+            $0.updatePendingQuestions([asking([pickFramework])])
+            $0.beginOther()
+        }
+
+        // Design mock compact state: two sources running (lit + cyan dot), one source with only
+        // idle sessions (dimmed), an idle session at ctx 92% lights the right-wing alert
+        snapshot("5d-compact-ctx-alert", screen: notched) {
+            var hot = AgentTask(
+                source: .gemini, sessionId: "hot-idle", title: "方案需要继续增加",
+                cwd: "/Users/me/work/one-agent",
+                startedAt: now.addingTimeInterval(-3600), phase: .idle)
+            hot.contextUsedPercent = 92
+            $0.updateActiveTasks([running1, running2], idle: [hot])
+        }
+        snapshot("5c-compact-running-unread", screen: notched) {
+            $0.updateActiveTasks([running2])
+            $0.enqueueFinished(finished)
+            $0.expireCurrentCard()
         }
         snapshot("6-card-waiting", screen: notched) {
             $0.updateActiveTasks([waitingTask])
@@ -138,6 +231,32 @@ enum PreviewRenderer {
             var compacting = running2
             compacting.isCompacting = true
             $0.updateActiveTasks([withActivity, compacting, waitingTask], idle: [idle1, idle2])
+            $0.islandTapped()
+        }
+        snapshot("8b-tasklist-idle-only", screen: notched) {
+            var idle = AgentTask(
+                source: .claude, sessionId: "5e6f7a8b-idle", title: "方案需要继续增加：我提到 Analytics",
+                cwd: "/Users/me/work/one-agent",
+                startedAt: now.addingTimeInterval(-3600), phase: .idle)
+            idle.lastActivityAt = now.addingTimeInterval(-120)
+            idle.contextUsedPercent = 92
+            $0.updateActiveTasks([], idle: [idle])
+            $0.enqueueFinished(finished)
+            $0.expireCurrentCard()
+            $0.islandTapped()
+        }
+        snapshot("8c-tasklist-crowded-plain", screen: plain) {
+            var idleTasks: [AgentTask] = []
+            for index in 0..<5 {
+                var idle = AgentTask(
+                    source: .codex, sessionId: "idle-\(index)", title: L10n.format("Idle sessions %@", zhHans: "空闲会话 %@", "\(index)"),
+                    cwd: "/Users/me/work/idle", startedAt: now.addingTimeInterval(-7200),
+                    phase: .idle)
+                idle.lastActivityAt = now.addingTimeInterval(-Double(index + 1) * 360)
+                idleTasks.append(idle)
+            }
+            $0.updateActiveTasks(
+                [running1, running2, running3, running4, running5], idle: idleTasks)
             $0.islandTapped()
         }
 

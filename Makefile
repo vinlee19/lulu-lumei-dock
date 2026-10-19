@@ -4,6 +4,9 @@ build:
 	$(SWIFT) build
 
 test:
+	# The answer-hook end-to-end test runs eureka-ask directly; it is not a dependency of eureka-tests,
+	# so build it separately first
+	$(SWIFT) build --product eureka-ask
 	$(SWIFT) run eureka-tests
 
 run:

@@ -1,0 +1,307 @@
+import AppKit
+import EurekaKit
+import Foundation
+import ImageIO
+import UniformTypeIdentifiers
+
+extension Notification.Name {
+    /// A pack's files were changed from the UI (image swap / rename). object = pack id
+    static let eurekaMascotPackChanged = Notification.Name("eureka.mascotPackChanged")
+}
+
+enum MascotImportError: LocalizedError {
+    case unreadable
+    case tooLarge
+    case notAnImage
+    case writeFailed
+    case notEditable
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadable:
+            return L10n.text("The selected file could not be read", zhHans: "无法读取所选文件")
+        case .tooLarge:
+            return L10n.format(
+                "The image is larger than %@ MB; pick a smaller one",
+                zhHans: "图片超过 %@MB，请换一张小一点的",
+                String(MascotImageImporter.maxFileBytes / 1_048_576))
+        case .notAnImage:
+            return L10n.text("The selected file is not a recognised image", zhHans: "所选文件不是可识别的图片")
+        case .writeFailed:
+            return L10n.text("Saving the image failed", zhHans: "保存图片失败")
+        case .notEditable:
+            return L10n.text(
+                "This companion was not uploaded in the app; edit it in the animation-pack folder",
+                zhHans: "这个形象不是在界面上传的，请到动画包文件夹里手动修改")
+        }
+    }
+}
+
+/// Turns a user-picked image into a pack file: still images are downscaled to ≤ 512px on the long
+/// edge and saved as PNG (optionally cutting away the solid-color outer background); multi-frame
+/// GIF / APNG are copied as-is to keep the animation. The source file is only read, never modified.
+enum MascotImageImporter {
+    static let maxFileBytes = 20 * 1_024 * 1_024
+    static let maxPixelEdge = 512
+    static let allowedTypes: [UTType] = [.png, .jpeg, .gif, .heic, .tiff, .webP, .bmp]
+
+    /// Imports one image into the pack directory and returns the written file name
+    static func importImage(
+        from source: URL, into dir: URL, state: MascotState, removeBackground: Bool
+    ) throws -> String {
+        let values = try? source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values?.isRegularFile == true, let size = values?.fileSize else {
+            throw MascotImportError.unreadable
+        }
+        guard size <= maxFileBytes else { throw MascotImportError.tooLarge }
+        guard let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil),
+              CGImageSourceGetCount(imageSource) > 0
+        else { throw MascotImportError.notAnImage }
+
+        let stamp = Int(Date().timeIntervalSince1970 * 1_000)
+        let type = CGImageSourceGetType(imageSource).map { $0 as String }
+
+        // Animated image: keep the original file (re-encoding would lose frame timing); the
+        // rendering layer plays it natively with NSImageView.
+        if CGImageSourceGetCount(imageSource) > 1,
+           type == UTType.gif.identifier || type == UTType.png.identifier {
+            let ext = type == UTType.gif.identifier ? "gif" : "apng"
+            let name = MascotUploadNaming.imageFileName(state: state, stamp: stamp, ext: ext)
+            do {
+                try FileManager.default.copyItem(at: source, to: dir.appendingPathComponent(name))
+            } catch {
+                throw MascotImportError.writeFailed
+            }
+            return name
+        }
+
+        // The thumbnail API also handles EXIF orientation and never upscales small images.
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelEdge,
+        ]
+        guard var image = CGImageSourceCreateThumbnailAtIndex(
+            imageSource, 0, options as CFDictionary)
+        else { throw MascotImportError.notAnImage }
+        // Images that already have a transparent background aren't cut again, so a dark outline
+        // touching the edge isn't eaten as background.
+        if removeBackground, !MascotAssetPrep.hasTransparentCorners(image),
+           let cut = MascotAssetPrep.removeBackground(image) {
+            image = cut
+        }
+        let name = MascotUploadNaming.imageFileName(state: state, stamp: stamp, ext: "png")
+        guard writePNG(image, to: dir.appendingPathComponent(name)) else {
+            throw MascotImportError.writeFailed
+        }
+        return name
+    }
+
+    private static func writePNG(_ image: CGImage, to url: URL) -> Bool {
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil)
+        else { return false }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination)
+    }
+}
+
+/// Data source for the Settings "Desktop companion" section: lists selectable mascots, generates
+/// thumbnails, and handles adding, deleting and editing uploaded packs.
+/// Only edits packs generated by UI upload (manifest carries origin=upload); hand-written animation
+/// packs and presets are always read-only.
+/// Called only by the Settings page on the main thread; not marked @MainActor so it can be used
+/// directly as a @StateObject initial value.
+final class MascotLibrary: ObservableObject {
+    /// The uploaded pack being edited
+    struct Editing: Equatable {
+        var id: String
+        var name: String
+        /// States with their own configured image → file name
+        var files: [MascotState: String]
+        /// The image each editable state actually shows (including ones reused along the fallback
+        /// chain)
+        var images: [MascotState: NSImage]
+    }
+
+    @Published private(set) var packs: [MascotPackInfo] = []
+    @Published private(set) var thumbnails: [String: NSImage] = [:]
+    @Published private(set) var editing: Editing?
+    @Published var lastError: String?
+
+    var presetPacks: [MascotPackInfo] { packs.filter { $0.kind != .custom } }
+    var customPacks: [MascotPackInfo] { packs.filter { $0.kind == .custom } }
+
+    func refresh() {
+        packs = MascotPackLoader.availablePacks()
+        var result: [String: NSImage] = [:]
+        for info in packs {
+            let pack = MascotPackLoader.load(packID: info.id)
+            let animation = pack.animation(for: .idle)
+                ?? pack.variants(for: .idle).first?.animation
+            if let animation, let image = Self.firstFrame(of: animation) {
+                result[info.id] = image
+            }
+        }
+        thumbnails = result
+    }
+
+    /// Called when the selection changes: an uploaded pack becomes editable; any other pack clears
+    /// the editing area.
+    func select(packID: String) {
+        guard let dir = try? editableDirectory(packID),
+              let data = MascotPackLoader.readManifest(in: dir)
+        else {
+            editing = nil
+            return
+        }
+        let files = MascotManifestEditor.stateFiles(data)
+        var images: [MascotState: NSImage] = [:]
+        for state in MascotManifestEditor.editableStates {
+            guard let source = MascotManifestEditor.effectiveSource(for: state, files: files),
+                  let file = files[source],
+                  let image = NSImage(contentsOf: dir.appendingPathComponent(file))
+            else { continue }
+            images[state] = image
+        }
+        editing = Editing(
+            id: packID,
+            name: MascotManifestEditor.name(data) ?? packID,
+            files: files,
+            images: images)
+    }
+
+    /// Creates a new mascot from one image; returns the new pack id on success
+    func createPack(from source: URL, removeBackground: Bool) -> String? {
+        let fm = FileManager.default
+        let root = MascotPackLoader.customRoot()
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            let existing = Set((try? fm.contentsOfDirectory(atPath: root.path)) ?? [])
+            let dirName = MascotUploadNaming.directoryName(now: Date(), existing: existing)
+            let dir = root.appendingPathComponent(dirName, isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: false)
+            do {
+                let file = try MascotImageImporter.importImage(
+                    from: source, into: dir, state: .idle, removeBackground: removeBackground)
+                let manifest = MascotManifestEditor.makeUploadManifest(
+                    name: MascotUploadNaming.displayName(fromFileName: source.lastPathComponent),
+                    baseFile: file)
+                try manifest.write(to: dir.appendingPathComponent("manifest.json"), options: .atomic)
+            } catch {
+                // Don't leave a half-built directory behind, or an invalid pack would show up in
+                // the list
+                try? fm.removeItem(at: dir)
+                throw error
+            }
+            lastError = nil
+            refresh()
+            return MascotPackRef.custom(dirName).id
+        } catch {
+            lastError = Self.message(for: error)
+            return nil
+        }
+    }
+
+    /// Swaps the image for one state on its own (for idle this replaces the base mascot)
+    func setImage(for state: MascotState, packID: String, from source: URL, removeBackground: Bool) {
+        perform(packID: packID) { dir, data in
+            let file = try MascotImageImporter.importImage(
+                from: source, into: dir, state: state, removeBackground: removeBackground)
+            let old = MascotManifestEditor.stateFiles(data)[state]
+            let updated = try MascotManifestEditor.settingState(state, file: file, in: data)
+            return (updated, old.map { [$0] } ?? [])
+        }
+    }
+
+    /// Clears a state's own image so it goes back to reusing one along the fallback chain
+    func resetImage(for state: MascotState, packID: String) {
+        perform(packID: packID) { _, data in
+            let old = MascotManifestEditor.stateFiles(data)[state]
+            let updated = try MascotManifestEditor.settingState(state, file: nil, in: data)
+            return (updated, old.map { [$0] } ?? [])
+        }
+    }
+
+    func rename(packID: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        perform(packID: packID) { _, data in
+            let updated = try MascotManifestEditor.renaming(to: String(trimmed.prefix(24)), in: data)
+            return (updated, [])
+        }
+    }
+
+    /// Deletes an uploaded pack: the whole directory is moved to the Trash (recoverable) instead of
+    /// being erased outright.
+    func delete(packID: String) {
+        do {
+            let dir = try editableDirectory(packID)
+            try FileManager.default.trashItem(at: dir, resultingItemURL: nil)
+            lastError = nil
+        } catch {
+            lastError = Self.message(for: error)
+        }
+        if editing?.id == packID { editing = nil }
+        refresh()
+    }
+
+    // MARK: - Internals
+
+    /// Reads the manifest → modifies it → writes it back atomically, then removes old images that
+    /// are no longer referenced and notifies the desktop pet to reload.
+    private func perform(
+        packID: String,
+        _ change: (URL, Data) throws -> (manifest: Data, replacedFiles: [String])
+    ) {
+        do {
+            let dir = try editableDirectory(packID)
+            guard let data = MascotPackLoader.readManifest(in: dir) else {
+                throw MascotImportError.notEditable
+            }
+            let (updated, replaced) = try change(dir, data)
+            try updated.write(to: dir.appendingPathComponent("manifest.json"), options: .atomic)
+            let stillUsed = Set(MascotManifestEditor.stateFiles(updated).values)
+            // Only delete single-component file names inside the pack directory, so a manifest
+            // hand-edited to ../ and the like can't escape it
+            let stale = replaced.filter {
+                !stillUsed.contains($0) && MascotPackRef.isSafeDirectoryName($0)
+            }
+            for file in stale {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+            }
+            lastError = nil
+            NotificationCenter.default.post(name: .eurekaMascotPackChanged, object: packID)
+        } catch {
+            lastError = Self.message(for: error)
+        }
+        refresh()
+        select(packID: packID)
+    }
+
+    /// Only packs under the user directory whose manifest is marked origin=upload can be modified
+    /// from the UI
+    private func editableDirectory(_ packID: String) throws -> URL {
+        guard case .custom = MascotPackRef(id: packID),
+              let dir = MascotPackLoader.directory(for: MascotPackRef(id: packID)),
+              let data = MascotPackLoader.readManifest(in: dir),
+              MascotManifestEditor.isUpload(data)
+        else { throw MascotImportError.notEditable }
+        return dir
+    }
+
+    private static func firstFrame(of animation: MascotAnimation) -> NSImage? {
+        switch animation {
+        case .frames(let urls, _):
+            return urls.first.flatMap { NSImage(contentsOf: $0) }
+        case .animatedImage(let url):
+            return NSImage(contentsOf: url)
+        case .spriteSequence(let sheet, let cells, _):
+            return MascotSpriteCache.frames(sheet: sheet, cells: Array(cells.prefix(1))).first
+        }
+    }
+
+    private static func message(for error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}

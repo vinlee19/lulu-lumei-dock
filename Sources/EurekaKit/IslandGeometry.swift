@@ -113,11 +113,112 @@ public enum IslandGeometry {
         return rows + gaps + overflow + 16   // 16 = box top + bottom padding
     }
 
-    /// Whether a custom position is still usable: the panel's top "pill band" (top 72pt ×
-    /// central half width) must lie entirely within some screen. A mere edge overlap (e.g.
-    /// stale coordinates left after an external display is unplugged/rearranged) counts as
-    /// unusable → the caller clears the saved position and falls back to the default.
-    /// Pure function (screens passed as an array of frames), easy to unit-test.
+    /// Row heights and spacing of the task list card (1.0× baseline, not multiplied by scale).
+    /// `TaskListCardView` lays out with these values and `taskListHeight` computes the card height
+    /// from the same set -- both sides share this one copy.
+    public enum TaskList {
+        public static let maxActiveRows = 4
+        public static let maxIdleRows = 3
+        public static let topPadding: CGFloat = 10
+        /// Title row: "Running tasks N" + time-mode toggle (split across both sides of the notch on
+        /// notched screens)
+        public static let headerHeight: CGFloat = 24
+        public static let headerGap: CGFloat = 8
+        public static let activeRowHeight: CGFloat = 42
+        public static let activeRowSpacing: CGFloat = 6
+        /// Spacing between a subagent box and its row
+        public static let subagentBoxGap: CGFloat = 4
+        /// The "…N total" row when running tasks exceed maxActiveRows
+        public static let overflowLineHeight: CGFloat = 16
+        /// Divider between the running and idle sections (1pt line + 9 above and below)
+        public static let dividerHeight: CGFloat = 19
+        public static let idleHeaderHeight: CGFloat = 20
+        public static let idleRowHeight: CGFloat = 34
+        public static let bottomPadding: CGFloat = 10
+    }
+
+    /// Row heights and spacing of the question card (1.0× baseline, not multiplied by scale).
+    /// `QuestionCardView` lays out with these values, and `questionCardHeight` computes the height
+    /// from the same set.
+    public enum QuestionCard {
+        /// When fused with the notch, content starts at the notch's bottom edge (`topInset` is the
+        /// notch height passed by the caller); otherwise this is the top margin
+        public static let plainTopPadding: CGFloat = 14
+        /// Source + header label + progress "1/2"
+        public static let headerHeight: CGFloat = 20
+        /// Height of each line of question text; laid out by the actual line count (1–2), so a
+        /// one-line question leaves no second-line gap
+        public static let questionLineHeight: CGFloat = 20
+        public static let maxQuestionLines = 2
+        public static let sectionGap: CGFloat = 8
+        public static let optionHeight: CGFloat = 38
+        public static let optionSpacing: CGFloat = 6
+        /// The "Other…" row (same height once expanded into a text field)
+        public static let otherRowHeight: CGFloat = 32
+        /// The "Answer in terminal" / "Confirm" button row
+        public static let footerHeight: CGFloat = 28
+        public static let bottomPadding: CGFloat = 12
+        /// No matter how many options, only this many rows are laid out (AskUserQuestion specifies
+        /// 2–4)
+        public static let maxOptions = 4
+    }
+
+    /// Question area height (1.0× baseline): line count clamped to 1–2
+    public static func questionTextHeight(lines: Int) -> CGFloat {
+        CGFloat(min(max(lines, 1), QuestionCard.maxQuestionLines)) * QuestionCard.questionLineHeight
+    }
+
+    /// Question card height (1.0× baseline). `questionLines`: number of lines the question text
+    /// lays out to; `topInset`: the notch height when fused with the notch, otherwise 0
+    public static func questionCardHeight(
+        optionCount: Int, questionLines: Int, topInset: CGFloat
+    ) -> CGFloat {
+        typealias M = QuestionCard
+        let rows = min(max(optionCount, 1), M.maxOptions)
+        let top = max(topInset + 6, M.plainTopPadding)
+        return top + M.headerHeight + M.sectionGap + questionTextHeight(lines: questionLines)
+            + M.sectionGap
+            + CGFloat(rows) * M.optionHeight + CGFloat(rows - 1) * M.optionSpacing
+            + M.optionSpacing + M.otherRowHeight + M.sectionGap + M.footerHeight
+            + M.bottomPadding
+    }
+
+    /// The idle section is hidden while a subagent box is expanded: showing both would exceed the
+    /// panel height (the panel can't grow -- a custom position stores the panel's bottom-left
+    /// corner, so changing the height would shift the user's placed floating island upward)
+    public static func taskListShowsIdle(idleCount: Int, expandedSubagentCount: Int) -> Bool {
+        idleCount > 0 && expandedSubagentCount == 0
+    }
+
+    /// Task list card height (1.0× baseline, not multiplied by scale). `expandedSubagentCount`:
+    /// number of subagents in the expanded subagent box (0 = none expanded)
+    public static func taskListHeight(
+        activeCount: Int, idleCount: Int, expandedSubagentCount: Int = 0
+    ) -> CGFloat {
+        typealias M = TaskList
+        let activeRows = min(activeCount, M.maxActiveRows)
+        let idleRows = min(idleCount, M.maxIdleRows)
+        var height = M.topPadding + M.headerHeight + M.headerGap
+        if activeRows > 0 {
+            height += CGFloat(activeRows) * M.activeRowHeight
+                + CGFloat(activeRows - 1) * M.activeRowSpacing
+        }
+        if activeCount > M.maxActiveRows { height += M.overflowLineHeight }
+        if expandedSubagentCount > 0 {
+            height += M.subagentBoxGap + subagentBoxHeight(count: expandedSubagentCount)
+        }
+        if taskListShowsIdle(idleCount: idleCount, expandedSubagentCount: expandedSubagentCount) {
+            if activeRows > 0 { height += M.dividerHeight }
+            height += M.idleHeaderHeight + CGFloat(idleRows) * M.idleRowHeight
+        }
+        return height + M.bottomPadding
+    }
+
+    /// Whether a custom position is still usable: the "pill band" at the top of the panel (top 72pt
+    /// × central half-width) must lie entirely within one screen. A mere edge intersection (e.g.
+    /// stale coordinates left after unplugging / rearranging an external display) counts as
+    /// unusable → the caller clears the saved value and returns to the default position. Pure
+    /// function (screens are passed as an array of frames), easy to unit test.
     public static func positionUsable(
         origin: CGPoint, panelSize: CGSize, screens: [CGRect]
     ) -> Bool {

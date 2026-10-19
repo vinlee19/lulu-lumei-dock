@@ -20,6 +20,7 @@ final class MascotPanelController {
     private var isProgrammaticMove = false
     private var pointerTimer: Timer?
     private var lastPointerLocation: NSPoint?
+    private var currentPackID = MascotPackLoader.builtInID
 
     init() {
         viewModel = MascotViewModel(pack: MascotPackLoader.builtIn())
@@ -56,6 +57,9 @@ final class MascotPanelController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(packFilesChanged(_:)),
+            name: .eurekaMascotPackChanged, object: nil)
         pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.updatePointerBehavior() }
@@ -73,11 +77,21 @@ final class MascotPanelController {
     }
 
     func applyPack(id: String) {
+        currentPackID = id
         viewModel.setPack(MascotPackLoader.load(packID: id))
     }
 
-    /// Low-frequency mouse position sampling: when idle both characters naturally look at the
-    /// mouse; movement wakes them from sleep.
+    /// Reloads right after the Settings page swaps an image / renames the current mascot (the pack
+    /// id doesn't change, so the setting won't trigger it)
+    @objc private func packFilesChanged(_ note: Notification) {
+        MainActor.assumeIsolated {
+            guard (note.object as? String) == currentPackID else { return }
+            applyPack(id: currentPackID)
+        }
+    }
+
+    /// Samples the mouse position at low frequency: in idle the two characters naturally look
+    /// toward the mouse; while asleep, moving it can wake them.
     private func updatePointerBehavior() {
         guard panel.isVisible else {
             lastPointerLocation = nil

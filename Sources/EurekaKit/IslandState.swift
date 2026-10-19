@@ -11,6 +11,11 @@ public struct IslandState: Equatable, Sendable {
         /// High-risk operation security alert (red card; jumps the queue to the top,
         /// auto-dismisses)
         case alert(RiskAlert)
+        /// The agent's multiple-choice question (AskUserQuestion), answered by clicking on the
+        /// island. Jumps the queue to the top, never auto-dismisses:
+        /// the agent is paused waiting for the answer; withdrawn only once answered (on the island
+        /// or in Claude)
+        case question(PendingQuestion)
     }
 
     /// Active tasks (including waiting), sorted by start time
@@ -48,11 +53,11 @@ extension IslandState.Card {
     /// "the waiting card dismisses faster than the finished card", which makes no sense.
     public var autoDismissExtraSeconds: TimeInterval? {
         switch self {
-        case .finished: return 0  // the base value; the slider applies directly
-        case .waiting: return 4   // permission/input requests need a clear read: default 6+4=10s
-        case .notice: return 5    // give care copy enough reading time
-        case .alert: return 6     // security alerts linger longer (the audit page and
-                                  // Notification Center keep their own copy)
+        case .finished: return 0  // baseline value; the slider applies directly
+        case .waiting: return 4   // permission/input requests need a clear look: default 6+4=10s
+        case .notice: return 5    // wellbeing copy gets ample reading time
+        case .alert: return 6     // security alerts stay longer (audit page / Notification Center keep a record)
+        case .question: return nil  // withdrawn only when answered / dismissed / the hook gives up
         }
     }
 

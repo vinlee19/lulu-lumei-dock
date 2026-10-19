@@ -62,7 +62,7 @@ final class InstallerService: ObservableObject {
         var benefit: String {
             switch self {
             case .claudeHooks:
-                return L10n.text("Live task cards, permission reminders, tool-call auditing, and the session terminal", zhHans: "实时任务卡、等待授权提醒、工具调用审计、会话所在终端")
+                return L10n.text("Live task cards, permission reminders, tool-call auditing, the session terminal, and answering questions on the island", zhHans: "实时任务卡、等待授权提醒、工具调用审计、会话所在终端、在灵动岛上回答提问")
             case .codexNotify:
                 return L10n.text("Turn completion notifications and the session terminal", zhHans: "回合完成通知、会话所在终端")
             case .codexHooks:
@@ -88,8 +88,14 @@ final class InstallerService: ObservableObject {
     /// Short name of the program our Codex notify forwards to, when it is chained.
     @Published private(set) var codexNotifyChainedTo: String?
     @Published private(set) var message: String?
-    /// Whether the last auto-update was skipped due to an anomaly (the reason must be visible to
-    /// the user, not silent)
+    /// Whether the island answer hook is installed in settings.json and points at the stable path
+    @Published private(set) var askHookInstalled = false
+    /// Current value of the "Answer Claude's questions on the island" setting (AppDelegate wires it
+    /// to AppSettings). Installing / updating Claude hooks adds or removes the answer hook
+    /// accordingly
+    var askHookEnabled: () -> Bool = { true }
+    /// Whether the last auto-update was skipped due to an error (the reason must be shown to the
+    /// user, never silent)
     @Published private(set) var autoUpdateSkipped: [Integration] = []
 
     /// Compatibility for an old call site (AuditView checks whether Claude hooks are available)
@@ -121,6 +127,9 @@ final class InstallerService: ObservableObject {
         diagnoses[.claudeHooks] = ClaudeHooksInstaller.diagnose(
             json: claudeJSON, expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
+        askHookInstalled = ClaudeAskHookInstaller.isInstalled(
+            in: claudeJSON, askPath: RelaySyncer.stableAskURL.path)
+            && FileManager.default.isExecutableFile(atPath: RelaySyncer.stableAskURL.path)
         let codexToml = ConfigFile.read(codexConfigURL)
         diagnoses[.codexNotify] = CodexNotifyInstaller.diagnose(
             toml: codexToml, expectedRelayPath: relay,
@@ -218,7 +227,8 @@ final class InstallerService: ObservableObject {
         let updated: String
         switch integration {
         case .claudeHooks:
-            updated = try ClaudeHooksInstaller.install(into: original, relayPath: relayPath)
+            let relayHooks = try ClaudeHooksInstaller.install(into: original, relayPath: relayPath)
+            updated = try applyAskHook(to: relayHooks)
         case .codexNotify:
             updated = try CodexNotifyInstaller.install(into: original, relayPath: relayPath)
         case .codexHooks:
@@ -227,6 +237,63 @@ final class InstallerService: ObservableObject {
             updated = try TraeHooksInstaller.install(into: original, relayPath: relayPath)
         }
         try ConfigFile.backupThenWrite(path: url, newContent: updated)
+    }
+
+    // MARK: - Island answer hook (installed/removed with Claude hooks, separate toggle in settings)
+
+    /// Adds or removes the answer hook in the settings.json content according to the toggle. Throws
+    /// when the toggle is on but eureka-ask can't be found (not built in dev), rather than
+    /// installing a hook pointing at a missing file
+    private func applyAskHook(to json: String) throws -> String {
+        guard askHookEnabled() else { return try ClaudeAskHookInstaller.uninstall(from: json) }
+        guard let ask = RelaySyncer.syncAsk() else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [
+                NSLocalizedDescriptionKey: L10n.text(
+                    "eureka-ask not found (it should sit next to the app)",
+                    zhHans: "找不到 eureka-ask（应与应用同目录）"),
+            ])
+        }
+        return try ClaudeAskHookInstaller.install(into: json, askPath: ask.path)
+    }
+
+    /// Called when the "Answer Claude's questions on the island" setting is toggled; only
+    /// adds/removes the answer entry:
+    /// - Claude hooks installed: install or remove it per the toggle;
+    /// - Claude hooks not installed but the answer entry is installed on its own: still remove it
+    ///   when turned off (else the hook outlives the toggle);
+    /// - neither: write nothing (it is added along with the hooks when the user installs them)
+    func applyAskHookSetting() {
+        refresh()
+        let diagnosis = diagnosis(for: .claudeHooks)
+        let askEntryPresent = ClaudeAskHookInstaller.hasAnyEntry(
+            in: ConfigFile.read(EurekaCLI.claudeSettingsURL))
+        guard diagnosis.isInstalledInSomeForm || askEntryPresent else { return }
+        guard !diagnosis.blocksAutomaticWrite else {
+            message = L10n.format(
+                "Claude Code hooks: %@; the question hook was left unchanged",
+                zhHans: "Claude Code hooks：%@，未改动答题 hook",
+                diagnosis.detail ?? L10n.text("configuration problem", zhHans: "配置异常"))
+            return
+        }
+        let url = EurekaCLI.claudeSettingsURL
+        do {
+            let original = ConfigFile.read(url)
+            let updated = try applyAskHook(to: original)
+            guard updated != original else { return }
+            try ConfigFile.backupThenWrite(path: url, newContent: updated)
+            message = askHookEnabled()
+                ? L10n.text(
+                    "Answering Claude's questions on the island is on (the original config was backed up)",
+                    zhHans: "已开启在灵动岛上回答 Claude 的提问（原配置已备份）")
+                : L10n.text(
+                    "Answering Claude's questions on the island is off; questions go back to Claude (the original config was backed up)",
+                    zhHans: "已关闭在灵动岛上回答 Claude 的提问，提问回到终端（原配置已备份）")
+        } catch {
+            message = L10n.format(
+                "Updating the question hook failed: %@ (the original file was not changed)",
+                zhHans: "答题 hook 更新失败：%@（未改动原文件）", String(describing: error))
+        }
+        refresh()
     }
 
     // MARK: - Auto-update (only touches what is already installed)
@@ -252,11 +319,17 @@ final class InstallerService: ObservableObject {
                 skipped.append(integration)
                 continue
             }
-            guard !diagnosis.isHealthy else { continue }
+            // Claude hooks are healthy but the answer hook disagrees with the toggle (first time it
+            // ships after an upgrade / binary path changed): rewrite too
+            let askOutOfSync = integration == .claudeHooks && askHookInstalled != askHookEnabled()
+            guard !diagnosis.isHealthy || askOutOfSync else { continue }
             guard let relay = RelaySyncer.sync() else { continue }
             if (try? write(integration, relayPath: relay.path)) != nil {
                 updated.append(integration.title)
             }
+        }
+        if syncStandaloneAskEntry() {
+            updated.append(L10n.text("Island question hook", zhHans: "灵动岛答题 hook"))
         }
         autoUpdateSkipped = skipped
         if !updated.isEmpty {
@@ -264,6 +337,23 @@ final class InstallerService: ObservableObject {
             message = L10n.format("Automatically updated: %@ (original configuration backed up)", zhHans: "已自动更新：%@（原配置已备份）", String(updated.joined(separator: separator)))
         }
         if !updated.isEmpty || !skipped.isEmpty { refresh() }
+    }
+
+    /// Claude hooks not installed, yet settings.json holds the answer entry on its own (the loop
+    /// above skips it):
+    /// rewrite that entry per the toggle if it disagrees with the toggle or isn't the current form
+    /// (path changed / wrong event). Returns true if it wrote to disk
+    private func syncStandaloneAskEntry() -> Bool {
+        let diagnosis = diagnosis(for: .claudeHooks)
+        guard !diagnosis.isInstalledInSomeForm, !diagnosis.blocksAutomaticWrite,
+              askHookInstalled != askHookEnabled() else { return false }
+        let url = claudeSettingsURL
+        let original = ConfigFile.read(url)
+        guard ClaudeAskHookInstaller.hasAnyEntry(in: original),
+              let updated = try? applyAskHook(to: original), updated != original,
+              (try? ConfigFile.backupThenWrite(path: url, newContent: updated)) != nil
+        else { return false }
+        return true
     }
 
 }

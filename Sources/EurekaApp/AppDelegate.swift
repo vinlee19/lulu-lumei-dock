@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
+    private var questionBridge: IslandQuestionBridge?
     private var mascotController: MascotPanelController?
     private var wellnessMonitor: WellnessMonitor?
     private var cancellables: Set<AnyCancellable> = []
@@ -53,12 +54,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Release a hook waiting for an island answer right away, leaving only Claude's own dialog
+        questionBridge?.stop()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The brutal theme's fonts (Space Grotesk/Mono) must be registered before any UI renders
         ThemeFonts.register()
-        // Sync the bundled relay to the stable path on every launch (so hooks don't break after an
-        // app upgrade)
+        // On every launch, sync the bundled relay / answer hook to their stable paths (hooks stay
+        // linked across app upgrades)
         RelaySyncer.sync()
+        RelaySyncer.syncAsk()
         // Per-model context-window overrides (the denominator for ctx%; loaded once at launch)
         ContextWindows.loadOverrides(
             from: SpoolPaths.root().appendingPathComponent("context-windows.json"))
@@ -245,7 +252,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings?.showStartTime.toggle()
         }
 
-        // Health nudges: vibe coding too long / too many sessions / late-night care
+        // Answering Claude's questions on the island: the toggle governs both the heartbeat/polling
+        // and the answer hook in settings.json. settings.json is only edited when the user actually
+        // flips the toggle (dropFirst); installing at launch is left to autoUpdateInstalled, which
+        // is gated by the "auto-update hooks" toggle
+        let questionBridge = IslandQuestionBridge(viewModel: island.viewModel)
+        self.questionBridge = questionBridge
+        installer.askHookEnabled = { [weak settings] in settings?.answerQuestionsOnIsland ?? true }
+        settings.$answerQuestionsOnIsland
+            .sink { [weak questionBridge] on in questionBridge?.setEnabled(on) }
+            .store(in: &cancellables)
+        settings.$answerQuestionsOnIsland
+            .dropFirst()
+            .sink { [weak installer] _ in
+                // @Published fires on willSet: read the toggle only after the value is actually
+                // written
+                DispatchQueue.main.async { installer?.applyAskHookSetting() }
+            }
+            .store(in: &cancellables)
+
+        // Wellbeing nudges: vibe coding too long / too many sessions / late-night care
         let wellness = WellnessMonitor(settings: settings, store: store) { [weak island, weak mascot] notice in
             island?.viewModel.enqueueNotice(notice)
             mascot?.viewModel.showNotice(notice.headline)
@@ -584,7 +610,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let waitingCount = tasks.filter {
             if case .waiting = $0.phase { return true } else { return false }
         }.count
-        logLine("active=\(tasks.count) waiting=\(waitingCount) idle=\(store.sortedIdleTasks.count)")
+        let unread = islandController?.viewModel.unreadFinished.count ?? 0
+        logLine("active=\(tasks.count) waiting=\(waitingCount) idle=\(store.sortedIdleTasks.count) unread=\(unread)")
     }
 
     /// Dev-mode observability: single-line stdout log that e2e scripts assert on (harmless when
