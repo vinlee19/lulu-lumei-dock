@@ -37,6 +37,11 @@ public final class SummaryExecutorResolver {
     public func availability(
         for kind: SummaryExecutorKind, adapter: SummaryExecutorAdapter
     ) -> SummaryExecutorAvailability {
+        // Checked before the cache and the probe: the adapter carries the current config
+        // (e.g. Codex MCP names), so an unisolatable run is refused on every call
+        if let problem = adapter.isolationProblem {
+            return SummaryExecutorAvailability(kind: kind, executor: nil, reason: problem)
+        }
         lock.lock()
         if let cached = cache[kind] {
             lock.unlock()

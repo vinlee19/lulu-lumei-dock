@@ -67,12 +67,17 @@ struct SessionSummaryPane: View {
                 }
             }
         }
+        // The summary is model output built from transcript text, so a prompt-injected session can
+        // plant links in it. Only our citation links act in-app and only plain web links reach
+        // the system; file:, app-specific and every other scheme is dropped.
         .environment(\.openURL, OpenURLAction { url in
-            guard url.scheme == summaryMessageScheme, let id = Int(url.host ?? "") else {
-                return .systemAction
+            if url.scheme == summaryMessageScheme {
+                guard let id = Int(url.host ?? "") else { return .discarded }
+                onJump(id)
+                return .handled
             }
-            onJump(id)
-            return .handled
+            let scheme = url.scheme?.lowercased()
+            return scheme == "https" || scheme == "http" ? .systemAction : .discarded
         })
     }
 

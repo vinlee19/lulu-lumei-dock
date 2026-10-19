@@ -46,6 +46,13 @@ public protocol SummaryExecutorAdapter {
     /// Extra environment on top of the login environment
     var extraEnvironment: [String: String] { get }
     func makeParser() -> SummaryOutputParser
+    /// Non-nil when this adapter cannot isolate a run from the user's tools on this machine;
+    /// the resolver then reports the executor unavailable with this reason (fail closed)
+    var isolationProblem: String? { get }
+}
+
+public extension SummaryExecutorAdapter {
+    var isolationProblem: String? { nil }
 }
 
 func intValue(_ any: Any?) -> Int? {
@@ -174,6 +181,17 @@ public struct CodexSummaryAdapter: SummaryExecutorAdapter {
         if let model, !model.isEmpty { args += ["--model", model] }
         args.append("-")  // read the prompt from stdin
         return args
+    }
+
+    /// A server whose name is not a bare TOML key cannot be disabled through `-c`, so it would
+    /// still start inside the summary run. Refuse Codex outright instead of running unisolated.
+    public var isolationProblem: String? {
+        let unsafe = mcpServerNames.filter { !Self.isSafeKey($0) }
+        guard !unsafe.isEmpty else { return nil }
+        return L10n.format(
+            "Codex can't be isolated for summaries: the MCP server(s) %@ in ~/.codex/config.toml can't be turned off for the run. Rename them to letters, digits, - and _, or use another CLI.",
+            zhHans: "Codex 无法隔离运行：~/.codex/config.toml 里的 MCP 服务 %@ 无法在总结时关闭。请把名字改成字母、数字、- 和 _，或换用其他 CLI。",
+            unsafe.map { "\"\($0)\"" }.joined(separator: ", "))
     }
 
     /// Only bare TOML keys are passed through `-c` (no quoting games with arbitrary names)

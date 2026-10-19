@@ -559,4 +559,15 @@ func sessionSummaryTests(_ t: TestRunner) {
         try expect(claude.contains("--no-session-persistence"))
         try expect(claude.contains(#"{"disableAllHooks":true}"#))
     }
+
+    t.test("Codex：有 MCP 服务名无法按名禁用时整体不可用（失败即拒绝）") {
+        var probed = 0
+        let resolver = SummaryExecutorResolver { _, _, _ in probed += 1; return nil }
+        let unsafe = resolver.availability(
+            for: .codex, adapter: CodexSummaryAdapter(mcpServerNames: ["notion", "bad name"]))
+        try expect(!unsafe.isAvailable)
+        try expect(unsafe.reason?.contains("bad name") == true)
+        try expectEqual(probed, 0)
+        try expect(CodexSummaryAdapter(mcpServerNames: ["notion", "infra-mcp"]).isolationProblem == nil)
+    }
 }
