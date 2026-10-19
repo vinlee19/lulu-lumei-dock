@@ -535,6 +535,14 @@ func sessionSummaryTests(_ t: TestRunner) {
         try expect(SummaryWorkspacePaths.isInternal("/tmp/eureka-summaries-test/run-1", under: root))
         try expect(!SummaryWorkspacePaths.isInternal("/tmp/eureka-summaries-test-other", under: root))
         try expect(!SummaryWorkspacePaths.isInternal(nil, under: root))
+        // An existing root and a deleted run directory must normalize the same way
+        let existing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("summary-root-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: existing) }
+        let gone = existing.resolvingSymlinksInPath().path + "/deleted-run"
+        try expect(SummaryWorkspacePaths.isInternal(gone, under: existing))
+        try expect(SummaryWorkspacePaths.isInternal("/private/tmp/x/run", under: URL(fileURLWithPath: "/tmp/x")))
         let env = ["EUREKA_SUMMARY_DIR": "/tmp/eureka-summaries-test"]
         try expect(SummaryWorkspacePaths.isInternal("/tmp/eureka-summaries-test/x", environment: env))
     }

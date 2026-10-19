@@ -15,7 +15,8 @@ public enum OpencodeSessionIndexer {
         dbPath: URL,
         window: TimeInterval = 30 * 86400,
         maxSessions: Int = 300,
-        now: Date = Date()
+        now: Date = Date(),
+        summaryRoot: URL = SummaryWorkspacePaths.root()
     ) -> [AgentSessionInfo] {
         guard FileManager.default.fileExists(atPath: dbPath.path),
               let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return [] }
@@ -48,7 +49,6 @@ public enum OpencodeSessionIndexer {
         let merged = v2 + query("session").filter { !v2Ids.contains($0.id) }
         // Eureka's own summary runs are recorded as OpenCode sessions (no ephemeral mode); they
         // stay out of browsing, prompt extraction and project discovery
-        let summaryRoot = SummaryWorkspacePaths.root()
         return Array(merged
             .filter { !$0.id.isEmpty }
             .filter { !SummaryWorkspacePaths.isInternal($0.cwd, under: summaryRoot) }

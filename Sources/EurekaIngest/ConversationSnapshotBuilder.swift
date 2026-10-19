@@ -169,8 +169,21 @@ public enum SummaryWorkspacePaths {
     /// Same check against an already resolved root (for loops over many sessions)
     public static func isInternal(_ cwd: String?, under root: URL) -> Bool {
         guard let cwd, !cwd.isEmpty else { return false }
-        let rootPath = root.standardizedFileURL.path
-        let path = URL(fileURLWithPath: cwd).standardizedFileURL.path
+        let rootPath = normalize(root.path)
+        let path = normalize(cwd)
         return path == rootPath || path.hasPrefix(rootPath + "/")
+    }
+
+    /// Pure string normalization. Not `standardizedFileURL`: it drops `/private` only for paths
+    /// that exist, so a run directory deleted after the run would stop matching its live root.
+    static func normalize(_ path: String) -> String {
+        var result = path
+        while result.count > 1 && result.hasSuffix("/") { result.removeLast() }
+        for alias in ["/private/tmp", "/private/var", "/private/etc"]
+        where result == alias || result.hasPrefix(alias + "/") {
+            result.removeFirst("/private".count)
+            break
+        }
+        return result
     }
 }
