@@ -113,11 +113,61 @@ public enum IslandGeometry {
         return rows + gaps + overflow + 16   // 16 = box top + bottom padding
     }
 
-    /// Whether a custom position is still usable: the panel's top "pill band" (top 72pt ×
-    /// central half width) must lie entirely within some screen. A mere edge overlap (e.g.
-    /// stale coordinates left after an external display is unplugged/rearranged) counts as
-    /// unusable → the caller clears the saved position and falls back to the default.
-    /// Pure function (screens passed as an array of frames), easy to unit-test.
+    /// 任务列表卡片的行高与间距（1.0× 基准，未乘 scale）。
+    /// `TaskListCardView` 按这些值排版，`taskListHeight` 按同一组值算卡片高度 —— 两边共用这一份。
+    public enum TaskList {
+        public static let maxActiveRows = 4
+        public static let maxIdleRows = 3
+        public static let topPadding: CGFloat = 10
+        /// 标题行：「进行中任务 N」+ 时间模式切换（刘海屏上分居刘海两侧）
+        public static let headerHeight: CGFloat = 24
+        public static let headerGap: CGFloat = 8
+        public static let activeRowHeight: CGFloat = 42
+        public static let activeRowSpacing: CGFloat = 6
+        /// 子 agent 框与所属行之间的间距
+        public static let subagentBoxGap: CGFloat = 4
+        /// 进行中超过 maxActiveRows 时的「…等 N 个」
+        public static let overflowLineHeight: CGFloat = 16
+        /// 进行中与空闲分区之间的分隔线（1pt 线 + 上下各 9）
+        public static let dividerHeight: CGFloat = 19
+        public static let idleHeaderHeight: CGFloat = 20
+        public static let idleRowHeight: CGFloat = 34
+        public static let bottomPadding: CGFloat = 10
+    }
+
+    /// 展开子 agent 框时不显示空闲分区：两者同时出现会超出 panel 高度（panel 不能加高 ——
+    /// 自定义位置存的是 panel 左下角，改高度会让用户拖好的悬浮岛整体上移）
+    public static func taskListShowsIdle(idleCount: Int, expandedSubagentCount: Int) -> Bool {
+        idleCount > 0 && expandedSubagentCount == 0
+    }
+
+    /// 任务列表卡片高度（1.0× 基准，未乘 scale）。
+    /// `expandedSubagentCount`：展开的子 agent 框里的子 agent 数（0 = 没有展开）
+    public static func taskListHeight(
+        activeCount: Int, idleCount: Int, expandedSubagentCount: Int = 0
+    ) -> CGFloat {
+        typealias M = TaskList
+        let activeRows = min(activeCount, M.maxActiveRows)
+        let idleRows = min(idleCount, M.maxIdleRows)
+        var height = M.topPadding + M.headerHeight + M.headerGap
+        if activeRows > 0 {
+            height += CGFloat(activeRows) * M.activeRowHeight
+                + CGFloat(activeRows - 1) * M.activeRowSpacing
+        }
+        if activeCount > M.maxActiveRows { height += M.overflowLineHeight }
+        if expandedSubagentCount > 0 {
+            height += M.subagentBoxGap + subagentBoxHeight(count: expandedSubagentCount)
+        }
+        if taskListShowsIdle(idleCount: idleCount, expandedSubagentCount: expandedSubagentCount) {
+            if activeRows > 0 { height += M.dividerHeight }
+            height += M.idleHeaderHeight + CGFloat(idleRows) * M.idleRowHeight
+        }
+        return height + M.bottomPadding
+    }
+
+    /// 自定义位置是否仍然可用：面板顶部的「胶囊带」（顶部 72pt × 中央半宽）须完整落在某块屏内。
+    /// 仅擦边相交（如外接屏拔掉/重排后残留的旧坐标）判不可用 → 调用方清存档回默认位。
+    /// 纯函数（screens 传 frame 数组），便于单测。
     public static func positionUsable(
         origin: CGPoint, panelSize: CGSize, screens: [CGRect]
     ) -> Bool {

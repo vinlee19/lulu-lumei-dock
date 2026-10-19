@@ -584,7 +584,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let waitingCount = tasks.filter {
             if case .waiting = $0.phase { return true } else { return false }
         }.count
-        logLine("active=\(tasks.count) waiting=\(waitingCount) idle=\(store.sortedIdleTasks.count)")
+        let unread = islandController?.viewModel.unreadFinished.count ?? 0
+        logLine("active=\(tasks.count) waiting=\(waitingCount) idle=\(store.sortedIdleTasks.count) unread=\(unread)")
     }
 
     /// Dev-mode observability: single-line stdout log that e2e scripts assert on (harmless when

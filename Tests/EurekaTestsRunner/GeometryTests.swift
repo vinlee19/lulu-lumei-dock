@@ -160,6 +160,46 @@ func geometryTests(_ t: TestRunner) {
             IslandGeometry.subagentBoxHeight(count: 99),
             IslandGeometry.subagentBoxHeight(count: 7))
     }
+
+    t.test("任务列表高度：标题 + 进行中行 + 分隔线 + 空闲分区") {
+        typealias M = IslandGeometry.TaskList
+        let headerOnly = M.topPadding + M.headerHeight + M.headerGap + M.bottomPadding
+        try expectEqual(IslandGeometry.taskListHeight(activeCount: 0, idleCount: 0), headerOnly)
+        try expectEqual(
+            IslandGeometry.taskListHeight(activeCount: 2, idleCount: 0),
+            headerOnly + 2 * M.activeRowHeight + M.activeRowSpacing)
+        // 只有空闲会话：没有进行中行可分隔，不画分隔线
+        try expectEqual(
+            IslandGeometry.taskListHeight(activeCount: 0, idleCount: 1),
+            headerOnly + M.idleHeaderHeight + M.idleRowHeight)
+        try expectEqual(
+            IslandGeometry.taskListHeight(activeCount: 1, idleCount: 5),
+            headerOnly + M.activeRowHeight + M.dividerHeight + M.idleHeaderHeight
+                + 3 * M.idleRowHeight, "空闲最多 3 行")
+        try expectEqual(
+            IslandGeometry.taskListHeight(activeCount: 6, idleCount: 0),
+            headerOnly + 4 * M.activeRowHeight + 3 * M.activeRowSpacing + M.overflowLineHeight,
+            "进行中最多 4 行，多出的算一行「…等 N 个」")
+    }
+
+    t.test("任务列表：展开子 agent 框时收起空闲分区，最高的列表仍放得进 panel") {
+        typealias M = IslandGeometry.TaskList
+        try expect(IslandGeometry.taskListShowsIdle(idleCount: 3, expandedSubagentCount: 0))
+        try expect(!IslandGeometry.taskListShowsIdle(idleCount: 3, expandedSubagentCount: 2))
+        try expect(!IslandGeometry.taskListShowsIdle(idleCount: 0, expandedSubagentCount: 0))
+        let expanded = IslandGeometry.taskListHeight(
+            activeCount: 9, idleCount: 9, expandedSubagentCount: 9)
+        try expectEqual(
+            expanded,
+            IslandGeometry.taskListHeight(activeCount: 9, idleCount: 0)
+                + M.subagentBoxGap + IslandGeometry.subagentBoxHeight(count: 9))
+        let tallest = max(
+            expanded, IslandGeometry.taskListHeight(activeCount: 9, idleCount: 9))
+        // 卡片阴影 radius 12、下移 5：底部还要留 17pt
+        try expect(
+            tallest + 17 <= IslandGeometry.Layout.standard.panelSize.height,
+            "最高 \(tallest) 放不进 panel")
+    }
 }
 
 func cardQueueTests(_ t: TestRunner) {
@@ -297,5 +337,115 @@ func cardQueueTests(_ t: TestRunner) {
         try expect(
             waitingExtra > finishedExtra,
             "等待卡该比完成卡多停一会（授权请求要看清）")
+    }
+}
+
+func unreadFinishedTests(_ t: TestRunner) {
+    t.suite("IslandUnreadFinished")
+
+    func finished(
+        _ session: String, at time: TimeInterval, _ outcome: TaskOutcome = .success,
+        source: AgentSource = .claude
+    ) -> FinishedTask {
+        FinishedTask(
+            source: source, sessionId: session,
+            finishedAt: Date(timeIntervalSince1970: time), outcome: outcome)
+    }
+    func running(_ session: String, source: AgentSource = .claude) -> AgentTask {
+        AgentTask(
+            source: source, sessionId: session,
+            startedAt: Date(timeIntervalSince1970: 900), phase: .running)
+    }
+
+    t.test("同会话多次完成只记最近一次") {
+        var unread = IslandUnreadFinished()
+        unread.add(finished("a", at: 100))
+        unread.add(finished("b", at: 200))
+        unread.add(finished("a", at: 300))
+        try expectEqual(unread.count, 2)
+        try expectEqual(unread.latest, finished("a", at: 300))
+    }
+
+    t.test("会话开始新一轮 turn 即清掉它的未读，其他会话不受影响") {
+        var unread = IslandUnreadFinished()
+        unread.add(finished("a", at: 100))
+        unread.add(finished("b", at: 200))
+        unread.reconcile(activeTaskIds: [running("a").id])
+        try expectEqual(unread.tasks, [finished("b", at: 200)])
+        // 同 sessionId、不同来源是另一个会话
+        unread.reconcile(activeTaskIds: [running("b", source: .codex).id])
+        try expectEqual(unread.count, 1)
+    }
+
+    t.test("点卡片清单个，点开列表全清") {
+        var unread = IslandUnreadFinished()
+        unread.add(finished("a", at: 100))
+        unread.add(finished("b", at: 200))
+        unread.markRead(finished("a", at: 100))
+        try expectEqual(unread.tasks, [finished("b", at: 200)])
+        unread.markAllRead()
+        try expect(unread.isEmpty)
+        try expectEqual(unread.worstOutcome, nil)
+    }
+
+    t.test("标记取最严重的结果：出错 > 中断 > 成功") {
+        var unread = IslandUnreadFinished()
+        unread.add(finished("a", at: 100))
+        try expectEqual(unread.worstOutcome, .success)
+        unread.add(finished("b", at: 200, .interrupted))
+        try expectEqual(unread.worstOutcome, .interrupted)
+        unread.add(finished("c", at: 300, .error))
+        try expectEqual(unread.worstOutcome, .error)
+    }
+}
+
+func islandPillTests(_ t: TestRunner) {
+    t.suite("IslandPill")
+
+    func task(
+        _ session: String, _ phase: AgentTask.Phase = .running,
+        source: AgentSource = .claude, context: Double? = nil
+    ) -> AgentTask {
+        var task = AgentTask(
+            source: source, sessionId: session,
+            startedAt: Date(timeIntervalSince1970: 900), phase: phase)
+        task.contextUsedPercent = context
+        return task
+    }
+    let since = Date(timeIntervalSince1970: 950)
+
+    t.test("来源图标：运行中与空闲来源取并集，按固定顺序，只有空闲的标为变暗") {
+        let marks = IslandPill.sourceMarks(
+            active: [task("a", source: .opencode), task("b")],
+            idle: [task("c", .idle, source: .codex), task("d", .idle, source: .opencode)])
+        try expectEqual(marks, [
+            IslandPill.SourceMark(source: .claude, isActive: true),
+            IslandPill.SourceMark(source: .codex, isActive: false),
+            IslandPill.SourceMark(source: .opencode, isActive: true),
+        ])
+    }
+
+    t.test("告警优先级：等待授权 > 等待输入 > ctx ≥ 90% > 未读完成 > 无") {
+        var unread = IslandUnreadFinished()
+        unread.add(FinishedTask(
+            source: .claude, sessionId: "f",
+            finishedAt: Date(timeIntervalSince1970: 1000), outcome: .error))
+        let hot = task("hot", .idle, context: 93.4)
+        let input = task("w1", .waiting(.idle, since: since))
+        let permission = task("w2", .waiting(.permission, since: since))
+
+        try expectEqual(
+            IslandPill.alert(active: [input, permission], idle: [hot], unread: unread),
+            .waiting(.permission))
+        try expectEqual(
+            IslandPill.alert(active: [input], idle: [hot], unread: unread), .waiting(.idle))
+        try expectEqual(
+            IslandPill.alert(active: [task("r", context: 70)], idle: [hot], unread: unread),
+            .context(percent: 93.4), "空闲会话的 ctx 也算")
+        try expectEqual(
+            IslandPill.alert(active: [task("r", context: 89.9)], idle: [], unread: unread),
+            .unread(count: 1, worstOutcome: .error), "90% 以下不亮")
+        try expectEqual(
+            IslandPill.alert(active: [task("r")], idle: [], unread: IslandUnreadFinished()), nil)
     }
 }
