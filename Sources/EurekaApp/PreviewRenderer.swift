@@ -56,6 +56,16 @@ enum PreviewRenderer {
             let vm = IslandViewModel()
             vm.updateScreen(screen)
             configure(vm)
+            if vm.display == .taskList {
+                // 排版高度须与 IslandGeometry.taskListHeight 一致：小了内容被裁，大了卡底留空
+                let card = TaskListCardView(
+                    tasks: vm.activeTasks, idleTasks: vm.idleTasks,
+                    showStartTime: vm.showStartTime, scale: vm.uiScale,
+                    centerGap: vm.pillCenterGap, expandedTaskId: vm.expandedSubagentTaskId)
+                let measured = NSHostingView(rootView: card.frame(width: vm.contentSize.width))
+                    .fittingSize.height
+                print("任务列表高度 \(name)：排版 \(measured) / 计算 \(vm.contentSize.height)")
+            }
             let root = IslandRootView(viewModel: vm)
                 .frame(width: vm.layout.panelSize.width, height: vm.layout.panelSize.height)
             let renderer = ImageRenderer(content: root)
@@ -89,6 +99,25 @@ enum PreviewRenderer {
         }
         snapshot("5-card-error", screen: notched) {
             $0.enqueueFinished(errored)
+        }
+        // 完成卡按时收起、没有运行中任务：胶囊留下未读完成标记，不再整个隐藏
+        snapshot("5b-compact-unread", screen: notched) {
+            $0.enqueueFinished(finished)
+            $0.expireCurrentCard()
+        }
+        // 设计稿收缩态：两个来源在跑（亮 + 青点），一个来源只剩空闲会话（变暗），空闲会话 ctx 92% 亮右翼告警
+        snapshot("5d-compact-ctx-alert", screen: notched) {
+            var hot = AgentTask(
+                source: .gemini, sessionId: "hot-idle", title: "方案需要继续增加",
+                cwd: "/Users/me/work/one-agent",
+                startedAt: now.addingTimeInterval(-3600), phase: .idle)
+            hot.contextUsedPercent = 92
+            $0.updateActiveTasks([running1, running2], idle: [hot])
+        }
+        snapshot("5c-compact-running-unread", screen: notched) {
+            $0.updateActiveTasks([running2])
+            $0.enqueueFinished(finished)
+            $0.expireCurrentCard()
         }
         snapshot("6-card-waiting", screen: notched) {
             $0.updateActiveTasks([waitingTask])
@@ -134,6 +163,32 @@ enum PreviewRenderer {
             var compacting = running2
             compacting.isCompacting = true
             $0.updateActiveTasks([withActivity, compacting, waitingTask], idle: [idle1, idle2])
+            $0.islandTapped()
+        }
+        snapshot("8b-tasklist-idle-only", screen: notched) {
+            var idle = AgentTask(
+                source: .claude, sessionId: "5e6f7a8b-idle", title: "方案需要继续增加：我提到 Analytics",
+                cwd: "/Users/me/work/one-agent",
+                startedAt: now.addingTimeInterval(-3600), phase: .idle)
+            idle.lastActivityAt = now.addingTimeInterval(-120)
+            idle.contextUsedPercent = 92
+            $0.updateActiveTasks([], idle: [idle])
+            $0.enqueueFinished(finished)
+            $0.expireCurrentCard()
+            $0.islandTapped()
+        }
+        snapshot("8c-tasklist-crowded-plain", screen: plain) {
+            var idleTasks: [AgentTask] = []
+            for index in 0..<5 {
+                var idle = AgentTask(
+                    source: .codex, sessionId: "idle-\(index)", title: "空闲会话 \(index)",
+                    cwd: "/Users/me/work/idle", startedAt: now.addingTimeInterval(-7200),
+                    phase: .idle)
+                idle.lastActivityAt = now.addingTimeInterval(-Double(index + 1) * 360)
+                idleTasks.append(idle)
+            }
+            $0.updateActiveTasks(
+                [running1, running2, running3, running4, running5], idle: idleTasks)
             $0.islandTapped()
         }
 

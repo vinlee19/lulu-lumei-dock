@@ -530,7 +530,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let waitingCount = tasks.filter {
             if case .waiting = $0.phase { return true } else { return false }
         }.count
-        logLine("active=\(tasks.count) waiting=\(waitingCount) idle=\(store.sortedIdleTasks.count)")
+        let unread = islandController?.viewModel.unreadFinished.count ?? 0
+        logLine("active=\(tasks.count) waiting=\(waitingCount) idle=\(store.sortedIdleTasks.count) unread=\(unread)")
     }
 
     /// 开发模式可观测性：stdout 单行日志，e2e 脚本据此断言（.app 包内运行时无害）

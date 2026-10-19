@@ -20,6 +20,8 @@ final class IslandViewModel: ObservableObject {
     /// 空闲会话（开着但没在跑 turn）：任务列表展示，胶囊计数不算
     @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
+    /// 按时收起、用户还没点开看过的完成卡：胶囊上的「✓ N」，有它时即使没有运行中任务岛也不隐藏
+    @Published private(set) var unreadFinished = IslandUnreadFinished()
     /// 任务列表里当前展开子 agent 框的任务 id（nil = 全收起；单开，几何有界）
     @Published private(set) var expandedSubagentTaskId: String?
     @Published private(set) var screen = IslandGeometry.ScreenInfo(
@@ -67,6 +69,8 @@ final class IslandViewModel: ObservableObject {
         for id in queue.waitingTaskIds where !stillWaiting.contains(id) {
             queue.removeWaiting(taskId: id)
         }
+        // 会话开始新一轮 turn：之前那次完成不再算未读
+        unreadFinished.reconcile(activeTaskIds: Set(tasks.map(\.id)))
         // 展开的任务消失了就收起（防停在已不存在的会话上）
         if let id = expandedSubagentTaskId, !tasks.contains(where: { $0.id == id }) {
             expandedSubagentTaskId = nil
@@ -76,6 +80,7 @@ final class IslandViewModel: ObservableObject {
 
     func enqueueFinished(_ task: FinishedTask) {
         queue.enqueue(.finished(task))
+        unreadFinished.add(task)
         refresh()
     }
 
@@ -97,9 +102,18 @@ final class IslandViewModel: ObservableObject {
     func islandTapped() {
         switch display {
         case .compact:
+            unreadFinished.markAllRead()
+            if activeTasks.isEmpty && idleTasks.isEmpty {
+                // 只剩未读标记且会话都已退出：列表没东西可看，点一下即清掉标记
+                refresh()
+                return
+            }
             setDisplay(.taskList)
             scheduleAutoDismiss()
-        case .card:
+        case .card(let card):
+            if case .finished(let task) = card {
+                unreadFinished.markRead(task)
+            }
             advanceCard()
         case .taskList:
             refresh(collapseTaskList: true)
@@ -171,32 +185,26 @@ final class IslandViewModel: ObservableObject {
         case .card:
             return layout.expandedCardSize
         case .taskList:
-            let activeRows = min(activeTasks.count, 4)
-            let idleRows = min(idleTasks.count, 3)
-            let idleHeader = idleRows > 0 ? 18 : 0
-            // 展开的子 agent 框（仅当展开任务在可见的前 4 个且确有子 agent）
-            var expanded: CGFloat = 0
-            if let id = expandedSubagentTaskId,
-               let task = activeTasks.prefix(4).first(where: { $0.id == id }),
-               !task.subagents.isEmpty {
-                expanded = IslandGeometry.subagentBoxHeight(count: task.subagents.count)
-            }
-            let base = CGFloat(34 + activeRows * 30 + idleHeader + idleRows * 24 + 10) + expanded
-            return CGSize(width: layout.expandedCardSize.width, height: base * uiScale)
+            let height = IslandGeometry.taskListHeight(
+                activeCount: activeTasks.count, idleCount: idleTasks.count,
+                expandedSubagentCount: expandedSubagentCount)
+            return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         }
+    }
+
+    /// 展开的子 agent 框里的子 agent 数（仅当展开任务在可见的前几行且确有子 agent；否则 0）
+    var expandedSubagentCount: Int {
+        guard let id = expandedSubagentTaskId,
+              let task = activeTasks.prefix(IslandGeometry.TaskList.maxActiveRows)
+                  .first(where: { $0.id == id })
+        else { return 0 }
+        return task.subagents.count
     }
 
     /// panel 坐标系中的可交互区域（hitTest 穿透 + hover 跟踪）
     var interactiveRect: CGRect {
         IslandGeometry.interactiveRect(
             contentSize: contentSize, topInset: topInset, layout: layout)
-    }
-
-    var hasWaiting: Bool {
-        activeTasks.contains {
-            if case .waiting = $0.phase { return true }
-            return false
-        }
     }
 
     // MARK: - 内部
@@ -229,7 +237,7 @@ final class IslandViewModel: ObservableObject {
             }
         } else {
             timerCard = nil
-            setDisplay(activeTasks.isEmpty ? .hidden : .compact)
+            setDisplay(activeTasks.isEmpty && unreadFinished.isEmpty ? .hidden : .compact)
         }
         queuedCount = queue.pendingCount
     }
@@ -270,12 +278,18 @@ final class IslandViewModel: ObservableObject {
                 }
                 self.hoverExtensions = 0
                 switch self.display {
-                case .card: self.advanceCard()
+                case .card: self.expireCurrentCard()
                 case .taskList: self.refresh(collapseTaskList: true)
                 default: break
                 }
             }
         }
+    }
+
+    /// 卡片按时收起：不算已读，完成卡在胶囊上留下未读标记（预览渲染也走这里）
+    func expireCurrentCard() {
+        guard case .card = display else { return }
+        advanceCard()
     }
 
     private func cancelAutoDismiss() {
@@ -292,8 +306,7 @@ final class IslandViewModel: ObservableObject {
         case .card(.finished(let task)): name = "card-finished(\(task.outcome.rawValue))"
         case .card(.waiting): name = "card-waiting"
         case .card(.notice): name = "card-notice"
-        case .card(.alert(let alert)): name = "card-alert(\(alert.ruleId))"
-        case .taskList: name = "taskList"
+        case .card(.alert(let alert)): name = "card-alert(\(alert.ruleId))"        case .taskList: name = "taskList"
         }
         print("[eureka] island=\(name)")
         fflush(stdout)

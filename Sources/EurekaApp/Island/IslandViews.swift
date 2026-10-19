@@ -5,6 +5,9 @@ import SwiftUI
 struct IslandRootView: View {
     @ObservedObject var viewModel: IslandViewModel
 
+    /// 悬浮/无刘海屏的底色 #1C1C20（设计稿 agent-dock-final）
+    private static let floatingFill = Color(red: 0.110, green: 0.110, blue: 0.125)
+
     var body: some View {
         let size = viewModel.contentSize
         VStack(spacing: 0) {
@@ -23,10 +26,14 @@ struct IslandRootView: View {
     private func island(size: CGSize) -> some View {
         // 拖拽在 IslandHostingView（performDrag）；点按回到 SwiftUI——
         // 内部按钮优先消费，背景 tap 才走 islandTapped
-        UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
-            .fill(Color.black)
+        let shape = UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)
+        let fused = viewModel.fuseWithNotch
+        return shape
+            // 与刘海融合时必须纯黑（顶边接物理刘海）；悬浮/无刘海屏用深灰底 + 细边框
+            .fill(fused ? Color.black : Self.floatingFill)
+            .overlay(shape.stroke(Color.white.opacity(fused ? 0 : 0.09), lineWidth: 1))
             .frame(width: size.width, height: size.height)
-            .overlay(content.clipShape(UnevenRoundedRectangle(cornerRadii: cornerRadii, style: .continuous)))
+            .overlay(content.clipShape(shape))
             .shadow(color: .black.opacity(0.38), radius: 12, y: 5)
             .contentShape(Rectangle())
             .onTapGesture { viewModel.islandTapped() }
@@ -57,7 +64,8 @@ struct IslandRootView: View {
         case .compact:
             CompactPillView(
                 tasks: viewModel.activeTasks,
-                hasWaiting: viewModel.hasWaiting,
+                idleTasks: viewModel.idleTasks,
+                unread: viewModel.unreadFinished,
                 centerGap: viewModel.pillCenterGap,
                 showStartTime: viewModel.showStartTime,
                 scale: scale
@@ -70,6 +78,7 @@ struct IslandRootView: View {
                 idleTasks: viewModel.idleTasks,
                 showStartTime: viewModel.showStartTime,
                 scale: scale,
+                centerGap: viewModel.pillCenterGap,
                 expandedTaskId: viewModel.expandedSubagentTaskId,
                 onToggleTimeMode: { viewModel.onToggleTimeMode?() },
                 onToggleSubagents: { viewModel.toggleSubagentExpansion($0) }
@@ -78,26 +87,32 @@ struct IslandRootView: View {
     }
 }
 
-/// compact 胶囊：左翼状态 + 数量，右翼最早任务计时/开始时间；中部为物理刘海留空
+/// compact 胶囊（设计稿 agent-dock-final 的「菜单栏窄条」），中部为物理刘海留空：
+/// - 左翼：在场来源图标（有运行中会话的亮并带青色圆点，只剩空闲会话的变暗）+ 运行中计数；
+/// - 右翼：告警位，等待授权/输入 > ctx ≥ 90% > 未读完成，见 `IslandPill.alert`；没有告警时显示最早任务的计时。
 struct CompactPillView: View {
     let tasks: [AgentTask]
-    let hasWaiting: Bool
+    var idleTasks: [AgentTask] = []
+    var unread = IslandUnreadFinished()
     let centerGap: CGFloat
     var showStartTime = false
     var scale: CGFloat = 1
+
+    private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)      // #5AC8FA
+    private static let alertRed = Color(red: 1.0, green: 0.420, blue: 0.392)      // #FF6B64
 
     var body: some View {
         // Each wing is a fixed share of a fixed-width pill, and nothing in it may wrap: a
         // two-digit count once became a vertical "3/0" and a cross-day start time a two-line
         // date. Every text is `fixedSize`, and when a wing still cannot fit, ViewThatFits drops
-        // its least important piece (the "claude" word on the left, the subagent marker on the
-        // right) instead of letting SwiftUI break a line.
+        // its least important piece (dimmed idle sources on the left, the alert icon or the
+        // subagent marker on the right) instead of letting SwiftUI break a line.
+        let marks = IslandPill.sourceMarks(active: tasks, idle: idleTasks)
         HStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
-                leftWing(showSourceLabel: true, spacing: 6 * scale)
-                // A notched wing is 1pt short of "! + logo + claude + 2": tighten before dropping
-                leftWing(showSourceLabel: true, spacing: 4 * scale)
-                leftWing(showSourceLabel: false, spacing: 6 * scale)
+                leftWing(marks)
+                leftWing(marks.filter(\.isActive))
+                leftWing([])
             }
             .frame(maxWidth: .infinity)
 
@@ -105,31 +120,92 @@ struct CompactPillView: View {
                 Color.clear.frame(width: centerGap, height: 1)
             }
 
-            ViewThatFits(in: .horizontal) {
-                rightWing(showSubagents: true)
-                rightWing(showSubagents: false)
+            Group {
+                if let alert = IslandPill.alert(active: tasks, idle: idleTasks, unread: unread) {
+                    ViewThatFits(in: .horizontal) {
+                        alertBadge(alert, showIcon: true, showText: true)
+                        alertBadge(alert, showIcon: false, showText: true)
+                        alertBadge(alert, showIcon: true, showText: false)
+                    }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        rightWing(showSubagents: true)
+                        rightWing(showSubagents: false)
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 14 * scale)
     }
 
-    /// 左翼：等待标记 + 在场来源 + 数量
-    private func leftWing(showSourceLabel: Bool, spacing: CGFloat) -> some View {
-        HStack(spacing: spacing) {
-            if hasWaiting {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 14 * scale, weight: .semibold))
-                    .foregroundStyle(.orange)
+    /// 左翼：来源图标 + 运行中计数（没有运行中任务时不显示计数）
+    private func leftWing(_ marks: [IslandPill.SourceMark]) -> some View {
+        HStack(spacing: 7 * scale) {
+            ForEach(marks, id: \.source) { mark in
+                sourceIcon(mark)
             }
-            // 在场来源各一枚「logo + claude/codex」标签
-            PulsingSourceBadges(
-                sources: distinctSources, scale: scale, showLabel: showSourceLabel)
-            Text("\(tasks.count)")
-                .font(.system(size: 14 * scale, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .fixedSize()
+            if !tasks.isEmpty {
+                Text("\(tasks.count)")
+                    .font(.system(size: 11 * scale, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Self.accent)
+                    .padding(.horizontal, 6 * scale)
+                    .padding(.vertical, 1 * scale)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5 * scale).fill(Self.accent.opacity(0.14)))
+                    .fixedSize()
+            }
+        }
+    }
+
+    private func sourceIcon(_ mark: IslandPill.SourceMark) -> some View {
+        SourceBadge(source: mark.source, size: 15 * scale, onDark: true)
+            .opacity(mark.isActive ? 1 : 0.4)
+            .overlay(alignment: .topTrailing) {
+                if mark.isActive {
+                    RunningSourceDot(color: Self.accent, size: 6.5 * scale)
+                        .offset(x: 1 * scale, y: -1 * scale)
+                }
+            }
+    }
+
+    /// 右翼告警徽标；放不下时先去图标，再只留图标
+    private func alertBadge(
+        _ alert: IslandPill.Alert, showIcon: Bool, showText: Bool
+    ) -> some View {
+        let style = alertStyle(alert)
+        return HStack(spacing: 4 * scale) {
+            if showIcon {
+                Image(systemName: style.icon)
+                    .font(.system(size: 10 * scale, weight: .bold))
+            }
+            if showText {
+                Text(style.text)
+            }
+        }
+        .font(.system(size: 11 * scale, weight: .semibold).monospacedDigit())
+        .foregroundStyle(style.color)
+        .padding(.horizontal, 7 * scale)
+        .padding(.vertical, 2 * scale)
+        .background(RoundedRectangle(cornerRadius: 6 * scale).fill(style.color.opacity(0.16)))
+        .fixedSize()
+    }
+
+    /// 未读完成的图标与颜色同完成卡（成功绿 ✓ / 出错红 / 中断灰）
+    private func alertStyle(_ alert: IslandPill.Alert) -> (icon: String, text: String, color: Color) {
+        switch alert {
+        case .waiting(.permission):
+            return ("hand.raised.fill", "等待授权", .orange)
+        case .waiting(.idle):
+            return ("ellipsis.bubble.fill", "等待输入", .orange)
+        case .context(let percent):
+            return ("exclamationmark.triangle.fill", "ctx \(Int(percent.rounded()))%", Self.alertRed)
+        case .unread(let count, .success):
+            return ("checkmark.circle.fill", "\(count)", .green)
+        case .unread(let count, .error):
+            return ("xmark.octagon.fill", "\(count)", Self.alertRed)
+        case .unread(let count, .interrupted):
+            return ("minus.circle.fill", "\(count)", .gray)
         }
     }
 
@@ -157,23 +233,34 @@ struct CompactPillView: View {
                     }
                 }
                 .font(.system(size: 13 * scale, weight: .medium).monospacedDigit())
-                .foregroundStyle(hasWaiting ? .orange : Color(white: 0.85))
+                .foregroundStyle(Color(white: 0.85))
                 .lineLimit(1)
                 .fixedSize()
             }
         }
     }
 
-    /// 在场来源（保持稳定顺序：claude 前 codex 后）
-    private var distinctSources: [AgentSource] {
-        var seen = Set<AgentSource>()
-        for task in tasks { seen.insert(task.source) }
-        return AgentSource.allCases.filter { seen.contains($0) }
-    }
-
     /// 在场子 agent 总数（compact 胶囊聚合标识）
     private var subagentTotal: Int {
         tasks.reduce(0) { $0 + $1.subagents.count }
+    }
+}
+
+/// 胶囊来源图标右上角的运行中圆点：外圈描一道底色把它从图标上「切」出来，发光并缓慢呼吸
+struct RunningSourceDot: View {
+    let color: Color
+    let size: CGFloat
+    @State private var on = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .overlay(Circle().stroke(Color.black, lineWidth: size * 0.23))
+            .shadow(color: color.opacity(0.9), radius: size * 0.4)
+            .opacity(on ? 1 : 0.55)
+            .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: on)
+            .onAppear { on = true }
     }
 }
 
@@ -639,31 +726,6 @@ struct SourceLabelBadge: View {
     }
 }
 
-/// 胶囊左翼：呼吸的来源标签（在场来源各一枚 logo + 文字）
-struct PulsingSourceBadges: View {
-    let sources: [AgentSource]
-    var scale: CGFloat = 1
-    /// Single-source word label ("claude"); the pill turns it off when the wing is out of room.
-    var showLabel = true
-    @State private var on = false
-
-    var body: some View {
-        HStack(spacing: 5 * scale) {
-            ForEach(sources, id: \.self) { source in
-                // 单来源：logo + 文字（胶囊够宽）；多来源并存：只放 logo（刘海两翼放不下两组文字，
-                // 完整 claude/codex 文字在展开任务列表里每行都有）
-                if sources.count == 1, showLabel {
-                    SourceLabelBadge(source: source, size: 13 * scale)
-                } else {
-                    SourceBadge(source: source, size: 13 * scale, onDark: true)
-                }
-            }
-        }
-        .opacity(on ? 1 : 0.45)
-        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: on)
-        .onAppear { on = true }
-    }
-}
 
 /// 展开卡片：完成/出错/中断/等待确认。
 /// φ 黄金比竖式：图标 + 来源标签在上，文字居中在下。
@@ -835,151 +897,309 @@ struct TaskListCardView: View {
     var idleTasks: [AgentTask] = []
     var showStartTime = false
     var scale: CGFloat = 1
+    /// 物理刘海宽度：标题行分居刘海两侧（浮动/无刘海为 0）
+    var centerGap: CGFloat = 0
     /// 当前展开子 agent 框的任务 id（nil = 全收起）
     var expandedTaskId: String? = nil
     var onToggleTimeMode: () -> Void = {}
     var onToggleSubagents: (String) -> Void = { _ in }
 
+    /// 行高/间距与 `IslandGeometry.taskListHeight` 共用
+    private typealias M = IslandGeometry.TaskList
+
+    // 配色（设计稿 agent-dock-final）
+    private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)        // #5AC8FA 进行中
+    private static let labelGray = Color(red: 0.557, green: 0.557, blue: 0.576)     // #8E8E93 分区标题
+    private static let primaryText = Color(red: 0.961, green: 0.961, blue: 0.969)   // #F5F5F7
+    private static let secondaryText = Color(red: 0.596, green: 0.596, blue: 0.616) // #98989D 计时
+    private static let sourceText = Color(red: 0.780, green: 0.780, blue: 0.800)    // #C7C7CC
+    private static let idleText = Color(red: 0.820, green: 0.820, blue: 0.839)      // #D1D1D6
+    private static let idleSourceText = Color(red: 0.682, green: 0.682, blue: 0.698) // #AEAEB2
+    private static let idleDot = Color(red: 0.282, green: 0.282, blue: 0.298)       // #48484C
+    private static let contextOrange = Color(red: 1.0, green: 0.624, blue: 0.039)   // #FF9F0A
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("进行中 \(tasks.count) 个任务")
-                    .font(.system(size: 11 * scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Spacer()
-                // 切换右侧时间显示：已持续时长 ↔ 开始时间
-                Button(action: onToggleTimeMode) {
-                    HStack(spacing: 3 * scale) {
-                        Image(systemName: showStartTime ? "calendar.badge.clock" : "stopwatch")
-                            .font(.system(size: 9 * scale))
-                        Text(showStartTime ? "开始时间" : "耗时")
-                            .font(.system(size: 9.5 * scale))
-                    }
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.horizontal, 6 * scale)
-                    .padding(.vertical, 2 * scale)
-                    .background(Capsule().fill(Color.white.opacity(0.1)))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 18 * scale)
-            .padding(.top, 10 * scale)
-            .padding(.bottom, 4 * scale)
+            header
+                .frame(height: M.headerHeight * scale)
+                .padding(.top, M.topPadding * scale)
+                .padding(.bottom, M.headerGap * scale)
 
-            ForEach(tasks.prefix(4)) { task in
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 8 * scale) {
-                        statusIcon(task)
-                        SourceLabelBadge(source: task.source, size: 10 * scale)
-                        Text(taskDisplayName(task))
-                            .font(.system(size: 12 * scale))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
-                        Spacer(minLength: 8 * scale)
-                        // 跳到会话所在终端（只在知道终端且它还在运行时出现）
-                        if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
-                            terminalJumpButton(terminal)
+            VStack(spacing: M.activeRowSpacing * scale) {
+                ForEach(tasks.prefix(M.maxActiveRows)) { task in
+                    VStack(spacing: M.subagentBoxGap * scale) {
+                        activeRow(task)
+                        if expandedTaskId == task.id, !task.subagents.isEmpty {
+                            subagentBox(task)
                         }
-                        // 子 agent 数量徽标（可点开/收起；无子 agent 不显示）
-                        if !task.subagents.isEmpty {
-                            subagentBadge(task)
-                        }
-                        if task.isCompacting {
-                            // 压缩期间没有别的事件，不标出来就像卡死了
-                            Text("压缩上下文")
-                                .font(.system(size: 9.5 * scale))
-                                .foregroundStyle(Theme.gold.opacity(0.85))
-                                .lineLimit(1)
-                                .fixedSize()
-                        } else if let activity = task.currentActivity {
-                            // 有具体对象就一起显示：「Edit main.swift」比光「Edit」有用得多
-                            Text(compactToolLabel(
-                                tool: activity, detail: task.currentToolDetail))
-                                .font(.system(size: 9.5 * scale).monospaced())
-                                .foregroundStyle(.white.opacity(0.45))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        if let context = task.contextUsedPercent, context >= 60 {
-                            Text("ctx \(Int(context.rounded()))%")
-                                .font(.system(size: 9.5 * scale, weight: .medium).monospacedDigit())
-                                .foregroundStyle(contextColor(context))
-                                .fixedSize()
-                        }
-                        // 尾部必须 fixedSize：否则中间的工具标签会把它挤到换行
-                        // （Plans 行踩过同一个坑 —— 该固定的是尾部，让中间去让位）
-                        if showStartTime {
-                            Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
-                                .font(.system(size: 11 * scale).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.5))
-                                .fixedSize()
-                        } else {
-                            Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
-                                .font(.system(size: 11 * scale).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.5))
-                                .fixedSize()
-                        }
-                    }
-                    .frame(height: 30 * scale)
-
-                    if expandedTaskId == task.id, !task.subagents.isEmpty {
-                        subagentBox(task)
                     }
                 }
-                .padding(.horizontal, 18 * scale)
             }
-            if tasks.count > 4 {
+            if tasks.count > M.maxActiveRows {
                 Text("…等 \(tasks.count) 个")
                     .font(.system(size: 11 * scale))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .padding(.horizontal, 18 * scale)
+                    .foregroundStyle(Self.labelGray)
+                    .padding(.leading, 16 * scale)
+                    .frame(height: M.overflowLineHeight * scale)
             }
 
-            if !idleTasks.isEmpty {
-                Text("空闲会话 \(idleTasks.count)")
-                    .font(.system(size: 10 * scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.horizontal, 18 * scale)
-                    .padding(.top, 5 * scale)
-                ForEach(idleTasks.prefix(3)) { task in
-                    HStack(spacing: 8 * scale) {
-                        Circle()
-                            .fill(Color.white.opacity(0.45))
-                            .frame(width: 6 * scale, height: 6 * scale)
-                        SourceLabelBadge(source: task.source, size: 9 * scale)
-                            .opacity(0.75)
-                        Text(taskDisplayName(task))
-                            .font(.system(size: 11 * scale))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
-                        Spacer(minLength: 8 * scale)
-                        if let context = task.contextUsedPercent, context >= 60 {
-                            Text("ctx \(Int(context.rounded()))%")
-                                .font(.system(size: 9.5 * scale).monospacedDigit())
-                                .foregroundStyle(contextColor(context).opacity(0.7))
-                        }
-                        Text(relativeFormatter.localizedString(
-                            for: task.lastActivityAt, relativeTo: Date()))
-                            .font(.system(size: 10 * scale))
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                    .padding(.horizontal, 18 * scale)
-                    .frame(height: 24 * scale)
+            if IslandGeometry.taskListShowsIdle(
+                idleCount: idleTasks.count, expandedSubagentCount: expandedSubagentCount) {
+                if !tasks.isEmpty {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.07))
+                        .frame(height: 1)
+                        .padding(.horizontal, 4 * scale)
+                        .frame(height: M.dividerHeight * scale)
+                }
+                idleHeader
+                ForEach(idleTasks.prefix(M.maxIdleRows)) { task in
+                    idleRow(task)
                 }
             }
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 12 * scale)
+        .padding(.bottom, M.bottomPadding * scale)
     }
 
-    @ViewBuilder
-    private func statusIcon(_ task: AgentTask) -> some View {
-        if case .waiting = task.phase {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 10 * scale))
-                .foregroundStyle(.orange)
-        } else {
-            Circle().fill(Color.cyan).frame(width: 6 * scale, height: 6 * scale)
+    /// 与 IslandViewModel.expandedSubagentCount 同口径：展开的任务须在可见行里
+    private var expandedSubagentCount: Int {
+        guard let id = expandedTaskId else { return 0 }
+        return tasks.prefix(M.maxActiveRows).first { $0.id == id }?.subagents.count ?? 0
+    }
+
+    // MARK: 标题行
+
+    /// 刘海屏上标题行落在刘海两侧（内容贴屏幕顶），中间留出刘海宽度；
+    /// 两翼放不下时 ViewThatFits 先缩短文字，绝不让文字钻到刘海后面
+    private var header: some View {
+        HStack(spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                headerTitle("进行中任务")
+                headerTitle("进行中")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if centerGap > 0 {
+                Color.clear.frame(width: centerGap, height: 1)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                timeModeToggle(showLabel: true, showChevron: true)
+                timeModeToggle(showLabel: true, showChevron: false)
+                timeModeToggle(showLabel: false, showChevron: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .padding(.horizontal, 4 * scale)
+    }
+
+    private func headerTitle(_ label: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8 * scale) {
+            Text(label)
+                .font(.system(size: 11 * scale, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(Self.labelGray)
+                .fixedSize()
+            Text("\(tasks.count)")
+                .font(.system(size: 22 * scale, weight: .bold).monospacedDigit())
+                .foregroundStyle(Self.primaryText)
+                .fixedSize()
+        }
+    }
+
+    /// 切换右侧时间显示：已持续时长 ↔ 开始时间（内层按钮消费点击，不触发整岛收起）
+    private func timeModeToggle(showLabel: Bool, showChevron: Bool) -> some View {
+        Button(action: onToggleTimeMode) {
+            HStack(spacing: 5 * scale) {
+                Image(systemName: showStartTime ? "calendar" : "stopwatch")
+                    .font(.system(size: 12 * scale))
+                if showLabel {
+                    Text(showStartTime ? "开始时间" : "耗时")
+                        .font(.system(size: 12 * scale))
+                }
+                if showChevron {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8 * scale, weight: .semibold))
+                        .foregroundStyle(Self.secondaryText.opacity(0.7))
+                }
+            }
+            .foregroundStyle(Self.secondaryText)
+            .fixedSize()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(showStartTime ? "改为显示耗时" : "改为显示开始时间")
+    }
+
+    // MARK: 进行中行
+
+    /// 进行中行：浅色底 + 左侧发光竖条 + 状态点；等待中的任务整行换成橙色
+    private func activeRow(_ task: AgentTask) -> some View {
+        let tint = rowTint(task)
+        let shape = RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+        return HStack(spacing: 10 * scale) {
+            statusMark(task, tint: tint)
+            sourceLabel(task.source, textColor: Self.sourceText, weight: .medium)
+            VStack(alignment: .leading, spacing: 1 * scale) {
+                Text(taskDisplayName(task))
+                    .font(.system(size: 13 * scale))
+                    .foregroundStyle(Self.primaryText)
+                    .lineLimit(1)
+                activityLine(task)
+            }
+            Spacer(minLength: 6 * scale)
+            // 跳到会话所在终端（只在知道终端且它还在运行时出现）
+            if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
+                terminalJumpButton(terminal)
+            }
+            // 子 agent 数量徽标（可点开/收起；无子 agent 不显示）
+            if !task.subagents.isEmpty {
+                subagentBadge(task)
+            }
+            if let context = task.contextUsedPercent, context >= 60 {
+                contextBadge(context)
+            }
+            // 尾部必须 fixedSize：否则中间的标题会把它挤到换行
+            // （Plans 行踩过同一个坑 —— 该固定的是尾部，让中间去让位）
+            Group {
+                if showStartTime {
+                    Text(formatStartTime(task.sessionStartedAt ?? task.startedAt))
+                } else {
+                    Text(timerInterval: task.startedAt...Date.distantFuture, countsDown: false)
+                }
+            }
+            .font(.system(size: 12 * scale).monospacedDigit())
+            .foregroundStyle(Self.secondaryText)
+            .fixedSize()
+        }
+        .padding(.leading, 14 * scale)
+        .padding(.trailing, 12 * scale)
+        .frame(height: M.activeRowHeight * scale)
+        .background(shape.fill(tint.opacity(0.08)))
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(tint)
+                .frame(width: 3 * scale)
+                .padding(.vertical, 8 * scale)
+                .shadow(color: tint.opacity(0.9), radius: 5 * scale)
+        }
+        .clipShape(shape)
+    }
+
+    private func rowTint(_ task: AgentTask) -> Color {
+        if case .waiting = task.phase { return .orange }
+        return Self.accent
+    }
+
+    /// 状态标记：运行中为带光圈的圆点，等待确认为橙色感叹号（同宽，标题列对齐）
+    @ViewBuilder
+    private func statusMark(_ task: AgentTask, tint: Color) -> some View {
+        Group {
+            if case .waiting = task.phase {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 12 * scale, weight: .semibold))
+                    .foregroundStyle(tint)
+            } else {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 9 * scale, height: 9 * scale)
+                    .background(
+                        Circle()
+                            .fill(tint.opacity(0.18))
+                            .frame(width: 15 * scale, height: 15 * scale))
+            }
+        }
+        .frame(width: 15 * scale)
+    }
+
+    /// 标题下的第二行：压缩上下文 / 当前工具（没有就不占行，标题垂直居中）
+    @ViewBuilder
+    private func activityLine(_ task: AgentTask) -> some View {
+        if task.isCompacting {
+            // 压缩期间没有别的事件，不标出来就像卡死了
+            Text("压缩上下文")
+                .font(.system(size: 10 * scale))
+                .foregroundStyle(Theme.gold.opacity(0.85))
+                .lineLimit(1)
+        } else if let activity = task.currentActivity {
+            // 有具体对象就一起显示：「Edit main.swift」比光「Edit」有用得多
+            Text(compactToolLabel(tool: activity, detail: task.currentToolDetail))
+                .font(.system(size: 10 * scale).monospaced())
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    // MARK: 空闲分区
+
+    private var idleHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
+            Text("空闲会话")
+                .font(.system(size: 11 * scale, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(Self.labelGray)
+            Text("\(idleTasks.count)")
+                .font(.system(size: 13 * scale, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Self.idleSourceText)
+        }
+        .padding(.horizontal, 4 * scale)
+        .frame(height: M.idleHeaderHeight * scale)
+    }
+
+    private func idleRow(_ task: AgentTask) -> some View {
+        HStack(spacing: 10 * scale) {
+            Circle()
+                .fill(Self.idleDot)
+                .frame(width: 9 * scale, height: 9 * scale)
+                .frame(width: 15 * scale)
+            sourceLabel(task.source, textColor: Self.idleSourceText, weight: .regular)
+            Text(taskDisplayName(task))
+                .font(.system(size: 13 * scale))
+                .foregroundStyle(Self.idleText)
+                .lineLimit(1)
+            Spacer(minLength: 6 * scale)
+            if let context = task.contextUsedPercent, context >= 60 {
+                contextBadge(context)
+            }
+            Text(relativeFormatter.localizedString(for: task.lastActivityAt, relativeTo: Date()))
+                .font(.system(size: 12 * scale).monospacedDigit())
+                .foregroundStyle(Self.labelGray)
+                .fixedSize()
+        }
+        .padding(.leading, 14 * scale)
+        .padding(.trailing, 12 * scale)
+        .frame(height: M.idleRowHeight * scale)
+    }
+
+    // MARK: 行内部件
+
+    /// 来源：品牌色 logo + 灰色小写来源名
+    private func sourceLabel(
+        _ source: AgentSource, textColor: Color, weight: Font.Weight
+    ) -> some View {
+        HStack(spacing: 5 * scale) {
+            SourceBadge(source: source, size: 14 * scale, onDark: true)
+            Text(source.rawValue)
+                .font(.system(size: 12 * scale, weight: weight))
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+        }
+        .fixedSize()
+    }
+
+    /// 上下文占用徽标（≥60% 才出现）：80% 起橙
+    private func contextBadge(_ percent: Double) -> some View {
+        let color = contextColor(percent)
+        return Text("ctx \(Int(percent.rounded()))%")
+            .font(.system(size: 10 * scale, weight: .semibold).monospacedDigit())
+            .foregroundStyle(color)
+            .padding(.horizontal, 6 * scale)
+            .padding(.vertical, 2 * scale)
+            .background(RoundedRectangle(cornerRadius: 5 * scale).fill(color.opacity(0.16)))
+            .fixedSize()
     }
 
     /// 行尾跳转徽标：把会话所在终端应用带到前台（内层按钮消费点击，不触发整岛展开/收起）。
@@ -1067,12 +1287,9 @@ struct TaskListCardView: View {
         }
     }
 
+    /// 列表里 80% 起就用橙色；红色留给收缩胶囊右翼的 ctx ≥ 90% 告警
     private func contextColor(_ percent: Double) -> Color {
-        switch percent {
-        case ..<80: return .white.opacity(0.45)
-        case ..<90: return .orange
-        default: return .red
-        }
+        percent < 80 ? Self.secondaryText : Self.contextOrange
     }
 }
 
