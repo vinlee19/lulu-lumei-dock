@@ -125,8 +125,10 @@ struct SessionDetailView: View {
         }
     }
 
+    /// Prompts the user actually typed: injected turns (task notifications, relayed session
+    /// messages, command output) are left out of the outline and the prompt count
     private var userMessages: [TranscriptMessage] {
-        service.transcript.filter { $0.role == .user }
+        service.transcript.filter { $0.role == .user && !PromptClassifier.isInjectedArtifact($0.text) }
     }
 
     /// Message stream filtered by role (search doesn't filter, it only highlights + jumps)
@@ -782,6 +784,9 @@ private struct MessageRowView: View {
                 .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .thinking:
             ThinkingRowView(message: message, isMatch: isMatch, expanded: $expandedTrails)
+                .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
+        case .user where PromptClassifier.isInjectedArtifact(message.text):
+            InjectedMessageRowView(message: message, isMatch: isMatch, expanded: $expandedTrails)
                 .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .user:
             messageBlock(

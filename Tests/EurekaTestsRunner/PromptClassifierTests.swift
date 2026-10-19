@@ -39,6 +39,9 @@ func promptClassifierTests(_ t: TestRunner) {
         try expectEqual(PromptClassifier.classify("<local-command-stdout>Enabled</local-command-stdout>"), .noise)
         try expectEqual(PromptClassifier.classify("<bash-input>ls</bash-input>"), .noise)
         try expectEqual(PromptClassifier.classify("<environment_context>cwd=/x</environment_context>"), .noise)
+        // A message relayed from another Claude session arrives as a user turn
+        try expect(PromptClassifier.isInjectedArtifact(
+            "Another Claude session sent a message:\n<teammate-message teammate_id=\"audit\">done</teammate-message>"))
         try expectEqual(PromptClassifier.classify("/compact"), .noise)
         try expectEqual(
             PromptClassifier.classify("You are a memory relevance compressor utility. Do not use any tools."),

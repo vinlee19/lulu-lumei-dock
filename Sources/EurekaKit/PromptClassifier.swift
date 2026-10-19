@@ -52,6 +52,8 @@ public enum PromptClassifier {
         "<task-notification>", "<system-reminder>",
         "<bash-input>", "<bash-stdout>",
         "<environment_context>", "<user_instructions>",
+        // Claude Code relays another session's message (a <teammate-message> block) as a user turn
+        "Another Claude session sent a message",
     ]
 
     /// Whether this is an injected artifact / bare slash command (not a human question)
