@@ -220,7 +220,7 @@ struct SessionDetailView: View {
             }
             HStack(spacing: 8) {
                 if let started = session.startedAt {
-                    metaItem("clock", started.formatted(.dateTime.month().day().hour().minute()))
+                    metaItem("clock", started.formatted(.dateTime.month().day().hour().minute().locale(L10n.current.locale)))
                 }
                 if let cwd = session.cwd {
                     metaItem("folder", URL(fileURLWithPath: cwd).lastPathComponent)
@@ -427,7 +427,7 @@ struct SessionDetailView: View {
         let cost = service.costs[session.id]
         HStack(spacing: 24) {
             overviewStat(L10n.text("Messages", zhHans: "消息"), "\(service.transcript.count)")
-            overviewStat(L10n.text("prompts", zhHans: "提问"), "\(userMessages.count)")
+            overviewStat(L10n.text("Prompts", zhHans: "提问"), "\(userMessages.count)")
             if let cost {
                 overviewStat("Tokens", formatTokens(cost.totalTokens))
                 if let usd = cost.costUSD {

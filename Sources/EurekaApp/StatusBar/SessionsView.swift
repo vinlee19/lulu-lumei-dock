@@ -229,18 +229,14 @@ struct SessionsView: View {
 
             // Sort / view (first three modes are flat lists, "Project" groups by project); capsule
             // tabs, selected = purple fill + white text
-            CapsuleTabTray {
-                ForEach(SessionBrowserService.SortMode.allCases, id: \.self) { mode in
-                    CapsuleTabButton(
-                        title: mode.label,
-                        icon: mode.icon,
-                        isSelected: service.sortMode == mode
-                    ) {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            service.sortMode = mode
-                        }
-                    }
-                }
+            // English labels don't fit four equal tabs in the narrow list, so fall back from
+            // icon + title to title only, then to icons only (the title moves into the tooltip).
+            // The title-only tray hugs its labels: equal-width tabs would let ViewThatFits accept
+            // it on total width and then truncate the longest label.
+            ViewThatFits(in: .horizontal) {
+                sortTray(showIcon: true, showTitle: true, fill: true)
+                sortTray(showIcon: false, showTitle: true, fill: false)
+                sortTray(showIcon: true, showTitle: false, fill: true)
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
@@ -465,6 +461,24 @@ struct SessionsView: View {
             }
         }
         return (users, utilityCount)
+    }
+
+    private func sortTray(showIcon: Bool, showTitle: Bool, fill: Bool) -> some View {
+        CapsuleTabTray {
+            ForEach(SessionBrowserService.SortMode.allCases, id: \.self) { mode in
+                CapsuleTabButton(
+                    title: showTitle ? mode.label : "",
+                    icon: showIcon ? mode.icon : nil,
+                    fillWidth: fill,
+                    isSelected: service.sortMode == mode
+                ) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        service.sortMode = mode
+                    }
+                }
+                .help(mode.label)
+            }
+        }
     }
 
     private func sessionRow(_ session: AgentSessionInfo) -> some View {

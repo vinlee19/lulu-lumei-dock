@@ -326,12 +326,14 @@ func formatCost(_ usd: Double) -> String {
     usd < 0.01 && usd > 0 ? "<$0.01" : String(format: "$%.2f", usd)
 }
 
-let relativeFormatter: RelativeDateTimeFormatter = {
+/// Built per read so it follows the interface language (a `static let` would freeze the first
+/// language it saw, and a fixed zh_CN locale printed Chinese relative times in English UI).
+var relativeFormatter: RelativeDateTimeFormatter {
     let formatter = RelativeDateTimeFormatter()
-    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.locale = L10n.current.locale
     formatter.unitsStyle = .abbreviated
     return formatter
-}()
+}
 
 /// Relative time. Anything under 5 seconds either way (including the "in 0 sec" a clock
 /// step-back produces) reads "just now".
