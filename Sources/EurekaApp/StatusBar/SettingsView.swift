@@ -180,6 +180,13 @@ struct SettingsView: View {
                     L10n.text("Waiting for confirmation / input", zhHans: "等待确认 / 等待输入"),
                     isOn: $settings.notifyWaiting)
                 Toggle(
+                    L10n.text("Answer Claude's questions on the island", zhHans: "在灵动岛上回答 Claude 的提问"),
+                    isOn: $settings.answerQuestionsOnIsland)
+                Text(askHookHint)
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle(
                     L10n.text("Task failed / interrupted", zhHans: "任务出错 / 中断"),
                     isOn: $settings.notifyError)
                 Toggle(
@@ -329,8 +336,20 @@ struct SettingsView: View {
         }
     }
 
-    /// System notification degradation hint: reflects the real authorization state (unavailable in
-    /// dev / denied / OK)
+    /// 答题 hook 的实际状态：开关开着不等于装上了（要先装 Claude Code hooks）
+    private var askHookHint: String {
+        guard settings.answerQuestionsOnIsland else {
+            return "关闭时 Claude 的选择题照常在终端里回答。"
+        }
+        if installer.askHookInstalled {
+            return "已生效：Claude 提问时岛上弹出选项，点选即作答；最多等 10 分钟，"
+                + "超时或点「在终端回答」就回到终端提问。"
+        }
+        return "尚未生效：需要先在「集成」页安装 Claude Code hooks，会一并在 settings.json 加一条"
+            + " AskUserQuestion 专用 hook。"
+    }
+
+    /// 系统通知降级提示：反映真实授权状态（开发态不可用 / 被拒 / 正常）
     private var notificationHint: String? {
         switch notificationService.availability {
         case .unavailableNotBundled:

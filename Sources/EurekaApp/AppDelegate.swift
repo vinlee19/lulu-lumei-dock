@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pipeline: EventPipeline?
     private var reapTimer: Timer?
     private var islandController: IslandPanelController?
+    private var questionBridge: IslandQuestionBridge?
     private var mascotController: MascotPanelController?
     private var wellnessMonitor: WellnessMonitor?
     private var cancellables: Set<AnyCancellable> = []
@@ -53,13 +54,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Release a hook waiting for an island answer right away so Claude asks in its own UI
+        questionBridge?.stop()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The brutal theme's fonts (Space Grotesk/Mono) must be registered before any UI renders
         ThemeFonts.register()
-        // Sync the bundled relay to the stable path on every launch (so hooks don't break after an
-        // app upgrade)
+        // 每次启动把随包 relay / 答题 hook 同步到稳定路径（升级 app 后 hooks 不断链）
         RelaySyncer.sync()
-        // Per-model context-window overrides (the denominator for ctx%; loaded once at launch)
+        RelaySyncer.syncAsk()
+        // 模型上下文窗口覆盖表（ctx% 的分母；启动时一次性加载）
         ContextWindows.loadOverrides(
             from: SpoolPaths.root().appendingPathComponent("context-windows.json"))
 
@@ -245,7 +251,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings?.showStartTime.toggle()
         }
 
-        // Health nudges: vibe coding too long / too many sessions / late-night care
+        // 在灵动岛上回答 Claude 的提问：开关同时管心跳/轮询与 settings.json 里的答题 hook。
+        // 改 settings.json 只在用户真的拨动开关时做（dropFirst）；启动时补装交给 autoUpdateInstalled，
+        // 那里受「自动更新 hooks」开关约束
+        let questionBridge = IslandQuestionBridge(viewModel: island.viewModel)
+        self.questionBridge = questionBridge
+        installer.askHookEnabled = { [weak settings] in settings?.answerQuestionsOnIsland ?? true }
+        settings.$answerQuestionsOnIsland
+            .sink { [weak questionBridge] on in questionBridge?.setEnabled(on) }
+            .store(in: &cancellables)
+        settings.$answerQuestionsOnIsland
+            .dropFirst()
+            .sink { [weak installer] _ in
+                // @Published 在 willSet 时发出：等值真正写入后再读开关
+                DispatchQueue.main.async { installer?.applyAskHookSetting() }
+            }
+            .store(in: &cancellables)
+
+        // 健康提示：vibe coding 过久/会话过多/深夜关怀
         let wellness = WellnessMonitor(settings: settings, store: store) { [weak island, weak mascot] notice in
             island?.viewModel.enqueueNotice(notice)
             mascot?.viewModel.showNotice(notice.headline)

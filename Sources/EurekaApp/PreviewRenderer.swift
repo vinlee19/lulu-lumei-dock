@@ -68,6 +68,14 @@ enum PreviewRenderer {
                     .fittingSize.height
                 print("任务列表高度 \(name)：排版 \(measured) / 计算 \(vm.contentSize.height)")
             }
+            if let draft = vm.questionDraft {
+                let card = QuestionCardView(
+                    draft: draft, sessionLabel: vm.questionSessionLabel, scale: vm.uiScale,
+                    topInset: vm.questionTopInset, questionLines: vm.questionLines)
+                let measured = NSHostingView(rootView: card.frame(width: vm.contentSize.width))
+                    .fittingSize.height
+                print("提问卡高度 \(name)：\(vm.questionLines) 行问题，排版 \(measured) / 计算 \(vm.contentSize.height)")
+            }
             let root = IslandRootView(viewModel: vm)
                 .frame(width: vm.layout.panelSize.width, height: vm.layout.panelSize.height)
             let renderer = ImageRenderer(content: root)
@@ -107,6 +115,57 @@ enum PreviewRenderer {
             $0.enqueueFinished(finished)
             $0.expireCurrentCard()
         }
+        // 提问卡（AskUserQuestion）：单选 4 项 / 两题中的多选第二题 / 「其他」输入中
+        let pickFramework = AskQuestion(
+            question: "这个页面用哪个前端框架重写？会影响后面组件库和构建配置的选择。",
+            header: "框架",
+            options: [
+                AskOption(label: "React", description: "生态最大，团队已有组件库"),
+                AskOption(label: "Vue", description: "模板语法上手快"),
+                AskOption(label: "Svelte", description: "编译期框架，包体最小"),
+                AskOption(label: "保持现状", description: "只修 bug，不重写"),
+            ],
+            multiSelect: false)
+        let pickSections = AskQuestion(
+            question: "周报里要包含哪些章节？",
+            header: "章节",
+            options: [
+                AskOption(label: "本周进展"), AskOption(label: "风险与阻塞"),
+                AskOption(label: "下周计划", description: "按优先级排序"),
+            ],
+            multiSelect: true)
+        func asking(_ questions: [AskQuestion]) -> PendingQuestion {
+            PendingQuestion(
+                id: "toolu_preview", sessionId: "p1", cwd: "/Users/me/work/auth-service",
+                hookPid: ProcessInfo.processInfo.processIdentifier, createdAt: now,
+                questions: questions)
+        }
+        // 实测时的那道题：一行问题、两个选项，问题与选项之间不该留出第二行的空白
+        snapshot("14d-card-question-one-line", screen: notched) {
+            $0.updatePendingQuestions([asking([AskQuestion(
+                question: "Which framework?", header: "Framework",
+                options: [
+                    AskOption(label: "React", description: "Component library"),
+                    AskOption(label: "Vue", description: "Template syntax"),
+                ],
+                multiSelect: false)])])
+        }
+        snapshot("14-card-question", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.updatePendingQuestions([asking([pickFramework])])
+        }
+        snapshot("14b-card-question-multi", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.updatePendingQuestions([asking([pickFramework, pickSections])])
+            $0.chooseOption("React")
+            $0.toggleOption("风险与阻塞")
+            $0.toggleOption("本周进展")
+        }
+        snapshot("14c-card-question-other-plain", screen: plain) {
+            $0.updatePendingQuestions([asking([pickFramework])])
+            $0.beginOther()
+        }
+
         // 设计稿收缩态：两个来源在跑（亮 + 青点），一个来源只剩空闲会话（变暗），空闲会话 ctx 92% 亮右翼告警
         snapshot("5d-compact-ctx-alert", screen: notched) {
             var hot = AgentTask(

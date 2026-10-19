@@ -62,7 +62,7 @@ final class InstallerService: ObservableObject {
         var benefit: String {
             switch self {
             case .claudeHooks:
-                return L10n.text("Live task cards, permission reminders, tool-call auditing, and the session terminal", zhHans: "实时任务卡、等待授权提醒、工具调用审计、会话所在终端")
+                return L10n.text("Live task cards, permission reminders, tool-call auditing, the session terminal, and answering questions on the island", zhHans: "实时任务卡、等待授权提醒、工具调用审计、会话所在终端、在灵动岛上回答提问")
             case .codexNotify:
                 return L10n.text("Turn completion notifications and the session terminal", zhHans: "回合完成通知、会话所在终端")
             case .codexHooks:
@@ -88,8 +88,12 @@ final class InstallerService: ObservableObject {
     /// Short name of the program our Codex notify forwards to, when it is chained.
     @Published private(set) var codexNotifyChainedTo: String?
     @Published private(set) var message: String?
-    /// Whether the last auto-update was skipped due to an anomaly (the reason must be visible to
-    /// the user, not silent)
+    /// settings.json 里灵动岛答题 hook 是否装着且指向稳定路径
+    @Published private(set) var askHookInstalled = false
+    /// 设置里「在灵动岛上回答 Claude 的提问」的当前值（AppDelegate 接到 AppSettings）。
+    /// 装 / 更新 Claude hooks 时据此带上或去掉答题 hook
+    var askHookEnabled: () -> Bool = { true }
+    /// 最近一次自动更新是否因异常被跳过（跳过原因要让用户看见，不能静悄悄）
     @Published private(set) var autoUpdateSkipped: [Integration] = []
 
     /// Compatibility for an old call site (AuditView checks whether Claude hooks are available)
@@ -121,6 +125,9 @@ final class InstallerService: ObservableObject {
         diagnoses[.claudeHooks] = ClaudeHooksInstaller.diagnose(
             json: claudeJSON, expectedRelayPath: relay,
             relayIsExecutable: relayIsExecutable)
+        askHookInstalled = ClaudeAskHookInstaller.isInstalled(
+            in: claudeJSON, askPath: RelaySyncer.stableAskURL.path)
+            && FileManager.default.isExecutableFile(atPath: RelaySyncer.stableAskURL.path)
         let codexToml = ConfigFile.read(codexConfigURL)
         diagnoses[.codexNotify] = CodexNotifyInstaller.diagnose(
             toml: codexToml, expectedRelayPath: relay,
@@ -218,7 +225,8 @@ final class InstallerService: ObservableObject {
         let updated: String
         switch integration {
         case .claudeHooks:
-            updated = try ClaudeHooksInstaller.install(into: original, relayPath: relayPath)
+            let relayHooks = try ClaudeHooksInstaller.install(into: original, relayPath: relayPath)
+            updated = try applyAskHook(to: relayHooks)
         case .codexNotify:
             updated = try CodexNotifyInstaller.install(into: original, relayPath: relayPath)
         case .codexHooks:
@@ -229,7 +237,50 @@ final class InstallerService: ObservableObject {
         try ConfigFile.backupThenWrite(path: url, newContent: updated)
     }
 
-    // MARK: - Auto-update (only touches what is already installed)
+    // MARK: - 灵动岛答题 hook（随 Claude hooks 装卸，设置里单独开关）
+
+    /// 按开关给 settings.json 内容带上或去掉答题 hook。
+    /// 开着却找不到 eureka-ask（开发环境没构建它）时抛错，不装一条指向不存在文件的 hook
+    private func applyAskHook(to json: String) throws -> String {
+        guard askHookEnabled() else { return try ClaudeAskHookInstaller.uninstall(from: json) }
+        guard let ask = RelaySyncer.syncAsk() else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [
+                NSLocalizedDescriptionKey: "找不到 eureka-ask（应与应用同目录）",
+            ])
+        }
+        return try ClaudeAskHookInstaller.install(into: json, askPath: ask.path)
+    }
+
+    /// 设置里切换「在灵动岛上回答 Claude 的提问」时调用，只增删答题那一条：
+    /// - Claude hooks 已装好：按开关装上或卸掉；
+    /// - 没装 Claude hooks、但答题那条单独装着：关掉时照样卸掉（不然开关关了 hook 还在）；
+    /// - 两样都没有：什么都不写（等用户装 hooks 时一并带上）
+    func applyAskHookSetting() {
+        refresh()
+        let diagnosis = diagnosis(for: .claudeHooks)
+        let askEntryPresent = ClaudeAskHookInstaller.hasAnyEntry(
+            in: ConfigFile.read(EurekaCLI.claudeSettingsURL))
+        guard diagnosis.isInstalledInSomeForm || askEntryPresent else { return }
+        guard !diagnosis.blocksAutomaticWrite else {
+            message = "Claude Code hooks：\(diagnosis.detail ?? "配置异常")，未改动答题 hook"
+            return
+        }
+        let url = EurekaCLI.claudeSettingsURL
+        do {
+            let original = ConfigFile.read(url)
+            let updated = try applyAskHook(to: original)
+            guard updated != original else { return }
+            try ConfigFile.backupThenWrite(path: url, newContent: updated)
+            message = askHookEnabled()
+                ? "已开启在灵动岛上回答 Claude 的提问（原配置已备份）"
+                : "已关闭在灵动岛上回答 Claude 的提问，提问回到终端（原配置已备份）"
+        } catch {
+            message = "答题 hook 更新失败：\(error)（未改动原文件）"
+        }
+        refresh()
+    }
+
+    // MARK: - 自动更新（只碰已经装过的）
 
     /// After an app upgrade, refreshes **already installed** integrations to the current version.
     ///
@@ -252,7 +303,9 @@ final class InstallerService: ObservableObject {
                 skipped.append(integration)
                 continue
             }
-            guard !diagnosis.isHealthy else { continue }
+            // Claude hooks 健康但答题 hook 与开关不一致（升级后首次带上它 / 二进制路径变了）也要重写
+            let askOutOfSync = integration == .claudeHooks && askHookInstalled != askHookEnabled()
+            guard !diagnosis.isHealthy || askOutOfSync else { continue }
             guard let relay = RelaySyncer.sync() else { continue }
             if (try? write(integration, relayPath: relay.path)) != nil {
                 updated.append(integration.title)

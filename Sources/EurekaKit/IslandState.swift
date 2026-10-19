@@ -11,6 +11,9 @@ public struct IslandState: Equatable, Sendable {
         /// High-risk operation security alert (red card; jumps the queue to the top,
         /// auto-dismisses)
         case alert(RiskAlert)
+        /// agent 的选择题（AskUserQuestion），在岛上点选作答。插队置顶、不自动收起：
+        /// agent 正停着等答案，收掉了用户就只能干等到 hook 超时
+        case question(PendingQuestion)
     }
 
     /// Active tasks (including waiting), sorted by start time
@@ -48,11 +51,11 @@ extension IslandState.Card {
     /// "the waiting card dismisses faster than the finished card", which makes no sense.
     public var autoDismissExtraSeconds: TimeInterval? {
         switch self {
-        case .finished: return 0  // the base value; the slider applies directly
-        case .waiting: return 4   // permission/input requests need a clear read: default 6+4=10s
-        case .notice: return 5    // give care copy enough reading time
-        case .alert: return 6     // security alerts linger longer (the audit page and
-                                  // Notification Center keep their own copy)
+        case .finished: return 0  // 基准值，滑块直接生效
+        case .waiting: return 4   // 授权/输入请求要看清：默认 6+4=10s
+        case .notice: return 5    // 关怀文案给足阅读时间
+        case .alert: return 6     // 安全告警多停一会（审计页与通知中心另有留存）
+        case .question: return nil  // 答完 / 回终端 / hook 放弃时才撤
         }
     }
 

@@ -74,6 +74,22 @@ struct IslandRootView: View {
                 showStartTime: viewModel.showStartTime,
                 scale: scale
             )
+        case .card(.question):
+            if let draft = viewModel.questionDraft {
+                QuestionCardView(
+                    draft: draft,
+                    sessionLabel: viewModel.questionSessionLabel,
+                    scale: scale,
+                    topInset: viewModel.questionTopInset,
+                    questionLines: viewModel.questionLines,
+                    onChoose: { viewModel.chooseOption($0) },
+                    onToggle: { viewModel.toggleOption($0) },
+                    onConfirm: { viewModel.confirmSelection() },
+                    onBeginOther: { viewModel.beginOther() },
+                    onCancelOther: { viewModel.cancelOther() },
+                    onSubmitOther: { viewModel.submitOther($0) },
+                    onAnswerInTerminal: { viewModel.answerInTerminal() })
+            }
         case .card(let card):
             ExpandedCardView(card: card, queuedCount: viewModel.queuedCount, scale: scale)
         case .taskList:
@@ -809,6 +825,7 @@ struct ExpandedCardView: View {
         case .finished(let task): return task.source
         case .waiting(let task): return task.source
         case .alert(let alert): return alert.source
+        case .question(let question): return question.source
         case .notice: return nil
         }
     }
@@ -826,6 +843,8 @@ struct ExpandedCardView: View {
             return "ellipsis.bubble.fill"
         case .alert:
             return "exclamationmark.shield.fill"
+        case .question:
+            return "questionmark.bubble.fill"  // 提问卡由 QuestionCardView 渲染，这里只为穷尽
         case .notice:
             return "heart.fill"  // Never reached (notices render an emoji); fallback
         }
@@ -841,6 +860,7 @@ struct ExpandedCardView: View {
             }
         case .waiting: return .orange
         case .alert: return .red
+        case .question: return .cyan
         case .notice: return .pink
         }
     }
@@ -863,6 +883,8 @@ struct ExpandedCardView: View {
             return L10n.text("Waiting", zhHans: "等待中")
         case .alert(let alert):
             return L10n.format("High-risk operation · %@", zhHans: "高危操作 · %@", String(alert.ruleTitle))
+        case .question:
+            return L10n.text("Waiting for your answer", zhHans: "等你回答")
         case .notice(let notice):
             return notice.headline
         }
@@ -885,6 +907,7 @@ struct ExpandedCardView: View {
             let firstLine = alert.detail.split(separator: "\n", maxSplits: 1).first.map(String.init)
                 ?? alert.detail
             return L10n.format("%@: %@", zhHans: "%@：%@", String(alert.tool), String(firstLine))
+        case .question(let question): return question.questions.first?.question
         case .notice(let notice): return notice.body
         }
     }
@@ -910,6 +933,9 @@ struct ExpandedCardView: View {
             var parts = [L10n.text("lulu-lumei-dock wellness tip", zhHans: "lulu-lumei-dock 健康提示")]
             if queuedCount > 0 { parts.append(L10n.format("%@ more notifications", zhHans: "还有 %@ 条通知", String(queuedCount))) }
             return parts.joined(separator: " · ")
+        case .question(let question):
+            project = question.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+            sessionId = question.sessionId ?? question.id
         }
         var parts: [String] = []
         if let project { parts.append(project) }

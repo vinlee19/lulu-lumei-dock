@@ -32,9 +32,13 @@ final class AppSettings: ObservableObject {
     @Published var notifyError: Bool {
         didSet { defaults.set(notifyError, forKey: "notifyError") }
     }
-    /// Also posts a system notification for key events (finished / waiting / error), visible on the
-    /// lock screen and other desktops. Off by default, opt-in; authorization is requested only when
-    /// enabled. Still gated by the per-type toggles above.
+    /// 在灵动岛上回答 Claude 的提问（AskUserQuestion）。默认开；
+    /// 开着且装了 Claude hooks 时，settings.json 里多一条 `lululumei-ask` hook
+    @Published var answerQuestionsOnIsland: Bool {
+        didSet { defaults.set(answerQuestionsOnIsland, forKey: "answerQuestionsOnIsland") }
+    }
+    /// 关键事件（完成/等待/出错）同时发系统通知（锁屏/其他桌面可见）。
+    /// 默认关，opt-in，开启时才请求授权；仍受上方按类型开关门控。
     @Published var eventSystemNotifyEnabled: Bool {
         didSet { defaults.set(eventSystemNotifyEnabled, forKey: "eventSystemNotifyEnabled") }
     }
@@ -221,6 +225,7 @@ final class AppSettings: ObservableObject {
         notifyCompletion = defaults.object(forKey: "notifyCompletion") as? Bool ?? true
         notifyWaiting = defaults.object(forKey: "notifyWaiting") as? Bool ?? true
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
+        answerQuestionsOnIsland = defaults.object(forKey: "answerQuestionsOnIsland") as? Bool ?? true
         eventSystemNotifyEnabled = defaults.bool(forKey: "eventSystemNotifyEnabled")
         autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
         showStartTime = defaults.bool(forKey: "islandShowStartTime")
