@@ -5,27 +5,27 @@ let package = Package(
     name: "eureka",
     platforms: [.macOS(.v14)],
     dependencies: [
-        // 应用内更新：精确锁定，避免发布机自动漂移到未经验证的 Sparkle 版本。
+        // In-app updates: pinned exactly so the release machine never drifts to an unverified Sparkle version.
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2"),
     ],
     targets: [
-        // 纯领域层：模型、状态机、几何纯函数。无 IO、无 AppKit。
+        // Pure domain layer: models, state machine, pure geometry functions. No IO, no AppKit.
         .target(name: "EurekaKit"),
-        // SQLite 持久化（系统 libsqlite3）
+        // SQLite persistence (system libsqlite3)
         .target(
             name: "EurekaStore",
             dependencies: ["EurekaKit"],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
-        // 事件接入：spool 消费、hook/notify 解码、rollout tailer
+        // Event ingestion: spool consumer, hook/notify decoding, rollout tailers
         .target(name: "EurekaIngest", dependencies: ["EurekaKit", "EurekaStore"]),
-        // 用量统计与限额
+        // Usage accounting and rate limits
         .target(name: "EurekaUsage", dependencies: ["EurekaKit", "EurekaStore"]),
-        // hooks / notify 配置安装器（纯文本进出，独立可测）
-        .target(name: "EurekaInstall"),
-        // 云端备份：S3/COS 增量上传（SigV4 签名、同步引擎、钥匙串凭证）
+        // hooks / notify config installers (pure text in/out). Depends only on EurekaKit so install diagnostics can go through L10n.
+        .target(name: "EurekaInstall", dependencies: ["EurekaKit"]),
+        // Cloud backup: incremental S3/COS upload (SigV4 signing, sync engine, Keychain credentials)
         .target(name: "EurekaSync", dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest"]),
-        // 菜单栏应用本体
+        // The menu-bar app itself
         .executableTarget(
             name: "eureka",
             dependencies: [
@@ -43,16 +43,16 @@ let package = Package(
                 .copy("Resources/Fonts"),
             ],
             linkerSettings: [
-                // 手工组装 .app 时从 Contents/Frameworks 加载 Sparkle.framework。
+                // A hand-assembled .app loads Sparkle.framework from Contents/Frameworks.
                 .unsafeFlags([
                     "-Xlinker", "-rpath",
                     "-Xlinker", "@executable_path/../Frameworks",
                 ]),
             ]
         ),
-        // hooks/notify 调用的轻量转发 CLI：静默、永远 exit 0
+        // Lightweight forwarding CLI invoked by hooks/notify: silent, always exit 0
         .executableTarget(name: "eureka-relay", path: "Sources/eureka-relay"),
-        // 测试 runner（CLT 无 XCTest，自建 harness）
+        // Test runner (CLT has no XCTest, so a hand-rolled harness)
         .executableTarget(
             name: "eureka-tests",
             dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall", "EurekaSync"],

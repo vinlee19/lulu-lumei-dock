@@ -2,7 +2,7 @@ import EurekaIngest
 import EurekaKit
 import Foundation
 
-/// TurnSlicer：扁平消息流 → 逐轮 TurnInput。轮边界 = 真实用户消息。
+/// TurnSlicer: flat message stream → per-turn TurnInput. Turn boundary = a real user message.
 func turnSlicerTests(_ t: TestRunner) {
     t.suite("TurnSlicer · 切轮")
 
@@ -39,10 +39,11 @@ func turnSlicerTests(_ t: TestRunner) {
         try expectEqual(turns[0].answerText, "改好了")
         try expectEqual(turns[0].duration, 60, "轮耗时 = 首末时间戳之差")
 
-        // 批次原样传递（并行判据），stepIndex 连续
+        // Batches pass through unchanged (the parallelism criterion); stepIndex is contiguous
         try expectEqual(turns[0].steps.map(\.batch), [1, 1, 2])
         try expectEqual(turns[0].steps.map(\.stepIndex), [0, 1, 2])
-        // 每步都记得自己挂在哪条消息上（点节点跳消息用）
+        // Every step remembers which message it belongs to (used to jump from a node to its
+        // message)
         try expect(turns[0].steps.allSatisfy { $0.messageId == 1 })
 
         try expectEqual(turns[1].turnIndex, 1)
@@ -64,7 +65,8 @@ func turnSlicerTests(_ t: TestRunner) {
         try expectEqual(turns.count, 1)
         try expectEqual(turns[0].thinkingTexts, ["先看热路径", "再确认一下缓存"])
 
-        // Claude 没有思考消息 → 恒空，引擎那侧据此改走「分叉」而不是伪造思考节点
+        // Claude has no thinking messages → always empty; the engine uses a "fork" instead of
+        // faking a thinking node
         let claudeLike = TurnSlicer.slice([
             message(0, .user, "改一下"),
             message(1, .turnTrail, steps: [ToolStep(kind: .edit, name: "Edit", detail: "/w/A")]),
@@ -115,7 +117,8 @@ func turnSlicerTests(_ t: TestRunner) {
     t.test("空输入 / 只有用户消息 / 无时间戳都不崩") {
         try expect(TurnSlicer.slice([]).isEmpty)
 
-        // 只有提问没有任何回应：仍产出一轮（用户问了但 agent 没动，本身就是信息）
+        // A prompt with no response at all still yields a turn (the user asked but the agent didn't
+        // act, which is itself information)
         let onlyPrompt = TurnSlicer.slice([message(0, .user, "在吗")])
         try expectEqual(onlyPrompt.count, 1)
         try expectEqual(onlyPrompt[0].promptText, "在吗")
@@ -134,7 +137,8 @@ func turnSlicerTests(_ t: TestRunner) {
         try expectEqual(turns.count, 1, "三条注入不该各开一轮，实得 \(turns.map(\.promptText))")
         try expectEqual(turns[0].promptText, "真正的提问")
 
-        // caveat 之后往往还跟着真实提问 —— 整条丢会把提问也丢掉
+        // A caveat is often followed by a real prompt — dropping the whole thing would drop the
+        // prompt too
         let mixed = TurnSlicer.slice([
             message(0, .user, """
             <local-command-caveat>Caveat: 下面是本地命令输出</local-command-caveat>
@@ -147,7 +151,8 @@ func turnSlicerTests(_ t: TestRunner) {
         try expectEqual(mixed.count, 1)
         try expectEqual(mixed[0].promptText, "帮我看下分页这块")
 
-        // 未闭合（内容被截断）也要当注入处理，不能漏成提问
+        // An unclosed one (content truncated) must still be treated as an injection, not leak
+        // through as a prompt
         let truncated = TurnSlicer.slice([
             message(0, .user, "<system-reminder>提示被截断了没有结尾"),
             message(1, .assistant, "答"),
@@ -161,24 +166,25 @@ func turnSlicerTests(_ t: TestRunner) {
         let path = try fixtureURL("claude-transcript-trail.jsonl").path
         let result = TranscriptReader.loadClaude(path: path, maxMessages: 2000)
         let turns = TurnSlicer.slice(result.messages)
-        // fixture 有 2 条真实用户提问 → 2 轮
+        // The fixture has 2 real user prompts → 2 turns
         try expectEqual(turns.count, 2)
         try expectEqual(turns[0].steps.count, 7)
         try expectEqual(turns[1].steps.count, 1)
-        // 批次：同一条 assistant 消息里的多个 tool_use 必须同批
+        // Batches: multiple tool_use blocks in the same assistant message must share a batch
         let batches = Set(turns[0].steps.map(\.batch))
         try expect(!batches.isEmpty)
         try expect(turns[0].steps.contains { $0.isError }, "失败标记应随步骤带过来")
     }
 
     t.test("Codex 真 turn_id 切轮：同轮内不断开、换 turn_id 才开新轮") {
-        // turn_id 落在 internal_chat_message_metadata_passthrough 下（实勘覆盖 15 种行类型）。
-        // 关键点：**两次工具调用之间没有用户消息**，只有 turn_id 变了 —— 旧逻辑（只看
-        // 用户消息）会把它们并进同一轮，新逻辑要切开。
+        // turn_id sits under internal_chat_message_metadata_passthrough (observed across 15 line
+        // types). Key point: **there's no user message between the two tool calls**, only turn_id
+        // changes — the old logic (looking only at user messages) merged them into one turn; the
+        // new logic must split them.
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-codex-turnid-\(UUID()).jsonl")
         defer { try? FileManager.default.removeItem(at: path) }
-        // 用 JSONSerialization 造行，避免手写多层转义写错
+        // Build lines with JSONSerialization to avoid getting hand-written nested escapes wrong
         func line(turn: String, callId: String, cmd: String) throws -> String {
             let payload: [String: Any] = [
                 "type": "custom_tool_call", "name": "exec", "call_id": callId,

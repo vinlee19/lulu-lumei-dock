@@ -1,9 +1,9 @@
 import Foundation
 import EurekaKit
 
-/// Codex 事件去重：notify（低延迟）与 rollout tailer（主源）会对同一 turn
-/// 各报一次完成。按 (session, turn, 事件类别) 在时间窗内去重。
-/// 仅在 EventPipeline 串行队列上使用。
+/// Codex event dedup: notify (low latency) and the rollout tailer (main source) each report the
+/// same turn's completion once. Dedup by (session, turn, event category) within a time window. Used
+/// only on the EventPipeline serial queue.
 public final class EventDeduplicator {
     private var seen: [String: Date] = [:]
     private let window: TimeInterval
@@ -21,7 +21,7 @@ public final class EventDeduplicator {
     }
 
     private func dedupKey(_ event: TaskEvent) -> String? {
-        // 只有 Codex 存在双通道；Claude hooks 单通道无需去重
+        // Only Codex has two channels; Claude hooks are single-channel and need no dedup
         guard event.source == .codex, let turnId = event.turnId else { return nil }
         switch event.kind {
         case .taskStarted: return "\(event.sessionId):\(turnId):start"

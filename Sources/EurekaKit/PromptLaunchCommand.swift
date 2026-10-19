@@ -1,10 +1,12 @@
 import Foundation
 
-/// 「以此 prompt 在终端启动新会话」的命令拼装。纯字符串函数，可单测。
+/// Builds the command for "start a new session in the terminal with this prompt". Pure string
+/// function, unit-testable.
 ///
-/// v1 白名单只有 claude / codex —— 两者已验证支持位置参数 prompt
-/// （`claude '…'` / `codex '…'`）。其余源的 CLI 是否接受位置 prompt 未实勘，
-/// 返回 nil，UI 隐藏该动作（复制提问原文仍可用）。
+/// The v1 allowlist is only claude / codex: both are verified to accept a positional prompt
+/// (`claude '...'` / `codex '...'`). Whether other sources' CLIs accept a positional prompt hasn't
+/// been verified, so they return nil and the UI hides the action (copying the prompt text still
+/// works).
 public enum PromptLaunchCommand {
     public static func cliExecutable(for source: AgentSource) -> String? {
         switch source {
@@ -14,7 +16,7 @@ public enum PromptLaunchCommand {
         }
     }
 
-    /// `cd '<cwd>' && <cli> '<prompt>'`；无 cwd 时省略前缀
+    /// `cd '<cwd>' && <cli> '<prompt>'`; the prefix is omitted without a cwd
     public static func build(cli: String, cwd: String?, prompt: String) -> String {
         let quoted = shellSingleQuote(prompt)
         if let cwd, !cwd.isEmpty {
@@ -23,10 +25,11 @@ public enum PromptLaunchCommand {
         return "\(cli) \(quoted)"
     }
 
-    /// POSIX 单引号转义：引号内一切字面量，`'` → `'\''`。
-    /// 换行单独处理成 `'$'\n''` 拼接（zsh/bash 均认）——不是为 shell，而是为
-    /// 上层 AppleScript：`do script "…"` 的字符串字面量放不下裸换行，
-    /// 转成 $'\n' 后整条命令保持单行。\r 直接丢弃。
+    /// POSIX single-quote escaping: everything inside quotes is literal, `'` → `'\''`. Newlines are
+    /// handled separately as `'$'\n''` concatenation (both zsh and bash accept it). Not for the
+    /// shell, but for the AppleScript layer above: the string literal in `do script "..."` can't
+    /// hold a bare newline, so converting to $'\n' keeps the whole command on one line. \r is
+    /// dropped.
     public static func shellSingleQuote(_ raw: String) -> String {
         var body = raw
             .replacingOccurrences(of: "\r", with: "")

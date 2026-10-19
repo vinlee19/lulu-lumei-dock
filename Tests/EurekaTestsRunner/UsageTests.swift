@@ -29,7 +29,7 @@ func claudeScannerTests(_ t: TestRunner) {
 
         let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
         let inserted = try scanner.scanOnce()
-        // fixture: msg_01AAA 重复两行 → 1 条；msg_01BBB 1 条；sidechain msg_01CCC 1 条
+        // fixture: msg_01AAA duplicated on two lines → 1; msg_01BBB 1; sidechain msg_01CCC 1
         try expectEqual(inserted, 3)
 
         let totals = try store.usage.totalsByModel(
@@ -37,7 +37,7 @@ func claudeScannerTests(_ t: TestRunner) {
         let fable = totals.first { $0.model == "claude-fable-5" }
         try expectEqual(fable?.requestCount, 2)
         try expectEqual(fable?.inputTokens, 1200 + 3400)
-        // 流式重复行 output 递增（40 → 100），应取最终值
+        // Streaming duplicate lines with increasing output (40 → 100): take the final value
         try expectEqual(fable?.outputTokens, 100 + 250)
         try expectEqual(fable?.cacheCreation1hTokens, 500)
         let haiku = totals.first { $0.model.hasPrefix("claude-haiku") }
@@ -51,15 +51,16 @@ func claudeScannerTests(_ t: TestRunner) {
         let dir = root.appendingPathComponent("-Users-me-work-demo")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // assistant 行（含 Skill + Bash 两个 tool_use）；后附一份完全相同的流式重复行
+        // assistant line (with two tool_use blocks, Skill + Bash), followed by an identical
+        // streaming duplicate
         let assistant = """
         {"type":"assistant","uuid":"u1","timestamp":"2026-07-05T10:00:00.000Z","requestId":"req_T","message":{"id":"msg_T","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":100,"output_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[{"type":"text","text":"ok"},{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"dataviz"}},{"type":"tool_use","id":"t2","name":"Bash","input":{}}]},"sessionId":"s","cwd":"/w"}
         """
-        // 另一 assistant 行：MCP 插件 + 子代理
+        // Another assistant line: MCP plugin + subagent
         let assistant2 = """
         {"type":"assistant","uuid":"u2","timestamp":"2026-07-05T10:01:00.000Z","requestId":"req_U","message":{"id":"msg_U","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":50,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[{"type":"tool_use","id":"t3","name":"mcp__claude_ai_Atlassian__search","input":{}},{"type":"tool_use","id":"t4","name":"Task","input":{"subagent_type":"Explore"}}]},"sessionId":"s","cwd":"/w"}
         """
-        // user 行：斜杠命令
+        // user line: slash command
         let commandLine = """
         {"type":"user","uuid":"uc1","timestamp":"2026-07-05T10:02:00.000Z","message":{"role":"user","content":"<command-name>/plan</command-name>\\n<command-message>plan</command-message>"},"sessionId":"s","cwd":"/w"}
         """
@@ -69,7 +70,7 @@ func claudeScannerTests(_ t: TestRunner) {
 
         let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
         _ = try scanner.scanOnce()
-        // 二次扫描：全局去重 + 命令 s:uuid 去重 → 计数不应翻倍
+        // Second scan: global dedup + command s:uuid dedup → counts must not double
         _ = try scanner.scanOnce()
 
         let totals = try store.toolCalls.totals(
@@ -93,8 +94,9 @@ func claudeScannerTests(_ t: TestRunner) {
         let dir = root.appendingPathComponent("-Users-me-work-demo")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // Claude Code 每个 content block 单独写一行，却共享同一 (requestId, message.id)：
-        // text 行 → Skill 行 → Bash 行。按消息键末次覆盖时 Skill 会被 Bash 顶掉。
+        // Claude Code writes each content block on its own line, all sharing the same (requestId,
+        // message.id): text line → Skill line → Bash line. Last-write-wins per message key would
+        // let Bash push Skill out.
         func line(_ uuid: String, _ blocks: String, output: Int) -> String {
             """
             {"type":"assistant","uuid":"\(uuid)","timestamp":"2026-07-06T10:00:00.000Z","requestId":"req_A","message":{"id":"msg_A","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":100,"output_tokens":\(output),"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"content":[\(blocks)]},"sessionId":"s","cwd":"/w"}
@@ -106,14 +108,15 @@ func claudeScannerTests(_ t: TestRunner) {
             output: 12)
         let bashLine = line(
             "u3", #"{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{}}"#, output: 20)
-        // 末行再重复一次 Skill 行（流式重复写）→ 同 id 文件内只能算一次
+        // The last line repeats the Skill line once more (streaming duplicate) → counted only once
+        // per id within the file
         let content = [textLine, skillLine, bashLine, skillLine].joined(separator: "\n") + "\n"
         try content.write(
             to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
 
         let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
         _ = try scanner.scanOnce()
-        _ = try scanner.scanOnce()  // 二次扫描不应翻倍
+        _ = try scanner.scanOnce()  // A second scan must not double
 
         let totals = try store.toolCalls.totals(
             from: Date(timeIntervalSince1970: 0),
@@ -123,7 +126,7 @@ func claudeScannerTests(_ t: TestRunner) {
         }
         try expectEqual(count("skill", "tdd"), 1, "同消息里的 Skill 不能被后面的 Bash 行顶掉")
         try expectEqual(count("tool", "Bash"), 1)
-        // tokens 取"该 tool_use 所在行"的合计，不是消息合并后的那行
+        // tokens are the totals of "the line carrying that tool_use", not the merged message line
         let skill = try store.toolCalls.skillStats(source: .claude).first { $0.name == "tdd" }
         try expectEqual(skill?.tokens, 100 + 12, "tokens 应来自 Skill 自己那行")
     }
@@ -142,12 +145,14 @@ func claudeScannerTests(_ t: TestRunner) {
 
             """
         }
-        // 第一轮只读到消息的 text 行 → 消息级去重键已被消费
+        // The first pass reads only the message's text line → the message-level dedup key is
+        // already consumed
         try Data(line("u1", #"{"type":"text","text":"稍等"}"#).utf8).write(to: file)
         let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
         try expectEqual(try scanner.scanOnce(), 1)
 
-        // 第二轮才落盘同消息的 tool_use 行（走"已记录过"回填分支）
+        // The tool_use line of the same message is written only in the second pass (takes the
+        // "already recorded" backfill branch)
         let handle = try FileHandle(forWritingTo: file)
         _ = try handle.seekToEnd()
         try handle.write(contentsOf: Data(
@@ -171,7 +176,8 @@ func claudeScannerTests(_ t: TestRunner) {
             .appendingPathComponent("-Users-me-work-demo")
             .appendingPathComponent("parent-session-1")
             .appendingPathComponent("subagents")
-        // subagents 下还会再套一层 workflows/wf_<id>/（本机实测存在）
+        // subagents contain one more nested workflows/wf_<id>/ level (verified to exist on this
+        // machine)
         let workflowDir = subDir
             .appendingPathComponent("workflows")
             .appendingPathComponent("wf_910931c7")
@@ -241,7 +247,7 @@ func claudeScannerTests(_ t: TestRunner) {
         _ = try scanner.scanOnce()
         try expectEqual(try scanner.scanOnce(), 0, "offset 之后无新内容")
 
-        // 追加一条新 assistant 行
+        // Append a new assistant line
         let newLine = """
         {"type":"assistant","uuid":"u-9","timestamp":"2026-06-09T11:00:00.000Z","requestId":"req_NEW","message":{"id":"msg_NEW","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0}}},"sessionId":"fixture-session-1","cwd":"/Users/me/work/demo"}
 
@@ -263,7 +269,7 @@ func claudeScannerTests(_ t: TestRunner) {
         let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
         let first = try scanner.scanOnce()
 
-        // 模拟 resume：同内容复制成新会话文件
+        // Simulate resume: copy the same content into a new session file
         try FileManager.default.copyItem(
             at: projectDir.appendingPathComponent("s1.jsonl"),
             to: projectDir.appendingPathComponent("s2-resumed.jsonl"))
@@ -298,10 +304,10 @@ func claudeScannerTests(_ t: TestRunner) {
             "claude-transcript-running.jsonl", as: "sess-42.jsonl", in: dir)
         let scanner = ClaudeTranscriptScanner(projectsRoot: root, store: store)
         _ = try scanner.scanOnce()
-        // running fixture：1 条真实 prompt + 1 条 tool_result（不算）
+        // running fixture: 1 real prompt + 1 tool_result (not counted)
         try expectEqual(try store.sessionStats.promptCounts(for: ["sess-42"]), ["sess-42": 1])
 
-        // 追加一条新 prompt → 增量累加
+        // Append a new prompt → accumulates incrementally
         let newPrompt = """
         {"type":"user","message":{"role":"user","content":"再跑一次"},"uuid":"u-p2","timestamp":"2026-06-09T11:00:00.000Z","sessionId":"sess-42","cwd":"/Users/me/work/pipeline"}
 
@@ -361,8 +367,8 @@ func codexScannerTests(_ t: TestRunner) {
         let totals = try store.usage.totalsByModel(
             from: Date(timeIntervalSince1970: 0), to: Date())
         let codex = totals.first { $0.source == .codex }
-        // 事件1: in=10000(cached 2000) out=500 → 记 in=8000 cached=2000 out=500
-        // 事件2: 差值 in=6000(cached 3000) out=800 → 记 in=3000 cached=3000 out=800
+        // Event 1: in=10000(cached 2000) out=500 → record in=8000 cached=2000 out=500
+        // Event 2: delta in=6000(cached 3000) out=800 → record in=3000 cached=3000 out=800
         try expectEqual(codex?.inputTokens, 8000 + 3000)
         try expectEqual(codex?.cacheReadTokens, 2000 + 3000)
         try expectEqual(codex?.outputTokens, 500 + 800)
@@ -373,12 +379,13 @@ func codexScannerTests(_ t: TestRunner) {
         let root = try makeSessionsDir()
         let lines = [
             #"{"type":"session_meta","payload":{"id":"s1","cwd":"/w"}}"#,
-            // 原生工具（计入 tool）
+            // Native tool (counted as tool)
             #"{"type":"response_item","timestamp":"2026-07-08T10:00:00.000Z","payload":{"type":"function_call","name":"exec_command"}}"#,
             #"{"type":"response_item","timestamp":"2026-07-08T10:00:01.000Z","payload":{"type":"function_call","name":"exec_command"}}"#,
-            // MCP 代理的 function_call（_ 前缀）应跳过，避免与 mcp_tool_call_end 重复
+            // MCP-proxied function_call (_ prefix) should be skipped to avoid duplicating
+            // mcp_tool_call_end
             #"{"type":"response_item","timestamp":"2026-07-08T10:00:02.000Z","payload":{"type":"function_call","name":"_search"}}"#,
-            // MCP 插件调用（计入 mcp，命名干净）
+            // MCP plugin call (counted as mcp, clean name)
             #"{"type":"event_msg","timestamp":"2026-07-08T10:00:03.000Z","payload":{"type":"mcp_tool_call_end","invocation":{"server":"codex_apps.notion","tool":"search"}}}"#,
         ].joined(separator: "\n") + "\n"
         try lines.write(
@@ -387,7 +394,7 @@ func codexScannerTests(_ t: TestRunner) {
 
         let scanner = CodexUsageScanner(sessionsRoot: root, store: store)
         _ = try scanner.scanOnce()
-        _ = try scanner.scanOnce()  // 幂等：offset 已过
+        _ = try scanner.scanOnce()  // Idempotent: offset already past
 
         let totals = try store.toolCalls.totals(
             from: Date(timeIntervalSince1970: 0),
@@ -412,8 +419,8 @@ func codexScannerTests(_ t: TestRunner) {
         let totals = try store.usage.totalsByModel(
             from: Date(timeIntervalSince1970: 0), to: Date())
         let codex = totals.first { $0.source == .codex }
-        // 事件1 全量 200000/150000/8000；事件2 回落 → last(30000/10000/1000)；
-        // 事件3 差值 12000/5000/600
+        // Event 1 totals 200000/150000/8000; event 2 drops back → last(30000/10000/1000);
+        // event 3 delta 12000/5000/600
         try expectEqual(codex?.inputTokens, 50000 + 20000 + 7000)
         try expectEqual(codex?.cacheReadTokens, 150_000 + 10000 + 5000)
         try expectEqual(codex?.outputTokens, 8000 + 1000 + 600)
@@ -423,7 +430,8 @@ func codexScannerTests(_ t: TestRunner) {
     t.test("resume 的旧会话（老日期目录）用量不丢") {
         let store = try makeStore()
         let root = try makeSessionsDir()
-        // 创建日目录很老的 rollout：resume 后原地追加，只数最近日期目录会漏
+        // A rollout whose creation-date directory is old: appended in place after resume; counting
+        // only the latest date directory would miss it
         let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
         try FileManager.default.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
         try FileManager.default.copyItem(
@@ -435,7 +443,7 @@ func codexScannerTests(_ t: TestRunner) {
         let totals = try store.usage.totalsByModel(
             from: Date(timeIntervalSince1970: 0), to: Date())
         let codex = totals.first { $0.source == .codex }
-        // 与"相邻差值法记账"同一 fixture：in=8000+3000 cached=2000+3000 out=500+800
+        // Same fixture as "adjacent-delta accounting": in=8000+3000 cached=2000+3000 out=500+800
         try expectEqual(codex?.inputTokens, 8000 + 3000)
         try expectEqual(codex?.cacheReadTokens, 2000 + 3000)
         try expectEqual(codex?.outputTokens, 500 + 800)
@@ -472,7 +480,7 @@ func pricingTests(_ t: TestRunner) {
             inputTokens: 1_000_000, outputTokens: 100_000,
             cacheCreationTokens: 200_000, cacheCreation1hTokens: 50_000,
             cacheReadTokens: 500_000, requestCount: 1)
-        // 15 + 7.5 + 读 0.5M*1.5=0.75 + 5m 写 150k*18.75/M=2.8125 + 1h 写 50k*30/M=1.5
+        // 15 + 7.5 + read 0.5M*1.5=0.75 + 5m write 150k*18.75/M=2.8125 + 1h write 50k*30/M=1.5
         let cost: Double = table.cost(of: totals) ?? 0
         let expected: Double = 15.0 + 7.5 + 0.75 + 2.8125 + 1.5
         try expect(abs(cost - expected) < 0.0001, "got \(cost)")
@@ -511,7 +519,7 @@ func aggregatorTests(_ t: TestRunner) {
         var calendar = Calendar.current
         calendar.timeZone = TimeZone.current
 
-        // 2026-06-10 是周三。周起点应为 6-08（周一）
+        // 2026-06-10 is a Wednesday. The week start should be 6-08 (Monday)
         let now = calendar.date(from: DateComponents(
             year: 2026, month: 6, day: 10, hour: 15))!
         let monday = UsageAggregator.weekStart(of: now, calendar: calendar)
@@ -526,9 +534,9 @@ func aggregatorTests(_ t: TestRunner) {
                 inputTokens: tokens, outputTokens: 0)
         }
         try store.usage.insert([
-            record(10, 9, tokens: 100),   // 今日
-            record(9, 23, tokens: 50),    // 昨日（本周内）
-            record(7, 12, tokens: 7),     // 上周日（窗口外）
+            record(10, 9, tokens: 100),   // today
+            record(9, 23, tokens: 50),    // yesterday (this week)
+            record(7, 12, tokens: 7),     // last Sunday (outside the window)
         ])
 
         let pricing = PricingTable(models: [])
@@ -536,7 +544,7 @@ func aggregatorTests(_ t: TestRunner) {
             store: store, pricing: pricing, now: now, calendar: calendar)
         try expectEqual(summary.today.first?.inputTokens, 100)
         try expectEqual(summary.thisWeek.first?.inputTokens, 150)
-        // 6-07（上周日）在本周窗口外、本月窗口内
+        // 6-07 (last Sunday) is outside this week's window but inside this month's
         try expectEqual(summary.thisMonth.first?.inputTokens, 157)
     }
 

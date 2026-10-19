@@ -1,14 +1,17 @@
 import Foundation
 import EurekaKit
 
-/// 监听 spool/events 目录，把事件文件解码为领域事件交给 handler。
-/// 消费协议：events/ → rename 到 processing/ → handler → 删除；
-/// 启动时先重放 processing/ 残留（上次崩溃未删的），再排空 events/ 积压。
+/// Watches the spool/events directory, decodes event files into domain events and hands them to the
+/// handler. Consumption protocol: events/ → rename into processing/ → handler → delete; on start,
+/// first replay leftovers in processing/ (not deleted before the last crash), then drain the
+/// events/ backlog.
 public final class SpoolConsumer {
-    /// isStale = 事件落地时间距今超过阈值（开机排空积压时只入历史，不触发岛动画）
+    /// isStale = the event landed longer ago than the threshold (draining the backlog at launch
+    /// only writes history, no island animation)
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
-    /// 旁路观察者：拿到原始信封（route 之前），供审计等旁路管道消费。isStale 一并传。
+    /// Side-channel observer: receives the raw envelope (before routing) for side pipelines such as
+    /// audit. isStale is passed along.
     public typealias RawObserver = (RawEvent, _ isStale: Bool) -> Void
 
     private let root: URL
@@ -34,7 +37,8 @@ public final class SpoolConsumer {
 
     static let healthName = "事件队列（hooks / notify）"
 
-    /// 开始监听。handler 在内部队列回调，调用方自行切主线程。
+    /// Start watching. The handler is called back on an internal queue; callers hop to the main
+    /// thread themselves.
     public func start() {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: nil)
         let fm = FileManager.default
@@ -62,7 +66,8 @@ public final class SpoolConsumer {
         dirSource = nil
     }
 
-    /// 排空 events/ 中的待处理文件（公开供测试与启动排空直接调用，同步执行）
+    /// Drain pending files in events/ (public for tests and the launch-time drain; runs
+    /// synchronously)
     public func drainOnce() {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: eventsDir, includingPropertiesForKeys: nil)) ?? []
@@ -72,7 +77,7 @@ public final class SpoolConsumer {
             do {
                 try fm.moveItem(at: url, to: dst)
             } catch {
-                continue  // 多实例竞争同一文件时让对方处理
+                continue  // Another instance raced us for this file; let it handle it
             }
             process(fileURL: dst)
             try? fm.removeItem(at: dst)
@@ -96,12 +101,12 @@ public final class SpoolConsumer {
         else {
             undecodableCount += 1
             HealthRegistry.shared.failure(
-                Self.healthName, note: "事件文件无法解析: \(fileURL.lastPathComponent)")
+                Self.healthName, note: L10n.format("Cannot parse event file: %@", zhHans: "事件文件无法解析: %@", String(fileURL.lastPathComponent)))
             return
         }
         HealthRegistry.shared.beat(Self.healthName)
         let isStale = Date().timeIntervalSince(raw.receivedAt) > staleThreshold
-        rawObserver?(raw, isStale)  // 旁路（审计）先于生命周期路由，两条链互不影响
+        rawObserver?(raw, isStale)  // Side channel (audit) before lifecycle routing; the two chains are independent
         for event in EventRouter.route(raw) {
             HealthRegistry.shared.event(Self.healthName)
             handler(event, isStale)

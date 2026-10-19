@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability · 报告安全漏洞
+    url: https://github.com/vinlee19/lulu-lumei-dock/security/advisories/new
+    about: Report privately - never in a public issue. · 请私密报告，不要公开提 issue。
+  - name: Contributing guide · 贡献指南
+    url: https://github.com/vinlee19/lulu-lumei-dock/blob/main/CONTRIBUTING.md
+    about: Read how issues, proposals and pull requests work. · issue、提案与 PR 的规范。

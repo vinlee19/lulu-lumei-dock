@@ -4,8 +4,8 @@ import EurekaStore
 import EurekaSync
 import SwiftUI
 
-/// 「备份」页签：云端备份的状态/进度/统计/历史一站式面板；
-/// 配置（服务商/连接/密钥/间隔）收在独立弹窗 ConfigSheet 里。
+/// Backup tab: one-stop panel for cloud backup status / progress / stats / history; configuration
+/// (provider / connection / secrets / interval) lives in the separate ConfigSheet dialog.
 struct BackupView: View {
     @ObservedObject var service: SyncService
     @ObservedObject var settings: AppSettings
@@ -14,7 +14,7 @@ struct BackupView: View {
     @State private var historyPage = 1
     @State private var expandedRuns: Set<Int64> = []
     @State private var expandedSources: Set<String> = []
-    /// 展开中的「轮次+类目」，键 `<runId>|<category>`
+    /// Expanded "run + category" entries, keyed `<runId>|<category>`
     @State private var expandedRunGroups: Set<String> = []
 
     private let historyPageSize = 20
@@ -53,16 +53,16 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 状态卡
+    // MARK: - Status card
 
     private var statusCard: some View {
-        card("备份状态") {
+        card(L10n.text("Backup status", zhHans: "备份状态")) {
             HStack {
-                Toggle("自动备份（增量上传，无变化自动跳过）", isOn: $settings.cloudBackupEnabled)
+                Toggle(L10n.text("Automatic backup (incremental upload, skipped when nothing changed)", zhHans: "自动备份（增量上传，无变化自动跳过）"), isOn: $settings.cloudBackupEnabled)
                     .toggleStyle(.themedSwitch)
                     .controlSize(.small)
                 Spacer()
-                Button("配置…") { showConfig = true }
+                Button(L10n.text("Configure…", zhHans: "配置…")) { showConfig = true }
                     .controlSize(.small)
             }
             HStack(spacing: 6) {
@@ -73,20 +73,20 @@ struct BackupView: View {
                 if !settings.cosRegion.isEmpty {
                     summaryBadge(settings.cosRegion)
                 }
-                summaryBadge("每 \(Int(service.intervalMinutes)) 分钟")
+                summaryBadge(L10n.format("Every %@ minutes", zhHans: "每 %@ 分钟", String(Int(service.intervalMinutes))))
                 summaryBadge(
-                    service.credentialsConfigured ? "密钥已配置" : "密钥未配置",
+                    service.credentialsConfigured ? L10n.text("Key configured", zhHans: "密钥已配置") : L10n.text("Key not configured", zhHans: "密钥未配置"),
                     color: service.credentialsConfigured ? .green : .orange)
                 Spacer(minLength: 0)
             }
             HStack {
-                Button("立即同步") {
+                Button(L10n.text("Sync Now", zhHans: "立即同步")) {
                     pushConfig()
                     service.syncNow()
                 }
                 .controlSize(.small)
                 .disabled(!configReady || service.syncing)
-                Button("测试连接") {
+                Button(L10n.text("Test Connection", zhHans: "测试连接")) {
                     pushConfig()
                     service.testConnection()
                 }
@@ -99,11 +99,11 @@ struct BackupView: View {
                 switch service.connectionTest {
                 case .running:
                     ProgressView().controlSize(.mini)
-                    Text("测试中…")
+                    Text(L10n.text("Testing…", zhHans: "测试中…"))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 case .success:
-                    Label("连接成功", systemImage: "checkmark.circle.fill")
+                    Label(L10n.text("Connected", zhHans: "连接成功"), systemImage: "checkmark.circle.fill")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.enabledGreen)
                 case .failure(let message):
@@ -124,24 +124,25 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 进度卡
+    // MARK: - Progress card
 
     private var progressCard: some View {
-        card("同步进行中") {
+        card(L10n.text("Sync in progress", zhHans: "同步进行中")) {
             if let progress = service.progress {
                 ProgressView(value: progress.fraction)
                     .progressViewStyle(.linear)
                 HStack(spacing: 8) {
-                    Text("\(progress.completedFiles)/\(progress.totalFiles) 个文件")
+                    Text(L10n.format("%@/%@ files", zhHans: "%@/%@ 个文件", String(progress.completedFiles), String(progress.totalFiles)))
                         .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                    // 统一用带 GB 的格式化：大备份用 formatBytes 会显示成「1234.5 MB」
+                    // Always use the GB-aware formatter: formatBytes would show a large backup as
+                    // "1234.5 MB"
                     Text("\(formatSyncBytes(max(0, progress.transferredBytes))) / \(formatSyncBytes(max(0, progress.totalBytes)))")
                         .font(.system(size: 10.5).monospacedDigit())
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
                 if let current = progress.currentFile {
-                    Text("正在上传：\(current)")
+                    Text(L10n.format("Uploading: %@", zhHans: "正在上传：%@", current))
                         .font(.system(size: 10).monospaced())
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -151,7 +152,7 @@ struct BackupView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在扫描本地文件…")
+                    Text(L10n.text("Scanning local files…", zhHans: "正在扫描本地文件…"))
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
                 }
@@ -159,28 +160,28 @@ struct BackupView: View {
         }
     }
 
-    // MARK: - 统计卡
+    // MARK: - Stats card
 
     private var statsCard: some View {
-        card("备份统计") {
+        card(L10n.text("Backup statistics", zhHans: "备份统计")) {
             HStack(spacing: 18) {
-                stat("已备份文件", service.stats.map { "\($0.fileCount)" } ?? "—")
-                stat("总大小", service.stats.map { formatSyncBytes(max(0, $0.totalBytes)) } ?? "—")
-                stat("最近上传", service.stats?.lastUploadAt.map {
+                stat(L10n.text("Files backed up", zhHans: "已备份文件"), service.stats.map { "\($0.fileCount)" } ?? "—")
+                stat(L10n.text("Total size", zhHans: "总大小"), service.stats.map { formatSyncBytes(max(0, $0.totalBytes)) } ?? "—")
+                stat(L10n.text("Last upload", zhHans: "最近上传"), service.stats?.lastUploadAt.map {
                     relativeFormatter.localizedString(for: $0, relativeTo: Date())
                 } ?? "—")
             }
             if let result = service.lastResult {
-                Text("上轮：\(result)")
+                Text(L10n.format("Last run: %@", zhHans: "上轮：%@", result))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    // MARK: - 备份构成（总览卡 + 每来源可折叠分组）
+    // MARK: - Backup composition (overview card + collapsible group per source)
 
-    /// 按来源聚合后的构成，字节降序
+    /// Composition aggregated by source, bytes descending
     private var compositionBySource:
         [(source: String, count: Int, bytes: Int64, kinds: [SyncStateRepo.CompositionBucket])] {
         var grouped: [String: [SyncStateRepo.CompositionBucket]] = [:]
@@ -197,29 +198,31 @@ struct BackupView: View {
             .sorted { $0.bytes > $1.bytes }
     }
 
-    /// 构成区。旧版是单行横向 ScrollView + 12 个 9.5pt 胶囊：最小窗口宽度（可用约 610pt）
-    /// 下必然溢出，而 `showsIndicators: false` 让用户根本看不出还有内容被藏起来。
-    /// 现在改成总览卡 + 每来源一行可折叠分组，展开看二级类目占比 —— 与 Skills/Memory/
-    /// Plans/Agents 四页同一套语言（`StatOverviewCard` + `SourceSectionHeader`）。
+    /// Composition area. The old version was a single-row horizontal ScrollView + 12 9.5pt
+    /// capsules: at the minimum window width (~610pt usable) it inevitably overflowed, and
+    /// `showsIndicators: false` meant users couldn't tell content was hidden. Now it is an overview
+    /// card + one collapsible group row per source, expanding to show second-level category shares
+    /// — the same language as the Skills/Memory/Plans/Agents pages (`StatOverviewCard` +
+    /// `SourceSectionHeader`).
     @ViewBuilder
     private var compositionCard: some View {
         let bySource = compositionBySource
         if !bySource.isEmpty {
             let totalFiles = bySource.reduce(0) { $0 + $1.count }
             let totalBytes = bySource.reduce(Int64(0)) { $0 + $1.bytes }
-            card("备份构成") {
+            card(L10n.text("Backup makeup", zhHans: "备份构成")) {
                 StatOverviewCard(
                     value: "\(totalFiles)",
-                    unit: "个文件",
+                    unit: L10n.text("files", zhHans: "个文件"),
                     subtitle: formatSyncBytes(totalBytes),
-                    distributionTitle: "按来源",
+                    distributionTitle: L10n.text("By source", zhHans: "按来源"),
                     segments: bySource.prefix(6).enumerated().map { index, item in
                         StatOverviewCard.Segment(
                             label: displayName(forSource: item.source),
                             count: item.count,
                             color: sourceColor(item.source, fallbackIndex: index))
                     },
-                    trailingNote: bySource.count > 6 ? "另有 \(bySource.count - 6) 个来源" : nil)
+                    trailingNote: bySource.count > 6 ? L10n.format("%@ more sources", zhHans: "另有 %@ 个来源", String(bySource.count - 6)) : nil)
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(bySource, id: \.source) { item in
@@ -242,13 +245,13 @@ struct BackupView: View {
         }
     }
 
-    /// 二级类目一行：名称 + 占该来源的比例条 + 文件数 + 字节
+    /// Second-level category row: name + share-of-source bar + file count + bytes
     private func kindRow(
         _ bucket: SyncStateRepo.CompositionBucket, sourceBytes: Int64
     ) -> some View {
         let ratio = sourceBytes > 0 ? Double(bucket.bytes) / Double(sourceBytes) : 0
         return HStack(spacing: 8) {
-            Text(bucket.kind ?? "根文件")
+            Text(bucket.kind ?? L10n.text("Root files", zhHans: "根文件"))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .frame(width: 108, alignment: .leading)
@@ -260,7 +263,7 @@ struct BackupView: View {
                 }
             }
             .frame(height: 4)
-            Text("\(bucket.count) 个")
+            Text(L10n.format("%@ files", zhHans: "%@ 个", String(bucket.count)))
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 54, alignment: .trailing)
@@ -281,29 +284,33 @@ struct BackupView: View {
         }
     }
 
-    /// 来源段 → 展示名。`custom` 与未知段回退原文（以前页面上直接印裸 rawValue 如 `codebuddy`）
+    /// Source segment → display name. `custom` and unknown segments fall back to the raw text (the
+    /// page used to print bare rawValues like `codebuddy`)
     private func displayName(forSource source: String) -> String {
         AgentSource(rawValue: source)?.displayName ?? source
     }
 
-    /// 总览条的分段色：命中来源用品牌色，其余（custom）按序取品牌色不同透明度
+    /// Overview bar segment colors: matched sources use their brand color, the rest (custom) take
+    /// the brand color at varying opacity in order
     private func sourceColor(_ source: String, fallbackIndex: Int) -> Color {
         if let agent = AgentSource(rawValue: source) { return agent.brandColor }
         return Theme.brand.opacity(max(0.25, 0.8 - Double(fallbackIndex) * 0.12))
     }
 
-    // MARK: - 历史卡（持久化 + 分页 + 可展开文件明细）
+    // MARK: - History card (persisted + paginated + expandable file details)
 
     private var totalHistoryPages: Int {
         max(1, (service.runsTotal + historyPageSize - 1) / historyPageSize)
     }
 
-    /// 同步历史。旧版无列头无对齐（字段左挤、跨行对不齐）、20 行非 lazy、
-    /// 展开后最多 500 个文件平铺、且只按来源一级分组（把 `RunFile.category` 的二级丢了）。
-    /// 现在照仓库里最相近的两页（`AuditView` 的 LazyVStack + `UsageDashboardView` 的
-    /// 固定列宽表格）重做，并给每行加一条来源占比微条 —— 不展开也能看出这轮传了谁的东西。
+    /// Sync history. The old version had no column headers or alignment (fields crammed left,
+    /// misaligned across rows), 20 non-lazy rows, up to 500 files flattened when expanded, and
+    /// grouping by source only (dropping `RunFile.category`'s second level). Now rebuilt after the
+    /// two closest pages in the repo (`AuditView`'s LazyVStack + `UsageDashboardView`'s fixed-width
+    /// column table), with a per-row source-share micro bar — you can see whose data the run
+    /// uploaded without expanding.
     private var historyCard: some View {
-        card("同步历史") {
+        card(L10n.text("Sync history", zhHans: "同步历史")) {
             historyHeader
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(service.runs) { run in
@@ -317,12 +324,12 @@ struct BackupView: View {
 
     private var historyHeader: some View {
         HStack(spacing: 8) {
-            Color.clear.frame(width: 10)  // chevron 列
-            Text("时间").frame(width: 84, alignment: .leading)
-            Text("状态").frame(width: 46, alignment: .leading)
-            Text("上传").frame(width: 58, alignment: .trailing)
-            Text("大小").frame(width: 68, alignment: .trailing)
-            Text("构成").frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
+            Color.clear.frame(width: 10)  // chevron column
+            Text(L10n.text("Time", zhHans: "时间")).frame(width: 84, alignment: .leading)
+            Text(L10n.text("Status", zhHans: "状态")).frame(width: 46, alignment: .leading)
+            Text(L10n.text("Uploaded", zhHans: "上传")).frame(width: 58, alignment: .trailing)
+            Text(L10n.text("Size", zhHans: "大小")).frame(width: 68, alignment: .trailing)
+            Text(L10n.text("Makeup", zhHans: "构成")).frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
         }
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(.tertiary)
@@ -331,7 +338,7 @@ struct BackupView: View {
 
     private var historyPager: some View {
         HStack(spacing: 8) {
-            Text("共 \(service.runsTotal) 轮")
+            Text(L10n.format("%@ runs", zhHans: "共 %@ 轮", String(service.runsTotal)))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -353,7 +360,8 @@ struct BackupView: View {
 
     private func goToHistoryPage(_ page: Int) {
         historyPage = min(max(1, page), totalHistoryPages)
-        // 服务侧每轮同步后按这个页码原地刷新，不再把用户顶回第 1 页
+        // The service refreshes in place at this page number after each sync, instead of bouncing
+        // the user back to page 1
         service.visibleRunsPage = historyPage
         service.loadRuns(page: historyPage, pageSize: historyPageSize)
     }
@@ -380,12 +388,12 @@ struct BackupView: View {
                     Circle()
                         .fill(run.error == nil ? Theme.enabledGreen : Theme.failureRed)
                         .frame(width: 6, height: 6)
-                    Text(run.error == nil ? "成功" : "失败")
+                    Text(run.error == nil ? L10n.text("Succeeded", zhHans: "成功") : L10n.text("Failed", zhHans: "失败"))
                         .font(.system(size: 10.5))
                         .foregroundStyle(run.error == nil ? .secondary : Color(Theme.failureRed))
                 }
                 .frame(width: 46, alignment: .leading)
-                Text("\(run.uploaded) 个")
+                Text(L10n.format("%@ files", zhHans: "%@ 个", String(run.uploaded)))
                     .font(.system(size: 10.5, weight: .medium).monospacedDigit())
                     .frame(width: 58, alignment: .trailing)
                 Text(run.uploadedBytes > 0 ? formatSyncBytes(run.uploadedBytes) : "—")
@@ -395,11 +403,11 @@ struct BackupView: View {
                 compositionBar(groups)
                     .frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
                 if run.failed > 0 {
-                    Text("失败 \(run.failed)")
+                    Text(L10n.format("Failed %@", zhHans: "失败 %@", String(run.failed)))
                         .font(.system(size: 10)).foregroundStyle(Color(Theme.failureRed))
                 }
                 if run.deferred > 0 {
-                    Text("待传 \(run.deferred)")
+                    Text(L10n.format("Deferred %@", zhHans: "待传 %@", String(run.deferred)))
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
             }
@@ -418,12 +426,16 @@ struct BackupView: View {
 
         if expanded {
             VStack(alignment: .leading, spacing: 1) {
-                // 按**完整 category** 分组（claude/skills 而不是 claude），每组可再折叠
+                // Group by the **full category** (claude/skills rather than claude); each group is
+                // collapsible again
                 ForEach(groups, id: \.category) { group in
                     runGroupRow(run: run, group: group)
                 }
                 if run.uploaded > run.files.count {
-                    Text("本轮共 \(run.uploaded) 个文件，只记录了前 \(run.files.count) 个明细")
+                    Text(L10n.format(
+                        "This run uploaded %@ files; only the first %@ are listed",
+                        zhHans: "本轮共 %@ 个文件，只记录了前 %@ 个明细",
+                        String(run.uploaded), String(run.files.count)))
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)
@@ -434,7 +446,7 @@ struct BackupView: View {
         }
     }
 
-    /// 每行一条来源占比微条（照 UsageDashboardView.toolRow 的做法）
+    /// Per-row source-share micro bar (after UsageDashboardView.toolRow)
     @ViewBuilder
     private func compositionBar(_ groups: [RunGroup]) -> some View {
         let total = max(Int64(1), groups.reduce(Int64(0)) { $0 + $1.bytes })
@@ -455,7 +467,8 @@ struct BackupView: View {
         }
     }
 
-    /// 展开区的一个类目组：默认收起，点开才列文件（最多 30 个，避免 500 个平铺）
+    /// A category group in the expanded area: collapsed by default, files listed only when opened
+    /// (at most 30, instead of 500 flattened)
     @ViewBuilder
     private func runGroupRow(run: SyncRunsRepo.Run, group: RunGroup) -> some View {
         let key = "\(run.id)|\(group.category)"
@@ -479,7 +492,7 @@ struct BackupView: View {
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 6)
-                Text("\(group.files.count) 个")
+                Text(L10n.format("%@ files", zhHans: "%@ 个", String(group.files.count)))
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(.secondary)
                 Text(formatSyncBytes(group.bytes))
@@ -509,7 +522,7 @@ struct BackupView: View {
                 .padding(.leading, 20)
             }
             if group.files.count > shown.count {
-                Text("…剩 \(group.files.count - shown.count) 个")
+                Text(L10n.format("…%@ more", zhHans: "…剩 %@ 个", String(group.files.count - shown.count)))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 20)
@@ -517,7 +530,7 @@ struct BackupView: View {
         }
     }
 
-    /// 一轮里的一个类目组
+    /// A category group within one run
     struct RunGroup {
         var category: String
         var source: String
@@ -525,12 +538,13 @@ struct BackupView: View {
         var bytes: Int64
     }
 
-    /// 一轮的文件按**完整 category** 分组（`claude/skills` 而不是 `claude`），字节降序。
-    /// 旧版只取首段，把二级信息丢了 —— 而 `RunFile.category` 本来就带着。
+    /// A run's files grouped by **full category** (`claude/skills` rather than `claude`), bytes
+    /// descending. The old version took only the first segment and lost the second level — even
+    /// though `RunFile.category` already carries it.
     private func groupedFiles(_ files: [SyncRunsRepo.RunFile]) -> [RunGroup] {
         var groups: [String: [SyncRunsRepo.RunFile]] = [:]
         for file in files {
-            let category = (file.category?.isEmpty == false ? file.category! : "其他")
+            let category = (file.category?.isEmpty == false ? file.category! : L10n.text("Other", zhHans: "其他"))
             groups[category, default: []].append(file)
         }
         return groups
@@ -544,28 +558,28 @@ struct BackupView: View {
             .sorted { $0.bytes > $1.bytes }
     }
 
-    // MARK: - 空态
+    // MARK: - Empty state
 
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "icloud.and.arrow.up")
                 .font(.system(size: 34))
                 .foregroundStyle(Theme.brandFg.opacity(0.5))
-            Text("开启自动备份后，技能、记忆、计划与全部会话记录会增量上传到你的云端存储")
+            Text(L10n.text("After automatic backup is on, skills, memory, plans, and every session record upload incrementally to your cloud storage", zhHans: "开启自动备份后，技能、记忆、计划与全部会话记录会增量上传到你的云端存储"))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text("只上传不删除 · 密钥仅存于 macOS 钥匙串 · 支持腾讯云 COS 与自定义 S3 兼容存储")
+            Text(L10n.text("Upload only, never delete · keys stay in the macOS Keychain · Tencent Cloud COS and custom S3-compatible storage", zhHans: "只上传不删除 · 密钥仅存于 macOS 钥匙串 · 支持腾讯云 COS 与自定义 S3 兼容存储"))
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-            Button("配置…") { showConfig = true }
+            Button(L10n.text("Configure…", zhHans: "配置…")) { showConfig = true }
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
     }
 
-    // MARK: - 助手
+    // MARK: - Helpers
 
     private var configReady: Bool {
         let endpointReady = provider != .custom
@@ -614,9 +628,10 @@ struct BackupView: View {
     }
 }
 
-// MARK: - 配置弹窗
+// MARK: - Config dialog
 
-/// 云端备份配置：服务商/连接参数/密钥/同步间隔 + 实时请求 URL 预览
+/// Cloud backup config: provider / connection parameters / secrets / sync interval + live request
+/// URL preview
 private struct BackupConfigSheet: View {
     @ObservedObject var service: SyncService
     @ObservedObject var settings: AppSettings
@@ -632,7 +647,7 @@ private struct BackupConfigSheet: View {
         StorageProvider(rawValue: settings.storageProvider) ?? .tencentCOS
     }
 
-    /// 实时拼出的请求 URL 预览（与实际上传请求一致的形态）
+    /// Live-assembled request URL preview (same shape as the real upload request)
     private var urlPreview: String {
         let bucket = settings.cosBucket.trimmingCharacters(in: .whitespaces)
         let region = settings.cosRegion.trimmingCharacters(in: .whitespaces)
@@ -650,14 +665,14 @@ private struct BackupConfigSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("云端备份配置")
+            Text(L10n.text("Cloud backup configuration", zhHans: "云端备份配置"))
                 .font(.system(size: 13, weight: .semibold))
                 .padding(12)
             Divider()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    row("服务商") {
+                    row(L10n.text("Provider", zhHans: "服务商")) {
                         Picker("", selection: $settings.storageProvider) {
                             ForEach(StorageProvider.selectable, id: \.rawValue) { provider in
                                 Text(provider.displayName).tag(provider.rawValue)
@@ -666,39 +681,39 @@ private struct BackupConfigSheet: View {
                         .labelsHidden()
                         .frame(maxWidth: 220, alignment: .leading)
                     }
-                    row("地域") {
+                    row(L10n.text("Region", zhHans: "地域")) {
                         TextField(provider.regionHint, text: $settings.cosRegion)
                             .textFieldStyle(.roundedBorder)
                     }
-                    row("存储桶") {
-                        TextField("如 backup-1250000000", text: $settings.cosBucket)
+                    row(L10n.text("Bucket", zhHans: "存储桶")) {
+                        TextField(L10n.text("e.g. backup-1250000000", zhHans: "如 backup-1250000000"), text: $settings.cosBucket)
                             .textFieldStyle(.roundedBorder)
                     }
                     if provider == .custom {
                         row("Endpoint") {
-                            TextField("如 s3.us-east-1.amazonaws.com",
+                            TextField(L10n.text("e.g. s3.us-east-1.amazonaws.com", zhHans: "如 s3.us-east-1.amazonaws.com"),
                                       text: $settings.cosEndpointHost)
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
-                    row("键前缀") {
-                        TextField("对象键前缀", text: $settings.cosKeyPrefix)
+                    row(L10n.text("Key prefix", zhHans: "键前缀")) {
+                        TextField(L10n.text("Object key prefix", zhHans: "对象键前缀"), text: $settings.cosKeyPrefix)
                             .textFieldStyle(.roundedBorder)
                     }
-                    row("同步间隔") {
+                    row(L10n.text("Sync interval", zhHans: "同步间隔")) {
                         TextField("30", value: $settings.cosSyncIntervalMinutes,
                                   format: .number)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                             .onSubmit { clampInterval() }
-                        Text("分钟（最小 1）")
+                        Text(L10n.text("minutes (minimum 1)", zhHans: "分钟（最小 1）"))
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                     }
-                    row("失败重试") {
+                    row(L10n.text("Retries", zhHans: "失败重试")) {
                         Stepper(value: $settings.cosRetryAttempts, in: 0...5) {
-                            Text("\(settings.cosRetryAttempts) 次")
+                            Text(L10n.format("%@ times", zhHans: "%@ 次", String(settings.cosRetryAttempts)))
                                 .font(.system(size: 11).monospacedDigit())
                         }
                         .controlSize(.small)
@@ -706,7 +721,7 @@ private struct BackupConfigSheet: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 48)
                             .multilineTextAlignment(.trailing)
-                        Text("秒退避 ×2 递增（仅网络错误/5xx 重试）")
+                        Text(L10n.text("second backoff, doubling (network errors and 5xx only)", zhHans: "秒退避 ×2 递增（仅网络错误/5xx 重试）"))
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
@@ -730,12 +745,12 @@ private struct BackupConfigSheet: View {
                             .textFieldStyle(.roundedBorder)
                     }
                     row("") {
-                        Button(credentialsSaved ? "已保存" : "保存密钥") {
+                        Button(credentialsSaved ? L10n.text("Saved", zhHans: "已保存") : L10n.text("Save Keys", zhHans: "保存密钥")) {
                             service.saveCredentials(
                                 secretId: secretId.trimmingCharacters(in: .whitespaces),
                                 secretKey: secretKey.trimmingCharacters(in: .whitespaces)
                             ) { ok in
-                                credentialsError = ok ? nil : "密钥写入钥匙串失败，请检查钥匙串访问权限后重试"
+                                credentialsError = ok ? nil : L10n.text("Could not write the keys to the Keychain. Check Keychain access and try again.", zhHans: "密钥写入钥匙串失败，请检查钥匙串访问权限后重试")
                                 if ok {
                                     secretId = ""
                                     secretKey = ""
@@ -749,7 +764,7 @@ private struct BackupConfigSheet: View {
                         .controlSize(.small)
                         .disabled(secretId.trimmingCharacters(in: .whitespaces).isEmpty
                             || secretKey.trimmingCharacters(in: .whitespaces).isEmpty)
-                        Text(service.credentialsConfigured ? "钥匙串：已配置" : "钥匙串：未配置")
+                        Text(service.credentialsConfigured ? L10n.text("Keychain: configured", zhHans: "钥匙串：已配置") : L10n.text("Keychain: not configured", zhHans: "钥匙串：未配置"))
                             .font(.system(size: 10))
                             .foregroundStyle(service.credentialsConfigured ? .green : .secondary)
                         if let credentialsError {
@@ -762,7 +777,7 @@ private struct BackupConfigSheet: View {
                     Divider().padding(.vertical, 2)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("请求预览")
+                        Text(L10n.text("Request preview", zhHans: "请求预览"))
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         Text(urlPreview)
@@ -771,7 +786,7 @@ private struct BackupConfigSheet: View {
                             .lineLimit(2)
                             .truncationMode(.middle)
                             .textSelection(.enabled)
-                        Text("认证走 AWS SigV4 签名头（Authorization / x-amz-date / x-amz-content-sha256）；只上传不删除，密钥仅存于 macOS 钥匙串。")
+                        Text(L10n.text("Auth uses AWS SigV4 headers (Authorization / x-amz-date / x-amz-content-sha256). Upload only, never delete, and keys stay in the macOS Keychain.", zhHans: "认证走 AWS SigV4 签名头（Authorization / x-amz-date / x-amz-content-sha256）；只上传不删除，密钥仅存于 macOS 钥匙串。"))
                             .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
                     }
@@ -782,7 +797,7 @@ private struct BackupConfigSheet: View {
             Divider()
             HStack {
                 Spacer()
-                Button("完成") {
+                Button(L10n.text("Done", zhHans: "完成")) {
                     clampInterval()
                     dismiss()
                 }
@@ -798,17 +813,17 @@ private struct BackupConfigSheet: View {
         .onDisappear { clampInterval() }
     }
 
-    /// 自定义同步目录：任意本地目录 → 远端 custom/<远端名>/…
+    /// Custom sync folders: any local folder → remote custom/<remote name>/…
     @ViewBuilder
-    /// 审计归档：脱敏后的审计记录按天写成 Parquet 随备份上传（Athena / DuckDB 可直接查）
+    /// Audit archive: redacted audit records written as daily Parquet files uploaded with backups
+    /// (queryable directly with Athena / DuckDB)
     private var auditArchiveSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("审计归档（Parquet）", isOn: $settings.auditArchiveEnabled)
+            Toggle(L10n.text("Audit archive (Parquet)", zhHans: "审计归档（Parquet）"), isOn: $settings.auditArchiveEnabled)
                 .font(.system(size: 11))
-            Text("把审计记录按 UTC 日写成 Parquet，上传到 <前缀>/<主机>/eureka/audit/dt=YYYY-MM-DD/。"
-                + "上传前自动遮掉命令里的密钥、令牌、密码（Authorization、KEY=、URL 凭证、常见密钥格式等），"
-                + "但命令、路径等其余内容保留，建议给存储桶配置访问控制与服务端加密。"
-                + "开启后，本地只清理已确认上传的日期：上传失败时记录会超过保留期继续保留，不会丢。")
+            Text(L10n.text(
+                "Audit records are written as Parquet per UTC day and uploaded to <prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/. Secrets, tokens, and passwords in commands are redacted before upload (Authorization, KEY=, URL credentials, and common key formats). The rest of the command and paths are kept, so lock the bucket down and turn on server-side encryption. Once this is on, local cleanup only deletes days that uploaded successfully: a failed upload is kept past the retention window instead of being dropped.",
+                zhHans: "把审计记录按 UTC 日写成 Parquet，上传到 <前缀>/<主机>/eureka/audit/dt=YYYY-MM-DD/。上传前自动遮掉命令里的密钥、令牌、密码（Authorization、KEY=、URL 凭证、常见密钥格式等），但命令、路径等其余内容保留，建议给存储桶配置访问控制与服务端加密。开启后，本地只清理已确认上传的日期：上传失败时记录会超过保留期继续保留，不会丢。"))
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -818,15 +833,15 @@ private struct BackupConfigSheet: View {
     private var customFoldersSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("自定义目录")
+                Text(L10n.text("Custom folders", zhHans: "自定义目录"))
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("添加文件夹…") { pickFolder() }
+                Button(L10n.text("Add Folder…", zhHans: "添加文件夹…")) { pickFolder() }
                     .controlSize(.small)
             }
             if settings.customSyncFolders.isEmpty {
-                Text("把任意本地目录纳入备份：远端键 = <前缀>/<主机>/custom/<远端名>/<相对路径>")
+                Text(L10n.text("Include any local folder in the backup. Remote key = <prefix>/<host>/custom/<remote name>/<relative path>", zhHans: "把任意本地目录纳入备份：远端键 = <前缀>/<主机>/custom/<远端名>/<相对路径>"))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             }
@@ -844,14 +859,14 @@ private struct BackupConfigSheet: View {
                     Text("→ custom/")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.tertiary)
-                    TextField("远端名", text: $folder.remoteName)
+                    TextField(L10n.text("Remote name", zhHans: "远端名"), text: $folder.remoteName)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
                     Toggle("", isOn: $folder.enabled)
                         .toggleStyle(.themedSwitch)
                         .controlSize(.mini)
                         .labelsHidden()
-                        .help(folder.enabled ? "已纳入备份" : "已暂停")
+                        .help(folder.enabled ? L10n.text("Included in backup", zhHans: "已纳入备份") : L10n.text("Paused", zhHans: "已暂停"))
                     Button {
                         settings.customSyncFolders.removeAll { $0.id == folder.id }
                     } label: {
@@ -860,27 +875,27 @@ private struct BackupConfigSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
-                    .help("移除（不删除本地文件，远端已传内容保留）")
+                    .help(L10n.text("Remove (the local folder stays, and anything already uploaded stays remote)", zhHans: "移除（不删除本地文件，远端已传内容保留）"))
                 }
             }
         }
     }
 
-    /// 系统目录选择器（非沙盒，直接存路径）
+    /// System folder picker (not sandboxed, stores the path directly)
     private func pickFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择"
+        panel.prompt = L10n.text("Choose", zhHans: "选择")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        // 同一路径不重复添加
+        // Don't add the same path twice
         guard !settings.customSyncFolders.contains(where: { $0.path == url.path }) else { return }
         settings.customSyncFolders.append(CustomSyncFolder(
             path: url.path, remoteName: url.lastPathComponent))
     }
 
-    /// 间隔钳制：最小 1 分钟
+    /// Interval clamp: minimum 1 minute
     private func clampInterval() {
         if settings.cosSyncIntervalMinutes < 1 || !settings.cosSyncIntervalMinutes.isFinite {
             settings.cosSyncIntervalMinutes = 1

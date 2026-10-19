@@ -1,7 +1,8 @@
 import Foundation
 
-// 极简测试 harness：CLT 工具链没有 XCTest，自建断言与汇总。
-// 组织方式（每模块一个 `xxxTests(_:)` 函数 + expect 断言）兼容未来迁移 XCTest。
+// Minimal test harness: the CLT toolchain has no XCTest, so assertions and the summary are
+// hand-rolled. The layout (one `xxxTests(_:)` function per module + expect assertions) keeps a
+// future XCTest migration easy.
 
 final class TestRunner {
     private(set) var failures: [String] = []
@@ -76,7 +77,7 @@ func expectEqual<T: Equatable>(
     }
 }
 
-/// 取 fixture 文件 URL（Fixtures 以 .copy 资源打进 Bundle.module）
+/// Fixture file URL (Fixtures ship in Bundle.module as .copy resources)
 func fixtureURL(_ relativePath: String) throws -> URL {
     guard let base = Bundle.module.url(forResource: "Fixtures", withExtension: nil) else {
         throw ExpectationError(description: "Fixtures 资源目录不存在")

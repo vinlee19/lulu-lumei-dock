@@ -1,11 +1,12 @@
 import CryptoKit
 import EurekaIngest
 import EurekaInstall
+import EurekaKit
 import Foundation
 
-/// 把随 app 分发的 eureka-relay 同步到稳定路径
-/// `~/Library/Application Support/Eureka/bin/lululumei-relay`。
-/// hooks/notify 配置永远只引用稳定路径 → 升级/移动 app 不断链。
+/// Syncs the eureka-relay shipped with the app to the stable path `~/Library/Application
+/// Support/Eureka/bin/lululumei-relay`. hooks/notify configs only ever reference the stable path →
+/// upgrading/moving the app never breaks the link.
 ///
 /// The pre-0.36 stable name `bin/eureka-relay` is kept as a symlink to the new file, so configs
 /// written by older versions keep delivering events until they are migrated
@@ -23,7 +24,8 @@ enum RelaySyncer {
         binDirectory.appendingPathComponent(RelayIdentity.legacyBinaryName)
     }
 
-    /// 与当前可执行文件同目录的 relay（.build/debug/ 与 lulu-lumei-dock.app/Contents/MacOS/ 都成立）
+    /// The relay in the same directory as the current executable (holds for both .build/debug/ and
+    /// lulu-lumei-dock.app/Contents/MacOS/)
     static var bundledRelayURL: URL? {
         guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
             return nil
@@ -33,7 +35,8 @@ enum RelaySyncer {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
-    /// 同步（内容不同才覆盖），返回稳定路径；找不到源时返回 nil
+    /// Syncs (overwrites only when the content differs) and returns the stable path; nil when no
+    /// source is found
     @discardableResult
     static func sync() -> URL? {
         guard let source = bundledRelayURL else { return nil }
@@ -46,9 +49,10 @@ enum RelaySyncer {
                let fresh = try? Data(contentsOf: source),
                SHA256.hash(data: existing) == SHA256.hash(data: fresh) {
                 linkLegacyName()
-                return target  // 已是最新
+                return target  // Already up to date
             }
-            // 先落临时文件再替换，避免覆盖正在执行的二进制
+            // Write a temp file first, then replace, to avoid overwriting a binary that is
+            // currently executing
             let tmp = target.deletingLastPathComponent()
                 .appendingPathComponent(".\(RelayIdentity.binaryName).tmp")
             try? fm.removeItem(at: tmp)
@@ -62,7 +66,7 @@ enum RelaySyncer {
             linkLegacyName()
             return target
         } catch {
-            fputs("[eureka] relay 同步失败: \(error)\n", stderr)
+            fputs(L10n.format("[eureka] relay sync failed: %@\n", zhHans: "[eureka] relay 同步失败: %@\n", String(describing: error)), stderr)
             return fm.fileExists(atPath: target.path) ? target : nil
         }
     }
@@ -87,7 +91,10 @@ enum RelaySyncer {
             }
         } catch {
             try? fm.removeItem(at: tmp)
-            fputs("[eureka] 旧名 relay 软链更新失败: \(error)\n", stderr)
+            fputs(L10n.format(
+                "[eureka] failed to update the legacy relay symlink: %@\n",
+                zhHans: "[eureka] 旧名 relay 软链更新失败: %@\n",
+                String(describing: error)), stderr)
         }
     }
 }

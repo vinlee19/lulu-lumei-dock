@@ -5,53 +5,60 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-/// 用量服务：持有 SQLite + 双扫描器，定时增量扫描并发布汇总。
-/// store/扫描器只在内部串行队列上触碰；@Published 属性只在主线程更新。
+/// Usage service: owns SQLite + the scanners, scans incrementally on a timer and publishes
+/// summaries. The store/scanners are only touched on an internal serial queue; @Published
+/// properties are only updated on the main thread.
 final class UsageService: ObservableObject {
     @Published private(set) var summary: UsageSummary?
     @Published private(set) var recentHistory: [FinishedTask] = []
-    /// 近 14 天按 (天, 结局) 的任务计数（历史页堆叠图；无任务的日期不出现，UI 补 0）
+    /// Task counts by (day, outcome) over the last 14 days (history page stacked chart; days with
+    /// no tasks are absent, the UI fills 0)
     @Published private(set) var historyDailyOutcomes: [(day: Date, outcome: TaskOutcome, count: Int)] = []
-    /// 历史任务的会话 token 总量（sessionId → totalTokens；行内 Tokens 列用）
+    /// Session token totals for history tasks (sessionId → totalTokens; for the inline Tokens
+    /// column)
     @Published private(set) var historyTokens: [String: Int] = [:]
-    /// 运行中任务（AppDelegate 状态机推送；历史页置顶「运行中」分组用）
+    /// Running tasks (pushed by the AppDelegate state machine; for the history page's pinned
+    /// "Running" group)
     @Published private(set) var runningTasks: [AgentTask] = []
     @Published private(set) var lastError: String?
     @Published private(set) var exportMessage: String?
-    /// 请求日志当前页（倒序）与总条数（仪表盘分页用）
+    /// Current page of the request log (newest first) and total count (for dashboard paging)
     @Published private(set) var records: [RecordDisplay] = []
     @Published private(set) var recordTotal = 0
-    /// 模型统计（选中时段/来源的完整分项）
+    /// Model stats (full breakdown for the selected period/source)
     @Published private(set) var modelTotals: [UsageTotals] = []
-    /// 选中区间按 (时间桶, 来源) 的 token/成本趋势（图表用；短区间自动切小时粒度）
+    /// Token/cost trend by (time bucket, source) over the selected range (for charts; short ranges
+    /// switch to hourly granularity automatically)
     @Published private(set) var trend: [TrendPoint] = []
     @Published private(set) var trendIsHourly = false
-    /// 工具/技能/插件/子代理调用统计（选中时段/来源）
+    /// Tool/skill/plugin/subagent call stats (selected period/source)
     @Published private(set) var toolCallTotals: [ToolCallsRepo.ToolCallTotal] = []
-    /// 技能全时累计统计（Skills 分析视图：累计次数 / 最近活跃 / 触发时 token）
+    /// All-time skill stats (Skills analysis view: total count / last active / tokens at trigger)
     @Published private(set) var skillStats: [ToolCallsRepo.SkillUsageStat] = []
-    /// MCP server 调用统计（键 = server 名小写，跨源聚合；MCP 页闲置检测用）
+    /// MCP server call stats (key = lowercase server name, aggregated across sources; for the MCP
+    /// page's idle detection)
     @Published private(set) var mcpServerStats: [String: MCPServerCallStat] = [:]
 
     struct MCPServerCallStat: Equatable {
         var calls: Int
         var lastTs: Double
     }
-    /// Top 技能排行（Skills 页分析卡，按所选时间档过滤）
+    /// Top skill ranking (Skills page analysis card, filtered by the selected time period)
     @Published private(set) var skillRanking: [ToolCallsRepo.SkillUsageStat] = []
-    /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，Claude/Kimi 有数据）
+    /// All-time subagent call stats (Agents page "called N times"; kind='agent', data from
+    /// Claude/Kimi)
     @Published private(set) var agentStats: [ToolCallsRepo.SkillUsageStat] = []
-    /// vibe coding 周报（loadWeeklyReport 填充；nil = 未加载）
+    /// Vibe coding weekly report (filled by loadWeeklyReport; nil = not loaded)
     @Published private(set) var weeklyReport: WeeklyReport?
-    /// 项目统计（选中区间）
+    /// Project stats (selected range)
     @Published private(set) var projectTotals: [ProjectTotal] = []
-    /// 按会话用量排行（选中区间/来源，token 降序 Top 50）
+    /// Per-session usage ranking (selected range/source, top 50 by tokens descending)
     @Published private(set) var sessionTotals: [SessionTotal] = []
-    /// 活跃时段热力格（选中区间/来源，周 × 24h）
+    /// Active-hours heatmap cells (selected range/source, weekday × 24h)
     @Published private(set) var heatmapCells: [UsageRepo.HeatmapCell] = []
-    /// 价格表版本（换价后 +1，看板据此重算费用）
+    /// Price table revision (+1 after a price change; the dashboard recomputes costs from it)
     @Published private(set) var pricingRevision = 0
-    /// 未定价 / 估算的模型清单（设置 → 模型价格；token 降序）
+    /// Unpriced / estimated models (Settings → Model pricing; by tokens descending)
     @Published private(set) var pricingDiagnostics: [PricingDiagnostic] = []
 
     struct PricingDiagnostic: Identifiable, Equatable {
@@ -70,7 +77,8 @@ final class UsageService: ObservableObject {
         var costUSD: Double?
     }
 
-    /// 趋势图数据点（一桶一来源；bucket = 日零点或小时整点）
+    /// Trend chart data point (one per bucket per source; bucket = midnight of the day or top of
+    /// the hour)
     struct TrendPoint: Identifiable {
         var id: String { "\(bucket.timeIntervalSince1970)-\(source.rawValue)" }
         var bucket: Date
@@ -79,7 +87,8 @@ final class UsageService: ObservableObject {
         var costUSD: Double
     }
 
-    /// 按会话用量排行行（会话名由视图层用 SessionBrowserService.sessionsById join）
+    /// Per-session usage ranking row (the view layer joins the session name via
+    /// SessionBrowserService.sessionsById)
     struct SessionTotal: Identifiable, Equatable {
         var id: String { sessionId }
         var sessionId: String
@@ -91,7 +100,8 @@ final class UsageService: ObservableObject {
         var costUSD: Double?
     }
 
-    /// 仪表盘时间段（口径与 UsageAggregator 一致：日=当天零点、周=周一、月=月初、全部=全时累计）
+    /// Dashboard period (same basis as UsageAggregator: day = today's midnight, week = Monday,
+    /// month = first of month, all = all-time)
     enum DashboardPeriod: String, CaseIterable {
         case today = "今日"
         case week = "本周"
@@ -99,7 +109,8 @@ final class UsageService: ObservableObject {
         case all = "全部"
         case custom = "自定义"
 
-        /// 固定档起点（custom 由视图用自选日期决定，此处返回今日零点兜底）
+        /// Fixed-period start (custom is decided by the view from picked dates; returns today's
+        /// midnight here as a fallback)
         var startDate: Date {
             var calendar = Calendar.current
             let now = Date()
@@ -120,14 +131,14 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 请求日志展示行（成本已按价格表折算）
+    /// Request log display row (cost already converted via the price table)
     struct RecordDisplay: Identifiable {
         let id = UUID()
         var row: UsageRepo.UsageRecordRow
         var costUSD: Double?
     }
 
-    /// 技能按天调用点（详情页趋势图）
+    /// Daily skill call point (detail page trend chart)
     struct SkillDayCount: Identifiable {
         var id: Double { day.timeIntervalSince1970 }
         var day: Date
@@ -137,18 +148,19 @@ final class UsageService: ObservableObject {
     private let queue = DispatchQueue(label: "com.vinlee.eureka.usage", qos: .utility)
     private var timer: DispatchSourceTimer?
 
-    /// 全文索引的节奏，**独立于用量的 60s**。
+    /// Full-text indexing cadence, **independent of usage's 60s**.
     ///
-    /// 搜索不是实时数据，而它要付的会话发现是这条后台队列的一大开销。原来两者共用 60s：
-    /// 发现一轮曾要 72s（见 `CodexSessionIndexer.headScanLimit` 的注释），等于队列永不空闲。
-    /// 索引器内部有指纹水位，跑得再密也只是重复付发现成本，没有额外产出。
+    /// Search isn't real-time data, while the session discovery it pays for is a big cost on this background queue. The two used to share 60s:
+    /// one discovery pass once took 72s (see the comment on `CodexSessionIndexer.headScanLimit`), so the queue was never idle.
+    /// The indexers keep fingerprint watermarks internally, so running more often only re-pays the discovery cost with no extra output.
     ///
-    /// 代价：全文搜索看到最新会话最多滞后 5 分钟。用量、限额、历史仍是 60s。
+    /// Cost: full-text search can lag the newest sessions by up to 5 minutes. Usage, rate limits and history stay at 60s.
     static let indexInterval: TimeInterval = 300
-    /// 上次跑索引的时间（只在 queue 上访问）。初值取 distantPast：启动后第一轮就索引。
+    /// When indexing last ran (accessed only on queue). Starts at distantPast so the first pass
+    /// after launch indexes.
     private var lastIndexRun = Date.distantPast
 
-    // 以下成员只在 queue 上访问
+    // The members below are accessed only on queue
     private var store: EurekaStore?
     private var claudeScanner: ClaudeTranscriptScanner?
     private var codexScanner: CodexUsageScanner?
@@ -161,12 +173,15 @@ final class UsageService: ObservableObject {
     private var codeBuddyScanner: CodeBuddyUsageScanner?
     private var cursorScanner: CursorUsageScanner?
     private var zcodeScanner: ZcodeUsageScanner?
-    /// Antigravity（实验，默认关）：每轮按开关决定是否扫
+    /// Antigravity (experimental, off by default): each pass decides whether to scan based on the
+    /// toggle
     private var antigravityScanner: AntigravityUsageScanner?
-    /// 开关首次打开时才登记健康项（关着时不该在健康页亮红灯）；仅 queue 上访问
+    /// The health entry is registered only when the toggle is first turned on (it shouldn't show
+    /// red on the health page while off); accessed only on queue
     private var antigravityHealthRegistered = false
     private var searchIndexer: TranscriptSearchIndexer?
-    /// 共享价格表（远程目录到达时原子替换；读取加锁，主线程渲染与后台扫描都安全）
+    /// Shared price table (atomically swapped when a remote catalog arrives; reads are locked, safe
+    /// for both main-thread rendering and background scans)
     private var pricing: PricingTable { PricingCatalogStore.shared.current }
 
     private static let claudeHealthName = "用量扫描 Claude"
@@ -214,27 +229,30 @@ final class UsageService: ObservableObject {
                     projectsFile: GeminiPaths.projectsFile(), store: store)
                 self.qwenScanner = QwenUsageScanner(
                     projectsRoot: QwenPaths.projectsRoot(), store: store)
-                // hermes：token/成本都在 state.db（含各 profile 的独立库）
+                // hermes: tokens/cost are all in state.db (including each profile's separate DB)
                 self.hermesScanner = HermesUsageScanner(
                     stateDBs: { HermesPaths.allStateDBs() }, store: store)
-                // codebuddy：token 在 projects/**/*.jsonl 的 function_call 行
-                // （qoder 的 CN 后端 token 全零，无用量扫描器）
+                // codebuddy: tokens are in the function_call lines of projects/**/*.jsonl
+                // (qoder's CN backend reports all-zero tokens, so it has no usage scanner)
                 self.codeBuddyScanner = CodeBuddyUsageScanner(
                     projectsRoot: CodeBuddyPaths.projectsRoot(), store: store)
-                // cursor：token 在 state.vscdb 的助手气泡里，按相邻差分归缓存
-                // （成本恒 0——pricing.json 里 cursor/ 前缀标了 unknown，见扫描器头注释）
+                // cursor: tokens are in state.vscdb's assistant bubbles, with cache attributed by
+                // adjacent differencing (cost is always 0 -- the cursor/ prefix is marked unknown
+                // in pricing.json, see the scanner's header comment)
                 self.cursorScanner = CursorUsageScanner(
                     dbPath: CursorPaths.globalStateDB(), store: store,
                     workspaceStorageRoot: CursorPaths.workspaceStorageRoot(),
                     sessions: { now in
-                        // 全量历史：每 composer 各有水位，回访老会话近乎零成本；
-                        // 若按 30 天截断，一个月前的 Cursor 用量就永远进不了账
+                        // Full history: each composer has its own watermark, so revisiting old
+                        // sessions costs almost nothing; truncating at 30 days would mean Cursor
+                        // usage older than a month never enters the ledger
                         CursorSessionIndexer.index(
                             window: CursorSessionIndexer.fullHistoryWindow,
                             maxSessions: 2000, now: now)
                             .map { ($0.id, $0.cwd, $0.lastActiveAt) }
                     })
-                // zcode：token 在 cli/rollout 的 model_io 行（含子代理流水）
+                // zcode: tokens are in the model_io lines of cli/rollout (including subagent
+                // streams)
                 self.zcodeScanner = ZcodeUsageScanner(
                     rolloutRoot: ZcodePaths.rolloutRoot(),
                     dbPath: ZcodePaths.db(), store: store)
@@ -246,19 +264,19 @@ final class UsageService: ObservableObject {
                 PricingCatalogStore.shared.loadIfNeeded(paths: .app)
                 self.scanAndPublish()
             } catch {
-                self.publish { $0.lastError = "数据库打开失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to open database: %@", zhHans: "数据库打开失败: %@", String(describing: error)) }
             }
         }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电
+        // leeway lets the system coalesce wakeups to save power
         timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in self?.scanAndPublish() }
         timer.resume()
         self.timer = timer
     }
 
-    /// 聚合一周报告（[weekStart, weekEnd)），完成后发布到 weeklyReport
+    /// Aggregates a weekly report ([weekStart, weekEnd)) and publishes it to weeklyReport when done
     func loadWeeklyReport(weekStart: Date, weekEnd: Date) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -269,11 +287,13 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 知识面索引被清空后的回调（AppDelegate 装配为重新触发一次 reindex——
-    /// 知识面侧只挂 lastScanAt 事件驱动，清空后没有定时器会自愈，必须显式踢一脚）
+    /// Callback after the knowledge index is cleared (AppDelegate wires it to trigger a reindex --
+    /// the knowledge side is only driven by lastScanAt events, so after clearing no timer heals it;
+    /// it must be kicked explicitly)
     var onSearchIndexCleared: (() -> Void)?
 
-    /// 清空全文索引（设置页「清空全文索引」；下轮扫描按开关状态自动重建）
+    /// Clears the full-text index (Settings' "Clear full-text index"; the next scan rebuilds it
+    /// automatically per the toggle)
     func clearSearchIndex() {
         queue.async { [weak self] in
             try? self?.store?.search.clearAll()
@@ -282,7 +302,7 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 任务完成 → 写历史（状态机副作用，主线程调用）
+    /// Task finished → write history (state machine side effect, called on the main thread)
     func recordFinished(_ task: FinishedTask) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -291,8 +311,9 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 记录一次「会话跑在哪个终端」。同键 upsert，所以每个事件都调也不会长表。
-    /// 过期/积压事件同样要记：终端归属是历史事实，与写 history 同待遇。
+    /// Records "which terminal a session runs in". Same-key upsert, so calling it on every event
+    /// doesn't grow the table. Stale/backlogged events are recorded too: terminal ownership is a
+    /// historical fact, treated the same as history writes.
     func recordTerminal(
         source: AgentSource, sessionId: String, binding: TerminalBinding, at: Date
     ) {
@@ -303,12 +324,13 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// popover 打开时主动刷一次
+    /// Proactively refreshes once when the popover opens
     func refreshNow() {
         queue.async { [weak self] in self?.scanAndPublish() }
     }
 
-    /// 扫一遍账本里出现过的 (来源, 模型, provider)，挑出未定价与估算的（设置页打开时调用）
+    /// Scans every (source, model, provider) seen in the ledger and picks out unpriced and
+    /// estimated ones (called when the settings page opens)
     func loadPricingDiagnostics() {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -327,14 +349,16 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 价格表换了（远程目录到达 / 用户改 pricing.json）：费用是读时现算的，重发汇总即可；
-    /// pricingRevision 自增让看板 .onChange 重载明细
+    /// The price table changed (remote catalog arrived / user edited pricing.json): costs are
+    /// computed at read time, so republishing summaries is enough; incrementing pricingRevision
+    /// makes the dashboard's .onChange reload details
     func pricingDidChange() {
         pricingRevision += 1
         refreshNow()
     }
 
-    /// 请求日志分页加载（page 从 1 起）；行成本用价格表折算
+    /// Paged loading of the request log (page starts at 1); row costs are converted via the price
+    /// table
     func loadRecords(
         page: Int, pageSize: Int = 50, source: AgentSource?, from: Date, to: Date
     ) {
@@ -359,13 +383,14 @@ final class UsageService: ObservableObject {
                     $0.recordTotal = total
                 }
             } catch {
-                self.publish { $0.lastError = "读取请求日志失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to read request log: %@", zhHans: "读取请求日志失败: %@", String(describing: error)) }
             }
         }
     }
 
-    /// 选中区间按 (时间桶, 来源) 聚合 token/成本趋势（图表「按日期」，跟随区间联动）。
-    /// 区间 ≤48h（今日/短自定义）自动切小时粒度；成本必须在 model 粒度过价目表后再折叠。
+    /// Aggregates the token/cost trend by (time bucket, source) over the selected range (the
+    /// chart's "by date", following the range). Ranges ≤48h (today/short custom) switch to hourly
+    /// granularity; cost must be priced at model granularity before folding.
     func loadTrend(from: Date, to: Date) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -376,7 +401,8 @@ final class UsageService: ObservableObject {
             let formatter = DateFormatter()
             formatter.dateFormat = hourly ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd"
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            // (桶字符串, 来源) → token/成本求和（行是 model 粒度，成本先按行算再累加）
+            // (bucket string, source) → token/cost sums (rows are model-granular; cost is computed
+            // per row, then accumulated)
             var buckets: [String: [AgentSource: (tokens: Int, cost: Double)]] = [:]
             for row in rows {
                 let t = row.totals
@@ -404,7 +430,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 按会话用量排行（选中区间/来源；按 sessionId 折叠、成本逐 model 行算、token 降序 Top 50）
+    /// Per-session usage ranking (selected range/source; folded by sessionId, cost computed per
+    /// model row, top 50 by tokens descending)
     func loadSessionTotals(from: Date, to: Date, source: AgentSource?) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -432,7 +459,7 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 活跃时段热力图（选中区间/来源，周 × 24h 一次 SQL 聚合）
+    /// Active-hours heatmap (selected range/source, weekday × 24h in one SQL aggregation)
     func loadHeatmap(from: Date, to: Date, source: AgentSource?) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -442,7 +469,7 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 工具/技能/插件调用统计（选中区间/来源，count 降序）
+    /// Tool/skill/plugin call stats (selected range/source, count descending)
     func loadToolCalls(source: AgentSource?, from: Date, to: Date) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -452,9 +479,10 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 技能全时累计统计（技能卡片"最近活跃"与详情页匹配；kind='skill'，累计次数降序）。
-    /// Hermes 的消息流没有技能调用事件（审计流水永远覆盖不到它），
-    /// 用它自带的 `skills/.usage.json` 计数补行；同名审计行存在时以审计为准。
+    /// All-time skill stats (matched by skill cards' "last active" and the detail page;
+    /// kind='skill', total count descending). Hermes's message stream has no skill-call events (the
+    /// audit stream can never cover it), so rows are filled from its own `skills/.usage.json`
+    /// counts; when a same-name audit row exists, the audit row wins.
     func loadSkillStats(source: AgentSource? = nil) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -475,8 +503,9 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// MCP 调用按 server 聚合（MCP 页"N 次调用/最近使用/闲置提示"）。
-    /// 原始名形态：codex/kimi `server.tool`（取首个 . 前缀），Claude `mcp__server__tool`。
+    /// MCP calls aggregated by server (MCP page "N calls / last used / idle hint"). Raw name
+    /// shapes: codex/kimi `server.tool` (take the prefix before the first .), Claude
+    /// `mcp__server__tool`.
     func loadMCPStats() {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -494,7 +523,7 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// `server.tool` / `mcp__server__tool` → server 名（小写）
+    /// `server.tool` / `mcp__server__tool` → server name (lowercase)
     static func mcpServerKey(_ raw: String) -> String {
         if raw.hasPrefix("mcp__") {
             let rest = raw.dropFirst("mcp__".count)
@@ -503,15 +532,18 @@ final class UsageService: ObservableObject {
         return raw.split(separator: ".").first.map { String($0).lowercased() } ?? ""
     }
 
-    /// 某 MCP server 的调用活跃（详情页「调用活跃」卡）：近 N 天逐日序列 + top 工具
+    /// Call activity of one MCP server (detail page "call activity" card): daily series over the
+    /// last N days + top tools
     struct MCPServerActivity {
-        /// 连续 N 天（旧→新，缺调用补 0），day 为当天零点
+        /// N consecutive days (old → new, days without calls filled with 0), day is that day's
+        /// midnight
         var series: [(day: Date, count: Int)]
-        /// 全时 top 工具（次数降序；工具名 = 原始名去掉 server 前缀）
+        /// All-time top tools (count descending; tool name = raw name minus the server prefix)
         var topTools: [(name: String, count: Int)]
     }
 
-    /// 工具名：原始名去掉 server 前缀（`mcp__s__t` → t；`s.t` → t；无前缀原样）
+    /// Tool name: raw name minus the server prefix (`mcp__s__t` → t; `s.t` → t; unchanged without a
+    /// prefix)
     static func mcpToolLabel(_ raw: String) -> String {
         if raw.hasPrefix("mcp__") {
             let parts = raw.components(separatedBy: "__")
@@ -541,7 +573,8 @@ final class UsageService: ObservableObject {
                 byDay[row.day, default: 0] += row.count
                 byTool[Self.mcpToolLabel(row.name), default: 0] += row.count
             }
-            // 连续 N 天补零序列（旧 → 新）：与扫描器写库同款的本地 yyyy-MM-dd
+            // Zero-filled series of N consecutive days (old → new): same local yyyy-MM-dd as the
+            // scanners write to the DB
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
             let calendar = Calendar.current
@@ -558,7 +591,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 子代理全时累计调用统计（Agents 页「调用 N 次」；kind='agent'，累计次数降序）
+    /// All-time subagent call stats (Agents page "called N times"; kind='agent', total count
+    /// descending)
     func loadAgentStats(source: AgentSource? = nil) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -567,7 +601,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// Top 技能排行（Skills 页分析卡）：按时间档 + 来源筛选的日期窗口径
+    /// Top skill ranking (Skills page analysis card): date window from the time period + source
+    /// filter
     func loadSkillRanking(source: AgentSource? = nil, from: Date, to: Date) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -577,7 +612,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 某技能本周调用排名（详情页「本周排名 #N」；回调回主线程，不占用列表页排行态）
+    /// A skill's call rank this week (detail page "this week's rank #N"; callback on the main
+    /// thread, doesn't touch the list page's ranking state)
     func loadSkillWeeklyRank(
         source: AgentSource, name: String,
         completion: @escaping (Int?) -> Void
@@ -597,7 +633,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 某技能按天调用序列（详情页趋势图；回调回主线程，避免跨技能发布态串味）
+    /// A skill's daily call series (detail page trend chart; callback on the main thread, avoiding
+    /// cross-skill published-state bleed)
     func loadSkillDailySeries(
         source: AgentSource, name: String, from: Date, to: Date,
         completion: @escaping ([SkillDayCount]) -> Void
@@ -614,7 +651,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 某技能最近调用会话（详情页「最近调用会话」卡；回调回主线程）
+    /// Sessions that recently called a skill (detail page "recent sessions" card; callback on the
+    /// main thread)
     func loadSkillSessions(
         source: AgentSource, name: String, limit: Int = 8,
         completion: @escaping ([(sessionId: String, lastTs: Date, count: Int)]) -> Void
@@ -630,7 +668,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 模型统计（选中区间的完整分项，token 降序）——同时是英雄卡/四宫格/命中率的数据源
+    /// Model stats (full breakdown for the selected range, by tokens descending) -- also the data
+    /// source for the hero card/four tiles/hit rate
     func loadModelTotals(from: Date, to: Date) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -651,7 +690,7 @@ final class UsageService: ObservableObject {
             let rows = (try? store.usage.totalsByProject(from: from, to: to, source: source)) ?? []
             var byProject: [String: (tokens: Int, cost: Double?)] = [:]
             for (project, totals) in rows {
-                let name = project ?? "（未知项目）"
+                let name = project ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
                 let tokens = totals.inputTokens + totals.outputTokens
                     + totals.cacheCreationTokens + totals.cacheReadTokens
                 let cost = self.pricing.cost(of: totals)
@@ -667,17 +706,17 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 行成本折算（模型统计合计行用）
+    /// Row cost conversion (for the model stats total row)
     func cost(of totals: UsageTotals) -> Double? {
         pricing.cost(of: totals)
     }
 
-    /// 价格出处（看板费用格悬停）
+    /// Price provenance (hover on the dashboard's cost cell)
     func priceResolution(of totals: UsageTotals) -> PriceResolution {
         pricing.resolution(of: totals)
     }
 
-    /// 导出近 30 天用量 CSV 到 ~/Downloads 并在 Finder 中显示
+    /// Exports the last 30 days of usage as CSV to ~/Downloads and reveals it in Finder
     func exportCSV() {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -702,17 +741,17 @@ final class UsageService: ObservableObject {
                     .appendingPathComponent(
                         "Downloads/eureka-usage-\(formatter.string(from: now)).csv")
                 try Data(csv.utf8).write(to: url)
-                self.publish { $0.exportMessage = "已导出 \(url.lastPathComponent)" }
+                self.publish { $0.exportMessage = L10n.format("Exported %@", zhHans: "已导出 %@", String(url.lastPathComponent)) }
                 DispatchQueue.main.async {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             } catch {
-                self.publish { $0.exportMessage = "导出失败: \(error)" }
+                self.publish { $0.exportMessage = L10n.format("Export failed: %@", zhHans: "导出失败: %@", String(describing: error)) }
             }
         }
     }
 
-    // MARK: - queue 内部
+    // MARK: - Queue internals
 
     private func scanAndPublish() {
         guard let store else { return }
@@ -756,7 +795,8 @@ final class UsageService: ObservableObject {
                     antigravityHealthRegistered = true
                     HealthRegistry.shared.register(Self.antigravityHealthName, expectedInterval: 60)
                 }
-                // 实验源：解析失败只记健康，不中断整轮扫描
+                // Experimental source: a parse failure is only recorded in health, never aborting
+                // the whole scan
                 do {
                     let agyNew = try autoreleasepool { try antigravityScanner?.scanOnce() ?? 0 }
                     HealthRegistry.shared.beat(Self.antigravityHealthName)
@@ -767,24 +807,25 @@ final class UsageService: ObservableObject {
             }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
-            // 全文索引**不跟用量同节奏**：见 indexInterval。
+            // Full-text indexing does **not run at usage's cadence**: see indexInterval.
             if Date().timeIntervalSince(lastIndexRun) >= Self.indexInterval,
                UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
                 lastIndexRun = Date()
                 searchIndexer?.indexOnce(sessions: AgentSessionDiscovery.forIndexing())
             }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
-            // 成功一轮即清掉上次的错误：偶发的锁争用（启动预热/大文件建索引时
-            // 另一连接写事务超过 busy_timeout）下一轮就恢复，红字不该一直挂着。
+            // One successful pass clears the previous error: occasional lock contention (during
+            // launch warm-up/large-file indexing, another connection's write transaction exceeds
+            // busy_timeout) recovers by the next pass, so the red text shouldn't linger.
             publish { $0.summary = summary; $0.lastError = nil }
             publishHistory(store: store)
         } catch {
             HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
-            publish { $0.lastError = "扫描失败: \(error)" }
+            publish { $0.lastError = L10n.format("Scan failed: %@", zhHans: "扫描失败: %@", String(describing: error)) }
         }
     }
 
-    /// 历史页窗口：近 14 天、上限 200 条（替代旧的固定 50 条）
+    /// History page window: last 14 days, capped at 200 entries (replacing the old fixed 50)
     private static let historyWindow: TimeInterval = 14 * 86400
     private static let historyLimit = 200
 
@@ -792,7 +833,7 @@ final class UsageService: ObservableObject {
         let since = Date().addingTimeInterval(-Self.historyWindow)
         let history = (try? store.history.tasks(since: since, limit: Self.historyLimit)) ?? []
         let dailyRows = (try? store.history.dailyOutcomeCounts(since: since)) ?? []
-        // 按会话关联 token 总量（session_id → 四段 token 求和）
+        // Token totals associated by session (session_id → sum of the four token segments)
         var tokensBySession: [String: Int] = [:]
         if let totals = try? store.usage.totalsForSessions(history.map(\.sessionId)) {
             for (sessionId, rows) in totals {
@@ -816,7 +857,8 @@ final class UsageService: ObservableObject {
         }
     }
 
-    /// 历史页按天聚合用的日期解析（dailyOutcomeCounts 的 '%Y-%m-%d' 本地时区串）
+    /// Date parsing for the history page's per-day aggregation (dailyOutcomeCounts' '%Y-%m-%d'
+    /// local-time-zone strings)
     private static let historyDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -824,13 +866,14 @@ final class UsageService: ObservableObject {
         return formatter
     }()
 
-    /// 运行中任务推送（AppDelegate 在 .activeTasksChanged 时同步调用，主线程）
+    /// Running-task push (AppDelegate calls it synchronously on .activeTasksChanged, main thread)
     func publishRunningTasks(_ tasks: [AgentTask]) {
         runningTasks = tasks
     }
 
-    /// 导出历史页当前窗口（近 14 天）为 CSV 到 ~/Downloads 并在 Finder 显示。
-    /// 列：结局/标题/来源/项目/开始时间/结束时间/耗时/Tokens（范式同 AuditService.exportCSV）。
+    /// Exports the history page's current window (last 14 days) as CSV to ~/Downloads and reveals
+    /// it in Finder. Columns: outcome/title/source/project/start time/end time/duration/Tokens
+    /// (same pattern as AuditService.exportCSV).
     func exportHistoryCSV() {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -840,7 +883,9 @@ final class UsageService: ObservableObject {
                 let totals = (try? store.usage.totalsForSessions(
                     tasks.map(\.sessionId))) ?? [:]
                 let isoFormatter = ISO8601DateFormatter()
-                var csv = "结局,标题,来源,项目,开始时间,结束时间,耗时秒,Tokens\n"
+                var csv = L10n.text(
+                    "Outcome,Title,Source,Project,Started,Finished,Duration seconds,Tokens\n",
+                    zhHans: "结局,标题,来源,项目,开始时间,结束时间,耗时秒,Tokens\n")
                 for task in tasks {
                     let tokens = totals[task.sessionId]?.reduce(0) {
                         $0 + $1.inputTokens + $1.outputTokens
@@ -865,18 +910,18 @@ final class UsageService: ObservableObject {
                         "Downloads/eureka-history-\(formatter.string(from: Date())).csv")
                 try Data(csv.utf8).write(to: url)
                 self.publish {
-                    $0.exportMessage = "已导出 \(url.lastPathComponent)（\(tasks.count) 条）"
+                    $0.exportMessage = L10n.format("Exported %@ (%@ records)", zhHans: "已导出 %@（%@ 条）", String(url.lastPathComponent), String(tasks.count))
                 }
                 DispatchQueue.main.async {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             } catch {
-                self.publish { $0.exportMessage = "导出失败: \(error)" }
+                self.publish { $0.exportMessage = L10n.format("Export failed: %@", zhHans: "导出失败: %@", String(describing: error)) }
             }
         }
     }
 
-    /// CSV 字段转义（含逗号/引号/换行时加引号）
+    /// CSV field escaping (quoted when containing commas/quotes/newlines)
     private static func csvField(_ raw: String) -> String {
         guard raw.contains(",") || raw.contains("\"") || raw.contains("\n") else { return raw }
         return "\"" + raw.replacingOccurrences(of: "\"", with: "\"\"") + "\""

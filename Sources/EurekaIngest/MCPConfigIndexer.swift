@@ -1,27 +1,30 @@
 import EurekaKit
 import Foundation
 
-/// 一个已配置的 MCP server（只读索引）。
+/// A configured MCP server (read-only index).
 ///
-/// 密钥红线：`env` / `headers` 的**值**在解析层就不读入模型 —— 这些字段常放 API key。
-/// 这里只保留键名列表（用于展示"引用了哪些环境变量"），URL 也去掉 query/fragment
-/// （query 可能带 token）。索引结果只驻内存：不进 SQLite、不进全文索引、不进云备份。
+/// Secret red line: the **values** of `env` / `headers` are never read into the model at the parsing layer;
+/// these fields often hold API keys. Only the key names are kept (to show "which env vars are referenced"),
+/// and URLs also drop query/fragment (the query may carry a token). Index results live only in memory: not
+/// in SQLite, not in the full-text index, not in cloud backup.
 public struct MCPServerEntry: Equatable, Sendable, Identifiable {
     public var id: String { "\(source.rawValue):\(configPath):\(name)" }
     public var source: AgentSource
     public var name: String
-    /// 传输方式：stdio / http / sse（配置显式声明优先；有 url 无声明按 http）
+    /// Transport: stdio / http / sse (an explicit config declaration wins; a url without a
+    /// declaration means http)
     public var transport: String
-    /// 启动命令摘要（command + args，截断），仅本地展示
+    /// Launch command summary (command + args, truncated), for local display only
     public var commandSummary: String?
-    /// 远端地址（已去掉 query/fragment）
+    /// Remote URL (query/fragment stripped)
     public var urlSummary: String?
-    /// env / headers 的键名（**绝不含值**）
+    /// Key names of env / headers (**never the values**)
     public var envKeys: [String]
-    /// 项目级配置（`<repo>/.mcp.json`）归属的项目名；全局配置为 nil
+    /// Owning project name for project-level config (`<repo>/.mcp.json`); nil for global config
     public var projectName: String?
     public var configPath: String
-    /// 启停状态：仅 opencode / grok 的配置有 `enabled` 字段；其余源为 nil（无此语义）
+    /// Enabled state: only opencode / grok configs have an `enabled` field; other sources are nil
+    /// (no such semantics)
     public var enabled: Bool?
 
     public init(
@@ -41,17 +44,18 @@ public struct MCPServerEntry: Equatable, Sendable, Identifiable {
     }
 }
 
-/// MCP server 配置的只读索引，覆盖 9 个实勘过配置路径的源：
-/// claude（`~/.claude.json` 顶层 + `<repo>/.mcp.json`）、codex / grok（config.toml
-/// `[mcp_servers.*]`）、gemini / qwen（settings.json）、cursor（`~/.cursor/mcp.json`）、
-/// kimi（独立 `~/.kimi-code/mcp.json`，config.toml 扫描保留兜底）、opencode
-/// （`~/.config/opencode/opencode.json` 的 `mcp` 键；同目录 `config.json` 是 mcp
-/// 空对象的诱饵，不读）、zcode（cli/config.json，实勘无用户级 MCP，保留空读）。
-/// Trae 的 `mcp.json` 与 JWT 同目录，不读（与备份红线同源的谨慎）。
-/// 全部 best-effort：文件缺失/解析失败安静跳过。
+/// Read-only index of MCP server configs, covering 9 sources whose config paths were verified
+/// locally: claude (`~/.claude.json` top level + `<repo>/.mcp.json`), codex / grok (config.toml
+/// `[mcp_servers.*]`), gemini / qwen (settings.json), cursor (`~/.cursor/mcp.json`), kimi
+/// (standalone `~/.kimi-code/mcp.json`, with config.toml scanning kept as a fallback), opencode
+/// (the `mcp` key of `~/.config/opencode/opencode.json`; the sibling `config.json` is a decoy with
+/// an empty mcp object and is not read), zcode (cli/config.json; no user-level MCP found locally,
+/// the empty read is kept). Trae's `mcp.json` sits next to the JWT and is not read (the same
+/// caution as the backup red line). All best-effort: missing files / parse failures are skipped
+/// silently.
 public enum MCPConfigIndexer {
-    /// 各源的**全局** MCP 配置文件（索引与写入共用同一张表，避免两处口径漂移）。
-    /// 返回 nil = 该源没有已实勘的用户级 MCP 配置约定。
+    /// Each source's **global** MCP config file (indexing and writing share one table so the two
+    /// cannot drift). Returns nil = that source has no verified user-level MCP config convention.
     public static func globalConfigURL(
         for source: AgentSource,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -93,19 +97,22 @@ public enum MCPConfigIndexer {
             entries += parseTOMLServers(text, source: source, configPath: url.path)
         }
 
-        // claude 全局：~/.claude.json 顶层 mcpServers（projects 子树里的按项目文件口径不收，
-        // 与 ctx 估算同口径）；项目级：<repo>/.mcp.json
+        // claude global: top-level mcpServers in ~/.claude.json (per-project entries under the
+        // projects subtree are not collected, matching the ctx estimate); project level:
+        // <repo>/.mcp.json
         json(globalConfigURL(for: .claude, home: home), source: .claude)
         for (root, name) in projectRoots {
             json(root.appendingPathComponent(".mcp.json"), source: .claude, projectName: name)
-            // cursor 的项目级约定 <repo>/.cursor/mcp.json（文档化约定，与用户级同构）
+            // cursor's project-level convention <repo>/.cursor/mcp.json (documented, same shape as
+            // user level)
             json(root.appendingPathComponent(".cursor/mcp.json"),
                  source: .cursor, projectName: name)
         }
         toml(globalConfigURL(for: .codex, home: home), source: .codex)
         json(globalConfigURL(for: .gemini, home: home), source: .gemini)
         json(globalConfigURL(for: .cursor, home: home), source: .cursor)
-        // kimi 的 MCP 在独立 mcp.json（实勘）；config.toml 里若真出现 [mcp.*] 段照样兜底
+        // kimi's MCP lives in a standalone mcp.json (verified locally); if config.toml really has
+        // [mcp.*] sections, they are still picked up as a fallback
         json(globalConfigURL(for: .kimi, home: home), source: .kimi)
         toml(home.appendingPathComponent(".kimi-code/config.toml"), source: .kimi)
         json(globalConfigURL(for: .qwen, home: home), source: .qwen)
@@ -119,8 +126,8 @@ public enum MCPConfigIndexer {
         }
     }
 
-    // MARK: - JSON（mcpServers：claude/gemini/cursor/kimi/qwen/zcode/项目级 .mcp.json；
-    //               mcp：opencode，方言差异见下）
+    // MARK: - JSON (mcpServers: claude/gemini/cursor/kimi/qwen/zcode/project-level .mcp.json;
+    //               mcp: opencode, dialect differences below)
 
     public static func parseJSONServers(
         _ data: Data, source: AgentSource, configPath: String,
@@ -130,7 +137,7 @@ public enum MCPConfigIndexer {
               let servers = root[container] as? [String: Any] else { return [] }
         return servers.sorted { $0.key < $1.key }.map { name, value in
             let dict = value as? [String: Any] ?? [:]
-            // command：字符串（主流）或数组（opencode 的 local 形态，含可执行 + 参数）
+            // command: a string (mainstream) or an array (opencode's local form, executable + args)
             var command = dict["command"] as? String
             var args = (dict["args"] as? [Any])?.compactMap { $0 as? String } ?? []
             if command == nil, let array = dict["command"] as? [Any] {
@@ -141,7 +148,7 @@ public enum MCPConfigIndexer {
             let url = (dict["url"] as? String)
                 ?? (dict["httpUrl"] as? String)
                 ?? (dict["serverUrl"] as? String)
-            // 密钥红线：env / environment / headers 只取键名
+            // Secret red line: env / environment / headers yield key names only
             var keys: [String] = []
             if let env = dict["env"] as? [String: Any] { keys += env.keys }
             if let env = dict["environment"] as? [String: Any] { keys += env.keys }
@@ -160,12 +167,14 @@ public enum MCPConfigIndexer {
         }
     }
 
-    // MARK: - TOML（[mcp_servers.<name>]：codex；[mcp.<name>]：kimi 约定，保守解析）
+    // MARK: - TOML ([mcp_servers.<name>]: codex; [mcp.<name>]: kimi convention, parsed conservatively)
 
-    /// 行级解析，不引 TOML 依赖（与 CodexProfileEditor 的 `[profiles.*]` 手法同源）。
-    /// `[mcp_servers.<name>.env]` 之类的子段归属同一 server，且段内**只收键名不读值**；
-    /// `args = [` 换行书写的多行数组跨行拼接（grok 实勘的真实形态），遇段头或 EOF
-    /// 未闭合则放弃该数组；多行表仍不拼接（best-effort，宁可漏摘要也不误读密钥）。
+    /// Line-level parsing with no TOML dependency (same technique as CodexProfileEditor's
+    /// `[profiles.*]`). Subsections like `[mcp_servers.<name>.env]` belong to the same server, and
+    /// within them **only key names are collected, never values**; an `args = [` array written
+    /// across lines is joined (the real shape seen in grok's config), and the array is dropped if a
+    /// section header or EOF arrives before it closes; multi-line tables are still not joined
+    /// (best-effort: better to miss a summary than misread a secret).
     public static func parseTOMLServers(
         _ text: String, source: AgentSource, configPath: String
     ) -> [MCPServerEntry] {
@@ -178,13 +187,16 @@ public enum MCPConfigIndexer {
         var current: String?
         var inSecretSubsection = false
         var inIgnoredSubsection = false
-        /// 多行数组收集态：`args = [` 未闭合时持续吃行直到引号外出现 `]`
+        /// Multi-line array collection state: while `args = [` is unclosed, keep consuming lines
+        /// until a `]` appears outside quotes
         var pendingArray: (name: String, buffer: String)?
 
         for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            // 多行数组收集中：整行注释跳过（数组内允许注释）；段头 = 上个数组畸形
-            // 未闭合，放弃收集防吞段，该行落回正常段头处理
+            // Collecting a multi-line array: whole-line comments are skipped (allowed inside
+            // arrays); a section header means the previous array was malformed and unclosed, so
+            // give up collecting rather than swallow the section, and let the line fall through to
+            // normal header handling
             if var pending = pendingArray {
                 if line.hasPrefix("#") { continue }
                 if line.hasPrefix("[") {
@@ -216,9 +228,10 @@ public enum MCPConfigIndexer {
                 let name = parts[1]
                 if !order.contains(name) { order.append(name) }
                 current = name
-                // 子段分两类：`.env` / `.headers` 是密钥段 → 只收键名；
-                // 其它子段（实勘 codex 有 `.tools.<tool>` 逐工具开关）→ 整段忽略，
-                // 别把 `enabled = false` 这种键错标成"引用密钥键"。
+                // Two kinds of subsection: `.env` / `.headers` are secret sections → collect key
+                // names only; other subsections (codex was seen with per-tool `.tools.<tool>`
+                // toggles) → ignore entirely, so a key like `enabled = false` is not mislabeled as
+                // a "referenced secret key".
                 inSecretSubsection = parts.count >= 3
                     && (parts[2] == "env" || parts[2] == "headers")
                 inIgnoredSubsection = parts.count >= 3 && !inSecretSubsection
@@ -230,7 +243,7 @@ public enum MCPConfigIndexer {
             let key = unquote(String(line[..<eq]).trimmingCharacters(in: .whitespaces))
             if inSecretSubsection {
                 envKeys[name, default: []].insert(key)
-                continue  // 值绝不读取
+                continue  // values are never read
             }
             let value = String(line[line.index(after: eq)...])
                 .trimmingCharacters(in: .whitespaces)
@@ -241,10 +254,11 @@ public enum MCPConfigIndexer {
                 if tomlArrayClosed(value) {
                     args[name] = inlineArrayStrings(value)
                 } else {
-                    // 多行数组开头（`args = [` 后换行）：进收集态吃后续行
+                    // Start of a multi-line array (newline after `args = [`): enter collection
+                    // state to consume the following lines
                     pendingArray = (name, value)
                 }
-            case "enabled": enabled[name] = value.lowercased().hasPrefix("t")  // true/false 字面量
+            case "enabled": enabled[name] = value.lowercased().hasPrefix("t")  // true/false literal
             case "env", "headers":
                 envKeys[name, default: []].formUnion(inlineTableKeys(value))
             default: break
@@ -264,13 +278,13 @@ public enum MCPConfigIndexer {
         }
     }
 
-    // MARK: - 私有小工具
+    // MARK: - Private helpers
 
     private static func transport(declared: String?, url: String?) -> String {
         if let declared = declared?.lowercased(), !declared.isEmpty {
             switch declared {
-            case "streamable-http", "remote": return "http"  // opencode 的 remote 归一到 http
-            case "local": return "stdio"                     // opencode 的 local 归一到 stdio
+            case "streamable-http", "remote": return "http"  // opencode's remote normalizes to http
+            case "local": return "stdio"                     // opencode's local normalizes to stdio
             default: return declared
             }
         }
@@ -283,7 +297,7 @@ public enum MCPConfigIndexer {
         return joined.count > 160 ? String(joined.prefix(160)) + "…" : joined
     }
 
-    /// URL 去掉 query 与 fragment（可能带 token）
+    /// Strips query and fragment from a URL (they may carry a token)
     private static func stripQuery(_ url: String) -> String {
         String(url.prefix { $0 != "?" && $0 != "#" })
     }
@@ -297,7 +311,8 @@ public enum MCPConfigIndexer {
         return value
     }
 
-    /// 单行内联表 `{ A = "x", B = "y" }` → 键名（只取 `=` 左侧，值不经手）
+    /// Single-line inline table `{ A = "x", B = "y" }` → key names (only the left of `=`; values
+    /// are never touched)
     private static func inlineTableKeys(_ value: String) -> [String] {
         var inner = value.trimmingCharacters(in: .whitespaces)
         guard inner.hasPrefix("{") else { return [] }
@@ -310,7 +325,8 @@ public enum MCPConfigIndexer {
         }
     }
 
-    /// 单行数组 `["-y", "pkg"]` → 字符串元素（多行形态由调用方拼接后再进来）
+    /// Single-line array `["-y", "pkg"]` → string elements (the multi-line form is joined by the
+    /// caller before it gets here)
     private static func inlineArrayStrings(_ value: String) -> [String] {
         var inner = value.trimmingCharacters(in: .whitespaces)
         guard inner.hasPrefix("[") else { return [] }
@@ -321,8 +337,9 @@ public enum MCPConfigIndexer {
         }.filter { !$0.isEmpty }
     }
 
-    /// 数组字面量是否已闭合：引号外的 `]` 才算（引号内的 `]` 是元素内容）；
-    /// 引号内的 `\"` 转义不翻转引号态。best-effort 扫描，够覆盖 args 的字符串数组形态。
+    /// Whether an array literal is closed: only a `]` outside quotes counts (a `]` inside quotes is
+    /// element content); an escaped `\"` inside quotes does not flip the quote state. A best-effort
+    /// scan, enough for the string-array form of args.
     private static func tomlArrayClosed(_ value: String) -> Bool {
         var inString = false
         var escaped = false

@@ -27,11 +27,11 @@ func subagentScannerTests(_ t: TestRunner) {
         try expectEqual(run.agentType, "Explore")
         try expectEqual(run.description, "探索 transcript 解析")
         try expectEqual(run.status, .running)
-        try expectEqual(run.currentActivity, "WebFetch")  // 子 agent transcript 尾部最后工具
+        try expectEqual(run.currentActivity, "WebFetch")  // Last tool at the tail of the subagent transcript
 
         try expectEqual(try find(subs, "done").status, .completed)
         try expectEqual(try find(subs, "fail").status, .failed)
-        // 完成/失败的不读 transcript，无当前工具
+        // Completed/failed ones don't read the transcript and have no current tool
         try expectEqual(try find(subs, "done").currentActivity, nil)
     }
 

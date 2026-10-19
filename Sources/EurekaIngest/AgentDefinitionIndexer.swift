@@ -1,25 +1,26 @@
 import EurekaKit
 import Foundation
 
-/// 一个 agent 定义 markdown（Claude `~/.claude/agents/<name>.md` 或 opencode `~/.config/opencode/agents/<name>.md`，
-/// 均含项目级变体）。frontmatter：Claude 用 name/description/tools/model/color；
-/// opencode 用 description/mode(primary|subagent|all)/model/temperature；正文为 system prompt。
-/// Codex 没有同类文件（其「agent」是 config.toml 的 `[profiles.*]`）。
+/// An agent definition markdown (Claude `~/.claude/agents/<name>.md` or opencode
+/// `~/.config/opencode/agents/<name>.md`, both with project-level variants). Frontmatter: Claude
+/// uses name/description/tools/model/color; opencode uses
+/// description/mode(primary|subagent|all)/model/temperature; the body is the system prompt. Codex
+/// has no equivalent file (its "agents" are `[profiles.*]` in config.toml).
 public struct AgentDefinition: Equatable, Sendable, Identifiable {
     public var id: String { path }
     public var source: AgentSource
     public var name: String
     public var description: String?
-    public var tools: [String]     // 空 = 继承全部工具
-    public var model: String?      // opus / sonnet / … 或 provider/model
+    public var tools: [String]     // empty = inherits all tools
+    public var model: String?      // opus / sonnet / ... or provider/model
     public var color: String?
-    public var mode: String?       // opencode：primary / subagent / all
-    public var scope: SkillScope   // 系统级 or 项目级
-    public var path: String        // .md 绝对路径（内置 agent 无文件 = 空串）
-    public var enabled: Bool       // 停用区（*.eureka-disabled）= false
-    /// 所属插件名（`~/.claude/plugins` 下的插件 agent）；nil = 非插件
+    public var mode: String?       // opencode: primary / subagent / all
+    public var scope: SkillScope   // system-level or project-level
+    public var path: String        // absolute .md path (built-in agents have no file = empty string)
+    public var enabled: Bool       // disabled area (*.eureka-disabled) = false
+    /// Owning plugin name (plugin agents under `~/.claude/plugins`); nil = not from a plugin
     public var pluginName: String?
-    /// Claude Code 内置 agent（无磁盘文件，只读展示，随版本可能变化）
+    /// Claude Code built-in agent (no file on disk, read-only display, may change across versions)
     public var builtin: Bool
     public var sizeBytes: UInt64
     public var modifiedAt: Date
@@ -52,11 +53,11 @@ public struct AgentDefinition: Equatable, Sendable, Identifiable {
     }
 }
 
-/// 扫描 Claude agent 定义。纯文件 IO，env 覆盖路径根，便于单测。
+/// Scans Claude agent definitions. Pure file IO; env overrides the path roots for unit tests.
 public enum AgentDefinitionIndexer {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
-    /// `~/.claude/agents`（env `EUREKA_CLAUDE_AGENTS` 覆盖）
+    /// `~/.claude/agents` (overridden by env `EUREKA_CLAUDE_AGENTS`)
     public static func claudeAgentsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -66,7 +67,8 @@ public enum AgentDefinitionIndexer {
         return home().appendingPathComponent(".claude/agents", isDirectory: true)
     }
 
-    /// 停用区：`<root>.eureka-disabled`（沿用技能约定，非破坏、可逆）
+    /// Disabled area: `<root>.eureka-disabled` (follows the skill convention; non-destructive,
+    /// reversible)
     public static func disabledRoot(for agentsRoot: URL) -> URL {
         agentsRoot.deletingLastPathComponent()
             .appendingPathComponent(agentsRoot.lastPathComponent + ".eureka-disabled", isDirectory: true)
@@ -78,23 +80,24 @@ public enum AgentDefinitionIndexer {
         indexAgents(systemRoots: [systemRoot], source: .claude, projectRoots: projectRoots)
     }
 
-    /// opencode agents：多个系统根（agents + agent）+ 项目 `.opencode/agents`
+    /// opencode agents: several system roots (agents + agent) + project `.opencode/agents`
     public static func indexOpencodeAgents(
         systemRoots: [URL], projectRoots: [ProjectScopedRoot] = []
     ) -> [AgentDefinition] {
         indexAgents(systemRoots: systemRoots, source: .opencode, projectRoots: projectRoots)
     }
 
-    /// grok agents：用户 `~/.grok/agents` + 内置 `~/.grok/bundled/agents` + 项目 `.grok/agents`
+    /// grok agents: user `~/.grok/agents` + bundled `~/.grok/bundled/agents` + project
+    /// `.grok/agents`
     public static func indexGrokAgents(
         systemRoots: [URL], projectRoots: [ProjectScopedRoot] = []
     ) -> [AgentDefinition] {
         indexAgents(systemRoots: systemRoots, source: .grok, projectRoots: projectRoots)
     }
 
-    /// Cursor 子代理：`~/.cursor/agents/<name>.md` 与 `<repo>/.cursor/agents/<name>.md`
-    /// （约定见 Cursor 自带的 create-subagent 技能：YAML frontmatter + 正文即系统提示，
-    /// 与 Claude 的 agents/*.md 同构，故直接复用同一套扫描）
+    /// Cursor subagents: `~/.cursor/agents/<name>.md` and `<repo>/.cursor/agents/<name>.md`
+    /// (convention per Cursor's own create-subagent skill: YAML frontmatter + body as the system
+    /// prompt, same shape as Claude's agents/*.md, so the same scan is reused directly)
     public static func indexCursorAgents(
         systemRoot: URL, projectRoots: [ProjectScopedRoot] = []
     ) -> [AgentDefinition] {
@@ -116,8 +119,9 @@ public enum AgentDefinitionIndexer {
             result += scanAgentRoot(
                 disabledRoot(for: project.root), source: source, enabled: false, scope: scope)
         }
-        // 同一 path 只留一条（系统级先扫 → 优先）：项目根与系统根重合时同一 .md 会被扫两次，
-        // 而 AgentDefinition.id = path，重复 id 会让 SwiftUI 网格出现空洞格子。
+        // Keep one entry per path (system-level scanned first → wins): when a project root overlaps
+        // a system root the same .md is scanned twice, and AgentDefinition.id = path, so duplicate
+        // ids would leave hollow cells in the SwiftUI grid.
         var seenPaths = Set<String>()
         result = result.filter { seenPaths.insert($0.path).inserted }
         return result.sorted {
@@ -125,7 +129,7 @@ public enum AgentDefinitionIndexer {
         }
     }
 
-    /// 扫描一个 agents 根：直属子级的 `*.md` 文件（扁平，非 <dir>/SKILL.md）
+    /// Scans one agents root: direct-child `*.md` files (flat, not <dir>/SKILL.md)
     static func scanAgentRoot(
         _ root: URL, source: AgentSource = .claude, enabled: Bool, scope: SkillScope
     ) -> [AgentDefinition] {
@@ -142,7 +146,7 @@ public enum AgentDefinitionIndexer {
                 SkillMemoryIndexer.readHead(file) ?? "")
             result.append(AgentDefinition(
                 source: source,
-                name: fields["name"] ?? stem,  // opencode 无 name，文件名即 id
+                name: fields["name"] ?? stem,  // opencode has no name; the file name is the id
                 description: fields["description"].flatMap { $0.isEmpty ? nil : $0 },
                 tools: parseToolList(fields["tools"]),
                 model: fields["model"].flatMap { $0.isEmpty ? nil : $0 },
@@ -157,7 +161,7 @@ public enum AgentDefinitionIndexer {
         return result
     }
 
-    /// `tools` 解析：支持 `a, b, c` 与 `[a, b, c]` 两种写法；nil/空 → []（继承全部）
+    /// Parses `tools`: supports both `a, b, c` and `[a, b, c]`; nil/empty → [] (inherits all)
     public static func parseToolList(_ raw: String?) -> [String] {
         guard var value = raw?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return [] }
         if value.first == "[" && value.last == "]" {
@@ -168,9 +172,9 @@ public enum AgentDefinitionIndexer {
             .filter { !$0.isEmpty }
     }
 
-    // MARK: - 插件 agent（~/.claude/plugins）
+    // MARK: - Plugin agents (~/.claude/plugins)
 
-    /// `~/.claude/plugins`（env `EUREKA_CLAUDE_PLUGINS` 覆盖）
+    /// `~/.claude/plugins` (overridden by env `EUREKA_CLAUDE_PLUGINS`)
     public static func claudePluginsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -180,8 +184,10 @@ public enum AgentDefinitionIndexer {
         return home().appendingPathComponent(".claude/plugins", isDirectory: true)
     }
 
-    /// 扫描已安装插件的 agents：读 `installed_plugins.json` → 逐插件扫 `<installPath>/agents/*.md`
-    /// （含停用区），每条打上 `pluginName`（插件 key `名字@市场` 取「名字」，与调用时的 `plugin:agent` 一致）。
+    /// Scans installed plugins' agents: reads `installed_plugins.json` → scans each plugin's
+    /// `<installPath>/agents/*.md` (including the disabled area), tagging each with `pluginName`
+    /// (the "name" part of the plugin key `name@marketplace`, matching `plugin:agent` at call
+    /// time).
     public static func indexPluginAgents(pluginsRoot: URL) -> [AgentDefinition] {
         let installedURL = pluginsRoot.appendingPathComponent("installed_plugins.json")
         guard let data = try? Data(contentsOf: installedURL),
@@ -203,22 +209,23 @@ public enum AgentDefinitionIndexer {
                 result += group
             }
         }
-        // 按 插件名 → 启用在前 → 名字 排序
+        // Sort by plugin name → enabled first → name
         return result.sorted {
             ($0.pluginName ?? "", $0.enabled ? 0 : 1, $0.name.lowercased())
                 < ($1.pluginName ?? "", $1.enabled ? 0 : 1, $1.name.lowercased())
         }
     }
 
-    /// Claude Code 内置 agent 静态清单：无磁盘文件、只读展示，随 Claude Code 版本可能变化。
+    /// Static list of Claude Code built-in agents: no files on disk, read-only display, may change
+    /// across Claude Code versions.
     public static func builtinClaudeAgents() -> [AgentDefinition] {
         let entries: [(name: String, description: String)] = [
-            ("general-purpose", "通用多步骤任务：研究复杂问题、搜索代码、执行多步操作"),
-            ("Explore", "只读代码搜索：大范围定位文件 / 符号 / 命名约定，只返回结论"),
-            ("Plan", "方案设计：产出分步实现计划、识别关键文件与取舍"),
-            ("claude", "通用兜底 agent（未指定类型时的默认）"),
-            ("claude-code-guide", "Claude Code / Agent SDK / Claude API 使用问答"),
-            ("statusline-setup", "配置状态栏（statusline）设置"),
+            ("general-purpose", L10n.text("General multi-step tasks: research complex problems, search code, and perform multiple operations", zhHans: "通用多步骤任务：研究复杂问题、搜索代码、执行多步操作")),
+            ("Explore", L10n.text("Read-only code search: locate files / symbols / naming conventions and return findings", zhHans: "只读代码搜索：大范围定位文件 / 符号 / 命名约定，只返回结论")),
+            ("Plan", L10n.text("Plan design: produce implementation steps, identify key files and tradeoffs", zhHans: "方案设计：产出分步实现计划、识别关键文件与取舍")),
+            ("claude", L10n.text("General-purpose fallback agent (default when no type is specified)", zhHans: "通用兜底 agent（未指定类型时的默认）")),
+            ("claude-code-guide", L10n.text("Help with Claude Code / Agent SDK / Claude API", zhHans: "Claude Code / Agent SDK / Claude API 使用问答")),
+            ("statusline-setup", L10n.text("Configure statusline settings", zhHans: "配置状态栏（statusline）设置")),
         ]
         return entries.map { entry in
             AgentDefinition(
@@ -228,15 +235,16 @@ public enum AgentDefinitionIndexer {
         }
     }
 
-    /// ZCode 子代理 profile：内置在 CLI 二进制里、磁盘无定义文件，但每次派生子代理都会把
-    /// `profileSnapshot`（name/description/tools/color）写进运行记录
-    /// `~/.zcode/cli/agents/<sess>/agent_*/metadata.json` → 聚合真实观测到的快照展示
-    /// （只列跑过的 profile，不猜静态清单）。同 profileId 取最近一次快照。
+    /// ZCode subagent profiles: built into the CLI binary with no definition files on disk, but
+    /// every spawned subagent writes its `profileSnapshot` (name/description/tools/color) into the
+    /// run record `~/.zcode/cli/agents/<sess>/agent_*/metadata.json` → aggregate the snapshots
+    /// actually observed for display (only profiles that have run are listed; no guessing at a
+    /// static list). For the same profileId the latest snapshot wins.
     public static func indexZcodeObservedAgents(agentsRoot: URL) -> [AgentDefinition] {
         let fm = FileManager.default
         let sessionDirs = (try? fm.contentsOfDirectory(
             at: agentsRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-        // profileId → (快照定义, 观测时间)，同 id 保留最近一次
+        // profileId → (snapshot definition, observed time); the latest is kept per id
         var latest: [String: (definition: AgentDefinition, observedAt: Date)] = [:]
         for sessionDir in sessionDirs {
             let agentDirs = (try? fm.contentsOfDirectory(
@@ -268,14 +276,15 @@ public enum AgentDefinitionIndexer {
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
-    /// Kimi Code 内置 subagent profile 静态清单：编译内嵌于 CLI 二进制（profile/default/*.yaml），
-    /// 磁盘上无用户自定义 agent 约定 → 只读展示，随 Kimi Code 版本可能变化。
+    /// Static list of Kimi Code built-in subagent profiles: compiled into the CLI binary
+    /// (profile/default/*.yaml), and there's no on-disk convention for user-defined agents →
+    /// read-only display, may change across Kimi Code versions.
     public static func builtinKimiAgents() -> [AgentDefinition] {
         let entries: [(name: String, description: String)] = [
-            ("coder", "默认编码子代理（AgentSwarm 缺省类型）：写码 / 改码 / 跑命令"),
-            ("explore", "只读探索：搜索与阅读代码，不做修改"),
-            ("plan", "规划：产出实现计划（plan mode 配套）"),
-            ("agent", "通用 agent profile（其余类型的 extends 基底）"),
+            ("coder", L10n.text("Default coding subagent (AgentSwarm default): write / edit code / run commands", zhHans: "默认编码子代理（AgentSwarm 缺省类型）：写码 / 改码 / 跑命令")),
+            ("explore", L10n.text("Read-only exploration: search and read code without making changes", zhHans: "只读探索：搜索与阅读代码，不做修改")),
+            ("plan", L10n.text("Planning: produce an implementation plan (for plan mode)", zhHans: "规划：产出实现计划（plan mode 配套）")),
+            ("agent", L10n.text("General agent profile (extends base for other types)", zhHans: "通用 agent profile（其余类型的 extends 基底）")),
         ]
         return entries.map { entry in
             AgentDefinition(

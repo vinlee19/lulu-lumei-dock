@@ -1,8 +1,9 @@
 import Foundation
 
-/// 计划完成度解析：从计划正文数任务清单标记（`- [x]` / `- [~]` / `- [ ]`），
-/// 以及提取一句话摘要。纯字符串逻辑、无 IO，便于单测。
-/// 兼容列表前缀 `-` / `*` / `+` / `1.` / `2)`，方框内 `x`/`X`=完成、`~`/`/`=进行中、其余=未开始。
+/// Plan progress parsing: counts task checklist markers (`- [x]` / `- [~]` / `- [ ]`) in the plan
+/// body and extracts a one-line summary. Pure string logic, no IO, easy to unit test.
+/// Accepts list prefixes `-` / `*` / `+` / `1.` / `2)`; inside the box `x`/`X` = done,
+/// `~`/`/` = in progress, anything else = not started.
 public enum PlanParsing {
     public struct Checklist: Equatable, Sendable {
         public let done: Int
@@ -15,13 +16,14 @@ public enum PlanParsing {
             self.total = total
         }
 
-        /// 完成占比（无清单项 → nil，用于判定「是否有进度可展示」）
+        /// Completed fraction (no checklist items → nil, used to decide whether there is progress
+        /// to show)
         public var fraction: Double? {
             total > 0 ? Double(done) / Double(total) : nil
         }
     }
 
-    /// 逐行统计任务清单项。
+    /// Counts task checklist items line by line.
     public static func checklist(_ markdown: String) -> Checklist {
         var done = 0, inProgress = 0, total = 0
         markdown.enumerateLines { line, _ in
@@ -36,8 +38,9 @@ public enum PlanParsing {
         return Checklist(done: done, inProgress: inProgress, total: total)
     }
 
-    /// 首个任务清单项的文字（去掉列表符与方框）。占位标题（如「Codex 计划」）的计划改用它命名——
-    /// 那才是这份计划实际要做的第一件事。
+    /// Text of the first task checklist item (list marker and box removed). Plans with a
+    /// placeholder title (such as the zhHans "Codex plan" title) are named after it instead — that
+    /// is the first thing the plan actually sets out to do.
     public static func firstStep(_ markdown: String) -> String? {
         var found: String?
         markdown.enumerateLines { line, stop in
@@ -49,8 +52,9 @@ public enum PlanParsing {
         return found
     }
 
-    /// 一句话摘要：首个「非标题(#) / 非引用(>) / 非分隔线 / 非代码围栏 / 非表格 / 非清单项 / 非空」的正文行，
-    /// 去掉常见 markdown 修饰符后返回（截断交给视图）。
+    /// One-line summary: the first body line that is not a heading (#) / quote (>) / divider / code
+    /// fence / table / checklist item / blank, returned with common markdown decorations stripped
+    /// (truncation is left to the view).
     public static func summary(_ markdown: String) -> String? {
         var found: String?
         markdown.enumerateLines { line, stop in
@@ -70,8 +74,9 @@ public enum PlanParsing {
         return found
     }
 
-    /// 匹配 `- [x] …` / `* [ ] …` / `1. [~] …`，返回方框内字符与其后的步骤文字；非清单行返回 nil。
-    /// 入参需为已去首部空白的行。
+    /// Matches `- [x] …` / `* [ ] …` / `1. [~] …` and returns the box character and the step text
+    /// after it; returns nil for non-checklist lines. The input must already have leading
+    /// whitespace trimmed.
     private static func checkbox(_ trimmed: String) -> (mark: Character, text: String)? {
         var s = Substring(trimmed)
         if let first = s.first, first == "-" || first == "*" || first == "+" {

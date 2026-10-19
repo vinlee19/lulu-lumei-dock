@@ -1,11 +1,12 @@
 import Foundation
 
-/// Gemini CLI 的本地数据路径（默认 `~/.gemini`，v0.51 实勘）。
-/// 布局：`tmp/<项目slug>/chats/session-<ts>-<id8>.jsonl`（会话）、`projects.json`
-/// （绝对路径 → slug 映射，反查会话 cwd）、`skills/<name>/SKILL.md`（与 Claude 同构）、
-/// 全局记忆 `GEMINI.md`。GUI 不继承 shell env，测试/迁移用 EUREKA_GEMINI_HOME 覆盖。
+/// Gemini CLI local data paths (default `~/.gemini`, surveyed on v0.51).
+/// Layout: `tmp/<project slug>/chats/session-<ts>-<id8>.jsonl` (sessions), `projects.json`
+/// (absolute path → slug map, used to resolve a session's cwd), `skills/<name>/SKILL.md`
+/// (same shape as Claude), and global memory `GEMINI.md`. The GUI does not inherit the shell
+/// env; tests/migration override with EUREKA_GEMINI_HOME.
 public enum GeminiPaths {
-    /// 配置主目录（env `EUREKA_GEMINI_HOME` > `~/.gemini`）
+    /// Config home (env `EUREKA_GEMINI_HOME` > `~/.gemini`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -16,35 +17,35 @@ public enum GeminiPaths {
             .appendingPathComponent(".gemini", isDirectory: true)
     }
 
-    /// 会话根 `<home>/tmp`（每项目一个 slug 子目录）
+    /// Session root `<home>/tmp` (one slug subdirectory per project)
     public static func tmpRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("tmp", isDirectory: true)
     }
 
-    /// 项目映射 `<home>/projects.json`（{"projects": {"/abs/path": "slug"}}）
+    /// Project map `<home>/projects.json` ({"projects": {"/abs/path": "slug"}})
     public static func projectsFile(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("projects.json")
     }
 
-    /// 技能根 `<home>/skills`（SKILL.md 格式与 Claude 同构）
+    /// Skill root `<home>/skills` (SKILL.md format same as Claude)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 全局记忆 `<home>/GEMINI.md`
+    /// Global memory `<home>/GEMINI.md`
     public static func globalGeminiMd(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
         configHome(environment: environment).appendingPathComponent("GEMINI.md")
     }
 
-    /// 读取 projects.json 反查表：slug → 项目绝对路径
+    /// Reads the projects.json reverse lookup: slug → absolute project path
     public static func slugToProject(
         projectsFile: URL
     ) -> [String: String] {

@@ -6,10 +6,10 @@ import Foundation
 func weeklyReportTests(_ t: TestRunner) {
     t.suite("WeeklyReportBuilder · vibe coding 周报")
 
-    // 固定一周：从某个周一的本地零点开始
+    // Fixed week: starting at local midnight of a Monday
     let calendar = Calendar.current
     let weekStart = calendar.date(
-        from: DateComponents(year: 2026, month: 7, day: 13))!  // 2026-07-13 是周一
+        from: DateComponents(year: 2026, month: 7, day: 13))!  // 2026-07-13 is a Monday
     let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)!
 
     func makeStore() throws -> (EurekaStore, URL) {
@@ -39,11 +39,11 @@ func weeklyReportTests(_ t: TestRunner) {
         let (store, path) = try makeStore()
         defer { try? FileManager.default.removeItem(at: path) }
         try store.usage.insert([
-            record(0, hour: 10),                              // 周一 10 点
-            record(0, hour: 10, input: 2000, output: 1000),   // 同小时 → 桶去重
-            record(1, hour: 23, project: "proj-b", session: "s2"),  // 周二深夜
+            record(0, hour: 10),                              // Monday 10:00
+            record(0, hour: 10, input: 2000, output: 1000),   // same hour → bucket dedup
+            record(1, hour: 23, project: "proj-b", session: "s2"),  // late Tuesday night
             record(2, hour: 15, model: "gpt-5.2", source: .codex, session: "s3"),
-            record(9, hour: 10),                              // 下周 → 不计
+            record(9, hour: 10),                              // next week → not counted
         ])
         try store.history.insert(FinishedTask(
             source: .claude, sessionId: "s1", title: "t", cwd: nil,
@@ -71,7 +71,7 @@ func weeklyReportTests(_ t: TestRunner) {
         try expectEqual(report.errorCount, 1)
         try expectEqual(report.topSkills.count, 1, "只统计 kind=skill")
         try expectEqual(report.topSkills.first?.name, "tdd")
-        // claude 有价格表 → 有成本；codex 模型无价格 → 不计入
+        // claude has a price table → has cost; the codex model has no price → not counted
         try expect(report.totalCostUSD != nil)
         try expectEqual(report.topSessions.first?.sessionId, "s1", "s1 消耗最大")
         try expect(!report.isEmpty)
@@ -113,7 +113,8 @@ func weeklyReportTests(_ t: TestRunner) {
         let report = try WeeklyReportBuilder.build(
             store: store, pricing: pricing, weekStart: weekStart, weekEnd: weekEnd)
         try expectEqual(report.promptSection?.askedCount, 1)
-        // 标题取首行（"修一下分页越界"），复用计数是全期累计值
+        // The title is the first line (the prompt text asserted below); the reuse count is the
+        // all-period cumulative value
         try expectEqual(report.promptSection?.topReused.first?.name, "修一下分页越界")
         try expectEqual(report.promptSection?.topReused.first?.count, 1)
         try expect(!report.isEmpty, "只有提问数据的周不算空周")

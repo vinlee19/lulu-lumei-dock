@@ -27,7 +27,8 @@ func storeHistoryTests(_ t: TestRunner) {
             try expectEqual(rows[0].sessionStartedAt, Date(timeIntervalSince1970: 50))
         }
 
-        // 再次打开：Schema.migrate 会再跑，ALTER 幂等（列已存在则跳过），历史不丢
+        // Reopen: Schema.migrate runs again, ALTER is idempotent (skipped if the column exists),
+        // history is preserved
         let store2 = try EurekaStore(path: dbURL)
         let rows2 = try store2.history.recent(limit: 10)
         try expectEqual(rows2.count, 1)

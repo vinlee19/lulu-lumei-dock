@@ -5,3 +5,5 @@ dist/
 *.xcodeproj
 .swiftpm/
 .worktrees/
+.claude/worktrees/
+__pycache__/

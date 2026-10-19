@@ -2,15 +2,16 @@ import AppKit
 import Combine
 import EurekaKit
 
-/// 菜单栏：左键前置主窗口，右键菜单（退出）；
-/// 标题 = 任务计数 + 限额百分比（取双源 5h 窗口最大值，60%/85% 变色）
+/// Menu bar: left click brings the main window forward, right click opens a menu (Quit); title =
+/// task count + rate-limit percentage (max of both sources' 5h windows, color changes at 60%/85%)
 @MainActor
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
     private let usageService: UsageService
     private let limitsService: RateLimitsService
     private let settings: AppSettings
-    /// 左键回调：前置/激活主窗口（由 AppDelegate 接到 MainWindowController.show）
+    /// Left-click callback: brings forward/activates the main window (AppDelegate wires it to
+    /// MainWindowController.show)
     private let onActivate: () -> Void
     private var lastTasks: [AgentTask] = []
     private var cancellables: Set<AnyCancellable> = []
@@ -35,7 +36,8 @@ final class StatusItemController: NSObject {
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
 
-        // 限额变化 / 开关变化 → 重组标题（任务变化走 update(tasks:)）
+        // Rate-limit change / toggle change → rebuild the title (task changes go through
+        // update(tasks:))
         limitsService.$codex
             .combineLatest(
                 limitsService.$grok, limitsService.$claude, settings.$menuBarShowsLimit)
@@ -44,7 +46,8 @@ final class StatusItemController: NSObject {
                 MainActor.assumeIsolated { self?.renderTitle() }
             }
             .store(in: &cancellables)
-        // combineLatest 最多 4 路，Antigravity（实验）单独订阅
+        // combineLatest takes at most 4 publishers, so Antigravity (experimental) is subscribed
+        // separately
         limitsService.$antigravity
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -53,7 +56,7 @@ final class StatusItemController: NSObject {
         renderTitle()
     }
 
-    /// 状态栏文字随活跃任务变化
+    /// Status bar text follows active tasks
     func update(tasks: [AgentTask]) {
         lastTasks = tasks
         renderTitle()
@@ -73,7 +76,7 @@ final class StatusItemController: NSObject {
         )
 
         if let percent = title.percent, title.tier != .normal {
-            // 百分比部分按档位着色
+            // The percentage part is colored by tier
             let font = button.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
             let attributed = NSMutableAttributedString(
                 string: title.base + " · ", attributes: [.font: font])
@@ -94,7 +97,10 @@ final class StatusItemController: NSObject {
             guard let snapshot, let primary = snapshot.primary else { continue }
             var text = "\(snapshot.source.displayName) \(Int(primary.usedPercent.rounded()))%"
             if let secondary = snapshot.secondary {
-                text += "（周 \(Int(secondary.usedPercent.rounded()))%）"
+                text += L10n.format(
+                    " (week %@%%)",
+                    zhHans: "（周 %@%%）",
+                    String(Int(secondary.usedPercent.rounded())))
             }
             parts.append(text)
         }
@@ -115,33 +121,34 @@ final class StatusItemController: NSObject {
         guard let item = statusItem else { return }
         let menu = NSMenu()
         let openItem = NSMenuItem(
-            title: "打开主窗口",
+            title: L10n.text("Open Main Window", zhHans: "打开主窗口"),
             action: #selector(openMainWindow),
             keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
         let resetItem = NSMenuItem(
-            title: "重置灵动岛位置",
+            title: L10n.text("Reset Dynamic Island Position", zhHans: "重置灵动岛位置"),
             action: #selector(resetIslandPosition),
             keyEquivalent: "")
         resetItem.target = self
         menu.addItem(resetItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
-            title: "退出 lulu-lumei-dock",
+            title: L10n.text("Quit lulu-lumei-dock", zhHans: "退出 lulu-lumei-dock"),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
         item.menu = menu
         item.button?.performClick(nil)
-        item.menu = nil  // 用完即拆，避免左键也弹菜单
+        item.menu = nil  // Detach right after use so left click doesn't pop the menu too
     }
 
     @objc private func openMainWindow() {
         MainActor.assumeIsolated { onActivate() }
     }
 
-    /// 岛拖到外接屏/位置丢失时的快捷救援（与设置页「恢复默认位置」同一通知）
+    /// Quick rescue when the island is dragged to an external display / loses its position (same
+    /// notification as Settings' "Reset to default position")
     @objc private func resetIslandPosition() {
         NotificationCenter.default.post(name: .eurekaResetIslandPosition, object: nil)
     }

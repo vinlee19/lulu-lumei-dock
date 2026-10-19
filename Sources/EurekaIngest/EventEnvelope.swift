@@ -1,21 +1,22 @@
 import Foundation
 import EurekaKit
 
-/// spool 目录中事件文件的信封格式（与 eureka-relay 的 JSON 输出约定一致；
-/// relay 为零依赖目标，不共享代码，只共享此契约）：
+/// Envelope format of event files in the spool directory (matches eureka-relay's JSON output
+/// contract; the relay is a zero-dependency target, so no code is shared, only this contract):
 ///
 /// ```json
 /// {
 ///   "v": 1,
 ///   "channel": "claude-hook" | "codex-notify" | "inject",
 ///   "receivedAtMs": 1718000000123,
-///   "terminal": { "app": …, "bundleId": …, "tty": …, "tmuxPane": … },  // 可选
-///   "payload": { ...原始 hook stdin / notify argv JSON... }
+///   "terminal": { "app": …, "bundleId": …, "tty": …, "tmuxPane": … },  // optional
+///   "payload": { ...raw hook stdin / notify argv JSON... }
 /// }
 /// ```
 ///
-/// `terminal` 是**信封层**字段（不在 payload 里）：它描述 relay 那次调用所处的终端，
-/// 而不是 hook 报告的内容。旧版 relay 写的文件没有这个键 → 解出 nil，向后兼容。
+/// `terminal` is an **envelope-level** field (not inside payload): it describes the terminal the
+/// relay invocation ran in, not what the hook reported. Files written by older relays lack the key
+/// → decodes to nil, backward compatible.
 public struct RawEvent {
     public var channel: String
     public var receivedAt: Date

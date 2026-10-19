@@ -1,5 +1,5 @@
 #!/bin/bash
-# 从 SwiftUI 渲染的 1024px 母版生成 AppIcon.icns（提交到仓库，打包时拷入 bundle）
+# Generates AppIcon.icns from the 1024px master rendered by SwiftUI (committed to the repo, copied into the bundle at package time)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

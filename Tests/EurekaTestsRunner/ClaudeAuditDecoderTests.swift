@@ -66,7 +66,8 @@ func claudeAuditDecoderTests(_ t: TestRunner) {
         try expectEqual(event?.opId, "toolu_123")
     }
 
-    // SpoolConsumer rawObserver → ClaudeAuditDecoder 的接线（EventPipeline 用同一逻辑）
+    // Wiring from SpoolConsumer rawObserver → ClaudeAuditDecoder (EventPipeline uses the same
+    // logic)
     t.test("SpoolConsumer rawObserver 只对 claude-hook 通道产审计事件") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-auditwire-\(UUID().uuidString)", isDirectory: true)

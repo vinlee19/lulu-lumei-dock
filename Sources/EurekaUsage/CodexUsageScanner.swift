@@ -2,12 +2,12 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl 的 token_count 事件。
-/// resume 的旧会话在创建日目录原地追加，故整树枚举全部日期目录；
-/// scan_files 水位线保证重扫廉价（老文件只在首扫时全量读一次）。
-/// 记账用 total_token_usage 的**相邻差值法**（对重连稳健）；
-/// 差值为负（compaction/重置）时回退用 last_token_usage。
-/// 模型名跟踪 turn_context.payload.model（缺省 "gpt-5.5"）。
+/// Scans token_count events in ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl. Resumed old sessions
+/// append in place in their creation-day dir, so every date dir in the tree is enumerated; the
+/// scan_files watermark keeps rescans cheap (old files are read in full only on the first scan).
+/// Accounting uses **adjacent differences** of total_token_usage (robust to reconnects); a negative
+/// difference (compaction/reset) falls back to last_token_usage. The model name tracks
+/// turn_context.payload.model (default "gpt-5.5").
 public final class CodexUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
@@ -25,7 +25,7 @@ public final class CodexUsageScanner {
         return formatter
     }()
 
-    /// 每文件的扫描私有状态（存 scan_files.extra）
+    /// Per-file private scan state (stored in scan_files.extra)
     private struct FileExtra: Codable {
         var prevInput = 0
         var prevCached = 0
@@ -33,7 +33,8 @@ public final class CodexUsageScanner {
         var model: String?
         var project: String?
         var sessionId: String?
-        /// session_meta.model_provider（小写；自定义代理时价格按模型名推断厂商）
+        /// session_meta.model_provider (lowercase; with a custom proxy the vendor is inferred from
+        /// the model name for pricing)
         var provider: String?
     }
 
@@ -46,14 +47,15 @@ public final class CodexUsageScanner {
     public func scanOnce() throws -> Int {
         var inserted = 0
         for file in rolloutFiles() {
-            // 每文件一个池：rollout 最大 70MB，全量重扫不排水会积累 GB 级峰值
+            // One pool per file: rollouts reach 70MB, and a full rescan without draining builds
+            // GB-scale peaks
             inserted += try autoreleasepool { try scanFile(file) }
         }
         return inserted
     }
 
-    /// 整树递归枚举（CodexRolloutFiles）：resume 的旧会话在创建日目录原地追加，
-    /// 只数最近日期目录必漏。
+    /// Recursive whole-tree enumeration (CodexRolloutFiles): resumed old sessions append in place
+    /// in their creation-day dir, so counting only the most recent date dirs is bound to miss them.
     private func rolloutFiles() -> [URL] {
         CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot).map(\.url)
     }
@@ -77,7 +79,7 @@ public final class CodexUsageScanner {
 
         var records: [UsageRecord] = []
         var promptCount = 0
-        // 工具/插件调用聚合：("day\u{1}kind\u{1}name") → count
+        // Tool/plugin call aggregation: ("day\u{1}kind\u{1}name") → count
         var toolBumps: [String: Int] = [:]
         func bumpTool(_ day: String, _ kind: String, _ name: String) {
             guard !name.isEmpty else { return }
@@ -91,8 +93,8 @@ public final class CodexUsageScanner {
             else { continue }
             let payload = root["payload"] as? [String: Any] ?? [:]
 
-            // 工具/插件调用：function_call（原生工具，MCP 以 "_" 前缀重复出现 → 跳过）
-            // 与 mcp_tool_call_end（MCP 插件，命名干净）
+            // Tool/plugin calls: function_call (native tools; MCP reappears with a "_" prefix →
+            // skipped) and mcp_tool_call_end (MCP plugins, clean names)
             if type == "response_item", payload["type"] as? String == "function_call",
                let name = payload["name"] as? String, !name.hasPrefix("_") {
                 let day = (root["timestamp"] as? String).flatMap { Self.isoFormatter.date(from: $0) }
@@ -115,7 +117,8 @@ public final class CodexUsageScanner {
                 if let id = payload["id"] as? String {
                     extra.sessionId = id
                 }
-                // 只认第一个 session_meta（resume/fork 的文件里第二个属于别的会话）
+                // Take only the first session_meta (in resume/fork files the second one belongs to
+                // another session)
                 if extra.provider == nil, let provider = payload["model_provider"] as? String {
                     extra.provider = provider.lowercased()
                 }
@@ -148,7 +151,8 @@ public final class CodexUsageScanner {
             var deltaCached = cached - extra.prevCached
             var deltaOutput = output - extra.prevOutput
             if deltaInput < 0 || deltaCached < 0 || deltaOutput < 0 {
-                // 计数器被重置（compaction/会话重建）：退而用单次值
+                // Counter was reset (compaction/session rebuild): fall back to the single-call
+                // value
                 let last = payloadInfo["last_token_usage"] as? [String: Any] ?? [:]
                 deltaInput = last["input_tokens"] as? Int ?? 0
                 deltaCached = last["cached_input_tokens"] as? Int ?? 0
@@ -168,7 +172,7 @@ public final class CodexUsageScanner {
                 project: extra.project,
                 sessionId: extra.sessionId,
                 timestamp: timestamp,
-                // OpenAI 口径：cached 是 input 的子集 → 拆开记
+                // OpenAI convention: cached is a subset of input → split them out
                 inputTokens: max(0, deltaInput - deltaCached),
                 outputTokens: deltaOutput,
                 cacheReadTokens: deltaCached,

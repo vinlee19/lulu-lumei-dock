@@ -1,11 +1,15 @@
+import EurekaKit
 import Foundation
 import zlib
 
-/// 最小 Parquet 写入器（纯 Swift，无第三方依赖）。只覆盖审计归档需要的子集：
-/// 扁平 schema（无嵌套 / 重复）、每文件一个 row group、每列一个 Data Page v1、PLAIN 编码、
-/// 可空列的定义级别用 RLE 混合编码（位宽 1）、GZIP 或不压缩。
-/// 读端（DuckDB / pyarrow / Athena / Spark）按标准格式解析即可。
-/// 规范：https://github.com/apache/parquet-format（parquet.thrift）
+/// Minimal Parquet writer (pure Swift, no third-party dependencies). Covers only the subset the
+/// audit archive needs:
+/// flat schema (no nesting / repetition), one row group per file, one Data Page v1 per column,
+/// PLAIN encoding,
+/// RLE hybrid encoding (bit width 1) for nullable columns' definition levels, GZIP or no
+/// compression.
+/// Readers (DuckDB / pyarrow / Athena / Spark) just parse the standard format.
+/// Spec: https://github.com/apache/parquet-format (parquet.thrift)
 public enum ParquetWriter {
     public enum Compression: Int32 {
         case uncompressed = 0
@@ -13,7 +17,7 @@ public enum ParquetWriter {
     }
 
     public enum Values: Equatable {
-        /// BYTE_ARRAY + STRING 逻辑类型
+        /// BYTE_ARRAY + STRING logical type
         case string([String?])
         case int32([Int32?])
         case bool([Bool?])
@@ -33,7 +37,7 @@ public enum ParquetWriter {
     public struct Column: Equatable {
         public let name: String
         public let values: Values
-        /// true = REQUIRED（不允许 nil）；false = OPTIONAL
+        /// true = REQUIRED (nil not allowed); false = OPTIONAL
         public let required: Bool
 
         public init(name: String, values: Values, required: Bool) {
@@ -47,7 +51,7 @@ public enum ParquetWriter {
         public let description: String
     }
 
-    // parquet.thrift 枚举值
+    // parquet.thrift enum values
     private enum PhysicalType: Int32 {
         case boolean = 0, int32 = 1, int64 = 2, byteArray = 6
     }
@@ -59,10 +63,10 @@ public enum ParquetWriter {
         columns: [Column], compression: Compression = .gzip, createdBy: String
     ) throws -> Data {
         guard let rowCount = columns.first?.values.count else {
-            throw WriteError(description: "没有列")
+            throw WriteError(description: L10n.text("No columns", zhHans: "没有列"))
         }
         guard columns.allSatisfy({ $0.values.count == rowCount }) else {
-            throw WriteError(description: "各列行数不一致")
+            throw WriteError(description: L10n.text("Columns have different row counts", zhHans: "各列行数不一致"))
         }
 
         var file = magic
@@ -155,7 +159,7 @@ public enum ParquetWriter {
         return file
     }
 
-    // MARK: - 页编码
+    // MARK: - Page encoding
 
     private struct ChunkMeta {
         let column: Column
@@ -178,7 +182,7 @@ public enum ParquetWriter {
         func present<T>(_ values: [T?]) throws -> ([T], [Bool]) {
             let defined = values.map { $0 != nil }
             if column.required, defined.contains(false) {
-                throw WriteError(description: "必填列 \(column.name) 含空值")
+                throw WriteError(description: L10n.format("Required column %@ contains null values", zhHans: "必填列 %@ 含空值", String(column.name)))
             }
             return (values.compactMap { $0 }, defined)
         }
@@ -230,7 +234,8 @@ public enum ParquetWriter {
 
         var body = Data()
         if !column.required {
-            // 定义级别：RLE/bit-packed 混合编码，前置 4 字节长度（Data Page v1）
+            // Definition levels: RLE/bit-packed hybrid encoding, prefixed with a 4-byte length
+            // (Data Page v1)
             let levels = rleRuns(defined)
             body.append(littleEndian(UInt32(levels.count)))
             body.append(levels)
@@ -240,7 +245,7 @@ public enum ParquetWriter {
             type: type, body: body, nullCount: defined.filter { !$0 }.count, minMax: minMax)
     }
 
-    /// 位宽 1 的 RLE 段：每段 = varint(runLength << 1) + 1 字节取值
+    /// RLE run with bit width 1: each run = varint(runLength << 1) + 1 value byte
     static func rleRuns(_ flags: [Bool]) -> Data {
         var out = Data()
         var index = 0
@@ -257,13 +262,13 @@ public enum ParquetWriter {
         return out
     }
 
-    /// GZIP（带 gzip 头尾，Parquet 的 GZIP codec 要求）
+    /// GZIP (with gzip header and trailer, as Parquet's GZIP codec requires)
     static func gzip(_ input: Data) throws -> Data {
         var stream = z_stream()
         var status = deflateInit2_(
             &stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY,
             ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
-        guard status == Z_OK else { throw WriteError(description: "deflateInit2 失败 \(status)") }
+        guard status == Z_OK else { throw WriteError(description: L10n.format("deflateInit2 failed: %@", zhHans: "deflateInit2 失败 %@", String(status))) }
         defer { deflateEnd(&stream) }
 
         var output = Data(count: Int(deflateBound(&stream, UInt(input.count))) + 64)
@@ -278,7 +283,7 @@ public enum ParquetWriter {
                 return outputBuffer.count - Int(stream.avail_out)
             }
         }
-        guard status == Z_STREAM_END else { throw WriteError(description: "deflate 未完成 \(status)") }
+        guard status == Z_STREAM_END else { throw WriteError(description: L10n.format("deflate did not finish: %@", zhHans: "deflate 未完成 %@", String(status))) }
         return output.prefix(produced)
     }
 

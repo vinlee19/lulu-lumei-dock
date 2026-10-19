@@ -3,11 +3,12 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl，把 agent 操作落成审计流水。
-/// 独立于 CodexRolloutTailer：tailer 对新文件把 offset 置尾（不追历史），审计要完整性 →
-/// 走持久化 offset 增量扫描（scan_files，键加 "audit://" 前缀避免与用量扫描器冲突）。
-/// 整树覆盖全部日期目录（resume 的旧会话在创建日目录原地追加）；
-/// INSERT OR IGNORE 保证重扫幂等。
+/// Scans ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl and persists agent operations as an audit
+/// log. Independent of CodexRolloutTailer: the tailer puts new files' offset at EOF (no history),
+/// but audit needs completeness → it scans incrementally from a persisted offset (scan_files, keys
+/// prefixed "audit://" to avoid clashing with the usage scanner). Covers every date directory in
+/// the whole tree (resumed old sessions append in place in their creation-day dir); INSERT OR
+/// IGNORE keeps rescans idempotent.
 public final class CodexAuditScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
@@ -20,7 +21,8 @@ public final class CodexAuditScanner {
         return formatter
     }()
 
-    /// 每文件扫描私有状态（存 scan_files.extra）：跨扫描轮次保留会话上下文
+    /// Per-file private scan state (stored in scan_files.extra): keeps session context across scan
+    /// rounds
     private struct FileExtra: Codable {
         var sessionId: String?
         var cwd: String?
@@ -34,12 +36,15 @@ public final class CodexAuditScanner {
         self.store = store
         self.pipeline = pipeline
         self.staleThreshold = staleThreshold
-        // lookbackDays 已废弃：枚举改为整树递归（resume 的旧会话在创建日目录原地追加，
-        // 数日期目录会漏），保留形参仅为源码兼容；scan_files 水位线保证整树重扫廉价。
+        // lookbackDays is deprecated: enumeration is now a whole-tree recursion (resumed old
+        // sessions append in place in their creation-day dir, so counting date dirs misses them);
+        // the parameter is kept only for source compatibility. The scan_files watermark keeps
+        // whole-tree rescans cheap.
         _ = lookbackDays
     }
 
-    /// 整树扫一遍所有日期目录，返回本轮新插入的审计行数。alertSink 接收高危告警。
+    /// Scan every date directory in the whole tree once and return the number of audit rows newly
+    /// inserted this round. alertSink receives high-risk alerts.
     @discardableResult
     public func scanOnce(alertSink: ((RiskAlert) -> Void)? = nil) throws -> Int {
         var inserted = 0
@@ -99,8 +104,9 @@ public final class CodexAuditScanner {
 
                 switch (type, payload["type"] as? String) {
                 case ("response_item", "custom_tool_call"):
-                    // **当前 Codex 的命令/补丁主通道**（实勘 12 个最大 rollout：exec 1334 +
-                    // apply_patch 97）。以前完全没接 → 审计流水一直在少记 Codex 的命令。
+                    // **Current Codex's main command/patch channel** (surveyed the 12 largest
+                    // rollouts: exec 1334 + apply_patch 97). It used to be unwired entirely → the
+                    // audit log kept under-recording Codex's commands.
                     guard let name = payload["name"] as? String, !name.isEmpty else { continue }
                     let op = AuditExtractor.codexCustomTool(
                         name: name, input: payload["input"] as? String)
@@ -122,7 +128,8 @@ public final class CodexAuditScanner {
                         exitCode: outcome.exitCode, isError: outcome.isError)
 
                 case ("response_item", "function_call"):
-                    // "_" 前缀 = MCP 重复项，跳过（同 CodexUsageScanner 口径；MCP 走 mcp_tool_call_end）
+                    // "_" prefix = MCP duplicate, skip (same rule as CodexUsageScanner; MCP goes
+                    // through mcp_tool_call_end)
                     guard let name = payload["name"] as? String, !name.isEmpty, !name.hasPrefix("_")
                     else { continue }
                     let op = AuditExtractor.codex(
@@ -137,8 +144,9 @@ public final class CodexAuditScanner {
                     if let alert = result.alert { alerts.append(alert) }
 
                 case ("response_item", "function_call_output"):
-                    // 两代格式都认：老 rollout 的 `metadata.exit_code` 优先，当前版本
-                    // 已无该字段（实勘 2624 条里 metadata 出现 0 次）→ 退回输出文本判据。
+                    // Both formats are recognised: old rollouts' `metadata.exit_code` wins; the
+                    // current version no longer has that field (0 occurrences of metadata in 2624
+                    // surveyed entries) → fall back to the output-text heuristic.
                     guard let callId = payload["call_id"] as? String,
                           let outcome = AuditExtractor.codexOutcome(payload["output"])
                     else { continue }
@@ -186,8 +194,8 @@ public final class CodexAuditScanner {
         return inserted
     }
 
-    /// 无 call_id 的行（web_search / mcp）用 (路径+行内容) 的 SHA256 合成稳定幂等键。
-    /// rollout 行不可变 → 跨扫描/重扫稳定。
+    /// Lines without a call_id (web_search / mcp) get a stable idempotency key synthesized as
+    /// SHA256 of (path + line content). Rollout lines are immutable → stable across scans/rescans.
     private static func synthOpId(path: String, line: Data) -> String {
         var hasher = SHA256()
         hasher.update(data: Data(path.utf8))
@@ -196,7 +204,7 @@ public final class CodexAuditScanner {
         return "synth:" + hex.prefix(32)
     }
 
-    // MARK: - JSONL 增量读取（EurekaUsage.JSONLinesReader 跨模块不可见，此处自带）
+    // MARK: - Incremental JSONL reading (EurekaUsage.JSONLinesReader isn't visible here; own copy)
 
     private struct Chunk {
         var lines: [Data]

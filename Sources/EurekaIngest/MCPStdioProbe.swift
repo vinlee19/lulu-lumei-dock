@@ -1,33 +1,39 @@
+import EurekaKit
 import Foundation
 
-/// stdio MCP server 的**深度检测**（v2.8）：短暂启动配置的命令，走规范的
-/// stdin/stdout JSON-RPC（newline 分隔）完成 initialize → tools/list（跟分页）
-/// → prompts/list / resources/list（能力声明了才问），读完立即结束进程。
+/// **Deep inspection** of stdio MCP servers (v2.8): briefly launches the configured command and,
+/// over the spec's stdin/stdout JSON-RPC (newline-delimited), runs initialize → tools/list
+/// (following pagination)
+/// → prompts/list / resources/list (only if the capability is declared), then ends the process
+/// right away.
 ///
-/// 这是列出 stdio server 工具的**唯一**方式（Claude Desktop / Claude Code 同理）——
-/// 没有进程就没有清单。红线口径（v2.8 起）：**只在用户点击「重新检测」时启动**，
-/// 绝不自动、绝不常驻；启动的是用户自己配置、各 CLI 每个会话都在跑的命令；
-/// env 值只传给子进程（这是它们的既定用途），不落库不记日志；子进程 stderr 丢弃、
-/// stdout 只喂解析器；读完先关 stdin，不退再 SIGTERM → SIGKILL，绝不留孤儿进程。
+/// This is the **only** way to list a stdio server's tools (same for Claude Desktop / Claude Code): no
+/// process, no list. Red line (since v2.8): **launch only when the user clicks "Re-check"**, never
+/// automatically, never resident; what gets launched is a command the user configured and each CLI already
+/// runs every session; env values are passed only to the child process (their intended use), never stored
+/// or logged; the child's stderr is discarded and stdout only feeds the parser; after reading, stdin is
+/// closed first, then SIGTERM → SIGKILL if it does not exit, never leaving an orphan process.
 public enum MCPStdioProbe {
     public struct Inspection: Equatable, Sendable {
         public var handshake: MCPProbe.HandshakeInfo
         public var tools: [MCPProbe.ToolInfo]
         public var prompts: [MCPProbe.NamedItem]
         public var resources: [MCPProbe.NamedItem]
-        /// tools/list 各页载荷的 token 估算合计（≈ 每轮 schema 税，与 remote 同口径）
+        /// Sum of token estimates over all tools/list page payloads (≈ per-turn schema tax, same
+        /// basis as remote)
         public var schemaTokens: Int
     }
 
     public enum Failure: Error, Equatable, Sendable {
         case commandMissing
         case launchFailed(String)
-        /// 进程起来了但没有合法的 initialize 响应（超时/非 MCP 输出）
+        /// The process started but produced no valid initialize response (timeout / non-MCP output)
         case handshakeFailed(String)
     }
 
-    /// 同步执行（调用方在后台队列上）。timeout 是整体预算：uvx/npx 冷启动可能要
-    /// 下载包，给足 20s；每步等待共享同一个 deadline。
+    /// Runs synchronously (the caller is on a background queue). timeout is the overall budget: a
+    /// uvx/npx cold start may need to download packages, so allow a full 20s; every wait shares the
+    /// same deadline.
     public static func inspect(
         command: String, args: [String], env: [String: String],
         timeout: TimeInterval = 20
@@ -38,7 +44,8 @@ public enum MCPStdioProbe {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
-        // 继承本进程环境（server 需要 PATH/HOME…），配置里的 env 覆盖其上
+        // Inherit this process's environment (servers need PATH/HOME…), with the config's env
+        // layered on top
         process.environment = ProcessInfo.processInfo.environment
             .merging(env) { _, configured in configured }
         let stdinPipe = Pipe()
@@ -65,23 +72,25 @@ public enum MCPStdioProbe {
             }
         }
 
-        // ① initialize 真握手（报最新定稿版本，协商回落照记）
+        // (1) A real initialize handshake (reports the latest finalized version; records whatever
+        //     is negotiated down to)
         guard send(MCPProbe.initializeRequestBody()) else {
-            return .failure(.launchFailed("进程未能接收输入"))
+            return .failure(.launchFailed(L10n.text("The process could not receive input", zhHans: "进程未能接收输入")))
         }
         guard let initLine = channel.nextResponse(id: 1, deadline: deadline, process: process)
         else {
             return .failure(.handshakeFailed(
-                process.isRunning ? "等待 initialize 响应超时" : "进程提前退出"))
+                process.isRunning ? L10n.text("Timed out waiting for the initialize response", zhHans: "等待 initialize 响应超时") : L10n.text("The process exited early", zhHans: "进程提前退出")))
         }
         guard let info = MCPProbe.parseInitializeResponse(
             initLine, contentType: "application/json")
         else {
-            return .failure(.handshakeFailed("initialize 响应不是合法 MCP 握手"))
+            return .failure(.handshakeFailed(L10n.text("The initialize response is not a valid MCP handshake", zhHans: "initialize 响应不是合法 MCP 握手")))
         }
         _ = send(MCPProbe.initializedNotificationBody())
 
-        // ② tools/list 跟随分页（护栏 ≤20 页且 ≤1000 工具）；schema 税按各页累加
+        // (2) tools/list following pagination (guardrails: ≤20 pages and ≤1000 tools); schema tax
+        //     accumulates per page
         var tools: [MCPProbe.ToolInfo] = []
         var schemaTokens = 0
         var cursor: String?
@@ -96,7 +105,8 @@ public enum MCPStdioProbe {
             guard cursor != nil, tools.count < 1000 else { break }
         }
 
-        // ③ prompts / resources：能力声明了才问，第一页即可（清单缓存上限由调用方裁）
+        // (3) prompts / resources: only asked if the capability is declared, first page only (the
+        //     caller caps the cached list)
         var prompts: [MCPProbe.NamedItem] = []
         if info.capabilities.contains("prompts"),
            send(MCPProbe.promptsListRequestBody()),
@@ -119,7 +129,7 @@ public enum MCPStdioProbe {
             resources: resources, schemaTokens: schemaTokens))
     }
 
-    /// 结束进程：关 stdin（规范的退出信号）→ 0.5s → SIGTERM → 0.5s → SIGKILL
+    /// Ends the process: close stdin (the spec's exit signal) → 0.5s → SIGTERM → 0.5s → SIGKILL
     private static func shutdown(_ process: Process, stdin: Pipe, channel: LineChannel) {
         channel.stop()
         try? stdin.fileHandleForWriting.close()
@@ -140,8 +150,9 @@ public enum MCPStdioProbe {
     }
 }
 
-/// stdout 行读取器：后台线程累积字节、按 \n 切行；调用方按 JSON-RPC id 取响应。
-/// 容错：跳过空行/非 JSON 行/无匹配 id 的行（server 发来的通知与请求一概忽略）。
+/// stdout line reader: a background thread accumulates bytes and splits on \n; the caller fetches
+/// responses by JSON-RPC id. Tolerant: skips empty lines / non-JSON lines / lines with no matching
+/// id (notifications and requests from the server are ignored).
 private final class LineChannel {
     private let handle: FileHandle
     private let lock = NSLock()
@@ -174,7 +185,8 @@ private final class LineChannel {
         handle.readabilityHandler = nil
     }
 
-    /// 轮询等待 id 匹配的 JSON-RPC 响应；进程退出且无存量行、或到 deadline 即放弃
+    /// Polls for the JSON-RPC response with a matching id; gives up when the process has exited
+    /// with no buffered lines, or at the deadline
     func nextResponse(id: Int, deadline: Date, process: Process) -> Data? {
         while Date() < deadline {
             lock.lock()
@@ -189,7 +201,7 @@ private final class LineChannel {
                 if let lineID = root["id"] as? String, lineID == "\(id)" { return line }
             }
             if pending.isEmpty, isClosed || !process.isRunning {
-                // 存量清空且流已关/进程已退 → 不会再有响应
+                // Buffer drained and stream closed / process exited → no more responses will come
                 lock.lock()
                 let drained = lines.isEmpty
                 lock.unlock()

@@ -1,16 +1,17 @@
 import Foundation
 
-/// 一组重复出现的提问（按归一化指纹聚类）——「你反复在问同一件事」，
-/// 是模板化 / 升级为技能的头号候选。
+/// A group of repeated prompts (clustered by normalized fingerprint): "you keep asking the same
+/// thing", the top candidate for templating / promotion to a skill.
 public struct PromptGroup: Identifiable, Equatable, Sendable {
     public var id: String { fingerprint }
     public let fingerprint: String
-    /// 代表条目（组内最新的一条）
+    /// Representative entry (the newest in the group)
     public let representative: PromptEntry
     public let count: Int
-    /// 跨了几个项目（跨项目重复 = 更该毕业成全局技能/指令）
+    /// How many projects it spans (cross-project repeats = stronger case for graduating to a global
+    /// skill/instruction)
     public let projectCount: Int
-    /// 组内全部条目 id（最新在前）
+    /// Every entry id in the group (newest first)
     public let memberIds: [String]
 
     public init(
@@ -26,9 +27,10 @@ public struct PromptGroup: Identifiable, Equatable, Sendable {
 }
 
 public enum PromptGrouping {
-    /// 按指纹聚类；`keeping` 由调用方过滤（噪音/琐碎不该成组——实勘重复榜
-    /// top 全是 `<command-name>` ×57 与"继续" ×41 这类，必须先除噪）。
-    /// 出现次数 ≥ minCount 才成组；组按次数降序、同数按代表条目时间降序。
+    /// Cluster by fingerprint; `keeping` is filtered by the caller (noise/trivial entries shouldn't
+    /// group: locally the top of the repeat chart was all `<command-name>` ×57 and "continue" ×41
+    /// and the like, so noise must be removed first). Only counts ≥ minCount form a group; groups
+    /// sort by count descending, ties by representative entry time descending.
     public static func groups(
         from entries: [PromptEntry], minCount: Int = 3,
         keeping: (PromptEntry) -> Bool
@@ -54,10 +56,12 @@ public enum PromptGrouping {
         return sorted(result)
     }
 
-    /// 用户移除一条后同步内存里的组，不必重聚全库：所在组去掉该成员、代表换成剩余
-    /// 成员里最新的一条（memberIds 本就最新在前）、项目数按剩余成员重算；跌破 minCount
-    /// 的组整组消失；最后按 groups(from:) 同序重排（次数变了位置可能要动）。
-    /// `entry` 把成员 id 解析成条目（用调用方的索引）；解析不到的成员视为已不存在。
+    /// After the user removes an entry, sync the in-memory groups without reclustering the whole
+    /// DB: drop the member from its group, make the newest remaining member the representative
+    /// (memberIds is already newest first), recount projects from the remaining members; groups
+    /// that fall below minCount vanish; finally re-sort in the same order as groups(from:) (a
+    /// changed count may move a group). `entry` resolves member ids to entries (using the caller's
+    /// index); members that don't resolve are treated as gone.
     public static func removing(
         memberId: String, from groups: [PromptGroup], minCount: Int = 3,
         entry: (String) -> PromptEntry?
@@ -79,7 +83,8 @@ public enum PromptGrouping {
         return sorted(result)
     }
 
-    /// 组序：次数降序、同数按代表条目 firstSeen 降序（groups(from:) 与 removing 共用）
+    /// Group order: count descending, ties by representative entry firstSeen descending (shared by
+    /// groups(from:) and removing)
     static func sorted(_ groups: [PromptGroup]) -> [PromptGroup] {
         groups.sorted {
             $0.count == $1.count

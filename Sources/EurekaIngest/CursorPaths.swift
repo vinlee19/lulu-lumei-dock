@@ -1,21 +1,25 @@
 import Foundation
 
-/// Cursor（IDE，3.13.10 实勘）的本地数据路径。
+/// Local data paths for Cursor (the IDE, verified on 3.13.10).
 ///
-/// 与其余来源不同，Cursor **没有 transcript 文件**：全部会话都在
+/// Unlike every other source, Cursor has **no transcript files**: all sessions live in
 /// `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`
-/// 这一个 SQLite 库里（WAL，Cursor 进程常驻持有，本 app 一律只读打开）：
+/// this one SQLite database (WAL, held open by the resident Cursor process; this app always opens
+/// it read-only):
 ///   - `composerHeaders(composerId, workspaceId, recency, isSubagent, value)`
-///     — 已打开 workspace 的会话索引，`value` 里有标题 / ctx% / 待授权标记；
-///   - `cursorDiskKV['composerData:<id>']` — 单会话全量（状态、生成中气泡、ctx token）；
-///   - `cursorDiskKV['bubbleId:<composerId>:<bubbleId>']` — 单条消息（工具调用、token）。
-/// cwd 要经 `workspaceStorage/<wsId>/workspace.json` 反查（见 `CursorWorkspaceIndex`）。
+///     — session index for open workspaces; `value` holds the title / ctx% / pending-permission
+///     flag;
+///   - `cursorDiskKV['composerData:<id>']` — one full session (status, in-progress bubble, ctx
+///     tokens);
+///   - `cursorDiskKV['bubbleId:<composerId>:<bubbleId>']` — one message (tool calls, tokens).
+/// cwd has to be looked up via `workspaceStorage/<wsId>/workspace.json` (see
+/// `CursorWorkspaceIndex`).
 ///
-/// ⚠️ 同一个 `state.vscdb` 的 `ItemTable` 里存着 `cursorAuth/accessToken`、
-/// `cursorAuth/refreshToken`。**这个库绝不能进备份/同步**，Cursor 只有
-/// `~/.cursor/skills` 可以纳入（见 `SyncSourceCatalog`）。
+/// ⚠️ The `ItemTable` of the same `state.vscdb` stores `cursorAuth/accessToken` and
+/// `cursorAuth/refreshToken`. **This database must never be backed up/synced**; for Cursor only
+/// `~/.cursor/skills` may be included (see `SyncSourceCatalog`).
 public enum CursorPaths {
-    /// 应用数据主目录（env `EUREKA_CURSOR_HOME` > `~/Library/Application Support/Cursor`）
+    /// App data home (env `EUREKA_CURSOR_HOME` > `~/Library/Application Support/Cursor`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -26,7 +30,8 @@ public enum CursorPaths {
             .appendingPathComponent("Library/Application Support/Cursor", isDirectory: true)
     }
 
-    /// 全局状态库 `<home>/User/globalStorage/state.vscdb`（会话与消息都在这里）
+    /// Global state database `<home>/User/globalStorage/state.vscdb` (sessions and messages all
+    /// live here)
     public static func globalStateDB(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -34,8 +39,8 @@ public enum CursorPaths {
             .appendingPathComponent("User/globalStorage/state.vscdb", isDirectory: false)
     }
 
-    /// 工作区存储根 `<home>/User/workspaceStorage`（每 workspace 一个 hash 目录，
-    /// 内含 `workspace.json` 的 folder 字段 = cwd）
+    /// Workspace storage root `<home>/User/workspaceStorage` (one hash directory per workspace,
+    /// whose `workspace.json` folder field = cwd)
     public static func workspaceStorageRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -43,8 +48,9 @@ public enum CursorPaths {
             .appendingPathComponent("User/workspaceStorage", isDirectory: true)
     }
 
-    /// 用户技能根 `~/.cursor/skills/<name>/SKILL.md`（Claude 式布局）。
-    /// 注意它不在 `configHome` 下：CLI 侧配置走 `~/.cursor`，IDE 状态走 Application Support。
+    /// User skill root `~/.cursor/skills/<name>/SKILL.md` (Claude-style layout).
+    /// Note it isn't under `configHome`: CLI-side config lives in `~/.cursor`, IDE state in
+    /// Application Support.
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -52,8 +58,9 @@ public enum CursorPaths {
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 内置技能根 `~/.cursor/skills-cursor`（Cursor 官方分发、随客户端更新）。
-    /// 它自带的 `create-skill` 技能里明写「绝不要在这里创建技能」→ 本 app 只读展示。
+    /// Built-in skill root `~/.cursor/skills-cursor` (distributed by Cursor itself, updated with
+    /// the client). Its bundled `create-skill` skill says outright "never create skills here" →
+    /// this app only displays it read-only.
     public static func bundledSkillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -61,8 +68,9 @@ public enum CursorPaths {
             .appendingPathComponent("skills-cursor", isDirectory: true)
     }
 
-    /// 用户级子代理定义根 `~/.cursor/agents/<name>.md`（YAML frontmatter + 正文即系统提示）。
-    /// 项目级是 `<repo>/.cursor/agents/`，由 ProjectScopeDiscovery 发现。
+    /// User-level subagent definition root `~/.cursor/agents/<name>.md` (YAML frontmatter + body as
+    /// the system prompt). The project level is `<repo>/.cursor/agents/`, discovered by
+    /// ProjectScopeDiscovery.
     public static func agentsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -70,7 +78,7 @@ public enum CursorPaths {
             .appendingPathComponent("agents", isDirectory: true)
     }
 
-    /// CLI 侧配置目录 `~/.cursor`（技能、规则、子代理、MCP 配置）
+    /// CLI-side config directory `~/.cursor` (skills, rules, subagents, MCP config)
     public static func cliHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

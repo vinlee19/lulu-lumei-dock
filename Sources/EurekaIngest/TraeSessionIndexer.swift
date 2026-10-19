@@ -1,29 +1,33 @@
 import Foundation
 import EurekaKit
 
-/// Trae 的会话索引 —— **从明文记忆库反推**，因为会话库本身读不了。
+/// Trae session index - **inferred from the plaintext memory library**, because the session
+/// DB itself is unreadable.
 ///
-/// 会话正文/标题/时间都在 `ModularData/ai-agent/database.db` 里，而那个库是 SQLCipher
-/// 加密的（见 `TraePaths`）。唯一的明文旁证是 Trae 自己写的记忆库：
+/// Session bodies/titles/times all live in `ModularData/ai-agent/database.db`, which is
+/// SQLCipher encrypted (see `TraePaths`). The only plaintext side evidence is the memory
+/// library Trae writes itself:
 ///
 /// ```
 /// ~/.trae-cn/memory/projects/<encoded>/
-///   project_memory.md                              ← 项目记忆（归记忆 tab，不在这里用）
-///   <YYYYMMDD>/topics.md                           ← 每会话一段叙述式摘要 + session_id + 时间
-///   <YYYYMMDD>/session_memory_<sessionId>.jsonl    ← 每回合一行（intent/actions/outcome + 时间）
+///   project_memory.md                              ← project memory (Memory tab, unused here)
+///   <YYYYMMDD>/topics.md                           ← one narrative summary + session_id + time per session
+///   <YYYYMMDD>/session_memory_<sessionId>.jsonl    ← one line per turn (intent/actions/outcome + time)
 /// ```
 ///
-/// `topics.md` 的一段形如（实勘，块与块可能不换行相连，故用「下一个块头」定界而不是按行切）：
+/// A `topics.md` entry looks like this (observed; blocks may run together with no newline, so
+/// entries are delimited by "the next block header" rather than split by line):
 ///
 /// ```
 /// [session_id: 6a75a6cd602f315c19ec63ac | topic_summary_time: 2026-08-07 17:51:40]User requested…
 /// ```
 ///
-/// **这份索引是延迟的**：Trae 的摘要是异步生成的（`compact_summary_meta.mode = async`），
-/// 而且用户关掉记忆功能就什么都没有。所以它只服务「会话浏览」，**不是实时通道**
-/// —— 实时活动靠 hooks（见 `TraeHooksInstaller`）。
+/// **This index lags**: Trae generates summaries asynchronously
+/// (`compact_summary_meta.mode = async`), and there is nothing at all if the user turns the
+/// memory feature off. So it only serves session browsing and is **not a live channel** -
+/// live activity comes from hooks (see `TraeHooksInstaller`).
 public enum TraeSessionIndexer {
-    /// 单个 day 目录里解析出的一段
+    /// One entry parsed from a single day dir
     public struct Topic: Equatable, Sendable {
         public var sessionId: String
         public var summary: String
@@ -41,11 +45,12 @@ public enum TraeSessionIndexer {
         let knownCwds = workspaceFolders(roots: workspaceStorageRoots)
         let cutoff = now.addingTimeInterval(-window)
 
-        // sessionId → 累积状态。一个会话可以横跨多个 <YYYYMMDD> 目录，必须跨目录合并。
+        // sessionId → accumulated state. A session can span several <YYYYMMDD> dirs and must
+        // be merged across them.
         struct Accum {
             var cwd: String?
             var summary: String?
-            /// 当前 summary 的 `topic_summary_time`，用来决定谁覆盖谁
+            /// `topic_summary_time` of the current summary; decides which one wins
             var summaryAt: Date?
             var first: Date?
             var last: Date?
@@ -59,13 +64,14 @@ public enum TraeSessionIndexer {
         ) {
             var entry = accum[sessionId] ?? Accum()
             if entry.cwd == nil { entry.cwd = cwd }
-            // 越新的叙述越贴近会话最终形态 → 按 topic_summary_time 取最新那份。
-            // **不能靠遍历顺序**：`contentsOfDirectory` 不保证顺序，按天的目录名先后随机，
-            // 那样会随机拿到第一天的摘要（此处曾因此挂过一次测试）。
+            // The newer the narrative, the closer it is to the session's final shape → take
+            // the latest by topic_summary_time. **Don't rely on traversal order**:
+            // `contentsOfDirectory` guarantees no order, so the day dirs come back shuffled and
+            // we'd randomly pick the first day's summary (a test failed here once because of it).
             if let summary, !summary.isEmpty {
                 let newer = switch (entry.summaryAt, summaryAt) {
-                case (nil, _): true                              // 还没有摘要 → 收下
-                case (_, nil): false                             // 新的没有时间 → 不覆盖已有
+                case (nil, _): true                              // no summary yet → take it
+                case (_, nil): false                             // new one has no time → keep existing
                 case (let old?, let new?): new >= old
                 }
                 if newer {
@@ -100,7 +106,8 @@ public enum TraeSessionIndexer {
                         times: [topic.summaryTime].compactMap { $0 },
                         topicsPath: topicsURL.path)
                 }
-                // 逐回合流水：只取时间戳（正文归记忆 tab，不进会话标题）
+                // Per-turn log: timestamps only (the body belongs to the Memory tab, not the
+                // session title)
                 let files = (try? fm.contentsOfDirectory(at: dayDir, includingPropertiesForKeys: nil))
                     ?? []
                 for file in files
@@ -128,11 +135,11 @@ public enum TraeSessionIndexer {
                 name: entry.summary.map { tightenPlanTitle($0, maxLength: 80) },
                 startedAt: entry.first,
                 lastActiveAt: last,
-                // 同 cursor / hermes / opencode：共享库的源不报单会话体积
+                // Same as cursor / hermes / opencode: shared-DB sources report no per-session size
                 sizeBytes: 0,
-                // 刻意**不填加密库路径**，填信息真正的来源（明文 topics.md）。
-                // `usesSharedSessionDatabase == true` 会让 UI 不展示这个路径，
-                // 这里只是别留一个空串。
+                // Deliberately **not the encrypted DB path**; use where the info actually comes
+                // from (the plaintext topics.md). `usesSharedSessionDatabase == true` keeps the
+                // UI from showing this path; this just avoids leaving an empty string.
                 transcriptPath: entry.topicsPath ?? "")
         }
         .sorted { $0.lastActiveAt > $1.lastActiveAt }
@@ -140,7 +147,7 @@ public enum TraeSessionIndexer {
         .map { $0 }
     }
 
-    /// 会话涉及的工程目录集合（供项目发现并入）
+    /// Project dirs the sessions touched (merged into project discovery)
     public static func recentDirectories(
         memoryProjectsRoot: URL = TraePaths.memoryProjectsRoot(),
         workspaceStorageRoots: [URL] = TraePaths.workspaceStorageRoots(),
@@ -158,12 +165,13 @@ public enum TraeSessionIndexer {
         .filter { seen.insert($0).inserted }
     }
 
-    // MARK: - topics.md 解析
+    // MARK: - topics.md parsing
 
-    /// 从 `topics.md` 里切出每个会话的一段。
+    /// Cuts each session's entry out of `topics.md`.
     ///
-    /// 用「下一个块头的起点」定界而不是按行切：实勘文件是**单行无换行**的
-    /// `[头]正文`，若还有第二个会话，它可能紧跟其后而不换行。
+    /// Delimited by "the start of the next block header" rather than by line: observed files
+    /// are a **single line with no newline**, `[header]body`, and a second session may follow
+    /// directly without a line break.
     public static func parseTopics(fileURL: URL) -> [Topic] {
         guard let data = try? Data(contentsOf: fileURL),
             let text = String(data: data, encoding: .utf8), !text.isEmpty
@@ -186,7 +194,7 @@ public enum TraeSessionIndexer {
                 .map { String(text[$0]).trimmingCharacters(in: .whitespaces) }
                 .flatMap(parseLocalTimestamp)
 
-            // 正文 = 本块头结束 → 下一块头开始（最后一块到文末）
+            // Body = end of this header → start of the next header (last block runs to EOF)
             guard let bodyStart = Range(match.range, in: text)?.upperBound else { continue }
             let bodyEnd: String.Index = offset + 1 < matches.count
                 ? (Range(matches[offset + 1].range, in: text)?.lowerBound ?? text.endIndex)
@@ -200,12 +208,13 @@ public enum TraeSessionIndexer {
         return result
     }
 
-    /// `session_memory_<id>.jsonl` 里每回合的时间。
-    /// 优先 `compact_summary_meta.created_at_ms`（epoch 毫秒，无时区歧义），
-    /// 退回 `message_summary_time`（本地时间字符串，无时区标记）。
+    /// Per-turn times from `session_memory_<id>.jsonl`.
+    /// Prefers `compact_summary_meta.created_at_ms` (epoch millis, no timezone ambiguity),
+    /// falling back to `message_summary_time` (local time string, no timezone marker).
     static func turnTimestamps(fileURL: URL, maxBytes: Int = 1 << 20) -> [Date] {
         guard let data = try? Data(contentsOf: fileURL), !data.isEmpty else { return [] }
-        // 逐回合一行、每行几百字节；超限就只读头部（时间只用来定 first/last，够用）
+        // One line per turn, a few hundred bytes each; past the cap read only the head (times
+        // only set first/last, so that's enough)
         let slice = data.count > maxBytes ? data.prefix(maxBytes) : data
         guard let text = String(data: slice, encoding: .utf8) else { return [] }
 
@@ -227,7 +236,8 @@ public enum TraeSessionIndexer {
         return result
     }
 
-    /// `"2026-08-07 17:51:40"` —— 没有时区标记，按本机时区解释（Trae 就是本地应用写的）
+    /// `"2026-08-07 17:51:40"` - no timezone marker, interpreted in the local timezone (Trae
+    /// is a local app writing it)
     static func parseLocalTimestamp(_ raw: String) -> Date? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
@@ -242,10 +252,11 @@ public enum TraeSessionIndexer {
         return formatter
     }()
 
-    // MARK: - cwd 反查
+    // MARK: - cwd lookup
 
-    /// `workspace.json` 的 `folder` 字段给出的**真实绝对路径**集合（多渠道合并、去重）。
-    /// 这是唯一不走有损编码的 cwd 来源，所以优先用它。
+    /// The **real absolute paths** given by the `folder` field of `workspace.json` (merged
+    /// across channels, deduped). This is the only cwd source that skips the lossy encoding,
+    /// so it takes priority.
     static func workspaceFolders(roots: [URL]) -> [String] {
         var seen = Set<String>()
         var result: [String] = []
@@ -267,16 +278,17 @@ public enum TraeSessionIndexer {
         return result
     }
 
-    /// 记忆库项目目录名 → 真实 cwd。
+    /// Memory library project dir name → real cwd.
     ///
-    /// 目录名形如 `-Users-wl-xiao-vinlee-workspace-lerobot--p2-832ae42141a2828b9304`：
-    /// 正斜杠编码（`/`、`.`、`_` 都变 `-`，见 `SkillMemoryIndexer.encodeProjectDirName`）
-    /// 加一个 `--p<N>-<hash>` 后缀。
+    /// Dir names look like `-Users-wl-xiao-vinlee-workspace-lerobot--p2-832ae42141a2828b9304`:
+    /// slash encoding (`/`, `.` and `_` all become `-`, see
+    /// `SkillMemoryIndexer.encodeProjectDirName`) plus a `--p<N>-<hash>` suffix.
     ///
-    /// **编码是多对一、不可反解**（`-` 可能来自 `/`、`.`、`_` 或原有连字符），所以只能
-    /// 把已知的真实路径**正向编码**后去比对 —— 绝不能反着 split `-`：那会把
-    /// `aftership-semantic-layer` 切成 `layer`（CLAUDE.md 里记着这个坑）。
-    /// 比不中就返回 nil（宁可不显示 cwd，也不显示一个错的）。
+    /// **The encoding is many-to-one and irreversible** (a `-` may come from `/`, `.`, `_` or
+    /// an original hyphen), so the only option is to **encode known real paths forward** and
+    /// compare - never split on `-` in reverse: that turns `aftership-semantic-layer` into
+    /// `layer` (this pitfall is recorded in CLAUDE.md).
+    /// No match returns nil (better no cwd than a wrong one).
     public static func resolveCwd(encodedDirName: String, knownCwds: [String]) -> String? {
         let stripped = stripProjectSuffix(encodedDirName)
         for cwd in knownCwds {
@@ -287,10 +299,12 @@ public enum TraeSessionIndexer {
         return nil
     }
 
-    /// 去掉 `--p<N>-<hash>` 后缀。找不到该形态就原样返回（老版本可能没有后缀）。
+    /// Strips the `--p<N>-<hash>` suffix. Returns the name unchanged when that shape isn't
+    /// found (older versions may have no suffix).
     public static func stripProjectSuffix(_ name: String) -> String {
         guard let range = name.range(of: "--p", options: .backwards) else { return name }
-        // `--p` 之后必须是数字才算后缀，否则可能是路径里本来就有的 `--p…`
+        // Only a digit after `--p` makes it a suffix; otherwise it may be a `--p…` that was in
+        // the path all along
         let rest = name[range.upperBound...]
         guard let first = rest.first, first.isNumber else { return name }
         return String(name[..<range.lowerBound])

@@ -4,13 +4,17 @@ import EurekaKit
 import EurekaSync
 import Foundation
 
-/// Trae ingest 测试。fixture 按本机真实数据的字节形状伪造（Trae CN 3.3.84 /
-/// 国际版 3.5.35），路径与 session id 全换假值；全程临时目录，不碰真实 ~/。
+/// Trae ingest tests. Fixtures mimic the byte shape of real local data (Trae CN 3.3.84 /
+/// international 3.5.35), with paths and session ids replaced by fake values; everything runs in a
+/// temp dir, real ~/ is never touched.
 ///
-/// 覆盖三条与别的源不同的要点：
-///   1. **两个渠道**（`~/.trae-cn` CN 与 `~/.trae` 国际版）是两个独立应用，同一个来源；
-///   2. 会话库是 SQLCipher 加密的 → 会话只能从明文记忆库 `topics.md` 反推；
-///   3. 记忆库项目目录名多一个 `--p<N>-<hash>` 后缀，且**不可反解**。
+/// Covers three points where Trae differs from other sources:
+///   1. **Two channels** (`~/.trae-cn` CN and `~/.trae` international) are two independent apps,
+///      one source;
+///   2. The session DB is SQLCipher-encrypted → sessions can only be inferred from the plaintext
+///      memory library `topics.md`;
+///   3. Memory library project directory names carry an extra `--p<N>-<hash>` suffix and are **not
+///      reversible**.
 func traeIngestTests(_ t: TestRunner) {
     traePathsTests(t)
     traeHooksInstallerTests(t)
@@ -21,10 +25,11 @@ func traeIngestTests(_ t: TestRunner) {
     traeSyncWhitelistTests(t)
 }
 
-// MARK: - TraeHooksInstaller（~/.trae-cn/hooks.json）
+// MARK: - TraeHooksInstaller (~/.trae-cn/hooks.json)
 
-/// 假想的"他人已占用"骨架：同 `~/.codex/hooks.json` 被 Otty 占用那种情形。
-/// Trae 的 hooks.json 与 Claude/Codex 同构，所以共存是首要测点。
+/// A hypothetical "already occupied by someone else" skeleton: the same situation as Otty occupying
+/// `~/.codex/hooks.json`. Trae's hooks.json has the same shape as Claude/Codex, so coexistence is
+/// the primary test point.
 private let traeForeignOccupied = """
 {
   "hooks": {
@@ -55,10 +60,11 @@ private func traeHooksInstallerTests(_ t: TestRunner) {
         try expectEqual(
             Set(map.keys), Set(TraeHooksInstaller.managedEvents),
             "实得 \(map.keys.sorted())")
-        // Trae 没有 SessionEnd / Notification（→ 等待授权对它永远不可见），别凭空写进去
+        // Trae has no SessionEnd / Notification (→ permission waits are never visible for it);
+        // don't write them in out of thin air
         try expect(!map.keys.contains("SessionEnd"))
         try expect(!map.keys.contains("Notification"))
-        // Trae 独有的 PostCompact 要在
+        // Trae's own PostCompact must be present
         try expect(map.keys.contains("PostCompact"))
 
         let command = try expectSome(
@@ -139,18 +145,18 @@ private func traeHooksInstallerTests(_ t: TestRunner) {
     }
 
     t.test("认不出的结构一律拒写，绝不覆盖看不懂的内容") {
-        // 事件值不是数组
+        // Event value is not an array
         let weird = #"{"hooks": {"Stop": {"command": "something"}}}"#
         var threw = false
         do { _ = try TraeHooksInstaller.install(into: weird, relayPath: relay) } catch { threw = true }
         try expect(threw, "事件值不是条目数组时必须抛错而不是当空数组覆盖")
-        // 整个文件不是 JSON 对象
+        // The whole file is not a JSON object
         threw = false
         do { _ = try TraeHooksInstaller.install(into: "not json", relayPath: relay) } catch {
             threw = true
         }
         try expect(threw)
-        // 卸载路径同样要拒
+        // The uninstall path must refuse too
         threw = false
         do { _ = try TraeHooksInstaller.uninstall(from: weird) } catch { threw = true }
         try expect(threw)
@@ -160,7 +166,7 @@ private func traeHooksInstallerTests(_ t: TestRunner) {
         try expectEqual(TraeHooksInstaller.status(of: ""), .none)
         let full = try TraeHooksInstaller.install(into: "", relayPath: relay)
         try expectEqual(TraeHooksInstaller.status(of: full), .installed)
-        // 摘掉一个事件 → partial
+        // Remove one event → partial
         var map = try hooks(of: full)
         map.removeValue(forKey: "PostCompact")
         let partialJSON = String(
@@ -171,25 +177,25 @@ private func traeHooksInstallerTests(_ t: TestRunner) {
             TraeHooksInstaller.diagnose(
                 json: full, expectedRelayPath: relay, relayIsExecutable: { _ in true }),
             .installed)
-        // 路径被手改
+        // Path edited by hand
         guard case .driftedPath = TraeHooksInstaller.diagnose(
             json: full, expectedRelayPath: "/other/eureka-relay",
             relayIsExecutable: { _ in true })
         else { throw ExpectationError(description: "路径不一致应报 driftedPath") }
-        // relay 不可执行
+        // relay not executable
         guard case .relayMissing = TraeHooksInstaller.diagnose(
             json: full, expectedRelayPath: relay, relayIsExecutable: { _ in false })
         else { throw ExpectationError(description: "relay 不可执行应报 relayMissing") }
-        // 缺事件
+        // missing event
         guard case .stale(let missing) = TraeHooksInstaller.diagnose(
             json: partialJSON, expectedRelayPath: relay, relayIsExecutable: { _ in true })
         else { throw ExpectationError(description: "缺事件应报 stale") }
         try expectEqual(missing, ["PostCompact"])
-        // 坏 JSON
+        // bad JSON
         guard case .unparseable = TraeHooksInstaller.diagnose(
             json: "not json", expectedRelayPath: relay, relayIsExecutable: { _ in true })
         else { throw ExpectationError(description: "坏 JSON 应报 unparseable") }
-        // 没装
+        // not installed
         try expectEqual(
             TraeHooksInstaller.diagnose(
                 json: "{}", expectedRelayPath: relay, relayIsExecutable: { _ in true }),
@@ -211,7 +217,8 @@ private func traePathsTests(_ t: TestRunner) {
         try expectEqual(TraePaths.configHome(.intl, environment: env).path, "/tmp/tr-intl")
         try expect(TraePaths.configHome(.cn, environment: [:]).path.hasSuffix("/.trae-cn"))
         try expect(TraePaths.configHome(.intl, environment: [:]).path.hasSuffix("/.trae"))
-        // 国际版目录名是 CN 的前缀，别把 `.trae-cn` 当成 `.trae`
+        // The international directory name is a prefix of the CN one; don't mistake `.trae-cn` for
+        // `.trae`
         try expect(!TraePaths.configHome(.cn, environment: [:]).path.hasSuffix("/.trae"))
     }
 
@@ -247,7 +254,7 @@ private func traePathsTests(_ t: TestRunner) {
         try expectEqual(
             TraePaths.workspaceStorageRoot(.cn, environment: env).path,
             "/tmp/as/User/workspaceStorage")
-        // 项目级
+        // project level
         let repo = URL(fileURLWithPath: "/work/proj", isDirectory: true)
         try expectEqual(
             TraePaths.projectSkillsRoot(repoRoot: repo).path, "/work/proj/.trae/skills")
@@ -265,20 +272,23 @@ private func traePathsTests(_ t: TestRunner) {
         let cn = base.appendingPathComponent("cn", isDirectory: true)
         let intl = base.appendingPathComponent("intl", isDirectory: true)
 
-        // env 覆盖 → 即使目录还没建也算装了（测试全靠临时目录，不能被存在性过滤掉）
+        // env override → counts as installed even if the directory doesn't exist yet (tests rely
+        // entirely on temp dirs and must not be filtered out by existence)
         try expect(!FileManager.default.fileExists(atPath: cn.path), "刻意不建目录")
         try expectEqual(
             TraePaths.installedChannels(environment: [
                 "EUREKA_TRAE_HOME": cn.path, "EUREKA_TRAE_INTL_HOME": intl.path,
             ]),
             [.cn, .intl], "CN 必须排在前（功能更全的那个）")
-        // 存在性判定分支只能拿真实 home 试，而测试不许碰真实 ~/ → 这里不断言，
-        // 改为断言"没被 env 覆盖的渠道走的是真实目录判定"这个可观察的等价事实。
+        // The existence-check branch can only be exercised against the real home, and tests may not
+        // touch the real ~/ → no assertion here; instead assert the observable equivalent: "a
+        // channel not overridden by env goes through the real directory check".
         let intlOnly = TraePaths.installedChannels(
             environment: ["EUREKA_TRAE_INTL_HOME": intl.path])
         try expect(intlOnly.contains(.intl), "被 env 覆盖的渠道必然在内")
 
-        // 聚合派生：两个渠道各一个可写技能根 + 每渠道两个只读 builtin 根
+        // Aggregate derivation: one writable skill root per channel + two read-only builtin roots
+        // per channel
         let env = ["EUREKA_TRAE_HOME": cn.path, "EUREKA_TRAE_INTL_HOME": intl.path]
         try expectEqual(TraePaths.userSkillsRoots(environment: env).count, 2)
         try expectEqual(
@@ -292,7 +302,7 @@ private func traePathsTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - hook 解码（复用 ClaudeHookDecoder，只换 source）
+// MARK: - hook decoding (reuses ClaudeHookDecoder, only the source changes)
 
 private func traeHookDecoderTests(_ t: TestRunner) {
     t.suite("Trae hooks 解码")
@@ -330,7 +340,8 @@ private func traeHookDecoderTests(_ t: TestRunner) {
         let event = try expectSome(decode(["hook_event_name": "PostCompact", "session_id": "s1"]))
         try expectEqual(event.kind, .activity(tool: nil))
 
-        // 端到端：compacting 之后来一条 PostCompact，卡片不该继续显示"压缩中"
+        // End to end: after compacting, a PostCompact arrives and the card must stop showing
+        // "compacting"
         var store = TaskStore()
         _ = store.apply(TaskEvent(
             source: .trae, sessionId: "s1", kind: .taskStarted(title: "t"), timestamp: Date()))
@@ -363,7 +374,8 @@ private func traeHookDecoderTests(_ t: TestRunner) {
         try expect(decode(["hook_event_name": "UserPromptSubmit"]) == nil, "缺 session_id")
         try expect(decode(["session_id": "s1"]) == nil, "缺事件名")
         try expect(decode(["hook_event_name": "FutureEvent", "session_id": "s1"]) == nil)
-        // Trae 二进制里没有 Notification 这个 hook，但真来了也得能宽松吃下
+        // Trae's binary has no Notification hook, but if one does arrive it must still be accepted
+        // leniently
         try expect(
             decode([
                 "hook_event_name": "Notification", "session_id": "s1",
@@ -406,7 +418,7 @@ private func traeHookDecoderTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - TraeSessionIndexer（从明文记忆库反推会话）
+// MARK: - TraeSessionIndexer (infers sessions from the plaintext memory library)
 
 private func traeSessionIndexerTests(_ t: TestRunner) {
     t.suite("TraeSessionIndexer")
@@ -415,7 +427,7 @@ private func traeSessionIndexerTests(_ t: TestRunner) {
         let base = try makeTraeTemp()
         defer { try? FileManager.default.removeItem(at: base) }
         let file = base.appendingPathComponent("topics.md")
-        // 实勘：整个文件就是一行，末尾没有换行
+        // Observed: the whole file is a single line with no trailing newline
         try Data(
             #"[session_id: 6a75a6cd602f315c19ec63ac | topic_summary_time: 2026-08-07 17:51:40]User requested an analysis of the LeRobot project. The user then asked for a deeper analysis."#
                 .utf8
@@ -473,21 +485,22 @@ private func traeSessionIndexerTests(_ t: TestRunner) {
     }
 
     t.test("cwd 反查：正向编码已知 workspace folder 去比对，绝不反着切 `-`") {
-        // `aftership-semantic-layer` 这种名字反着 split 会只剩 `layer`（CLAUDE.md 记着的坑）
+        // A name like `aftership-semantic-layer` split backwards leaves only `layer` (the pitfall
+        // recorded in CLAUDE.md)
         let cwd = "/Users/me/work/aftership-semantic-layer"
         let encoded = SkillMemoryIndexer.encodeProjectDirName(cwd)
         try expectEqual(
             TraeSessionIndexer.resolveCwd(
                 encodedDirName: encoded + "--p2-abc123", knownCwds: [cwd]),
             cwd)
-        // 无后缀形态也要认
+        // The suffix-less form must be recognized too
         try expectEqual(
             TraeSessionIndexer.resolveCwd(encodedDirName: encoded, knownCwds: [cwd]), cwd)
-        // 比不中就返回 nil —— 宁可不显示 cwd 也不显示一个错的
+        // No match returns nil — better to show no cwd than a wrong one
         try expect(
             TraeSessionIndexer.resolveCwd(
                 encodedDirName: "-Users-me-work-other--p1-x", knownCwds: [cwd]) == nil)
-        // 前缀相同但不是同一个项目：`…-lerobot` 不该匹配上 `…-lerobot-sub`
+        // Same prefix but a different project: `…-lerobot` must not match `…-lerobot-sub`
         let sub = "/Users/me/work/lerobot-sub"
         try expect(
             TraeSessionIndexer.resolveCwd(
@@ -500,7 +513,8 @@ private func traeSessionIndexerTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: base) }
         let cwd = "/Users/me/work/lerobot"
         let fixture = try TraeMemoryFixture(base: base, cwd: cwd)
-        // 两天的目录，同一个 session：证明必须跨目录合并而不是各出一条
+        // Directories for two days, same session: proves they must be merged across directories
+        // rather than yielding one entry each
         try fixture.addDay(
             "20260806", sessionId: "sess1", summary: "第一天：初步分析",
             summaryTime: "2026-08-06 10:00:00", turnMillis: [1_786_009_200_000])
@@ -565,7 +579,7 @@ private func traeSessionIndexerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 知识面：技能 / 记忆 vs 指令的硬分割
+// MARK: - knowledge surfaces: the hard split between skills / memory and instructions
 
 private func traeKnowledgeTests(_ t: TestRunner) {
     t.suite("Trae 知识面")
@@ -602,7 +616,7 @@ private func traeKnowledgeTests(_ t: TestRunner) {
             summaryTime: "2026-08-07 17:51:40", turnMillis: [1_786_097_697_737])
         try Data("## Preferences\n- Communication language: Chinese\n".utf8)
             .write(to: fixture.memoryRoot.appendingPathComponent("user_profile.md"))
-        // 用户手写规则：单文件 + 目录两种形态并存
+        // User-written rules: single-file and directory forms coexist
         try Data("- 回复用中文\n".utf8)
             .write(to: fixture.dataFolder.appendingPathComponent("user_rules.md"))
         let rulesDir = fixture.dataFolder.appendingPathComponent("user_rules", isDirectory: true)
@@ -635,11 +649,13 @@ private func traeKnowledgeTests(_ t: TestRunner) {
             !asMemory.contains { $0.hasPrefix("session_memory_") },
             "逐回合流水 jsonl 不该出现在记忆页")
 
-        // project_memory 应挂在解出的项目名下（正向编码匹配，不是那串 hash）
+        // project_memory should sit under the resolved project name (forward-encoding match, not
+        // the hash string)
         let projectMemory = try expectSome(
             trae.first { $0.path.hasSuffix("project_memory.md") })
         try expectEqual(projectMemory.projectName, "lerobot")
-        // topics.md 记着它覆盖了哪些会话，但一律不可跳转（Trae 没有转录文件）
+        // topics.md records which sessions it covers, but none are navigable (Trae has no
+        // transcript files)
         let topics = try expectSome(trae.first { $0.path.hasSuffix("topics.md") })
         try expectEqual(topics.relatedSessions.map(\.sessionId), ["sess1"])
         try expectEqual(topics.relatedSessions.first?.exists, false)
@@ -674,7 +690,7 @@ private func traeKnowledgeTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 计划：<repo>/.trae/documents/plan_*.md（真文件，不物化）
+// MARK: - plans: <repo>/.trae/documents/plan_*.md (real files, not materialized)
 
 private func traePlanTests(_ t: TestRunner) {
     t.suite("Trae 计划")
@@ -701,7 +717,7 @@ private func traePlanTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 备份白名单（安全红线）
+// MARK: - backup whitelist (security red line)
 
 private func traeSyncWhitelistTests(_ t: TestRunner) {
     t.suite("Trae 备份白名单")
@@ -713,7 +729,7 @@ private func traeSyncWhitelistTests(_ t: TestRunner) {
         let appSupport = base.appendingPathComponent("Trae CN", isDirectory: true)
         let fm = FileManager.default
 
-        // 该进的
+        // must be included
         try plantSkill(
             root: dataFolder.appendingPathComponent("skills", isDirectory: true),
             name: "byted-web-search", description: "豆包搜索")
@@ -727,7 +743,7 @@ private func traeSyncWhitelistTests(_ t: TestRunner) {
         try Data("## Preferences\n".utf8)
             .write(to: memory.appendingPathComponent("user_profile.md"))
 
-        // 绝不该进的
+        // must never be included
         try Data("eyJhbGciOi.FAKE.TOKEN".utf8)
             .write(to: dataFolder.appendingPathComponent("trae-jwt-token"))
         try Data(#"{"mcpServers":{}}"#.utf8)
@@ -780,13 +796,13 @@ private func plantSkill(root: URL, name: String, description: String) throws {
     try Data(body.utf8).write(to: dir.appendingPathComponent("SKILL.md"))
 }
 
-/// Trae CN 记忆库的真实布局：
+/// The real layout of the Trae CN memory library:
 /// ```
 /// <dataFolder>/memory/user_profile.md
 /// <dataFolder>/memory/projects/<encoded>--p2-<hash>/project_memory.md
 /// <dataFolder>/memory/projects/<encoded>--p2-<hash>/<YYYYMMDD>/topics.md
 /// <dataFolder>/memory/projects/<encoded>--p2-<hash>/<YYYYMMDD>/session_memory_<id>.jsonl
-/// <appSupport>/User/workspaceStorage/<hash>/workspace.json   ← cwd 的唯一非有损来源
+/// <appSupport>/User/workspaceStorage/<hash>/workspace.json   ← the only lossless source of the cwd
 /// ```
 private struct TraeMemoryFixture {
     let dataFolder: URL
@@ -802,7 +818,7 @@ private struct TraeMemoryFixture {
         appSupport = base.appendingPathComponent("Trae CN", isDirectory: true)
         memoryRoot = dataFolder.appendingPathComponent("memory", isDirectory: true)
         projectsRoot = memoryRoot.appendingPathComponent("projects", isDirectory: true)
-        // 目录名 = 正向编码的 cwd + `--p<N>-<hash>` 后缀（实勘形态）
+        // Directory name = forward-encoded cwd + `--p<N>-<hash>` suffix (observed shape)
         let encoded = SkillMemoryIndexer.encodeProjectDirName(cwd)
         projectDir = projectsRoot.appendingPathComponent(
             "\(encoded)--p2-832ae42141a2828b9304", isDirectory: true)
@@ -837,8 +853,9 @@ private struct TraeMemoryFixture {
     }
 }
 
-/// 全部源都指向临时空目录的 SyncRoots —— 只留 traeRoots 由调用方填。
-/// 漏传任何一个根都会让 enumerate 去读真实 ~/，测试就不自洽了。
+/// SyncRoots with every source pointed at an empty temp dir — only traeRoots is left for the caller
+/// to fill. Omitting any root makes enumerate read the real ~/, and the test is no longer
+/// self-contained.
 func emptySyncRoots(base: URL) throws -> SyncRoots {
     func dir(_ name: String) -> URL {
         base.appendingPathComponent("empty-\(name)", isDirectory: true)

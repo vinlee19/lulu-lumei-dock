@@ -1,22 +1,25 @@
 import EurekaKit
 import Foundation
 
-/// 子代理内部轨迹加载：`<sessionId>/subagents/agent-<id>.{meta.json,jsonl}` → 按 `toolUseId` 归位。
+/// Loads subagent-internal trails: `<sessionId>/subagents/agent-<id>.{meta.json,jsonl}` → placed
+/// by `toolUseId`.
 ///
-/// **父子边在磁盘上是精确的**（meta 里的 `toolUseId` 就是父 transcript 里那个 `tool_use` 的 id），
-/// 不需要靠时间窗启发式猜 —— `ClaudeSubagentScanner` 读到过这个字段但只用来判完成状态、
-/// 构造 `SubagentInfo` 时丢掉了，这里把它用起来。
+/// **The parent-child edge is exact on disk** (the meta's `toolUseId` is the id of that `tool_use`
+/// in the parent transcript), so no time-window heuristic is needed. `ClaudeSubagentScanner` reads
+/// this field but only uses it to decide completion and drops it when building `SubagentInfo`;
+/// this puts it to use.
 ///
-/// 子 agent 的 jsonl 与主 transcript **同一套 Claude 信封**，但每行 `isSidechain == true`
-/// （实勘 116 行全是）—— 所以不能直接喂 `TranscriptReader.loadClaude`，它的
-/// `guard isSidechain != true` 会把 assistant 行全丢掉。这里自己走一遍最小解析：
-/// 只要 tool_use，不要正文（正文对血缘图没用，且会撑爆内存）。
+/// A subagent jsonl uses **the same Claude envelope** as the main transcript, but every line has
+/// `isSidechain == true` (all 116 lines in a local sample), so it can't be fed straight to
+/// `TranscriptReader.loadClaude`, whose `guard isSidechain != true` would drop every assistant
+/// line. This does its own minimal parse: tool_use only, no body text (body text is useless to
+/// the lineage graph and would blow up memory).
 public enum SubagentTrailLoader {
-    /// 每个子代理最多收多少步。子代理动辄几十步，全收会把父图淹掉；
-    /// 超出部分在 UI 上以「…等 N 步」体现。
+    /// Max steps collected per subagent. Subagents routinely run dozens of steps; taking all of
+    /// them would drown the parent graph. The overflow shows in the UI as "… N more steps".
     public static let maxStepsPerAgent = 40
 
-    /// 主 transcript 路径 → `toolUseId: [ToolStep]`
+    /// Main transcript path → `toolUseId: [ToolStep]`
     public static func load(mainTranscriptPath: String) -> [String: [ToolStep]] {
         let base = URL(fileURLWithPath: mainTranscriptPath)
             .deletingPathExtension()
@@ -41,7 +44,8 @@ public enum SubagentTrailLoader {
         return result
     }
 
-    /// 子 agent transcript → 工具步骤（只取 tool_use，并回填 tool_result 的失败标记）
+    /// Subagent transcript → tool steps (tool_use only, with tool_result failure flags
+    /// back-filled)
     static func steps(at url: URL) -> [ToolStep] {
         guard let data = FileManager.default.contents(atPath: url.path) else { return [] }
         var steps: [ToolStep] = []
@@ -60,7 +64,7 @@ public enum SubagentTrailLoader {
                 for block in blocks where block["type"] as? String == "tool_use" {
                     guard steps.count < maxStepsPerAgent else { break }
                     var step = ToolStepExtractor.claude(
-                        name: block["name"] as? String ?? "工具",
+                        name: block["name"] as? String ?? L10n.text("Tool", zhHans: "工具"),
                         input: block["input"] as? [String: Any])
                     step.batch = batch
                     step.callId = block["id"] as? String

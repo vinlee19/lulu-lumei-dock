@@ -2,11 +2,14 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// opencode 会话索引：只读 `opencode.db` → `AgentSessionInfo`。两代会话表都读：
-/// 1.x 的 `session` 与 2.x 的 `session_v2`（opencode 2.x / OpenChamber 只写后者）。
-/// 升级时 1.x 会话会被原 id 复制进 `session_v2`，同 id 只保留一条（取 2.x 那行）。
-/// 只取顶层会话（parent_id 空）；子会话是 opencode 的子 agent，不进浏览列表。
-/// 时间是 epoch 毫秒；opencode 无 transcript 文件，故 sizeBytes 记 0。
+/// opencode session index: read-only `opencode.db` → `AgentSessionInfo`. Reads both generations of
+/// session tables: 1.x `session` and 2.x `session_v2` (opencode 2.x / OpenChamber write only the
+/// latter).
+/// On upgrade, 1.x sessions are copied into `session_v2` under their original ids; only one row per
+/// id is kept (the 2.x one).
+/// Only top-level sessions (empty parent_id) are taken; child sessions are opencode subagents and
+/// stay out of the browse list.
+/// Times are epoch milliseconds; opencode has no transcript file, so sizeBytes is recorded as 0.
 public enum OpencodeSessionIndexer {
     public static func index(
         dbPath: URL,
@@ -19,7 +22,7 @@ public enum OpencodeSessionIndexer {
         let cutoffMs = (now.timeIntervalSince1970 - window) * 1000
 
         func query(_ table: String) -> [AgentSessionInfo] {
-            // 表不存在（1.x 库没有 session_v2）→ 查询失败 → 空
+            // Table missing (1.x databases have no session_v2) → query fails → empty
             (try? db.query("""
                 SELECT id, directory, title, time_created, time_updated
                 FROM \(table)
@@ -49,7 +52,7 @@ public enum OpencodeSessionIndexer {
             .prefix(maxSessions))
     }
 
-    /// 顶层会话目录集合（供项目级技能/agent 发现并入）
+    /// Top-level session directories (merged into project-level skill/agent discovery)
     public static func recentDirectories(dbPath: URL, maxSessions: Int = 300) -> [String] {
         index(dbPath: dbPath, maxSessions: maxSessions).compactMap(\.cwd)
     }

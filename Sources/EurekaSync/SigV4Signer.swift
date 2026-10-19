@@ -1,11 +1,13 @@
 import CryptoKit
 import Foundation
 
-/// AWS Signature V4 签名器（纯函数，无 IO）。
-/// 腾讯云 COS 的 S3 兼容端点与 AWS S3 共用同一套算法：service 固定 "s3"，
-/// region 由配置注入 → 二期支持 AWS 是纯配置差异。
-/// 中间产物（canonicalRequest / stringToSign / signingKey）拆成 internal 函数，
-/// 便于直接对 AWS 官方测试向量断言。
+/// AWS Signature V4 signer (pure functions, no IO).
+/// Tencent Cloud COS's S3-compatible endpoint shares the same algorithm as AWS S3: service is
+/// always "s3",
+/// region is injected from config → supporting AWS in phase two is purely a config difference.
+/// Intermediate products (canonicalRequest / stringToSign / signingKey) are split out as internal
+/// functions
+/// so they can be asserted directly against the official AWS test vectors.
 public enum SigV4Signer {
     public struct Credentials {
         public var accessKey: String
@@ -20,10 +22,10 @@ public enum SigV4Signer {
     public struct RequestToSign {
         public var method: String            // "PUT" / "HEAD"
         public var host: String
-        public var canonicalPath: String     // 已按 SyncKeyMapper.canonicalURIPath 编码，含前导 /
-        public var query: [(String, String)] // 首期恒为空
-        public var headers: [String: String] // 额外头；host 由签名器补，键小写化/排序由签名器做
-        public var payloadHash: String       // SHA256 hex（无 body 用空串哈希）
+        public var canonicalPath: String     // already encoded with SyncKeyMapper.canonicalURIPath, with leading /
+        public var query: [(String, String)] // always empty in phase one
+        public var headers: [String: String] // extra headers; the signer adds host and lowercases/sorts the keys
+        public var payloadHash: String       // SHA256 hex (hash of the empty string when there's no body)
 
         public init(
             method: String, host: String, canonicalPath: String,
@@ -39,14 +41,15 @@ public enum SigV4Signer {
         }
     }
 
-    /// 空 body 的 SHA256 hex（HEAD 请求用）
+    /// SHA256 hex of an empty body (for HEAD requests)
     public static let emptyPayloadHash = sha256Hex(Data())
 
     public static func sha256Hex(_ data: Data) -> String {
         Data(SHA256.hash(data: data)).hexString
     }
 
-    /// 签名并返回需附加到请求上的全部头：Authorization、x-amz-date、x-amz-content-sha256、host 外的原有头
+    /// Signs and returns every header to attach to the request: Authorization, x-amz-date,
+    /// x-amz-content-sha256, and the original headers other than host
     public static func sign(
         _ request: RequestToSign, credentials: Credentials,
         region: String, service: String = "s3", date: Date = Date()
@@ -54,7 +57,7 @@ public enum SigV4Signer {
         let amzDate = Self.amzDateFormatter.string(from: date)
         let dateStamp = String(amzDate.prefix(8))
 
-        // 待签名头集合：host（小写）+ x-amz-* + 调用方额外头，键统一小写
+        // Headers to sign: host (lowercase) + x-amz-* + caller's extra headers, all keys lowercased
         var headers: [String: String] = [:]
         for (key, value) in request.headers {
             headers[key.lowercased()] = value.trimmingCharacters(in: .whitespaces)
@@ -82,7 +85,7 @@ public enum SigV4Signer {
         return result
     }
 
-    // MARK: - 中间产物（public 供测试向量断言，纯函数无副作用）
+    // MARK: - Intermediate products (public for test-vector assertions; pure, no side effects)
 
     public static func canonicalRequest(
         method: String, path: String, query: [(String, String)],
@@ -113,7 +116,7 @@ public enum SigV4Signer {
         ].joined(separator: "\n")
     }
 
-    /// 链式 HMAC 派生签名密钥：kSecret → kDate → kRegion → kService → kSigning
+    /// Derives the signing key via chained HMAC: kSecret → kDate → kRegion → kService → kSigning
     public static func signingKey(
         secretKey: String, dateStamp: String, region: String, service: String
     ) -> Data {
@@ -132,7 +135,8 @@ public enum SigV4Signer {
         hmac(key: key, message: message).hexString
     }
 
-    /// SigV4 查询参数编码（RFC 3986 unreserved 之外全部 %XX 大写）
+    /// SigV4 query-parameter encoding (everything outside RFC 3986 unreserved becomes uppercase
+    /// %XX)
     public static func uriEncode(_ value: String) -> String {
         var result = ""
         for byte in Array(value.utf8) {
@@ -148,7 +152,7 @@ public enum SigV4Signer {
         return result
     }
 
-    /// x-amz-date 格式：yyyyMMdd'T'HHmmss'Z'（UTC）
+    /// x-amz-date format: yyyyMMdd'T'HHmmss'Z' (UTC)
     static let amzDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
@@ -159,7 +163,7 @@ public enum SigV4Signer {
 }
 
 extension Data {
-    /// 小写 hex 编码（SigV4 摘要与 HMAC 输出格式）
+    /// Lowercase hex encoding (format of SigV4 digests and HMAC output)
     public var hexString: String {
         map { String(format: "%02x", $0) }.joined()
     }

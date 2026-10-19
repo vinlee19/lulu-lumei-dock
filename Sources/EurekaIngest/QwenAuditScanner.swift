@@ -3,19 +3,20 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 扫描 `~/.qwen/projects/<slug>/chats/<uuid>.jsonl`，把 `functionCall` 落成审计流水。
+/// Scans `~/.qwen/projects/<slug>/chats/<uuid>.jsonl` and persists each `functionCall` as an audit
+/// record.
 ///
-/// 行是 Claude 式混血信封，需要的字段全在行上（实勘 v0.2 2026-07）：
-/// `{type:"assistant", sessionId, cwd, timestamp, message:{parts:[{functionCall:{id,name,args}}]}}`。
-/// 与 Codex/Grok 不同，`args` 已是**结构化对象**而不是 JSON 字符串。
+/// Lines use a hybrid Claude-style envelope with every needed field on the line (surveyed v0.2, 2026-07):
+/// `{type:"assistant", sessionId, cwd, timestamp, message:{parts:[{functionCall:{id,name,args}}]}}`.
+/// Unlike Codex/Grok, `args` is already a **structured object**, not a JSON string.
 ///
-/// 词表同 Cursor/Grok 那套 snake_case（实勘 `read_file`(file_path) / `grep_search`(pattern,path) /
-/// `agent`(subagent_type) / `ask_user_question`），故复用 `AuditExtractor.qwen` → 内部走
-/// 共享的 snake_case 映射。⚠️ 本机 Qwen 用量很少（只见到 4 种工具 28 次调用），
-/// 词表**未穷尽**；认不出的名字会落 `.other` + 首个字符串参数，不会丢行。
+/// The vocabulary is the same snake_case set as Cursor/Grok (observed `read_file`(file_path) / `grep_search`(pattern,path) /
+/// `agent`(subagent_type) / `ask_user_question`), so it reuses `AuditExtractor.qwen`, which goes through
+/// the shared snake_case mapping. Local Qwen usage is very light (only 4 tools, 28 calls seen),
+/// so the vocabulary is **not exhaustive**; unrecognized names land as `.other` + first string arg, no row is dropped.
 ///
-/// 增量与其它审计扫描器一致：`scan_files` 持久化 offset（键带 `audit://` 前缀），
-/// `INSERT OR IGNORE` 保证重扫幂等；幂等键取 `functionCall.id`，缺失时按行合成 hash。
+/// Incremental like the other audit scanners: `scan_files` persists the offset (key prefixed with `audit://`),
+/// and `INSERT OR IGNORE` keeps rescans idempotent; the idempotency key is `functionCall.id`, or a per-line hash when absent.
 public final class QwenAuditScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
@@ -47,7 +48,8 @@ public final class QwenAuditScanner {
         return inserted
     }
 
-    /// `projects/<slug>/chats/*.jsonl`（不按 mtime 过滤 —— scan_files 水位让老文件近乎零成本）
+    /// `projects/<slug>/chats/*.jsonl` (no mtime filter: the scan_files watermark makes old files
+    /// nearly free)
     private func chatFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -74,7 +76,7 @@ public final class QwenAuditScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = Self.read(path: path, from: offset) else { return 0 }
-        // 会话 id 兜底：文件名 stem（行上通常自带 sessionId）
+        // Session id fallback: the file name stem (lines usually carry sessionId themselves)
         let fallbackSessionId = url.deletingPathExtension().lastPathComponent
 
         var inserted = 0
@@ -125,7 +127,7 @@ public final class QwenAuditScanner {
         return "synth:" + hex.prefix(32)
     }
 
-    // MARK: - JSONL 增量读取（EurekaUsage.JSONLinesReader 跨模块不可见，此处自带）
+    // MARK: - Incremental JSONL reading (EurekaUsage.JSONLinesReader isn't visible across modules, so we carry our own)
 
     private struct Chunk {
         var lines: [Data]

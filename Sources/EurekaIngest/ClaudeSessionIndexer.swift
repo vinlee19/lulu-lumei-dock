@@ -1,26 +1,28 @@
 import Foundation
 import EurekaKit
 
-/// 会话索引条目（项目会话管理用，Claude/Codex 通用）
+/// Session index entry (for project session management; shared by Claude/Codex)
 public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
     public var source: AgentSource
     public var id: String          // session uuid
     public var cwd: String?
-    /// ai-title / 首条 prompt 摘要；nil = 只能显示短 id
+    /// ai-title / first-prompt summary; nil = only the short id can be shown
     public var name: String?
-    /// 会话首次活跃时间（transcript 首行时间戳）；nil = 头部无时间戳
+    /// When the session was first active (transcript first-line timestamp); nil = no timestamp in
+    /// the head
     public var startedAt: Date?
     public var lastActiveAt: Date
     public var sizeBytes: UInt64
     public var transcriptPath: String
 
-    /// 展示名：name 空白时回退「会话 <id前8>」（空串 name 会渲染成空行，统一在此兜底）
+    /// Display name: falls back to the localized "Session <first 8 of id>" when name is blank (an
+    /// empty name would render as a blank row; the fallback lives here in one place)
     public var displayName: String {
         let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "会话 \(id.prefix(8))" : trimmed
+        return trimmed.isEmpty ? L10n.format("Session %@", zhHans: "会话 %@", String(id.prefix(8))) : trimmed
     }
 
-    /// 会话跨度：首次 → 最后活跃；startedAt 缺失时 nil
+    /// Session span: first → last active; nil when startedAt is missing
     public var duration: TimeInterval? {
         startedAt.map { lastActiveAt.timeIntervalSince($0) }.map { max(0, $0) }
     }
@@ -42,9 +44,10 @@ public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
     }
 }
 
-/// 扫描 ~/.claude/projects 建会话索引：
-/// 文件 = 会话（mtime = 最近活跃，size 可排序），名字从文件头部 64KB 提取
-/// （ai-title 在首轮响应后生成，通常都在头部；超长首轮退首条 prompt）。
+/// Scans ~/.claude/projects to build the session index:
+/// file = session (mtime = last active, size sortable), name extracted from the file's first 64KB
+/// (ai-title is generated after the first response, so it's usually in the head; a very long first
+/// turn falls back to the first prompt).
 public enum ClaudeSessionIndexer {
     public static func index(
         projectsRoot: URL,
@@ -69,7 +72,7 @@ public enum ClaudeSessionIndexer {
                 candidates.append((file, mtime, UInt64(values.fileSize ?? 0)))
             }
         }
-        // 最近优先，截断后才做文件头解析（控制 IO）
+        // Most recent first; only parse file heads after truncating (bounds IO)
         candidates.sort { $0.1 > $1.1 }
         return candidates.prefix(maxSessions).map { file, mtime, size in
             let head = headInfo(fileURL: file)
@@ -86,7 +89,8 @@ public enum ClaudeSessionIndexer {
         }
     }
 
-    /// 头部 64KB：cwd + 名字（ai-title 优先、首条真实 prompt 兜底）+ 会话开始时间（首行时间戳）
+    /// First 64KB: cwd + name (ai-title first, first real prompt as fallback) + session start time
+    /// (first-line timestamp)
     static func headInfo(
         fileURL: URL, headBytes: Int = 65536
     ) -> (cwd: String?, name: String?, startedAt: Date?) {
@@ -104,7 +108,7 @@ public enum ClaudeSessionIndexer {
             guard
                 let object = try? JSONSerialization.jsonObject(with: Data(line)),
                 let root = object as? [String: Any]
-            else { continue }  // 头窗截断的半行会落到这里，安全跳过
+            else { continue }  // A half line cut off by the head window lands here; skip it safely
             if cwd == nil { cwd = root["cwd"] as? String }
             if startedAt == nil, let ts = root["timestamp"] as? String {
                 startedAt = ClaudeSessionFirstTimestamp.parse(ts)

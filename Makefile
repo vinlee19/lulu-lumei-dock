@@ -30,7 +30,10 @@ demo:
 pricing-catalog:
 	Scripts/update-pricing-catalog.sh
 
+lint-comments:
+	Scripts/check-comment-language.py
+
 clean:
 	rm -rf .build dist
 
-.PHONY: build test run release app package-release install demo pricing-catalog clean
+.PHONY: build test run release app package-release install demo pricing-catalog lint-comments clean

@@ -3,21 +3,22 @@ import EurekaKit
 import Foundation
 import SwiftUI
 
-/// 吉祥物展示状态机:基础态由快照推导,瞬时态(完成/出错/关怀)按事件叠加、计时回落。
+/// Mascot presentation state machine: the base state derives from snapshots; transient states
+/// (finished / error / wellness) overlay on events and fall back on a timer.
 @MainActor
 final class MascotViewModel: ObservableObject {
     @Published private(set) var state: MascotState = .idle
     @Published private(set) var bubble: String?
     @Published private(set) var pack: MascotPack
-    /// 当前行为变体 id。变化时驱动视图切换素材。
+    /// Current behavior variant id. A change makes the view switch assets.
     @Published private(set) var variantID = ""
-    /// 0...15 顺时针视线；nil 表示回到普通 idle。
+    /// Clockwise gaze 0...15; nil means back to plain idle.
     @Published private(set) var lookDirection: Int?
-    /// 每次重新播放序列时递增，确保瞬时动作从第 0 帧开始。
+    /// Incremented each time a sequence replays, so transient moves start from frame 0.
     @Published private(set) var playbackTick = 0
-    /// 状态切换时 +1,驱动视图播放一次"大动作"过场(旋转/跳/翻等)
+    /// +1 on state change, making the view play one "big move" transition (spin / hop / flip, etc.)
     @Published private(set) var transitionTick = 0
-    /// 当前过场风格(每次切换选定,视图读取)
+    /// Current transition style (chosen on each change, read by the view)
     private(set) var transitionStyle: MascotTransition = .pop
 
     var idleSleepSeconds: TimeInterval = 60
@@ -40,7 +41,8 @@ final class MascotViewModel: ObservableObject {
     }
 
     func start() {
-        // 首次开启伙伴时先展示清醒 idle；不能把“从未记录过活跃”当成无限空闲。
+        // When the companion is first enabled, show awake idle; "never recorded any activity" must
+        // not be treated as infinite idleness.
         if lastActiveAt == nil { lastActiveAt = Date() }
         ticker = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.recompute() }
@@ -57,15 +59,16 @@ final class MascotViewModel: ObservableObject {
         playbackTick &+= 1
     }
 
-    /// 当前状态的英文艺术字标语
+    /// English word-art caption for the current state
     var caption: String? {
-        // 视线追踪是连续微交互，保持画面干净，避免每次转头都带着旧贴纸文案。
+        // Gaze tracking is a continuous micro-interaction; keep the frame clean instead of carrying
+        // old sticker captions on every head turn.
         if state == .idle, lookDirection != nil { return nil }
         if let currentVariant { return currentVariant.caption }
         return pack.captions[state]
     }
 
-    /// 当前动画(随 state/pack/行为变体/视线 变)
+    /// Current animation (changes with state / pack / behavior variant / gaze)
     var animation: MascotAnimation? {
         if state == .idle, let lookDirection,
            let look = pack.lookAnimation(direction: lookDirection) {
@@ -88,7 +91,7 @@ final class MascotViewModel: ObservableObject {
         pack.variants(for: state).count
     }
 
-    // MARK: - 输入
+    // MARK: - Input
 
     func updateActiveTasks(active: [AgentTask], idle: [AgentTask]) {
         hasRunning = !active.isEmpty
@@ -101,35 +104,38 @@ final class MascotViewModel: ObservableObject {
 
     func showFinished(success: Bool) {
         pushTransient(success ? .success : .error,
-                      bubble: success ? "搞定啦 🎉" : "出错了 😣", seconds: 2.5)
+                      bubble: success ? L10n.text("All done 🎉", zhHans: "搞定啦 🎉") : L10n.text("Something went wrong 😣", zhHans: "出错了 😣"), seconds: 2.5)
     }
 
-    /// 关怀提示:复用 WellnessAdvisor 的文案;深夜进困倦态,否则放松态
+    /// Wellness nudge: reuses WellnessAdvisor's copy; late at night enters the drowsy state,
+    /// otherwise the relax state
     func showNotice(_ headline: String) {
         let hour = Calendar.current.component(.hour, from: Date())
         let deepNight = hour >= 23 || hour < 6
         pushTransient(deepNight ? .night : .relax, bubble: headline, seconds: 6)
     }
 
-    /// 被点击 → 俏皮反应(蹦/转一下 + 短暂气泡)
+    /// Clicked → playful reaction (a bounce/spin + brief bubble)
     func poke() {
         pushTransient(.poke, bubble: nil, seconds: 1.2)
     }
 
-    /// 睡眠时检测到用户回来 → 先播放醒来动作，再从清醒 idle 重新计时。
+    /// User returns while asleep → play the wake-up move first, then restart timing from awake
+    /// idle.
     func wake() {
         lastActiveAt = Date()
         pushTransient(.wake, bubble: nil, seconds: 1.5)
     }
 
-    /// 面板控制器把鼠标相对方向映射到 16 向视线；近距离或非 idle 时回到普通姿势。
+    /// The panel controller maps the mouse's relative direction to the 16-direction gaze; up close
+    /// or when not idle, back to the plain pose.
     func setLookDirection(_ direction: Int?) {
         let normalized = direction.map { (($0 % 16) + 16) % 16 }
         let next = state == .idle ? normalized : nil
         if lookDirection != next { lookDirection = next }
     }
 
-    // MARK: - 内部
+    // MARK: - Internal
 
     private func pushTransient(_ state: MascotState, bubble: String?, seconds: TimeInterval) {
         let replaySameState = self.state == state
@@ -137,7 +143,8 @@ final class MascotViewModel: ObservableObject {
         transientUntil = Date().addingTimeInterval(seconds)
         pendingBubble = bubble
         apply()
-        // 连续完成/点击时也换一个表演，并重新触发过场与逐帧序列。
+        // Repeated finishes/clicks also pick a different performance and retrigger the transition
+        // and frame sequence.
         if replaySameState {
             transitionStyle = MascotTransition.choose(
                 from: self.state, to: state, tick: transitionTick)
@@ -173,7 +180,7 @@ final class MascotViewModel: ObservableObject {
             newBubble = nil
         }
         let stateChanged = newState != state
-        // 状态真正改变 → 选一个过场大动作并触发
+        // State really changed → pick a big transition move and trigger it
         if stateChanged {
             transitionStyle = MascotTransition.choose(from: state, to: newState, tick: transitionTick)
             transitionTick &+= 1
@@ -189,7 +196,8 @@ final class MascotViewModel: ObservableObject {
         updateVariantRotation()
     }
 
-    /// 高频态会在多个变体间自然轮换，避免长任务一直重复同一张贴纸。
+    /// High-frequency states rotate naturally among variants so long tasks don't repeat the same
+    /// sticker.
     private func updateVariantRotation() {
         let variants = pack.variants(for: state)
         guard [.idle, .working, .waiting, .sleeping, .night].contains(state),
@@ -221,7 +229,7 @@ final class MascotViewModel: ObservableObject {
         }
     }
 
-    /// 按权重随机选择，并在有其他候选时避免连续重复。
+    /// Weighted random choice, avoiding back-to-back repeats when other candidates exist.
     private func selectVariant(force: Bool) {
         var candidates = pack.variants(for: state)
         guard !candidates.isEmpty else {
@@ -248,15 +256,16 @@ final class MascotViewModel: ObservableObject {
     }
 }
 
-/// 状态切换时播放一次的"大动作"过场。phase 序列 [0,1,2,3](0/末相位为静止)。
+/// "Big move" transition played once on state change. Phase sequence [0,1,2,3] (phase 0 / the last
+/// phase are at rest).
 enum MascotTransition {
     case pop, spin, jump, flip, jumpSpin, shake, bounce, settle
 
     struct Pose: Equatable {
         var scaleX: CGFloat = 1
         var scaleY: CGFloat = 1
-        var rotation: Double = 0   // 2D z 轴(度)
-        var flip: Double = 0       // 3D y 轴翻转(度)
+        var rotation: Double = 0   // 2D z axis (degrees)
+        var flip: Double = 0       // 3D y-axis flip (degrees)
         var yOffset: CGFloat = 0
     }
 
@@ -293,7 +302,7 @@ enum MascotTransition {
     }
 
     func animation(toPhase phase: Int) -> Animation? {
-        if phase == 0 { return nil }  // 复位瞬间不做动画
+        if phase == 0 { return nil }  // No animation at the reset instant
         switch self {
         case .shake: return .easeInOut(duration: 0.09)
         case .spin, .flip, .jumpSpin: return .spring(response: 0.3, dampingFraction: 0.62)

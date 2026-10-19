@@ -4,7 +4,7 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-// MARK: - fixture 工具：造一个 opencode 形状的临时 SQLite 库
+// MARK: - fixture helper: build a temp SQLite DB shaped like opencode's
 
 private func makeOpencodeDB(at url: URL, _ build: (SQLiteDB) throws -> Void) throws {
     let db = try SQLiteDB(path: url.path)
@@ -19,7 +19,7 @@ private func makeOpencodeDB(at url: URL, _ build: (SQLiteDB) throws -> Void) thr
         type TEXT NOT NULL, data TEXT NOT NULL);
     """)
     try build(db)
-    try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)")  // 落盘，读连接可见
+    try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)")  // Persisted; visible to a read connection
 }
 
 private func tempDir(_ tag: String) -> URL {
@@ -81,7 +81,7 @@ func opencodeUsageScannerTests(_ t: TestRunner) {
             try db.run("INSERT INTO session VALUES (?,?,?,?,?,?)",
                 [.text("ses_x"), .null, .text("/Users/me/proj"), .text("t"),
                  .int(Int64(created) - 1000), .int(Int64(created))])
-            // 已完成的 assistant 消息
+            // Completed assistant message
             let done = """
             {"role":"assistant","tokens":{"input":100,"output":20,"reasoning":5,\
             "cache":{"read":30,"write":10}},"time":{"created":\(created),"completed":\(created + 500)},\
@@ -107,7 +107,7 @@ func opencodeUsageScannerTests(_ t: TestRunner) {
         try expectEqual(row.cacheReadTokens, 30)
         try expectEqual(row.cacheCreationTokens, 10)
 
-        // 再扫一次：水位已过，无新增
+        // Scan again: watermark already past, nothing new
         let second = try scanner.scanOnce()
         try expectEqual(second, 0)
     }
@@ -125,7 +125,7 @@ func opencodeUsageScannerTests(_ t: TestRunner) {
             try db.run("INSERT INTO session VALUES (?,?,?,?,?,?)",
                 [.text("ses_x"), .null, .text("/w"), .text("t"),
                  .int(Int64(created) - 1000), .int(Int64(created))])
-            // 3 个 tool 分片（read×2, bash×1）+ 1 个 text/reasoning（不计）
+            // 3 tool parts (read×2, bash×1) + 1 text/reasoning (not counted)
             func part(_ id: String, _ json: String) throws {
                 try db.run("INSERT INTO part VALUES (?,?,?,?,?,?)",
                     [.text(id), .text("m1"), .text("ses_x"),
@@ -151,7 +151,7 @@ func opencodeUsageScannerTests(_ t: TestRunner) {
         try expectEqual(try count("read"), 2)
         try expectEqual(try count("bash"), 1)
 
-        // 再扫一次：part 水位已过，计数不翻倍
+        // Scan again: part watermark already past, counts don't double
         _ = try scanner.scanOnce()
         try expectEqual(try count("read"), 2)
     }
@@ -225,11 +225,12 @@ func opencodeEventDecoderTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 事件 tailer：水位与 stale 判定
+// MARK: - event tailer: watermark and stale detection
 
-/// 2026-09-05 实测事故：某一轮 `MAX(rowid)` 查询失败被当成"rowid 回退"，水位归零，
-/// 25,571 条历史事件全部当实时事件重放 —— 灵动岛排进上百张完成卡收不回去，
-/// 22 个 7、8 月的旧会话被重新建成运行中、一分钟后又被判"中断"写进历史。
+/// Real incident on 2026-09-05: one failed `MAX(rowid)` query was read as "rowid went backwards",
+/// the watermark reset to zero, and all 25,571 historical events replayed as live — the Dynamic
+/// Island queued hundreds of finished cards it couldn't drain, and 22 old sessions from July/August
+/// were recreated as running, then marked "interrupted" into history a minute later.
 func opencodeEventTailerTests(_ t: TestRunner) {
     t.suite("OpencodeEventTailer · 水位与 stale")
 
@@ -262,8 +263,9 @@ func opencodeEventTailerTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expect(received.isEmpty, "首扫只定基线")
 
-        // 连接能打开、但 MAX(rowid) 这一句查询失败（IO 抖动 / 锁超时 / 表暂不可用）：
-        // 用"把表临时改名"精确模拟这一层失败，再改回来
+        // The connection opens, but the single MAX(rowid) query fails (IO hiccup / lock timeout /
+        // table temporarily unavailable): simulate exactly that failure by temporarily renaming the
+        // table, then rename it back
         let writer = try SQLiteDB(path: dbURL.path)
         try writer.execute("ALTER TABLE event RENAME TO event_hidden")
         checkpoint(writer)
@@ -289,15 +291,16 @@ func opencodeEventTailerTests(_ t: TestRunner) {
         }
         var received: [(TaskEvent, Bool)] = []
         let tailer = OpencodeEventTailer(dbPath: dbURL) { event, stale in received.append((event, stale)) }
-        tailer.scanOnce()  // 基线 = 3
-        // 模拟 opencode 重建库：清表后写入 1 条历史事件（rowid 从 1 重新计）
+        tailer.scanOnce()  // baseline = 3
+        // Simulate opencode rebuilding its DB: clear the table, then write 1 historical event
+        // (rowid restarts at 1)
         let writer = try SQLiteDB(path: dbURL.path)
         try writer.run("DELETE FROM event")
         try insert(writer, "e9", "message.updated.1", assistantDone("ses_a", completedMs: nowMs()))
         checkpoint(writer)
         tailer.scanOnce()
         try expect(received.isEmpty, "回退后只重定基线；实得 \(received.count) 条")
-        // 之后的新事件照常实时送达
+        // New events afterwards are delivered live as usual
         try insert(writer, "e10", "message.updated.1", userMessage("ses_a", createdMs: nowMs()))
         checkpoint(writer)
         tailer.scanOnce()
@@ -318,7 +321,7 @@ func opencodeEventTailerTests(_ t: TestRunner) {
         tailer.scanOnce()
         let writer = try SQLiteDB(path: dbURL.path)
         try insert(writer, "e2", "message.updated.1",
-                   assistantDone("ses_a", completedMs: nowMs() - 3600 * 1000))  // 一小时前完成
+                   assistantDone("ses_a", completedMs: nowMs() - 3600 * 1000))  // finished an hour ago
         try insert(writer, "e3", "message.updated.1", assistantDone("ses_a", completedMs: nowMs()))
         checkpoint(writer)
         tailer.scanOnce()

@@ -88,7 +88,7 @@ func planProgressTests(_ t: TestRunner) {
         try expectEqual(
             tightenPlanTitle("重构技能页的统计卡，同时把来源筛选换成 chips 并接真实命中数"),
             "重构技能页的统计卡")
-        // 逗号在第 3 字，过短 → 不按它切
+        // The comma is at the 3rd character, too short → don't cut there
         try expect(!tightenPlanTitle("先说，然后我们要把整个索引层的去重逻辑重做一遍并补上回归测试用例").hasSuffix("先说"))
     }
 

@@ -1,8 +1,9 @@
+import EurekaKit
 import Foundation
 
-/// ~/.codex/config.toml 的 notify 安装器（行级编辑，不整体重写 TOML）。
-/// 关键不变量：notify 是顶层键，必须插在首个 `[table]` 行之前——
-/// 追加到文件尾会落进最后一个 table 内变成非法配置。
+/// notify installer for ~/.codex/config.toml (line-level edits; never rewrites the whole TOML).
+/// Key invariant: notify is a top-level key and must be inserted before the first `[table]` line -
+/// appending it at EOF would land it inside the last table and make the config invalid.
 ///
 /// notify is a single slot. When another program already holds it, installing *chains*
 /// instead of refusing: the line becomes
@@ -27,8 +28,8 @@ public enum CodexNotifyInstaller {
             let line = lines[existing]
             guard let argv = notifyArgv(in: line) else {
                 throw InstallError.foreignConfig(
-                    "config.toml 的 notify 无法安全解析（如跨多行的数组）：\(trimmed(line))\n"
-                        + "请先手动改成单行再安装")
+                    L10n.format("Cannot safely parse notify in config.toml (for example, a multiline array): %@\n", zhHans: "config.toml 的 notify 无法安全解析（如跨多行的数组）：%@\n", String(trimmed(line)))
+                        + L10n.text("Please change it to a single line manually before installing", zhHans: "请先手动改成单行再安装"))
             }
             // Ours: keep whatever we were already chaining (the path may have changed).
             // Someone else's: wrap it so it keeps receiving every notification
@@ -38,7 +39,8 @@ public enum CodexNotifyInstaller {
             return lines.joined(separator: "\n")
         }
 
-        // 插入点：首个 table 头之前（跳过紧贴 table 的空行，保持原有空行归属 table）
+        // Insertion point: before the first table header (skipping blank lines right above it, so
+        // they stay with the table)
         var insertAt = lines.count
         if let firstTable = firstTableIndex(lines) {
             insertAt = firstTable
@@ -83,9 +85,10 @@ public enum CodexNotifyInstaller {
         return chained.isEmpty ? nil : chained
     }
 
-    // MARK: - 诊断
+    // MARK: - Diagnostics
 
-    /// 带异常识别的诊断。纯函数：relay 是否可执行由调用方注入。
+    /// Diagnosis that recognises anomalies. Pure function: whether the relay is executable is
+    /// injected by the caller.
     public static func diagnose(
         toml: String, expectedRelayPath: String,
         relayIsExecutable: (String) -> Bool
@@ -101,12 +104,12 @@ public enum CodexNotifyInstaller {
                 return .chainable(owner: URL(fileURLWithPath: program).lastPathComponent)
             }
             return .foreignOccupied(detail:
-                "config.toml 的顶层 notify 已被他人占用，且无法安全解析（如跨多行的数组）：\n\(line)\n"
-                    + "notify 只能有一个，不会自动改写。改成单行后可串联安装，"
-                    + "或手动改为：\(notifyLine(relayPath: expectedRelayPath, chaining: ["<原命令>", "…"]))")
+                L10n.format("The top-level notify in config.toml is used by another program and cannot be safely parsed (for example, a multiline array):\n%@\n", zhHans: "config.toml 的顶层 notify 已被他人占用，且无法安全解析（如跨多行的数组）：\n%@\n", String(line))
+                    + L10n.text("Only one notify is allowed, so it will not be rewritten automatically. Change it to a single line to chain the installation,", zhHans: "notify 只能有一个，不会自动改写。改成单行后可串联安装，")
+                    + L10n.format(" or change it manually to: %@", zhHans: "或手动改为：%@", String(notifyLine(relayPath: expectedRelayPath, chaining: [L10n.text("<original command>", zhHans: "<原命令>"), "…"]))))
         }
         guard let argv, let path = argv.first else {
-            return .unparseable(reason: "config.toml 的 notify 无法解析：\(line)")
+            return .unparseable(reason: L10n.format("Cannot parse notify in config.toml: %@", zhHans: "config.toml 的 notify 无法解析：%@", String(line)))
         }
         if path != expectedRelayPath,
            !RelayIdentity.isLegacyStablePath(path, expected: expectedRelayPath) {
@@ -119,7 +122,7 @@ public enum CodexNotifyInstaller {
         return .installed
     }
 
-    // MARK: - 内部
+    // MARK: - Internals
 
     /// `notify = [...]` → argv; nil when the value is not a single-line array of strings.
     private static func notifyArgv(in line: String) -> [String]? {
@@ -137,11 +140,11 @@ public enum CodexNotifyInstaller {
         line.trimmingCharacters(in: .whitespaces)
     }
 
-    /// 顶层区域（首个 table 之前）的 notify 赋值行
+    /// The notify assignment line in the top-level region (before the first table)
     private static func topLevelNotifyIndex(_ lines: [String]) -> Int? {
         for (index, raw) in lines.enumerated() {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("[") { return nil }  // 进入 table 区域，停止
+            if trimmed.hasPrefix("[") { return nil }  // Entered the table region; stop
             guard trimmed.hasPrefix("notify") else { continue }
             let rest = trimmed.dropFirst("notify".count).trimmingCharacters(in: .whitespaces)
             if rest.hasPrefix("=") { return index }

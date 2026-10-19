@@ -1,7 +1,7 @@
 #!/bin/bash
-# 安全审计演示：注入高危命令，验证灵动岛弹出红色告警卡（island=card-alert）。
-# 用临时 spool / DB / codex 目录，完全隔离，不碰真实数据。
-# 用法: Scripts/demo-audit.sh
+# Security-audit demo: injects high-risk commands and checks that the Dynamic Island pops a red alert card (island=card-alert).
+# Uses temporary spool / DB / codex directories, fully isolated, never touching real data.
+# Usage: Scripts/demo-audit.sh
 set -e
 cd "$(dirname "$0")/.."
 
@@ -9,7 +9,7 @@ swift build
 BIN=.build/debug
 export EUREKA_SPOOL_DIR=$(mktemp -d)
 export EUREKA_DB_PATH=$(mktemp -d)/audit-demo.sqlite
-export EUREKA_CODEX_SESSIONS=$(mktemp -d)   # 空目录，避免扫真实 Codex 数据
+export EUREKA_CODEX_SESSIONS=$(mktemp -d)   # empty dir, so real Codex data isn't scanned
 LOG=/tmp/eureka-audit-demo.log
 
 "$BIN/eureka" > "$LOG" 2>&1 &

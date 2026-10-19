@@ -4,8 +4,8 @@ import Foundation
 func sigV4Tests(_ t: TestRunner) {
     t.suite("SigV4Signer")
 
-    // AWS 官方文档的 GET iam 签名示例（AKIDEXAMPLE / 20150830 / us-east-1 / iam）
-    // 逐级断言 canonicalRequest → hash → stringToSign → signingKey → signature
+    // The GET iam signing example from the official AWS docs (AKIDEXAMPLE / 20150830 / us-east-1 /
+    // iam) Assert each stage: canonicalRequest → hash → stringToSign → signingKey → signature
     let secretKey = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
 
     t.test("canonical request 与 AWS 文档示例逐字节一致") {

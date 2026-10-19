@@ -1,8 +1,15 @@
 import Foundation
+import EurekaKit
+
+// The app defaults to English. Existing assertions pin the Chinese copy, so the suite is pinned to
+// Simplified Chinese and these assertions keep serving as the spec for the Chinese catalog. English
+// output is covered separately by localizationTests.
+L10n.current = .simplifiedChinese
 
 let t = TestRunner()
 print("eureka-tests")
 
+localizationTests(t)
 smokeTests(t)
 taskStoreTests(t)
 decoderTests(t)

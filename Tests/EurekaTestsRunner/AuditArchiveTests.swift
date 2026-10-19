@@ -63,7 +63,8 @@ func auditArchiveTests(_ t: TestRunner) {
         let footerLength = Int(lengthBytes[0]) | Int(lengthBytes[1]) << 8
             | Int(lengthBytes[2]) << 16 | Int(lengthBytes[3]) << 24
         try expect(footerLength > 0 && footerLength < data.count - 12, "\(footerLength)")
-        // 元数据以 FileMetaData.version 字段开头（字段 1、i32 → 0x15），值 1 的 zigzag = 0x02
+        // Metadata starts with the FileMetaData.version field (field 1, i32 → 0x15); zigzag of
+        // value 1 = 0x02
         let footer = data[(data.count - 8 - footerLength)...]
         try expectEqual(Array(footer.prefix(2)), [0x15, 0x02])
     }
@@ -160,7 +161,8 @@ func auditArchiveTests(_ t: TestRunner) {
         AuditArchive.materialize(store: store, outDir: out, host: "h", appVersion: "t", cutoff: nil)
         try expect(AuditArchive.prunableDays(store: store).isEmpty, "未上传不应可清理")
 
-        // 模拟备份引擎上传成功：sync_state 记下与本地文件一致的 size+mtime
+        // Simulate a successful backup-engine upload: sync_state records a size+mtime matching the
+        // local file
         let file = out.appendingPathComponent("dt=2026-09-21/audit-events-2026-09-21.parquet")
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         try store.syncState.upsert(.init(
@@ -171,11 +173,12 @@ func auditArchiveTests(_ t: TestRunner) {
         AuditArchive.reconcileUploads(store: store)
         try expectEqual(AuditArchive.prunableDays(store: store), ["2026-09-21"])
 
-        // 新增一行 → 指纹变了 → 又不可清理，直到重写并再次上传
+        // One new row → fingerprint changes → not prunable again until rewritten and re-uploaded
         try store.audit.insert(event("b", at: old + 60))
         try expect(AuditArchive.prunableDays(store: store).isEmpty)
 
-        // 保留期截止在它之后：已上传过的旧日期不再重写（防止清理后用更少的行覆盖远端）
+        // Retention cutoff is after it: an already-uploaded old day is never rewritten (prevents
+        // overwriting the remote with fewer rows after pruning)
         let outcome = AuditArchive.materialize(
             store: store, outDir: out, host: "h", appVersion: "t",
             cutoff: Date(timeIntervalSince1970: old + 10 * 86400))
@@ -229,7 +232,8 @@ func auditArchivePruneTests(_ t: TestRunner) {
         }
         let out = root.appendingPathComponent("audit")
         AuditArchive.materialize(store: store, outDir: out, host: "h", appVersion: "t", cutoff: nil)
-        // 截止时间落在 9-23 当天中午：9-21、9-22 过期；但都没上传 → 一行都不删
+        // Cutoff at noon on 9-23: 9-21 and 9-22 are expired, but neither was uploaded → no rows
+        // deleted
         let cutoff = Date(timeIntervalSince1970: base + 2 * 86400 + 3600)
         try expectEqual(AuditArchive.prune(store: store, cutoff: cutoff, maxRows: 1000), [])
         try expectEqual(try store.audit.totalCount(), 3)
@@ -237,7 +241,7 @@ func auditArchivePruneTests(_ t: TestRunner) {
         try uploadAll(store, out)
         try expectEqual(
             AuditArchive.prune(store: store, cutoff: cutoff, maxRows: 1000), ["2026-09-21", "2026-09-22"])
-        try expectEqual(try store.audit.totalCount(), 1)  // 截止当天整天保留
+        try expectEqual(try store.audit.totalCount(), 1)  // The cutoff day is kept in full
     }
 
     t.test("行数上限：从最旧的已上传日期起整天删") {

@@ -54,7 +54,8 @@ func promptLibraryTests(_ t: TestRunner) {
     }
 
     t.test("只提取真实用户提问；tool_result / assistant / 空白文本全部跳过") {
-        // 手搓最小 claude transcript：空白提问、真实提问、tool_result 伪 user、assistant
+        // Hand-rolled minimal claude transcript: blank prompt, real prompt, tool_result
+        // pseudo-user, assistant
         let file = try tempJSONL([
             #"{"type":"user","message":{"role":"user","content":"   "},"timestamp":"2026-08-23T10:00:00Z"}"#,
             #"{"type":"user","message":{"role":"user","content":"修一下分页越界"},"timestamp":"2026-08-23T10:01:00Z"}"#,
@@ -89,13 +90,14 @@ func promptLibraryTests(_ t: TestRunner) {
 
     t.test("排噪：注入块剥净跳过、caveat 后的真实提问保留、裸斜杠命令跳过") {
         let file = try tempJSONL([
-            // 纯斜杠命令回显：剥净剩空 → 跳过
+            // Pure slash-command echo: empty once stripped → skip
             #"{"type":"user","message":{"role":"user","content":"<command-name>/plan</command-name><command-message>plan</command-message>"},"timestamp":"2026-08-23T10:00:00Z"}"#,
-            // caveat 注入块后跟真实提问：剥块后保留提问本体
+            // Caveat injection block followed by a real prompt: strip the block, keep the prompt
+            // itself
             #"{"type":"user","message":{"role":"user","content":"<local-command-caveat>注入的说明</local-command-caveat>帮我修复分页越界并补测试"},"timestamp":"2026-08-23T10:01:00Z"}"#,
-            // 本地命令输出：跳过
+            // Local command output: skip
             #"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Enabled plan mode</local-command-stdout>"},"timestamp":"2026-08-23T10:02:00Z"}"#,
-            // 裸斜杠命令：跳过
+            // Bare slash command: skip
             #"{"type":"user","message":{"role":"user","content":"/compact"},"timestamp":"2026-08-23T10:03:00Z"}"#,
         ])
         defer { try? FileManager.default.removeItem(at: file) }
@@ -142,11 +144,11 @@ func promptLibraryTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: dbPath) }
 
         try store.prompts.upsertExtracted([entry("claude:sess-1:0", text: "原文")])
-        // 用户标注
+        // user annotation
         try store.prompts.setFavorite("claude:sess-1:0", favorite: true)
         try store.prompts.setTags("claude:sess-1:0", tags: ["调试", "分页"])
         try store.prompts.recordUse("claude:sess-1:0", at: Date(timeIntervalSince1970: 300))
-        // 会话有新消息 → 重新提取（同 id 文本更新 + 新增一条）
+        // Session has new messages → re-extract (same-id text updated + one new row)
         try store.prompts.upsertExtracted([
             entry("claude:sess-1:0", text: "原文（补充了细节）"),
             entry("claude:sess-1:1", text: "第二条提问"),
@@ -176,7 +178,7 @@ func promptLibraryTests(_ t: TestRunner) {
         let fingerprints = try store.prompts.extractionFingerprints()
         try expectEqual(fingerprints["s1"], Date(timeIntervalSince1970: 200), "后值覆盖前值")
 
-        // second 的 first_seen 更晚 → 排前（first_seen 倒序 = 最新提问在前）
+        // second's first_seen is later → ranks first (first_seen descending = newest prompt first)
         let first = PromptEntry(
             id: "claude:a:0", source: .claude, sessionId: "a", messageIdx: 0,
             text: "早", timestamp: nil, cwd: nil,
@@ -218,7 +220,8 @@ func promptLibraryTests(_ t: TestRunner) {
         try store.prompts.setFavorite(removedId, favorite: true)
         try store.prompts.recordUse(removedId, at: Date(timeIntervalSince1970: 150))
         try store.prompts.hide(removedId)
-        // 会话还在活跃：下一次增量提取会把同一批 prompt 再 upsert 一遍
+        // The session is still active: the next incremental extraction upserts the same prompts
+        // again
         try store.prompts.upsertExtracted([
             entry(removedId, text: "被移除的提问（会话追加后重提取）"),
             entry("claude:sess-1:1", text: "留下的提问"),
@@ -251,7 +254,7 @@ func promptLibraryTests(_ t: TestRunner) {
 
         let inWindow = Date(timeIntervalSince1970: 1500)
         let outWindow = Date(timeIntervalSince1970: 2500)
-        // 两条窗口内提问（timestamp 落窗）
+        // Two prompts inside the window (timestamp falls in the window)
         try store.prompts.upsertExtracted([
             PromptEntry(
                 id: "claude:s1:0", source: .claude, sessionId: "s1", messageIdx: 0,
@@ -260,19 +263,19 @@ func promptLibraryTests(_ t: TestRunner) {
                 id: "codex:s2:0", source: .codex, sessionId: "s2", messageIdx: 0,
                 text: "窗口内提问二", timestamp: inWindow, cwd: nil, firstSeen: outWindow),
         ])
-        // 一条窗口外提问（timestamp 与 first_seen 都在窗外）
+        // One prompt outside the window (both timestamp and first_seen are outside)
         try store.prompts.upsertExtracted([
             PromptEntry(
                 id: "claude:s3:0", source: .claude, sessionId: "s3", messageIdx: 0,
                 text: "窗口外提问", timestamp: outWindow, cwd: nil, firstSeen: outWindow),
         ])
-        // 一条 timestamp 缺失 → 退化用 first_seen 落窗
+        // One with a missing timestamp → falls back to first_seen for the window
         try store.prompts.upsertExtracted([
             PromptEntry(
                 id: "claude:s4:0", source: .claude, sessionId: "s4", messageIdx: 0,
                 text: "无时间戳提问", timestamp: nil, cwd: nil, firstSeen: inWindow),
         ])
-        // 复用：s1 两次都在窗口内；s3 只在窗口外用过
+        // Reuse: s1 used twice inside the window; s3 used only outside it
         try store.prompts.recordUse("claude:s1:0", at: inWindow)
         try store.prompts.recordUse("claude:s1:0", at: inWindow)
         try store.prompts.recordUse("claude:s3:0", at: outWindow)
@@ -304,7 +307,8 @@ func promptLibraryTests(_ t: TestRunner) {
         let stats = try store.prompts.weeklyStats(
             from: Date(timeIntervalSince1970: 1000), to: Date(timeIntervalSince1970: 2000))
         try expectEqual(stats.askedCount, 1, "两条噪音行不计入 asked")
-        // SQL 侧近似判据必须与内存分类器一致：这三条里恰好前两条是 noise
+        // The SQL-side approximate criterion must agree with the in-memory classifier: exactly the
+        // first two of these three are noise
         try expectEqual(PromptClassifier.classify("<command-name>/plan</command-name>"), .noise)
         try expectEqual(PromptClassifier.classify("/compact"), .noise)
         try expect(PromptClassifier.classify("真实提问：修复分页越界") != .noise)

@@ -5,40 +5,42 @@ import EurekaStore
 import EurekaSync
 import Foundation
 
-/// 安全审计服务：持有独立 SQLite 连接 + AuditPipeline + Codex/CodeBuddy/Qoder 审计扫描器。
-/// Claude 与 Trae 的操作经 EventPipeline 旁路送入（ingestHook），其余靠定时扫描 jsonl。
-/// store/pipeline/scanner 只在内部串行队列上触碰；@Published 只在主线程更新。
+/// Security audit service: owns a dedicated SQLite connection + AuditPipeline + the
+/// Codex/CodeBuddy/Qoder audit scanners. Claude and Trae operations arrive via EventPipeline's side
+/// channel (ingestHook); the rest rely on periodic jsonl scans. store/pipeline/scanner are only
+/// touched on the internal serial queue; @Published is only updated on the main thread.
 final class AuditService: ObservableObject {
-    /// 审计面板当前页（倒序）与总条数
+    /// The audit panel's current page (newest first) and total count
     @Published private(set) var events: [AuditEvent] = []
     @Published private(set) var total = 0
     @Published private(set) var riskTotal = 0
     @Published private(set) var lastError: String?
     @Published private(set) var exportMessage: String?
-    /// 按来源 / 类型分组的计数（筛选 chip 与总览卡的分布）。
-    /// ⚠️ `SourceFilterBar` 的 `count:` 闭包在渲染里**逐 chip 调用**，只能读这两个字典，
-    /// 绝不能每次都查库。
+    /// Counts grouped by source / type (the filter chips and the overview card's distribution). ⚠️
+    /// `SourceFilterBar`'s `count:` closure is **called per chip** during rendering, so it may only
+    /// read these two dictionaries; it must never hit the database each time.
     @Published private(set) var sourceCounts: [AgentSource: Int] = [:]
     @Published private(set) var kindCounts: [ToolKind: Int] = [:]
-    /// 审计归档台账摘要（设置浮层展示；未开启归档时为 nil）
+    /// Audit archive ledger summary (shown in the Settings popover; nil when archiving is off)
     @Published private(set) var archiveStatus: ArchiveStatus?
 
     struct ArchiveStatus: Equatable {
-        /// 已上传且与本地一致的天数
+        /// Days uploaded and matching local data
         var uploadedDays: Int
-        /// 本地有新变化、等待下一轮备份上传的天数
+        /// Days with new local changes, waiting for the next backup upload
         var pendingDays: Int
-        /// 最近一个已上传日期（UTC，YYYY-MM-DD）
+        /// Most recent uploaded date (UTC, YYYY-MM-DD)
         var latestUploadedDay: String?
     }
 
-    /// 命中高危规则时回调（主线程）：AppDelegate 转成岛卡 + 系统通知
+    /// Called back (main thread) when a high-risk rule matches: AppDelegate turns it into an island
+    /// card + system notification
     var onRiskAlert: ((RiskAlert) -> Void)?
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.audit", qos: .utility)
     private var timer: DispatchSourceTimer?
 
-    // 以下成员只在 queue 上访问
+    // The members below are only accessed on queue
     private var store: EurekaStore?
     private var pipeline: AuditPipeline?
     private var codexScanner: CodexAuditScanner?
@@ -99,12 +101,12 @@ final class AuditService: ObservableObject {
                 self.scanQwen()
                 self.pruneIfDue()
             } catch {
-                self.publish { $0.lastError = "审计库打开失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to open audit database: %@", zhHans: "审计库打开失败: %@", String(describing: error)) }
             }
         }
-        // 2s 近实时扫描 Codex/CodeBuddy/Qoder/Cursor/Grok/Qwen + 顺带到点清理
+        // 2s near-real-time scan of Codex/CodeBuddy/Qoder/Cursor/Grok/Qwen + pruning when due
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电
+        // leeway lets the system coalesce wakeups to save power
         timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in
             self?.scanCodex()
@@ -119,8 +121,9 @@ final class AuditService: ObservableObject {
         self.timer = timer
     }
 
-    /// Claude PostToolUse 旁路事件（EventPipeline 队列回调 → 切到审计队列串行处理）
-    /// hook 通道（Claude / Trae）的 PostToolUse 旁路入口。事件自带 source，此处不区分。
+    /// Claude PostToolUse side-channel events (EventPipeline queue callback -> hop onto the audit
+    /// queue for serial processing) Side-channel entry for PostToolUse on the hook channels (Claude
+    /// / Trae). Events carry their own source, so no distinction here.
     func ingestHook(_ event: AuditEvent, isStale: Bool) {
         queue.async { [weak self] in
             guard let self, self.captureEnabled, let pipeline = self.pipeline else { return }
@@ -128,12 +131,12 @@ final class AuditService: ObservableObject {
                 let result = try pipeline.ingest(event, isStale: isStale)
                 if let alert = result.alert { self.emit(alert) }
             } catch {
-                self.publish { $0.lastError = "\(event.source.displayName) 审计写入失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("%@ audit write failed: %@", zhHans: "%@ 审计写入失败: %@", String(event.source.displayName), String(describing: error)) }
             }
         }
     }
 
-    // MARK: - 设置绑定（主线程调用，切队列生效）
+    // MARK: - Settings bindings (called on the main thread, applied by hopping queues)
 
     func setCaptureEnabled(_ enabled: Bool) {
         queue.async { [weak self] in self?.captureEnabled = enabled }
@@ -143,14 +146,14 @@ final class AuditService: ObservableObject {
         queue.async { [weak self] in
             guard let self else { return }
             self.retentionDays = days
-            self.lastPruneAt = .distantPast  // 立即按新策略清一次
+            self.lastPruneAt = .distantPast  // prune once right away under the new policy
             self.pruneIfDue()
         }
     }
 
-    // MARK: - 面板数据
+    // MARK: - Panel data
 
-    /// 分页加载（page 从 1 起）
+    /// Paged load (page starts at 1)
     func load(query: AuditRepo.Query, page: Int, pageSize: Int = 100) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -159,8 +162,9 @@ final class AuditService: ObservableObject {
                 let rows = try store.audit.recent(
                     query, limit: pageSize, offset: (max(1, page) - 1) * pageSize)
                 let riskTotal = try store.audit.count(.init(riskOnly: true))
-                // 分布计数各自去掉自己那一维：否则选中某来源后其余 chip 全变 0，
-                // 用户就看不出「切过去还有多少条」。
+                // Each distribution count drops its own dimension: otherwise selecting a source
+                // turns every other chip to 0, and the user can't see "how many there would be if I
+                // switched".
                 var sourceQuery = query
                 sourceQuery.source = nil
                 var kindQuery = query
@@ -185,12 +189,13 @@ final class AuditService: ObservableObject {
                         })
                 }
             } catch {
-                self.publish { $0.lastError = "读取审计流水失败: \(error)" }
+                self.publish { $0.lastError = L10n.format("Failed to read audit log: %@", zhHans: "读取审计流水失败: %@", String(describing: error)) }
             }
         }
     }
 
-    /// 导出当前筛选结果为 CSV 到 ~/Downloads 并在 Finder 显示（含敏感命令，调用方须提示）
+    /// Exports the current filtered results as CSV to ~/Downloads and reveals it in Finder
+    /// (contains sensitive commands; the caller must warn)
     func exportCSV(query: AuditRepo.Query) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -213,17 +218,17 @@ final class AuditService: ObservableObject {
                 let url = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Downloads/eureka-audit-\(formatter.string(from: Date())).csv")
                 try Data(csv.utf8).write(to: url)
-                self.publish { $0.exportMessage = "已导出 \(url.lastPathComponent)（\(rows.count) 条）" }
+                self.publish { $0.exportMessage = L10n.format("Exported %@ (%@ records)", zhHans: "已导出 %@（%@ 条）", String(url.lastPathComponent), String(rows.count)) }
                 DispatchQueue.main.async {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             } catch {
-                self.publish { $0.exportMessage = "导出失败: \(error)" }
+                self.publish { $0.exportMessage = L10n.format("Export failed: %@", zhHans: "导出失败: %@", String(describing: error)) }
             }
         }
     }
 
-    /// 清空全部审计数据
+    /// Clears all audit data
     func clearAll() {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
@@ -232,12 +237,12 @@ final class AuditService: ObservableObject {
                 $0.events = []
                 $0.total = 0
                 $0.riskTotal = 0
-                $0.exportMessage = "审计数据已清空"
+                $0.exportMessage = L10n.text("Audit data cleared", zhHans: "审计数据已清空")
             }
         }
     }
 
-    // MARK: - queue 内部
+    // MARK: - Queue internals
 
     private func scanCodex() {
         guard captureEnabled, let scanner = codexScanner else { return }
@@ -319,11 +324,12 @@ final class AuditService: ObservableObject {
             latestUploadedDay: ledger.filter { $0.uploadedAt != nil }.map(\.day).max())
     }
 
-    /// 每小时清理一次：按天数窗口 + 兜底 20 万行上限
+    /// Prunes once an hour: by the day window + a fallback cap of 200k rows
     private func pruneIfDue() {
         guard let store, Date().timeIntervalSince(lastPruneAt) > 3600 else { return }
         lastPruneAt = Date()
-        // 开启归档：只整天删除已上传的日期（上传失败宁可超期保留，也不丢未归档的记录）
+        // With archiving on: only delete whole days that are already uploaded (on upload failure,
+        // keep past retention rather than lose unarchived records)
         if AuditArchiveSettings.isActive {
             AuditArchive.prune(store: store, cutoff: AuditArchiveSettings.retentionCutoff, maxRows: 200_000)
             return
@@ -347,7 +353,7 @@ final class AuditService: ObservableObject {
     }
 
     private static func csvField(_ value: String) -> String {
-        // 含逗号/引号/换行时用引号包裹并转义内部引号
+        // Wrap in quotes and escape inner quotes when the value contains a comma / quote / newline
         guard value.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" }) else { return value }
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }

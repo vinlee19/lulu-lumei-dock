@@ -1,6 +1,7 @@
 import Foundation
 
-/// 全文命中：一条消息级的搜索结果（snippet 由调用层按原文裁剪）
+/// Full-text hit: one message-level search result (the caller trims the snippet from the original
+/// text)
 public struct TranscriptSearchHit: Equatable {
     public var docId: Int64
     public var source: String
@@ -9,11 +10,11 @@ public struct TranscriptSearchHit: Equatable {
     public var messageIdx: Int
     public var role: String
     public var ts: Date?
-    /// 命中消息全文（已按索引截断上限存储）
+    /// Full text of the matched message (stored truncated to the index cap)
     public var text: String
 }
 
-/// 待索引的一条消息文档
+/// One message document to index
 public struct TranscriptSearchDoc {
     public var messageIdx: Int
     public var role: String
@@ -28,8 +29,8 @@ public struct TranscriptSearchDoc {
     }
 }
 
-/// 跨会话全文搜索仓库：transcript_fts（FTS5 trigram）+ fts_docs + fts_files。
-/// 派生数据：清空/重建随时安全，下轮索引自动恢复。
+/// Cross-session full-text search repo: transcript_fts (FTS5 trigram) + fts_docs + fts_files.
+/// Derived data: clearing/rebuilding is always safe; the next indexing pass restores it.
 public final class SearchRepo {
     private let db: SQLiteDB
 
@@ -37,9 +38,10 @@ public final class SearchRepo {
         self.db = db
     }
 
-    // MARK: - 文件指纹
+    // MARK: - File fingerprints
 
-    /// 全部已索引文件的指纹（path → (size, mtime)），一次取回做增量比对
+    /// Fingerprints of every indexed file (path → (size, mtime)), fetched in one go for incremental
+    /// comparison
     public func fileFingerprints() throws -> [String: (size: Int64, mtime: Double)] {
         let rows = try db.query("SELECT path, size, mtime FROM fts_files") { row in
             (row.text(0) ?? "", row.int(1), row.real(2))
@@ -47,9 +49,10 @@ public final class SearchRepo {
         return Dictionary(uniqueKeysWithValues: rows.map { ($0.0, (size: $0.1, mtime: $0.2)) })
     }
 
-    // MARK: - 写入
+    // MARK: - Writes
 
-    /// 整文件重建：删旧 docs → 插新 docs → 记指纹，单事务保证一致
+    /// Rebuild a whole file: delete old docs → insert new docs → record the fingerprint, in one
+    /// transaction for consistency
     public func replaceDocs(
         path: String, source: String, sessionId: String,
         size: Int64, mtime: Double, docs: [TranscriptSearchDoc]
@@ -75,7 +78,7 @@ public final class SearchRepo {
         }
     }
 
-    /// 清理已消失的文件（transcript 被删除/移走）
+    /// Clean up files that vanished (transcript deleted/moved)
     public func prune(keeping existingPaths: Set<String>) throws {
         let indexed = try db.query("SELECT path FROM fts_files") { $0.text(0) ?? "" }
         for path in indexed where !existingPaths.contains(path) {
@@ -86,7 +89,7 @@ public final class SearchRepo {
         }
     }
 
-    /// 清空全部索引（设置页「清空全文索引」）
+    /// Clear the whole index (Settings' "clear full-text index")
     public func clearAll() throws {
         try db.execute("""
         DELETE FROM transcript_fts;
@@ -102,15 +105,17 @@ public final class SearchRepo {
         try db.run("DELETE FROM fts_docs WHERE path = ?", [.text(path)])
     }
 
-    // MARK: - 查询
+    // MARK: - Queries
 
-    /// 全文检索：≥3 字符走 trigram MATCH（子串语义，中英文一致）；
-    /// 2 字符退化为 LIKE 全扫（有上限，中文双字词常见，不能不支持）；<2 字符返回空。
+    /// Full-text search: ≥3 characters use trigram MATCH (substring semantics, same for Chinese and
+    /// English); 2 characters fall back to a capped LIKE full scan (two-character Chinese words are
+    /// common, so this must be supported); <2 characters return nothing.
     public func search(_ rawQuery: String, limit: Int = 50) throws -> [TranscriptSearchHit] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.count >= 2 else { return [] }
         if query.count >= 3 {
-            // 整体作为一个短语（双引号内的 " 翻倍转义），trigram 下即子串匹配
+            // The whole query as one phrase (" inside double quotes escaped by doubling); under
+            // trigram that's a substring match
             let phrase = "\"" + query.replacingOccurrences(of: "\"", with: "\"\"") + "\""
             return try db.query("""
             SELECT d.id, d.source, d.session_id, d.path, d.message_idx, d.role, d.ts, f.text
@@ -143,7 +148,7 @@ public final class SearchRepo {
             text: row.text(7) ?? "")
     }
 
-    /// 索引文档总数（设置页展示 / 测试断言）
+    /// Total indexed documents (shown in Settings / used in test assertions)
     public func docCount() throws -> Int {
         Int(try db.query("SELECT COUNT(*) FROM fts_docs") { $0.int(0) }.first ?? 0)
     }

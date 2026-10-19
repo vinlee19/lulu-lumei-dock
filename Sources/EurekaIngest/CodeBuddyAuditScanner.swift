@@ -3,25 +3,29 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 ~/.codebuddy/projects/**/*.jsonl（含 `<sessionId>/subagents/agent-*.jsonl`），
-/// 把 function_call 工具调用落成审计流水。schema 已对真实会话核验（2026-07）：
-/// `type:"function_call"` 行带 `name` + `arguments`（JSON 字符串）+ `callId` +
-/// `timestamp`（epoch 毫秒）+ `cwd`。
-/// 与 CodexAuditScanner 同构：持久化 offset 增量扫描（scan_files，键加 "audit://"
-/// 前缀避免与用量扫描器冲突），INSERT OR IGNORE 保证重扫幂等。
-/// 两点与 codex 不同的口径：
-/// - 工具词汇是 Claude 式（Read/Grep/Glob/Bash/Write/Agent…，实勘 530 行 function_call
-///   无一 codex 式命名）→ arguments 解析成字典后喂 `AuditExtractor.claude(name:input:)`；
-///   若喂 codex 提取器会全部落 default（kind=.other），风险规则永不命中。
-/// - 子代理行内的 sessionId 是子代理自己的 id（实勘），归属父会话必须走路径推导
-///   （`<slug>/<sessionId>/subagents/` 的父目录名），与 CodeBuddyUsageScanner 同口径。
+/// Scans ~/.codebuddy/projects/**/*.jsonl (including `<sessionId>/subagents/agent-*.jsonl`) and
+/// turns function_call tool calls into audit records. Schema verified against real sessions
+/// (2026-07): `type:"function_call"` lines carry `name` + `arguments` (a JSON string) + `callId` +
+/// `timestamp` (epoch milliseconds) + `cwd`.
+/// Same shape as CodexAuditScanner: incremental scan from a persisted offset (scan_files, keys
+/// prefixed with "audit://" to avoid colliding with the usage scanner); INSERT OR IGNORE keeps
+/// rescans idempotent.
+/// Two conventions that differ from codex:
+/// - The tool vocabulary is Claude-style (Read/Grep/Glob/Bash/Write/Agent...; none of 530 observed
+///   function_call lines used a codex-style name) → arguments are parsed into a dictionary and fed
+///   to `AuditExtractor.claude(name:input:)`; fed to the codex extractor, everything would land in
+///   default (kind=.other) and the risk rules would never fire.
+/// - The sessionId inside subagent lines is the subagent's own id (observed), so attribution to the
+///   parent session must be derived from the path (the parent directory name of
+///   `<slug>/<sessionId>/subagents/`), same convention as CodeBuddyUsageScanner.
 public final class CodeBuddyAuditScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
     private let pipeline: AuditPipeline
     private let staleThreshold: TimeInterval
 
-    /// 每文件扫描私有状态（存 scan_files.extra）：路径推导的会话归属 + 行内 cwd 缓存
+    /// Private per-file scan state (stored in scan_files.extra): path-derived session attribution +
+    /// cached inline cwd
     private struct FileExtra: Codable {
         var sessionId: String?
         var cwd: String?
@@ -37,7 +41,8 @@ public final class CodeBuddyAuditScanner {
         self.staleThreshold = staleThreshold
     }
 
-    /// 整树扫一遍（含 subagents/），返回本轮新插入的审计行数。alertSink 接收高危告警。
+    /// Scans the whole tree once (including subagents/) and returns the number of audit rows newly
+    /// inserted this pass. alertSink receives high-risk alerts.
     @discardableResult
     public func scanOnce(alertSink: ((RiskAlert) -> Void)? = nil) throws -> Int {
         var inserted = 0
@@ -47,9 +52,9 @@ public final class CodeBuddyAuditScanner {
         return inserted
     }
 
-    /// projects/<slug>/*.jsonl（主会话）+ projects/<slug>/<sessionId>/subagents/*.jsonl
-    /// （子代理；不按 mtime 过滤——scan_state 水位使无新数据的老文件近乎零成本）。
-    /// 与 CodeBuddyUsageScanner.sessionFiles() 同一枚举口径。
+    /// projects/<slug>/*.jsonl (main sessions) + projects/<slug>/<sessionId>/subagents/*.jsonl
+    /// (subagents; not filtered by mtime, since the scan_state watermark makes old files with no
+    /// new data nearly free). Same enumeration convention as CodeBuddyUsageScanner.sessionFiles().
     private func sessionFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -112,7 +117,8 @@ public final class CodeBuddyAuditScanner {
                 let timestamp = CodeBuddyTranscriptDecoder.timestamp(root) ?? Date()
                 let isStale = Date().timeIntervalSince(timestamp) > staleThreshold
 
-                // arguments 是 JSON 字符串（实勘 530/530 行皆然）；解析失败按空字典
+                // arguments is a JSON string (true for 530/530 observed lines); a parse failure
+                // falls back to an empty dictionary
                 var args: [String: Any] = [:]
                 if let raw = root["arguments"] as? String,
                    let parsed = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) {
@@ -137,9 +143,10 @@ public final class CodeBuddyAuditScanner {
         return inserted
     }
 
-    /// 会话归属：主会话文件 = <slug>/<sessionId>.jsonl（文件名 stem 即会话 id）；
-    /// 子代理文件 = <slug>/<sessionId>/subagents/agent-*.jsonl（父目录名即父会话 id——
-    /// 行内 sessionId 是子代理自己的，不采用）。与 CodeBuddyUsageScanner 同口径。
+    /// Session attribution: a main session file = <slug>/<sessionId>.jsonl (the file stem is the
+    /// session id); a subagent file = <slug>/<sessionId>/subagents/agent-*.jsonl (the parent
+    /// directory name is the parent session id; the inline sessionId is the subagent's own and is
+    /// not used). Same convention as CodeBuddyUsageScanner.
     private func resolveOwnership(fileURL: URL, into extra: inout FileExtra) {
         let parent = fileURL.deletingLastPathComponent()
         if parent.lastPathComponent == "subagents" {
@@ -149,7 +156,8 @@ public final class CodeBuddyAuditScanner {
         }
     }
 
-    /// 无 callId 的行用 (路径+行内容) 的 SHA256 合成稳定幂等键（同 CodexAuditScanner）。
+    /// Lines without a callId get a stable idempotency key synthesized from the SHA256 of (path +
+    /// line content), same as CodexAuditScanner.
     private static func synthOpId(path: String, line: Data) -> String {
         var hasher = SHA256()
         hasher.update(data: Data(path.utf8))
@@ -158,7 +166,7 @@ public final class CodeBuddyAuditScanner {
         return "synth:" + hex.prefix(32)
     }
 
-    // MARK: - JSONL 增量读取（EurekaUsage.JSONLinesReader 跨模块不可见，此处自带）
+    // MARK: - Incremental JSONL reading (own copy: EurekaUsage.JSONLinesReader is module-internal)
 
     private struct Chunk {
         var lines: [Data]

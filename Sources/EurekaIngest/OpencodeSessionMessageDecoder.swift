@@ -1,15 +1,18 @@
 import EurekaKit
 import Foundation
 
-/// 把 opencode 2.x `session_message` 表一行解码为领域事件（source `.opencode`）。
+/// Decodes one row of the opencode 2.x `session_message` table into domain events
+/// (source `.opencode`).
 ///
-/// opencode 2.x（含 OpenChamber 自带的 `opencode serve`）不再写 `event` / `message` 表，
-/// 会话改存 `session_v2`，消息改存 `session_message`（`type` 列 + `data` JSON，时间均为 epoch 毫秒）：
-///   user      → {time{created}, text, files?}            一个 turn 的开始（追加引导也是 user）
+/// opencode 2.x (including OpenChamber's bundled `opencode serve`) no longer writes the `event` /
+/// `message` tables; sessions moved to `session_v2` and messages to `session_message` (`type`
+/// column + `data` JSON, all times in epoch milliseconds):
+///   user      → {time{created}, text, files?}            turn start (appended steering is user too)
 ///   assistant → {time{created,completed?}, model{id,providerID}, content[{type:text|reasoning|tool}],
 ///                finish, tokens{input,output,reasoning,cache{read,write}}}
-///   idle      → {time{created}, outcome: succeeded|failed|interrupted, error?}   turn 结束标记
-///   synthetic / system / compaction / agent-switched / model-switched → 注入或切换，不是 turn 边界
+///   idle      → {time{created}, outcome: succeeded|failed|interrupted, error?}   turn-end marker
+///   synthetic / system / compaction / agent-switched / model-switched →
+///     injection or switch, not a turn boundary
 public enum OpencodeSessionMessageDecoder {
     public static func decode(
         sessionID: String, type: String, data: [String: Any], cwd: String?
@@ -25,7 +28,8 @@ public enum OpencodeSessionMessageDecoder {
             return [event(.taskStarted(title: title))]
 
         case "assistant":
-            // 每个推理步插入一行：当心跳用；工具名取该步已写入的最后一个 tool 分片
+            // Each reasoning step inserts a row: used as a heartbeat; the tool name comes from the
+            // last tool part written so far in that step
             let content = data["content"] as? [[String: Any]] ?? []
             let tool = content.last { $0["type"] as? String == "tool" }?["name"] as? String
             return [event(.activity(tool: tool))]
@@ -37,7 +41,7 @@ public enum OpencodeSessionMessageDecoder {
                 let detail = (error?["message"] as? String) ?? (error?["type"] as? String)
                 return [event(.taskFinished(outcome: .error, title: nil, detail: detail))]
             case "interrupted":
-                return [event(.taskFinished(outcome: .interrupted, title: nil, detail: "已中断"))]
+                return [event(.taskFinished(outcome: .interrupted, title: nil, detail: L10n.text("Interrupted", zhHans: "已中断")))]
             default:
                 return [event(.taskFinished(outcome: .success, title: nil, detail: nil))]
             }

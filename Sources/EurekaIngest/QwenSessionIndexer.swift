@@ -1,10 +1,10 @@
 import EurekaKit
 import Foundation
 
-/// Qwen 会话行解析（projects/<encoded>/chats/<uuid>.jsonl，v0.20 实勘）。
-/// 混血格式：Claude 式信封 {uuid, sessionId, timestamp, type, cwd} +
-/// Gemini 式 payload message:{role, parts:[{text}|{text,thought}|{functionCall}]}。
-/// token 在 type=system/subtype=ui_telemetry 的 api_response 事件里（见 QwenUsageScanner）。
+/// Qwen session line parsing (projects/<encoded>/chats/<uuid>.jsonl, surveyed on v0.20).
+/// Hybrid format: Claude-style envelope {uuid, sessionId, timestamp, type, cwd} +
+/// Gemini-style payload message:{role, parts:[{text}|{text,thought}|{functionCall}]}.
+/// Tokens live in api_response events with type=system/subtype=ui_telemetry (see QwenUsageScanner).
 enum QwenChatDecoder {
     struct Message {
         var uuid: String?
@@ -12,12 +12,13 @@ enum QwenChatDecoder {
         /// user / assistant / system
         var type: String
         var cwd: String?
-        /// 可见正文（text parts 拼接，thought parts 单独进 `thoughts`）
+        /// Visible body (text parts joined; thought parts go separately into `thoughts`)
         var text: String
-        /// functionCall parts 的工具名列表
+        /// Tool names of the functionCall parts
         var toolCalls: [String]
-        /// **明文思考**（`{text, thought:true}` part）。Qwen 既不加密也不剥离，
-        /// 实勘单段可达 5000+ 字符。以前和正文一起被 `continue` 丢掉了。
+        /// **Plaintext thinking** (`{text, thought:true}` parts). Qwen neither encrypts nor strips
+        /// it; a single part was observed at 5000+ characters. It used to be dropped by `continue`
+        /// along with the body.
         var thoughts: [String] = []
     }
 
@@ -34,7 +35,7 @@ enum QwenChatDecoder {
                     continue
                 }
                 guard let piece = part["text"] as? String, !piece.isEmpty else { continue }
-                // thought parts 是思考正文，与可见回答分开收
+                // thought parts are thinking text, collected separately from the visible answer
                 if (part["thought"] as? Bool) == true {
                     thoughts.append(piece)
                 } else {
@@ -52,7 +53,7 @@ enum QwenChatDecoder {
             thoughts: thoughts)
     }
 
-    /// ui_telemetry 行 → api_response 事件（token 采集用）
+    /// ui_telemetry line → api_response event (for token collection)
     static func apiResponse(_ root: [String: Any]) -> [String: Any]? {
         guard root["type"] as? String == "system",
               root["subtype"] as? String == "ui_telemetry",
@@ -64,8 +65,8 @@ enum QwenChatDecoder {
     }
 }
 
-/// Qwen 会话索引：扫 `projects/*/chats/*.jsonl` → AgentSessionInfo。
-/// cwd 取伴随 runtime.json 的 work_dir（缺失回退消息行 cwd 字段）。
+/// Qwen session index: scans `projects/*/chats/*.jsonl` → AgentSessionInfo. cwd comes from the
+/// companion runtime.json's work_dir (falls back to the message line's cwd field).
 public enum QwenSessionIndexer {
     private static let headBytes = 256 * 1024
 
@@ -99,7 +100,7 @@ public enum QwenSessionIndexer {
             forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
         let sessionId = file.deletingPathExtension().lastPathComponent
 
-        // 伴随 runtime.json：work_dir + started_at
+        // Companion runtime.json: work_dir + started_at
         var cwd: String?
         var startedAt: Date?
         let runtimeURL = file.deletingPathExtension()
@@ -112,7 +113,8 @@ public enum QwenSessionIndexer {
             }
         }
 
-        // 名字 = 首条真实 user 消息摘要；cwd 缺失时回退消息行 cwd 字段
+        // Name = summary of the first real user message; falls back to the message line's cwd field
+        // when cwd is missing
         guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
         defer { try? handle.close() }
         let head = (try? handle.read(upToCount: headBytes)) ?? Data()
@@ -131,7 +133,7 @@ public enum QwenSessionIndexer {
                 }
             }
         }
-        guard name != nil else { return nil }  // 无真实用户输入的空会话不进列表
+        guard name != nil else { return nil }  // Empty sessions with no real user input stay out of the list
 
         return AgentSessionInfo(
             source: .qwen,

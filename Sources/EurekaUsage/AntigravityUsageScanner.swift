@@ -2,22 +2,30 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// Antigravity（`agy`）用量扫描（**实验**，设置里默认关闭）。
+/// Antigravity (`agy`) usage scanner (**experimental**, off by default in Settings).
 ///
-/// 每会话一个 `conversations/<uuid>.db`，其中 `gen_metadata(idx, data)` 每次模型调用一行，
-/// data 是未公开的 protobuf。字段含义按结构核对（与 Windsurf/Codeium 的 ModelUsageStats 同构）：
-/// - `1.19` 模型名（如 `gemini-3.8-flash`）
-/// - `1.4` 用量：`2` 输入、`3` 输出、`4` 缓存写、`5` 缓存读、`9` 思考输出、`10` 回复输出
-///   ——本地 1248 行全部满足 9 + 10 == 3；1069 行缓存读 > 输入，故输入**不含**缓存读（同 Claude 口径）
-/// - `1.20` 键值对，`last_step_index` 指向 `steps.idx`；该步 `metadata.1.1` 是调用时间（Unix 秒）
+/// One `conversations/<uuid>.db` per session; its `gen_metadata(idx, data)` has one row per model call,
+/// and data is an undocumented protobuf. Field meanings were checked against the structure (isomorphic to
+/// Windsurf/Codeium's ModelUsageStats):
+/// - `1.19` model name (e.g. `gemini-3.8-flash`)
+/// - `1.4` usage: `2` input, `3` output, `4` cache write, `5` cache read, `9` thinking output, `10`
+///   reply output
+///   -- all 1248 local rows satisfy 9 + 10 == 3; in 1069 rows cache read > input, so input **excludes**
+///   cache reads (same convention as Claude)
+/// - `1.20` key/value pairs; `last_step_index` points at `steps.idx`, whose `metadata.1.1` is the
+///   call time (Unix seconds)
 ///
-/// 读库方式：库是 WAL 模式，只读连接在没有 `-shm` 时打不开；而 `immutable=1` 会漏读未 checkpoint 的 WAL。
-/// 故每次把 `.db`（与 `-wal`，若有）复制到临时目录，打开副本（SQLite 会从 wal 重建索引）读完即删。
-/// 文件指纹（大小 + mtime）没变的库直接跳过，不复制。格式对不上一律跳过该行，永不抛错到上层。
+/// How the DB is read: it is in WAL mode, so a read-only connection can't open it without `-shm`, while
+/// `immutable=1` would miss un-checkpointed WAL content.
+/// So each time `.db` (and `-wal`, if present) is copied into a temp dir, the copy is opened (SQLite rebuilds
+/// the index from the wal), read, and deleted.
+/// DBs whose fingerprint (size + mtime) hasn't changed are skipped without copying. Any row that doesn't
+/// match the format is skipped; errors never propagate up.
 public final class AntigravityUsageScanner {
     private let conversationsRoot: URL
     private let store: EurekaStore
-    /// 会话工作区（EurekaUsage 不依赖 EurekaIngest，由 app 注入 AntigravityPaths.cwd）
+    /// Session workspace (EurekaUsage doesn't depend on EurekaIngest; the app injects
+    /// AntigravityPaths.cwd)
     private let cwdResolver: (URL) -> String?
     private let projectResolver = ProjectResolver()
 
@@ -59,7 +67,8 @@ public final class AntigravityUsageScanner {
         defer { try? FileManager.default.removeItem(at: snapshot.deletingLastPathComponent()) }
         guard let db = try? SQLiteDB(path: snapshot.path) else { return 0 }
 
-        // 库被重建（最大 idx 回退到水位以下）→ 清掉该会话已入账的行，从头重扫
+        // DB was rebuilt (max idx fell below the watermark) → clear that session's recorded rows
+        // and rescan from the start
         let maxIndex = (try? db.query("SELECT MAX(idx) FROM gen_metadata") { $0.int(0) })?.first ?? -1
         let sessionId = dbURL.deletingPathExtension().lastPathComponent
         var reset = false
@@ -124,7 +133,7 @@ public final class AntigravityUsageScanner {
         return records.count
     }
 
-    /// steps.metadata 的 `1.1`（Unix 秒）→ 调用时间
+    /// `1.1` of steps.metadata (Unix seconds) → call time
     private static func stepTimes(db: SQLiteDB, steps: Set<Int64>) -> [Int64: Date] {
         guard !steps.isEmpty else { return [:] }
         var result: [Int64: Date] = [:]
@@ -147,7 +156,8 @@ public final class AntigravityUsageScanner {
         return result
     }
 
-    /// 复制 .db（+ -wal）到独立临时目录；不复制 -shm（SQLite 打开时从 wal 重建）
+    /// Copy .db (+ -wal) into a dedicated temp dir; -shm is not copied (SQLite rebuilds it from the
+    /// wal on open)
     static func snapshotCopy(_ dbURL: URL) -> URL? {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("eureka-agy-\(UUID().uuidString)")

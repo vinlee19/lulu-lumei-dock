@@ -1,17 +1,18 @@
 import EurekaKit
 import Foundation
 
-/// 增量 tail CodeBuddy 会话（~/.codebuddy/projects/<cwd-slug>/<sessionId>.jsonl）。
-/// CodeBuddy 无 hook/notify 回调，这是实时通道（与 qwen/kimi tailer 同理）。
-/// 只看顶层会话文件，不 tail `<sessionId>/subagents/` 子目录（子代理 token 由
-/// CodeBuddyUsageScanner 归并，事件流以主会话为准）；子 agent 现场由
-/// CodeBuddySubagentScanner 快照（父 transcript 的 function_call/result 对派生）
-/// 在运行中会话上随轮询以 .subagentsUpdated 发出。
-/// 生命周期映射（CodeBuddyTranscriptDecoder）：user 消息（非 skipRun）→ taskStarted；
-/// function_call → activity(工具名)；assistant completed → taskFinished(success)；
-/// ai-title/summary → titleUpdate（只改已有任务标题，不造幻影任务）。
-/// 上下文占用：function_call 行的归一化用量（复用 decoder 的 usage 提取，
-/// input + cacheRead ≈ 当前上下文大小）÷ ContextWindows 窗口。
+/// Incrementally tails CodeBuddy sessions (~/.codebuddy/projects/<cwd-slug>/<sessionId>.jsonl).
+/// CodeBuddy has no hook/notify callback, so this is the live channel (same as the qwen/kimi
+/// tailers).
+/// Only top-level session files are read; `<sessionId>/subagents/` is not tailed (subagent tokens
+/// are merged by CodeBuddyUsageScanner and the event stream follows the main session). Live
+/// subagent state is a CodeBuddySubagentScanner snapshot (derived from the parent transcript's
+/// function_call/result pairs), emitted as .subagentsUpdated on each poll for running sessions.
+/// Lifecycle mapping (CodeBuddyTranscriptDecoder): user message (not skipRun) → taskStarted;
+/// function_call → activity(tool name); assistant completed → taskFinished(success);
+/// ai-title/summary → titleUpdate (only retitles existing tasks, never creates phantom tasks).
+/// Context usage: the normalized usage on function_call lines (reusing the decoder's usage
+/// extraction; input + cacheRead ≈ current context size) ÷ the ContextWindows window.
 public final class CodeBuddyChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -28,16 +29,16 @@ public final class CodeBuddyChatTailer {
         var cwd: String?
         var sessionStartedAt: Date?
         var title: String?
-        /// 标题来源优先级：ai-title(2) > summary(1) > 首条 user 文本(0)，高优先级可覆盖
+        /// Title source priority: ai-title(2) > summary(1) > first user text(0); higher wins
         var titleRank: Int = -1
-        /// 当前是否有未收尾的 turn（子 agent 快照只在运行中扫描）
+        /// Whether there is an unfinished turn (subagent snapshots are only scanned while running)
         var running = false
-        /// 当前 turn 起点（taskStarted 时间）：子 agent 快照按它裁到本 turn
+        /// Start of the current turn (taskStarted time); subagent snapshots are clipped to it
         var turnStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
-    /// 各会话上次发出的子 agent 快照（变化才重发；TaskStore 还会再去重）
+    /// Last subagent snapshot emitted per session (re-emitted on change; TaskStore dedups again)
     private var lastSubagents: [String: [SubagentInfo]] = [:]
 
     static let healthName = "codebuddy 事件监视"
@@ -68,7 +69,7 @@ public final class CodeBuddyChatTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public for tests and for the synchronous call at launch
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentSessionFiles() {
@@ -77,7 +78,7 @@ public final class CodeBuddyChatTailer {
         emitSubagentUpdates()
     }
 
-    /// projects/<slug>/*.jsonl 顶层文件（不进 <sessionId>/subagents/ 子目录）
+    /// Top-level projects/<slug>/*.jsonl files (does not descend into <sessionId>/subagents/)
     private func recentSessionFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -106,7 +107,7 @@ public final class CodeBuddyChatTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 会话恢复可能整写文件
+        if size < offset { offset = 0 }  // a session resume may rewrite the whole file
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -152,7 +153,7 @@ public final class CodeBuddyChatTailer {
         if ctx.sessionStartedAt == nil {
             ctx.sessionStartedAt = CodeBuddyTranscriptDecoder.timestamp(root)
         }
-        // 标题优先级：ai-title > summary > 首条 user 文本
+        // Title priority: ai-title > summary > first user text
         switch root["type"] as? String {
         case "ai-title", "summary":
             let rank = root["type"] as? String == "ai-title" ? 2 : 1
@@ -175,7 +176,7 @@ public final class CodeBuddyChatTailer {
         guard var event = CodeBuddyTranscriptDecoder.decode(
             root: root, sessionId: ctx.sessionId, cwd: ctx.cwd)
         else { return nil }
-        // taskFinished 的标题由上下文补（行内不带标题）
+        // taskFinished gets its title from the context (the line carries none)
         if case .taskFinished(let outcome, nil, let detail) = event.kind {
             event.kind = .taskFinished(outcome: outcome, title: ctx.title, detail: detail)
         }
@@ -183,19 +184,20 @@ public final class CodeBuddyChatTailer {
         return event
     }
 
-    /// function_call 行的上下文用量旁路：复用 decoder 的归一化 usage，
-    /// input + cacheRead = 含缓存读的完整提示 ≈ 当前上下文大小
+    /// Context-usage side channel for function_call lines: reuses the decoder's normalized usage;
+    /// input + cacheRead = the full prompt including cache reads ≈ current context size
     private func contextUsage(_ root: [String: Any]) -> (model: String?, used: Int)? {
         guard let (model, usage) = CodeBuddyTranscriptDecoder.usage(root) else { return nil }
         let used = usage.input + usage.cacheRead
         return used > 0 ? (model, used) : nil
     }
 
-    // MARK: - 上下文占用（function_call usage ÷ ContextWindows 窗口）
+    // MARK: - Context usage (function_call usage ÷ ContextWindows window)
 
-    /// 与 kimi/grok tailer 同例：按发射时刻 fresh 事件（stale 闸门会丢掉过期
-    /// contextUpdate），只在变化 ≥0.5 时补发避免刷屏。TaskStore 不为 contextUpdate
-    /// 建任务，且此处只对已跟踪会话发射，不会造幻影任务。
+    /// Same as the kimi/grok tailers: events are stamped fresh at emit time (the stale gate would
+    /// drop an outdated contextUpdate) and re-emitted only on a change ≥0.5 to avoid spam.
+    /// TaskStore never creates a task for contextUpdate, and this only emits for tracked sessions,
+    /// so no phantom tasks.
     private func emitContext(
         for chatURL: URL, context ctx: FileContext,
         usage: (model: String?, used: Int)
@@ -211,8 +213,9 @@ public final class CodeBuddyChatTailer {
             sessionStartedAt: ctx.sessionStartedAt), false)
     }
 
-    /// 新发现文件：只读头部 64KB 建上下文（cwd/起始时间/标题多在头部）
-    /// + 尾部 256KB 恢复"最后状态"，不重放历史；小文件（≤320KB）一次读完。
+    /// Newly discovered file: read only the first 64KB to build context (cwd/start time/title are
+    /// mostly at the head) + the last 256KB to recover the "last state", without replaying history;
+    /// small files (≤320KB) are read in one go.
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
@@ -227,12 +230,12 @@ public final class CodeBuddyChatTailer {
             guard let data = try? handle.readToEnd() else { return }
             chunks = [data]
         } else {
-            // 头部只用于建上下文，末尾可能的半行直接丢弃
+            // The head only builds context; drop any trailing partial line
             guard let head = try? handle.read(upToCount: Int(headLength)) else { return }
             if let lastNewline = head.lastIndex(of: UInt8(ascii: "\n")) {
                 chunks.append(Data(head[head.startIndex...lastNewline]))
             }
-            // 尾部起点可能落在半行中间，对齐到第一个换行之后
+            // The tail start may land mid-line; align to just past the first newline
             guard (try? handle.seek(toOffset: size - tailLength)) != nil,
                   let tail = try? handle.readToEnd()
             else { return }
@@ -260,7 +263,8 @@ public final class CodeBuddyChatTailer {
                 }
             }
         }
-        // 运行状态与 turn 起点：子 agent 快照按 turn 裁剪、只在运行中扫描
+        // Running state and turn start: subagent snapshots are clipped per turn and only scanned
+        // while running
         ctx.running = lastStarted != nil
             && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
         ctx.turnStartedAt = lastStarted?.timestamp
@@ -286,16 +290,18 @@ public final class CodeBuddyChatTailer {
             handler(event, false)
             titleEvent(from: event)
         }
-        // 尾部 usage 反映最新上下文占用（TaskStore 对未知会话直接丢弃，安全）
+        // The tail usage reflects the latest context usage (TaskStore drops unknown sessions, so
+        // this is safe)
         if let lastUsage {
             emitContext(for: url, context: ctx, usage: lastUsage)
         }
     }
 
-    // MARK: - 子 agent 快照（父 transcript 的 function_call/result 对派生）
+    // MARK: - Subagent snapshot (derived from the parent transcript's function_call/result pairs)
 
-    /// 只对已跟踪且运行中的会话扫描（幻影任务不变式：不为未跟踪会话发事件）；
-    /// 快照变化才发（TaskStore 还会再去重）；转空闲后清缓存，下一 turn 重新发。
+    /// Scans only tracked, running sessions (phantom-task invariant: never emit for untracked
+    /// sessions); emits only when the snapshot changes (TaskStore dedups again); clears the cache
+    /// on going idle so the next turn emits afresh.
     private func emitSubagentUpdates() {
         for (path, ctx) in contexts {
             guard ctx.running else {

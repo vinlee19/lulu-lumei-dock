@@ -2,13 +2,16 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 尾随 opencode.db 做实时事件。opencode 无 hook/notify 回调，这是唯一的实时通道。
-/// 同一个库里有两代表，各自一条 rowid 水位、互不影响（一边查询失败不拖累另一边）：
-///   - 1.x：append-only 的 `event` 表（`OpencodeEventDecoder`）
-///   - 2.x：`session_message` 表（`OpencodeSessionMessageDecoder`）。opencode 2.x 与
-///     OpenChamber 自带的 `opencode serve` 只写这一代，`event` 表保持 0 行
-/// 只读打开外部库；首扫定基线到当前最大 rowid，不重放历史（与 Codex initialScan 同理）。
-/// 子会话（subagent）的事件按 parent_id 过滤掉。
+/// Tails opencode.db for live events. opencode has no hook/notify callback, so this is the only
+/// live channel.
+/// The database holds two generations of tables, each with its own rowid watermark and independent
+/// of the other (a failed query on one side doesn't hold back the other):
+///   - 1.x: the append-only `event` table (`OpencodeEventDecoder`)
+///   - 2.x: the `session_message` table (`OpencodeSessionMessageDecoder`). opencode 2.x and
+///     OpenChamber's bundled `opencode serve` write only this generation; `event` stays at 0 rows
+/// Opens the external database read-only; the first scan baselines to the current max rowid and
+/// doesn't replay history (same as Codex initialScan).
+/// Child-session (subagent) events are filtered out by parent_id.
 public final class OpencodeEventTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -17,20 +20,21 @@ public final class OpencodeEventTailer {
     private let queue = DispatchQueue(label: "com.vinlee.eureka.opencode-tailer")
     private var timer: DispatchSourceTimer?
 
-    private var lastRowid: Int64 = -1  // -1 = 未初始化（首扫定基线）
+    private var lastRowid: Int64 = -1  // -1 = uninitialized (first scan sets the baseline)
     private var knownTopLevel = Set<String>()
     private var knownChild = Set<String>()
 
-    private var lastMessageRowid: Int64 = -1  // session_message 水位，语义同 lastRowid
-    /// 2.x 会话归属缓存：ignored = 子会话、不发事件；live 带 cwd
+    private var lastMessageRowid: Int64 = -1  // session_message watermark, like lastRowid
+    /// 2.x session ownership cache: ignored = child session, emits no events; live carries the cwd
     private var v2Sessions: [String: V2Session] = [:]
     private enum V2Session {
         case live(cwd: String?)
         case ignored
     }
 
-    /// 事件自身时间戳距今超过此秒数即视为积压：只入历史/用量、不触发岛动画
-    /// （与 spool / Hermes tailer 同一口径；消息完成时间可能是几周前的历史）
+    /// An event whose own timestamp is older than this many seconds is backlog: it only enters
+    /// history/usage and never triggers island animations (same rule as the spool / Hermes
+    /// tailer; a message's completion time may be weeks old)
     private let staleThreshold: TimeInterval = 300
 
     static let healthName = "opencode 事件监视"
@@ -43,7 +47,8 @@ public final class OpencodeEventTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must stay below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -57,7 +62,7 @@ public final class OpencodeEventTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动同步调用
+    /// Public so tests and launch can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         guard FileManager.default.fileExists(atPath: dbPath.path),
@@ -67,19 +72,23 @@ public final class OpencodeEventTailer {
         scanSessionMessages(db, now: now)
     }
 
-    /// 推进 rowid 水位；返回 nil = 本轮跳过（首扫 / 查询失败 / 表变小）。
+    /// Advances the rowid watermark; returns nil = skip this tick (first scan / failed query /
+    /// table shrank).
     ///
-    /// 水位查询失败（IO 抖动 / 锁超时 / 表暂不可用）必须原样返回、保住水位，下轮再试。
-    /// 之前把失败读成 0 再当作"rowid 回退"把水位归零 —— 下一轮就把 25,571 条历史事件
-    /// 整表当实时事件重放（2026-09-05 实测：灵动岛排进上百张完成卡收不回去，
-    /// 22 个 7、8 月的旧会话被重建成运行中、一分钟后又被判"中断"写进历史）。
+    /// A failed watermark query (IO hiccup / lock timeout / table briefly unavailable) must bail
+    /// out with the watermark intact and retry on the next tick. Previously a failure was read as 0
+    /// and then treated as a "rowid regression" that reset the watermark to zero — the next tick
+    /// replayed all 25,571 historical events as live events (observed 2026-09-05: the island queued
+    /// hundreds of finished cards it couldn't clear, and 22 old sessions from July/August were
+    /// rebuilt as running, then judged "interrupted" a minute later and written to history).
     private func baseline(_ watermark: inout Int64, table: String, db: SQLiteDB) -> Int64? {
         guard let maxRowid = (try? db.query("SELECT COALESCE(MAX(rowid), 0) FROM \(table)") {
             $0.int(0)
         })?.first else { return nil }
         if watermark < 0 || maxRowid < watermark {
-            // 首扫、或表被重建变小（rowid 真回退）：都只定基线、不重放 —— 重建后的表里
-            // 装的同样是历史，当实时事件重放一样会灌满岛；之后的新事件照常增量送达
+            // First scan, or the table was rebuilt smaller (a real rowid regression): only
+            // baseline, never replay — a rebuilt table holds history too, and replaying it as live
+            // would flood the island just the same; later new events still arrive incrementally
             watermark = maxRowid
             return nil
         }
@@ -88,12 +97,13 @@ public final class OpencodeEventTailer {
 
     private func emit(_ event: TaskEvent, now: Date) {
         HealthRegistry.shared.event(Self.healthName)
-        // 按事件自身时间戳判积压：即便水位失守重放了历史，几周前完成的消息
-        // 也只会进历史/用量，不会再排成岛卡
+        // Judge backlog by the event's own timestamp: even if the watermark is lost and
+        // history replays, messages completed weeks ago only go to history/usage and never
+        // queue up as island cards
         handler(event, now.timeIntervalSince(event.timestamp) > staleThreshold)
     }
 
-    // MARK: - 1.x：event 表
+    // MARK: - 1.x: event table
 
     private func scanEventTable(_ db: SQLiteDB, now: Date) {
         guard let from = baseline(&lastRowid, table: "event", db: db) else { return }
@@ -115,7 +125,8 @@ public final class OpencodeEventTailer {
         }
     }
 
-    /// 会话是否为子 agent（session.parent_id 非空）。每个 session id 只查一次表，缓存。
+    /// Whether the session is a subagent (session.parent_id non-empty). The table is queried once
+    /// per session id and cached.
     private func isChildSession(_ sessionID: String, db: SQLiteDB) -> Bool {
         if knownChild.contains(sessionID) { return true }
         if knownTopLevel.contains(sessionID) { return false }
@@ -127,13 +138,14 @@ public final class OpencodeEventTailer {
         return child
     }
 
-    // MARK: - 2.x：session_message 表
+    // MARK: - 2.x: session_message table
 
     private func scanSessionMessages(_ db: SQLiteDB, now: Date) {
         guard let from = baseline(&lastMessageRowid, table: "session_message", db: db) else {
             return
         }
-        // 升级迁移在 app 运行期间发生时，1.x 历史消息会按原 id 整批插入：逐行排除，免得当实时事件
+        // If the upgrade migration runs while the app is up, 1.x history messages are bulk-inserted
+        // under their original ids: exclude them row by row so they aren't emitted as live events
         let notCopiedFromV1 = db.tableExists("message")
             ? "AND NOT EXISTS (SELECT 1 FROM message o WHERE o.id = m.id)" : ""
         let rows = (try? db.query("""
@@ -157,13 +169,15 @@ public final class OpencodeEventTailer {
         }
     }
 
-    /// 2.x 会话归属：子会话（parent_id 非空）不发事件。每个 session id 只查一次表。
+    /// 2.x session ownership: child sessions (non-empty parent_id) emit no events. Each session id
+    /// is looked up in the table only once.
     private func v2Session(_ sessionID: String, db: SQLiteDB) -> V2Session {
         if let cached = v2Sessions[sessionID] { return cached }
         let rows = (try? db.query(
             "SELECT parent_id, directory FROM session_v2 WHERE id = ?",
             [.text(sessionID)]) { row in (row.text(0), row.text(1)) }) ?? []
-        // 消息先于会话行可见（不应发生）：本条按顶层处理，不缓存，下次再查
+        // Message visible before its session row (shouldn't happen): treat it as top-level, don't
+        // cache, look it up again next time
         guard let (parent, directory) = rows.first else { return .live(cwd: nil) }
         let resolved: V2Session = parent?.isEmpty == false ? .ignored : .live(cwd: directory)
         v2Sessions[sessionID] = resolved

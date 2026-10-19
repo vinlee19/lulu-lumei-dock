@@ -1,19 +1,21 @@
 import EurekaStore
 import Foundation
 
-/// Cursor 的 workspace 反查表：composer（会话）→ 工程目录。
+/// Cursor's workspace lookup table: composer (session) → project directory.
 ///
-/// 为什么需要单独一层：`composerHeaders` 只带 `workspaceId`（一串 hash），
-/// 真正的目录在 `workspaceStorage/<wsId>/workspace.json` 的 `folder` 字段里。
-/// 而且 `composerHeaders` **只覆盖当前已打开的 workspace**（实勘：本机 35 行 / 全库 151 个会话），
-/// 其余历史会话的会话头散落在各 workspace 自己的
-/// `state.vscdb → ItemTable['composer.composerData'].allComposers` 里。
+/// Why a separate layer: `composerHeaders` only carries `workspaceId` (a hash string), while the
+/// real directory is in the `folder` field of `workspaceStorage/<wsId>/workspace.json`. Also,
+/// `composerHeaders` **only covers currently open workspaces** (observed: 35 rows locally vs 151
+/// sessions in the whole database); the headers of the remaining historical sessions are scattered
+/// across each workspace's own `state.vscdb → ItemTable['composer.composerData'].allComposers`.
 ///
-/// 于是分两个口子：
-///   - `folders(root:)` — 只读 `workspace.json`，轻量，tailer 每轮都可以调（带 30s 缓存）；
-///   - `historicalComposers(root:)` — 要逐个打开 workspace 库，只给会话页/项目发现用。
+/// Hence two entry points:
+///   - `folders(root:)` — reads only `workspace.json`; lightweight, so the tailer can call it every
+///     pass (with a 30s cache);
+///   - `historicalComposers(root:)` — has to open each workspace database; only for the sessions
+///     page / project discovery.
 public enum CursorWorkspaceIndex {
-    /// 历史会话头（来自各 workspace 库的 `allComposers`）
+    /// Historical session header (from a workspace database's `allComposers`)
     public struct Entry: Equatable, Sendable {
         public var composerId: String
         public var workspaceId: String
@@ -38,11 +40,12 @@ public enum CursorWorkspaceIndex {
     private static let lock = NSLock()
     private static var folderCache: [String: (value: [String: String], at: Date)] = [:]
     private static var composerCache: [String: (value: [Entry], at: Date)] = [:]
-    /// 目录增减只在开/关 workspace 时发生，30s 粒度足够，省掉每 2s 的 11 次小文件读
-    /// 与 11 次 SQLite 只读连接（审计扫描是 2s 一轮，不缓存会把开销打进热路径）
+    /// Directories only change when a workspace is opened/closed, so 30s granularity is enough. It
+    /// saves 11 small file reads and 11 read-only SQLite connections every 2s (the audit scan runs
+    /// every 2s; without the cache that cost lands on the hot path).
     private static let cacheTTL: TimeInterval = 30
 
-    /// `workspaceId → cwd`（绝对路径）。`empty-window` 之类没有 folder 的条目直接跳过。
+    /// `workspaceId → cwd` (absolute path). Folderless entries such as `empty-window` are skipped.
     public static func folders(
         root: URL = CursorPaths.workspaceStorageRoot(), now: Date = Date()
     ) -> [String: String] {
@@ -72,8 +75,9 @@ public enum CursorWorkspaceIndex {
         return result
     }
 
-    /// 各 workspace 库里的历史会话头。开销较大（逐库开只读连接）→ 同样 30s 缓存。
-    /// 别放进 tailer 的每轮热路径；会话页刷新 / 项目发现 / 审计与用量扫描共用这份缓存。
+    /// Historical session headers from each workspace database. Expensive (one read-only connection
+    /// per database) → also cached for 30s. Keep it off the tailer's per-pass hot path; sessions
+    /// page refresh / project discovery / audit and usage scans share this cache.
     public static func historicalComposers(
         root: URL = CursorPaths.workspaceStorageRoot(), now: Date = Date()
     ) -> [Entry] {
@@ -125,13 +129,13 @@ public enum CursorWorkspaceIndex {
         return results
     }
 
-    /// Cursor 的时间戳一律是 epoch 毫秒（`createdAt` / `lastUpdatedAt` / `recency`）
+    /// Cursor timestamps are always epoch milliseconds (`createdAt` / `lastUpdatedAt` / `recency`)
     static func epochMillis(_ raw: Any?) -> Date? {
         guard let millis = (raw as? NSNumber)?.doubleValue, millis > 0 else { return nil }
         return Date(timeIntervalSince1970: millis / 1000)
     }
 
-    /// 仅供测试：清掉缓存，免得临时目录之间串台
+    /// Test-only: clears the cache so temporary directories don't bleed into each other
     public static func resetCacheForTesting() {
         lock.lock()
         folderCache.removeAll()

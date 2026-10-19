@@ -23,7 +23,7 @@ func planMaterializerTests(_ t: TestRunner) {
         let staging = base.appendingPathComponent("staging", isDirectory: true)
         try fm.createDirectory(at: sessions, withIntermediateDirectories: true)
 
-        // 有两次 update_plan：第二次是最终态；夹杂噪声行
+        // Two update_plan calls: the second is the final state; noise lines mixed in
         let rollout = sessions.appendingPathComponent("rollout-2025-11-17T10-18-25-abc.jsonl")
         let lines = [
             #"{"type":"response_item","payload":{"type":"message","role":"user"}}"#,
@@ -32,7 +32,7 @@ func planMaterializerTests(_ t: TestRunner) {
             #"{"type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"status\":\"completed\",\"step\":\"搞定甲\"},{\"status\":\"in_progress\",\"step\":\"进行乙\"},{\"status\":\"pending\",\"step\":\"待办丙\"}]}"}}"#,
         ]
         try lines.joined(separator: "\n").write(to: rollout, atomically: true, encoding: .utf8)
-        // 一个没有 update_plan 的 rollout → 不应产文件
+        // A rollout with no update_plan → should produce no file
         let noPlan = sessions.appendingPathComponent("rollout-2025-11-17T11-00-00-def.jsonl")
         try #"{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{}"}}"#
             .write(to: noPlan, atomically: true, encoding: .utf8)
@@ -53,7 +53,7 @@ func planMaterializerTests(_ t: TestRunner) {
                 "codex/rollout-2025-11-17T11-00-00-def.md").path),
             "无 update_plan 的 rollout 不产文件")
 
-        // 重复运行：内容未变 → 不重写 → mtime 稳定（同步去重不会重传）
+        // Repeated run: content unchanged → no rewrite → mtime stable (sync dedup won't re-upload)
         let mtime1 = try out.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         let again = PlanMaterializer.materializeCodex(
             sessionsRoot: base.appendingPathComponent("sessions", isDirectory: true), into: staging)
@@ -99,7 +99,8 @@ func planMaterializerTests(_ t: TestRunner) {
                 ],
             ]),
         ]
-        // 最后一行故意不加换行，验证完整静态 rollout 也能被物化。
+        // The last line deliberately has no trailing newline, verifying a complete static rollout
+        // still materializes.
         try lines.joined(separator: "\n").write(to: rollout, atomically: true, encoding: .utf8)
         let indexURL = base.appendingPathComponent("session_index.jsonl")
         try jsonLine(["id": "session-final", "thread_name": "Codex 标题计划修复"])
@@ -146,7 +147,7 @@ func planMaterializerTests(_ t: TestRunner) {
             """)
             try db.run("INSERT INTO session VALUES (?,?,?,?,?,?)",
                 [.text("s1"), .null, .text("/w"), .text("重构管道"), .int(1000), .int(2000)])
-            // plan 模式 assistant 消息（含 text + reasoning）
+            // plan-mode assistant message (with text + reasoning)
             try db.run("INSERT INTO message VALUES (?,?,?,?,?)",
                 [.text("m1"), .text("s1"), .int(1000), .int(1000),
                  .text(#"{"role":"assistant","mode":"plan"}"#)])
@@ -156,7 +157,7 @@ func planMaterializerTests(_ t: TestRunner) {
             try db.run("INSERT INTO part VALUES (?,?,?,?,?,?)",
                 [.text("p2"), .text("m1"), .text("s1"), .int(1001), .int(1001),
                  .text(#"{"type":"reasoning","text":"思考(不应收)"}"#)])
-            // build 模式消息（不应收）
+            // build-mode message (should not be collected)
             try db.run("INSERT INTO message VALUES (?,?,?,?,?)",
                 [.text("m2"), .text("s1"), .int(3000), .int(3000),
                  .text(#"{"role":"assistant","mode":"build"}"#)])
@@ -188,7 +189,8 @@ func planMaterializerTests(_ t: TestRunner) {
         try fm.createDirectory(at: staging.appendingPathComponent("opencode"), withIntermediateDirectories: true)
         try "# Claude 计划甲\n正文".write(
             to: claudePlans.appendingPathComponent("plan-a.md"), atomically: true, encoding: .utf8)
-        // 占位标题「Codex 计划」应在索引阶段被正文首步取代（见下方断言）
+        // The placeholder "Codex plan" title should be replaced by the body's first step at index
+        // time (see the assertions below)
         try "# Codex 计划\n- [ ] 收敛 relay 重试策略".write(
             to: staging.appendingPathComponent("codex/roll.md"), atomically: true, encoding: .utf8)
         try "# 会话标题\n正文".write(
@@ -209,12 +211,12 @@ func planMaterializerTests(_ t: TestRunner) {
         defer { try? fm.removeItem(at: base) }
         let sessions = base.appendingPathComponent("sessions", isDirectory: true)
         let staging = base.appendingPathComponent("staging", isDirectory: true)
-        // 有 plan.md 的会话
+        // Session with a plan.md
         let s1 = sessions.appendingPathComponent("enc-demo/uuid-1", isDirectory: true)
         try fm.createDirectory(at: s1, withIntermediateDirectories: true)
         try "# Plan: 深入调研\n\n## Context\n正文".write(
             to: s1.appendingPathComponent("plan.md"), atomically: true, encoding: .utf8)
-        // 空白 plan.md 的会话（应跳过）
+        // Session with a blank plan.md (should be skipped)
         let s2 = sessions.appendingPathComponent("enc-demo/uuid-2", isDirectory: true)
         try fm.createDirectory(at: s2, withIntermediateDirectories: true)
         try "   \n".write(to: s2.appendingPathComponent("plan.md"), atomically: true, encoding: .utf8)
@@ -231,7 +233,7 @@ func planMaterializerTests(_ t: TestRunner) {
         try expect(entries.contains { $0.source == .grok && $0.title == "Plan: 深入调研" },
                    "index 应含 .grok 计划，标题取首个 # 行")
 
-        // 重复运行内容未变 → 不重写（mtime 稳定）
+        // Repeated run with unchanged content → no rewrite (mtime stable)
         try expectEqual(PlanMaterializer.materializeGrok(sessionsRoot: sessions, into: staging), 0)
     }
 
@@ -253,13 +255,14 @@ func planMaterializerTests(_ t: TestRunner) {
         let stateURL = staging.appendingPathComponent("codex/.scan-state.json")
         try expect(fm.fileExists(atPath: stateURL.path), "应写指纹侧车")
 
-        // 二跑：指纹未变 → 0 改动（走跳过路径，产物仍受保护不被清理）
+        // Second run: fingerprint unchanged → 0 changes (takes the skip path; outputs stay
+        // protected from cleanup)
         try expectEqual(
             PlanMaterializer.materializeCodex(sessionsRoot: sessionsRoot, into: staging), 0)
         let out = staging.appendingPathComponent("codex/rollout-2025-11-17T10-00-00-aaa.md")
         try expect(fm.fileExists(atPath: out.path), "跳过解析时产物不应被误清")
 
-        // 追加新 update_plan（size 变化）→ 重物化,产物更新
+        // Append a new update_plan (size changes) → re-materialize, output updated
         let newer = planLine.replacingOccurrences(of: "步骤一", with: "步骤二更长的")
         try (planLine + "\n" + newer).write(to: rollout, atomically: true, encoding: .utf8)
         try expectEqual(
@@ -267,7 +270,7 @@ func planMaterializerTests(_ t: TestRunner) {
         let content = try String(contentsOf: out, encoding: .utf8)
         try expect(content.contains("步骤二更长的"), "变更文件应重物化")
 
-        // 删除 rollout → 产物被清理
+        // Delete the rollout → its output is cleaned up
         try fm.removeItem(at: rollout)
         try expectEqual(
             PlanMaterializer.materializeCodex(sessionsRoot: sessionsRoot, into: staging), 1)
@@ -289,9 +292,9 @@ func planMaterializerTests(_ t: TestRunner) {
         try write("plans/top.md", "# 顶层方案\n正文")
         try write("docs/plans/a.md", "# 字段映射方案\n正文")
         try write("docs/superpowers/plans/b.md", "无标题正文")
-        try write("docs/plans/README.md", "# 说明")             // 忽略
-        try write("docs/plans/notes.txt", "非 markdown")        // 忽略
-        try write("docs/a/b/c/d/plans/deep.md", "# 超深")       // 深度 >4 忽略
+        try write("docs/plans/README.md", "# 说明")             // ignored
+        try write("docs/plans/notes.txt", "非 markdown")        // ignored
+        try write("docs/a/b/c/d/plans/deep.md", "# 超深")       // depth >4, ignored
 
         let entries = PlanMaterializer.indexProjectPlans(roots: [(root, "my-proj")])
         try expectEqual(entries.count, 3)

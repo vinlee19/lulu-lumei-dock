@@ -4,24 +4,27 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-/// 限额服务：Codex / Grok（本地日志快照，零网络）+ Claude（opt-in 非官方接口）。
-/// Provider 返回 nil = 该来源整块隐藏。
-/// 每次刷新同时落一行百分比采样（limit_samples）并线性外推"预计打满时刻"，
-/// 命中视距（<90 分钟）时经 onAlert 弹岛卡（每源每窗口期一次）。
+/// Rate-limit service: Codex / Grok (local log snapshots, zero network) + Claude (opt-in unofficial
+/// API). A provider returning nil = that source's whole block is hidden. Each refresh also persists
+/// one percentage sample row (limit_samples) and linearly extrapolates the "expected to be full at"
+/// time; when that falls within the horizon (<90 minutes) an island card is raised via onAlert
+/// (once per source per window period).
 final class RateLimitsService: ObservableObject {
     @Published private(set) var codex: RateLimitSnapshot?
     @Published private(set) var grok: RateLimitSnapshot?
     @Published private(set) var claude: RateLimitSnapshot?
-    /// Antigravity：暂无可靠的本地额度来源（agy 只在内存里持有线上额度），恒为 nil
+    /// Antigravity: no reliable local quota source yet (agy holds the live quota only in memory),
+    /// always nil
     @Published private(set) var antigravity: RateLimitSnapshot?
     @Published private(set) var claudeFailureHint: String?
-    /// 各窗口的预计打满时刻（key = "\(source.rawValue)#primary" / "#secondary"；无风险即缺席）
+    /// Expected full-at time per window (key = "\(source.rawValue)#primary" / "#secondary"; absent
+    /// when not at risk)
     @Published private(set) var forecasts: [String: Date] = [:]
 
-    /// 预测告警回调（AppDelegate 注入 → 灵动岛卡片）
+    /// Forecast alert callback (injected by AppDelegate → Dynamic Island card)
     var onAlert: ((IslandNotice) -> Void)?
 
-    /// 非官方接口默认关闭
+    /// The unofficial API is off by default
     @Published var claudeEnabled: Bool = UserDefaults.standard.bool(forKey: "claudeLimitsEnabled") {
         didSet {
             UserDefaults.standard.set(claudeEnabled, forKey: "claudeLimitsEnabled")
@@ -36,7 +39,8 @@ final class RateLimitsService: ObservableObject {
 
     private let codexProvider = CodexRateLimitProvider(
         sessionsRoot: CodexRolloutTailer.defaultSessionsRoot())
-    // Grok 配额同 Codex：本地日志快照、零网络、失败即隐藏 → 无需 opt-in
+    // Grok quota works like Codex: local log snapshot, zero network, hidden on failure → no opt-in
+    // needed
     private let grokProvider = GrokRateLimitProvider(logURL: GrokPaths.unifiedLog())
     private let claudeProvider = ClaudeOAuthUsageProvider()
     private var timer: Timer?
@@ -44,10 +48,11 @@ final class RateLimitsService: ObservableObject {
 
     private let sampleQueue = DispatchQueue(
         label: "com.vinlee.eureka.limit-samples", qos: .utility)
-    /// 仅 sampleQueue 上访问
+    /// Accessed only on sampleQueue
     private var sampleStore: EurekaStore?
     private var sampleStoreLoaded = false
-    /// 已告警的 (source, window, 重置期) 键——每窗口期只弹一次；main 上访问
+    /// Keys of (source, window, reset period) already alerted: one alert per window period;
+    /// accessed on main
     private var alertedKeys: Set<String> = []
 
     func start() {
@@ -80,7 +85,7 @@ final class RateLimitsService: ObservableObject {
         }
     }
 
-    // MARK: - 采样与预测
+    // MARK: - Sampling and forecasting
 
     private func recordAndForecast(_ snapshots: [RateLimitSnapshot?]) {
         sampleQueue.async { [weak self] in
@@ -135,7 +140,8 @@ final class RateLimitsService: ObservableObject {
         else { return }
         for candidate in candidates {
             guard let eta = forecasts[candidate.key] else { continue }
-            // 每源每窗口期一次：重置时刻进 key，窗口翻转后自然解锁
+            // Once per source per window period: the reset time is part of the key, so it unlocks
+            // naturally once the window rolls over
             let epoch = Int(candidate.window.resetsAt?.timeIntervalSince1970 ?? 0)
             let dedupKey = "\(candidate.key)#\(epoch)"
             guard !alertedKeys.contains(dedupKey) else { continue }
@@ -146,19 +152,18 @@ final class RateLimitsService: ObservableObject {
             onAlert?(IslandNotice(
                 id: "limit-\(dedupKey)",
                 emoji: "⏳",
-                headline: "\(candidate.source.displayName) \(label)预计 \(timeText) 打满",
-                body: "当前已用 \(Int(candidate.window.usedPercent.rounded()))%，"
-                    + "按最近用量速度外推。注意安排任务，打满后需等窗口重置。"))
+                headline: L10n.format("%@ %@ is expected to reach its limit at %@", zhHans: "%@ %@预计 %@ 打满", String(candidate.source.displayName), String(label), String(timeText)),
+                body: L10n.format("Currently %@%% used, projected from recent usage. Schedule tasks accordingly; once full, you must wait for the window to reset.", zhHans: "当前已用 %@%%，按最近用量速度外推。注意安排任务，打满后需等窗口重置。", String(Int(candidate.window.usedPercent.rounded())))))
         }
     }
 
-    /// 窗口时长 → 告警文案标签（与限额面板口径一致）
+    /// Window duration → alert copy label (same basis as the limits panel)
     private static func windowLabel(_ minutes: Int, isPrimary: Bool) -> String {
         switch minutes {
-        case 300: return "5 小时窗口"
-        case 10080: return "每周窗口"
-        case 43200: return "每月窗口"
-        default: return isPrimary ? "短窗口" : "长窗口"
+        case 300: return L10n.text("5-hour window", zhHans: "5 小时窗口")
+        case 10080: return L10n.text("Weekly window", zhHans: "每周窗口")
+        case 43200: return L10n.text("Monthly window", zhHans: "每月窗口")
+        default: return isPrimary ? L10n.text("Short window", zhHans: "短窗口") : L10n.text("Long window", zhHans: "长窗口")
         }
     }
 }

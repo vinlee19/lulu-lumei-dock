@@ -2,47 +2,58 @@ import Charts
 import EurekaKit
 import SwiftUI
 
-/// 任务历史：近 14 天按结局堆叠图 + 置顶「运行中」分组 + 四档分组时间线
-/// （今天/昨天/本周更早/更早）。逐轮（turn）记录按会话合并为一行——数据层每轮一条，
-/// 逐轮展示像重复；合并后显会话开始时间/时长合计/Tokens 总量（右侧统计栏），
-/// 多轮会话带「N 轮」角标。成功绿圈✓ / 失败红圈✕ / 中断灰圈—，旁带文字标签。
-/// 支持「最近活跃 / 开始时间」排序与 CSV 导出（导出仍逐轮，口径不变）。
+/// Task history: last-14-days chart stacked by outcome + pinned "Running" group + a timeline in
+/// four groups (Today / Yesterday / Earlier this week / Older). Per-turn records are merged into
+/// one row per session — the data layer has one row per turn, and showing each turn looks like
+/// duplicates; merged rows show session start time / total duration / total tokens (right stats
+/// column), and multi-turn sessions get an "N turns" badge. Success green ✓ / failure red ✕ /
+/// interrupted gray —, each with a text label. Supports "Recently active / Start time" sorting and
+/// CSV export (export stays per turn, same semantics).
 struct HistoryView: View {
-    /// 逐轮历史记录（视图内按会话合并展示）
+    /// Per-turn history records (merged by session for display in this view)
     let tasks: [FinishedTask]
-    /// 近 14 天按 (天, 结局) 计数（堆叠图；无任务日不出现，这里补 0）
+    /// Counts by (day, outcome) for the last 14 days (stacked chart; days without tasks are absent,
+    /// zero-filled here)
     var dailyOutcomes: [(day: Date, outcome: TaskOutcome, count: Int)] = []
-    /// sessionId → token 总量（右侧统计栏；无记录显「—」）
+    /// sessionId → total tokens (right stats column; shows an em dash when there are no records)
     var tokens: [String: Int] = [:]
-    /// 运行中任务（置顶分组；图标换循环箭头 + 品牌色）
+    /// Running tasks (pinned group; icon becomes a looping arrow + brand color)
     var runningTasks: [AgentTask] = []
-    /// 会话 → 最近所在终端，键 `AgentTask.key(source:sessionId:)`。
-    /// 传纯字典而不是 service：本视图只依赖 EurekaKit + SwiftUI，不该反向依赖服务层。
+    /// Session → most recent terminal, keyed by `AgentTask.key(source:sessionId:)`. A plain
+    /// dictionary rather than a service: this view depends only on EurekaKit + SwiftUI and must not
+    /// depend back on the service layer.
     var terminals: [String: TerminalBinding] = [:]
-    /// 导出 CSV（含确认弹窗，由本视图触发）；导出结果提示由调用方注入展示
+    /// CSV export (with a confirmation dialog, triggered by this view); the caller injects how the
+    /// export result is shown
     var onExport: () -> Void = {}
     var exportMessage: String?
     @ObservedObject var settings: AppSettings
 
     @State private var showExportConfirm = false
 
-    /// rawValue 为持久化 token；label 为界面文案
+    /// rawValue is the persisted token; label is the UI copy
     enum SortMode: String, CaseIterable {
         case active
         case start
-        var label: String { self == .active ? "最近活跃" : "开始时间" }
+        var label: String {
+            self == .active
+                ? L10n.text("Recently active", zhHans: "最近活跃")
+                : L10n.text("Start time", zhHans: "开始时间")
+        }
     }
 
     private var sortMode: SortMode {
         SortMode(rawValue: settings.historySortMode) ?? .active
     }
 
-    /// 逐轮记录按会话合并（同 sessionId 每轮一条，逐轮展示像重复）
+    /// Merge per-turn records by session (one row per turn for the same sessionId, which looks like
+    /// duplicates)
     private var mergedSessions: [MergedSessionTask] {
         HistoryGrouping.mergeSessions(tasks)
     }
 
-    /// 客户端排序（200 行内成本可忽略）：活跃=最近一轮 finishedAt，开始=会话最初开始时间
+    /// Client-side sort (negligible cost within 200 rows): active = latest turn's finishedAt, start
+    /// = session's first start time
     private var sortedTasks: [MergedSessionTask] {
         switch sortMode {
         case .active:
@@ -56,7 +67,7 @@ struct HistoryView: View {
         task.sessionStartedAt ?? task.finishedAt
     }
 
-    /// 分组键（跟随当前排序依据的日期）
+    /// Group key (the date matching the current sort basis)
     private func groupKey(_ task: MergedSessionTask) -> Date {
         sortMode == .active ? task.finishedAt : startKey(task)
     }
@@ -101,11 +112,13 @@ struct HistoryView: View {
         return (rows, tasks.count - utilityCount)
     }
 
-    /// 四档分组：今天 / 昨天 / 本周更早 / 更早（sortedTasks 已倒序，组内保持该顺序）。
-    /// 运行中的会话已在置顶分组呈现，这里必须剔除：AgentTask.id 与 MergedSessionTask.id
-    /// 同为 `source:sessionId`，同一 id 在同一个 LazyVStack 的两个 ForEach 里重复出现时，
-    /// SwiftUI 会把后者渲染成只占位不显示的空洞——历史列表里表现为组内一大段空白
-    /// （成因同 AgentDefinitionIndexer 的重复 path 网格空洞）。
+    /// Four groups: Today / Yesterday / Earlier this week / Older (sortedTasks is already
+    /// descending; keep that order within groups). Running sessions are already shown in the pinned
+    /// group and must be excluded here: AgentTask.id and MergedSessionTask.id are both
+    /// `source:sessionId`, and when the same id appears in two ForEach blocks within one
+    /// LazyVStack, SwiftUI renders the latter as a hole that takes space but shows nothing — in the
+    /// history list a big blank stretch within a group (same cause as the duplicate-path grid holes
+    /// in AgentDefinitionIndexer).
     private var dayGroups: [(group: HistoryDayGroup, tasks: [MergedSessionTask])] {
         let runningKeys = Set(runningTasks.map(\.id))
         var buckets: [HistoryDayGroup: [MergedSessionTask]] = [:]
@@ -125,10 +138,10 @@ struct HistoryView: View {
                 Image(systemName: "tray")
                     .font(.system(size: 28))
                     .foregroundStyle(Theme.brandFg.opacity(0.45))
-                Text("还没有任务记录")
+                Text(L10n.text("No task history yet", zhHans: "还没有任务记录"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Text("跑一次 claude / codex / grok 任务试试")
+                Text(L10n.text("Try a claude / codex / grok task", zhHans: "跑一次 claude / codex / grok 任务试试"))
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -145,9 +158,10 @@ struct HistoryView: View {
                             .padding(.horizontal, 12)
                             .padding(.top, 10)
 
-                        // 运行中分组（置顶；复用 HistoryRow 样式，图标/色/标签换运行中语义）
+                        // Running group (pinned; reuses the HistoryRow style with running-state
+                        // icon / color / label)
                         if !runningTasks.isEmpty {
-                            groupHeader(title: "运行中", count: runningTasks.count)
+                            groupHeader(title: L10n.text("Running", zhHans: "运行中"), count: runningTasks.count)
                             ForEach(runningTasks) { task in
                                 RunningRow(
                                     task: task,
@@ -171,7 +185,9 @@ struct HistoryView: View {
                                 case .utilities(let count):
                                     HarnessUtilityRow(
                                         count: count,
-                                        subtitle: "记忆压缩、分支名生成这类内部提示，不是你发起的会话",
+                                        subtitle: L10n.text(
+                                            "Internal prompts such as memory compaction and branch naming, not sessions you started",
+                                            zhHans: "记忆压缩、分支名生成这类内部提示，不是你发起的会话"),
                                         verticalPadding: Theme.spacing.row)
                                 }
                                 Divider().padding(.leading, 44).opacity(0.5)
@@ -182,22 +198,22 @@ struct HistoryView: View {
                 }
             }
             .confirmationDialog(
-                "导出近 14 天任务历史为 CSV 到下载目录？",
+                L10n.text("Export the last 14 days of task history as CSV to Downloads?", zhHans: "导出近 14 天任务历史为 CSV 到下载目录？"),
                 isPresented: $showExportConfirm, titleVisibility: .visible
             ) {
-                Button("导出") { onExport() }
-                Button("取消", role: .cancel) {}
+                Button(L10n.text("Export", zhHans: "导出")) { onExport() }
+                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
             }
         }
     }
 
-    // MARK: - 顶栏（标题 + 跨源/条数 + 排序胶囊 + 导出）
+    // MARK: - Top bar (title + cross-source / count + sort capsule + export)
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("任务历史")
+            Text(L10n.text("Task history", zhHans: "任务历史"))
                 .font(Theme.font.pageTitle)
-            Text("跨 \(Set(tasks.map(\.source)).count) 个来源 · 共 \(userSessionCount) 个会话")
+            Text(L10n.format("Across %@ sources · %@ sessions", zhHans: "跨 %@ 个来源 · 共 %@ 个会话", "\(Set(tasks.map(\.source)).count)", "\(userSessionCount)"))
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             if let exportMessage {
@@ -216,7 +232,7 @@ struct HistoryView: View {
                     ) { settings.historySortMode = mode.rawValue }
                 }
             }
-            CardActionButton(icon: "square.and.arrow.up", help: "导出近 14 天历史为 CSV") {
+            CardActionButton(icon: "square.and.arrow.up", help: L10n.text("Export the last 14 days as CSV", zhHans: "导出近 14 天历史为 CSV")) {
                 showExportConfirm = true
             }
         }
@@ -224,9 +240,10 @@ struct HistoryView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - 近 14 天任务量（按结局堆叠）
+    // MARK: - Task volume over the last 14 days (stacked by outcome)
 
-    /// 图表数据点（零值日也出点：x 域固定 14 天，缺数据的日柱子为 0 高）
+    /// Chart data point (zero days still get a point: the x domain is fixed at 14 days, days
+    /// without data get zero-height bars)
     private struct ChartPoint: Identifiable {
         var id: String { "\(day.timeIntervalSince1970)-\(outcome.rawValue)" }
         var day: Date
@@ -234,7 +251,8 @@ struct HistoryView: View {
         var count: Int
     }
 
-    /// 补 0 后的 14 天 × 三结局全量点（堆叠柱不画 0 高段，但轴域稳定）+ 14 天日序列
+    /// Full zero-filled points for 14 days × three outcomes (stacked bars skip zero-height
+    /// segments, but the axis domain stays stable) + the 14-day date sequence
     private var chartSeries: (points: [ChartPoint], days: [Date]) {
         let cal = Calendar.current
         let todayStart = cal.startOfDay(for: Date())
@@ -262,13 +280,13 @@ struct HistoryView: View {
             SectionCard {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
-                        Text("近 14 天任务量")
+                        Text(L10n.text("Tasks over the last 14 days", zhHans: "近 14 天任务量"))
                             .font(Theme.font.themed(12, .semibold))
-                        Text("按结局堆叠")
+                        Text(L10n.text("Stacked by outcome", zhHans: "按结局堆叠"))
                             .font(Theme.font.caption)
                             .foregroundStyle(.tertiary)
                         Spacer(minLength: 8)
-                        // 图例合计：成功 N / 失败 N / 中断 N
+                        // Legend totals: success N / failure N / interrupted N
                         ForEach(TaskOutcome.allCases, id: \.self) { outcome in
                             let count = series.points.filter { $0.outcome == outcome }
                                 .reduce(0) { $0 + $1.count }
@@ -284,9 +302,9 @@ struct HistoryView: View {
                     }
                     Chart(series.points) { point in
                         BarMark(
-                            x: .value("时间", point.day, unit: .day),
-                            y: .value("任务数", point.count))
-                        .foregroundStyle(by: .value("结局", point.outcome.label))
+                            x: .value(L10n.text("Time", zhHans: "时间"), point.day, unit: .day),
+                            y: .value(L10n.text("Tasks", zhHans: "任务数"), point.count))
+                        .foregroundStyle(by: .value(L10n.text("Outcome", zhHans: "结局"), point.outcome.label))
                     }
                     .chartForegroundStyleScale(
                         domain: TaskOutcome.allCases.map(\.label),
@@ -305,14 +323,14 @@ struct HistoryView: View {
                             AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
                         }
                     }
-                    .chartLegend(.hidden)  // 图例已自绘在右上（带合计数）
+                    .chartLegend(.hidden)  // The legend is drawn manually at the top right (with totals)
                     .frame(height: 120)
                 }
             }
         }
     }
 
-    /// 分组头（标签 + 条数）
+    /// Group header (label + count)
     private func groupHeader(title: String, count: Int) -> some View {
         HStack(spacing: 5) {
             Text(title)
@@ -328,10 +346,11 @@ struct HistoryView: View {
     }
 }
 
-// MARK: - 运行中行
+// MARK: - Running row
 
-/// 运行中任务行：样式与 HistoryRow 一致，图标换循环箭头 + 品牌色 +「运行中」标签；
-/// 右侧统计栏显开始时间 + 已运行时长（未结束无 token 口径，不占位）。
+/// Running task row: same style as HistoryRow, icon becomes a looping arrow + brand color +
+/// "Running" label; the right stats column shows start time + elapsed time (unfinished tasks have
+/// no token figure, so no placeholder).
 private struct RunningRow: View {
     let task: AgentTask
     var terminal: TerminalBinding?
@@ -352,7 +371,7 @@ private struct RunningRow: View {
                     Text(task.title ?? task.projectName ?? task.sessionId)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(2)
-                    Text("运行中")
+                    Text(L10n.text("Running", zhHans: "运行中"))
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(Theme.brandFg)
                 }
@@ -375,12 +394,15 @@ private struct RunningRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
-            // 右侧统计栏：开始时间（强调）+ 已运行时长
+            // Right stats column: start time (emphasized) + elapsed time
             VStack(alignment: .trailing, spacing: 2) {
                 Text(formatStartTime(task.startedAt))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                     .foregroundStyle(.primary)
-                Text("已运行 \(formatDuration(Date().timeIntervalSince(task.startedAt)))")
+                Text(L10n.format(
+                    "Running for %@",
+                    zhHans: "已运行 %@",
+                    formatDuration(Date().timeIntervalSince(task.startedAt))))
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -391,19 +413,20 @@ private struct RunningRow: View {
     }
 }
 
-// MARK: - 历史行
+// MARK: - History row
 
-/// 历史行：一行 = 一个会话（逐轮记录已合并）。左侧标题 + 项目/相对结束时间；
-/// 右侧统计栏强调会话开始时间（大字号）、时长合计、Tokens 总量；多轮带「N 轮」角标。
+/// History row: one row = one session (per-turn records merged). Left: title + project / relative
+/// end time; right stats column emphasizes session start time (large font), total duration, total
+/// tokens; multi-turn sessions get an "N turns" badge.
 private struct HistoryRow: View {
     let task: MergedSessionTask
-    /// 会话 token 总量（nil 显「—」）
+    /// Session total tokens (nil shows an em dash)
     var tokens: Int?
     var terminal: TerminalBinding?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            // 状态圆：成功绿圈✓ / 失败红圈✕ / 中断灰圈—
+            // Status circle: success green ✓ / failure red ✕ / interrupted gray —
             Image(systemName: iconName)
                 .font(.system(size: 13))
                 .foregroundStyle(iconColor)
@@ -418,12 +441,13 @@ private struct HistoryRow: View {
                     Text(task.title ?? task.projectName ?? task.sessionId)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(2)
-                    // 结局文字标签（图标色弱提示不够一眼可辨，补文字）
+                    // Outcome text label (icon color alone isn't distinguishable at a glance, so
+                    // add text)
                     Text(task.outcome.label)
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(iconColor)
                     if task.turnCount > 1 {
-                        Text("\(task.turnCount) 轮")
+                        Text(L10n.format("%@ turns", zhHans: "%@ 轮", String(task.turnCount)))
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
@@ -446,7 +470,7 @@ private struct HistoryRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
 
-                // 失败红 / 中断灰的彩色注释
+                // Colored annotation for failure red / interrupted gray
                 if let detail = task.detail, task.outcome != .success {
                     Text(detail)
                         .font(.system(size: 10.5))
@@ -456,15 +480,15 @@ private struct HistoryRow: View {
                 }
             }
             Spacer(minLength: 8)
-            // 右侧统计栏：开始时间（强调）+ 时长合计 + Tokens 总量
+            // Right stats column: start time (emphasized) + total duration + total tokens
             VStack(alignment: .trailing, spacing: 2) {
                 if let start = task.sessionStartedAt {
                     Text(formatStartTime(start))
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Theme.font.themed(12, .semibold))
                         .foregroundStyle(.primary)
                 }
                 if let duration = task.totalDuration {
-                    Text("时长 \(formatDuration(duration))")
+                    Text(L10n.format("Duration %@", zhHans: "时长 %@", formatDuration(duration)))
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }

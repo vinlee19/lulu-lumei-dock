@@ -12,7 +12,7 @@ jobs:
   release:
     runs-on: macos-15
     env:
-      # 标准 arm64 runner 内存为 7GB；限制 SwiftPM 并行编译，避免编译结束时测试进程被 SIGKILL。
+      # Standard arm64 runners have 7GB of memory; cap SwiftPM build parallelism so the test process isn't SIGKILLed as the build finishes.
       LULU_SWIFT_JOBS: "2"
     steps:
       - name: Checkout tagged source
@@ -47,7 +47,7 @@ jobs:
           [[ -n "$SPARKLE_EDDSA_PRIVATE_KEY" ]]
           Scripts/package-release.sh "${GITHUB_REF_NAME#v}"
 
-      # 公开 Release 是最后一步；前面的测试、签名、appcast 或冒烟检查失败时不会执行。
+      # Publishing the Release is the last step; it never runs if the tests, signing, appcast or smoke check fail earlier.
       - name: Create stable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

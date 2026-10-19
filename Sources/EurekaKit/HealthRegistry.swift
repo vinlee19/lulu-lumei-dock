@@ -1,13 +1,14 @@
 import Foundation
 
-/// 数据源健康登记：各管线数据源（spool 消费、9 个 agent tailer/watcher、8 个用量扫描、
-/// 审计、云同步，共 20 处注册）的心跳/产出/失败计数。设置页"数据健康"区据此渲染——
-/// 轮询型数据源停摆（如定时器死掉）能被直接看见，不再靠"感觉不对"。
+/// Data-source health registry: heartbeat/output/failure counts for each pipeline source (spool
+/// consumer, 9 agent tailers/watchers, 8 usage scanners, audit, cloud sync; 20 registrations in
+/// total). The Settings "data health" section renders from it, so a stalled polling source (e.g. a
+/// dead timer) is directly visible instead of relying on "something feels off".
 public final class HealthRegistry: @unchecked Sendable {
     public static let shared = HealthRegistry()
 
     public struct Entry: Sendable {
-        /// nil = 事件驱动（无固定心跳，不按 stale 判红）
+        /// nil = event-driven (no fixed heartbeat, never marked red for staleness)
         public var expectedInterval: TimeInterval?
         public var lastBeatAt: Date?
         public var lastEventAt: Date?
@@ -16,9 +17,9 @@ public final class HealthRegistry: @unchecked Sendable {
 
         public enum Status: Equatable {
             case ok
-            case degraded   // 在跑但有失败记录
-            case stalled    // 轮询型超时未心跳
-            case idle       // 注册了还没动静
+            case degraded   // running but has recorded failures
+            case stalled    // polling source overdue for a heartbeat
+            case idle       // registered but no activity yet
         }
 
         public func status(now: Date = Date()) -> Status {
@@ -62,7 +63,7 @@ public final class HealthRegistry: @unchecked Sendable {
         }
     }
 
-    /// 按注册顺序返回快照
+    /// Snapshots in registration order
     public func snapshot() -> [(name: String, entry: Entry)] {
         lock.lock()
         defer { lock.unlock() }

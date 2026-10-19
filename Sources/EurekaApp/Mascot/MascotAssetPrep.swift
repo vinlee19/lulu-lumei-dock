@@ -1,11 +1,12 @@
 import AppKit
+import EurekaKit
 import CoreGraphics
 import Foundation
 import ImageIO
 
-/// 一次性资产预处理:从四角连通区域 flood-fill 抠掉"外圈纯色背景",
-/// 保留内部白色(眼睛/床品)。把模切贴纸转成透明浮动角色。
-/// 用法:`eureka --prep-mascot-assets <srcDir> <dstDir>`
+/// One-time asset preprocessing: flood-fill from the four corners to cut out the "solid outer
+/// background", keeping interior white (eyes / bedding). Turns die-cut stickers into transparent
+/// floating characters. Usage: `eureka --prep-mascot-assets <srcDir> <dstDir>`
 enum MascotAssetPrep {
     private static let v3SheetNames = [
         "00-idle-snack.png",
@@ -33,13 +34,14 @@ enum MascotAssetPrep {
             guard let image = NSImage(contentsOf: file),
                   let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
                   let out = removeBackground(cg)
-            else { print("跳过 \(file.lastPathComponent)"); continue }
+            else { print(L10n.format("Skipped %@", zhHans: "跳过 %@", String(file.lastPathComponent))); continue }
             writePNG(out, to: dst.appendingPathComponent(file.lastPathComponent))
             print("✓ \(file.lastPathComponent)")
         }
     }
 
-    /// 从四角 flood-fill,容差内的连通背景像素 → 透明(并清零 RGB 防白边)。
+    /// Flood-fill from the four corners; connected background pixels within tolerance → transparent
+    /// (RGB zeroed too, to avoid white fringes).
     static func removeBackground(_ image: CGImage, tolerance: Int = 72) -> CGImage? {
         let w = image.width, h = image.height
         guard w > 4, h > 4 else { return image }
@@ -52,7 +54,7 @@ enum MascotAssetPrep {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
-        // 参考背景色 = 四角均值
+        // Reference background color = average of the four corners
         let cornerPts = [(2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3)]
         var sr = 0, sg = 0, sb = 0
         for (x, y) in cornerPts {
@@ -82,7 +84,8 @@ enum MascotAssetPrep {
             if y < h - 1 { let q = p + w; if !visited[q] { visited[q] = true; stack.append(q) } }
         }
 
-        // 羽化:与透明相邻、且偏背景色的半透明边缘像素降低 alpha,减白边
+        // Feathering: lower alpha on semi-transparent edge pixels that border transparency and lean
+        // toward the background color, reducing white fringes
         var alphaCut = [(Int, UInt8)]()
         for p in 0..<(w * h) where !visited[p] {
             let i = p * 4
@@ -108,8 +111,9 @@ enum MascotAssetPrep {
         }
     }
 
-    /// 把 12 张 2×2 透明分镜图按固定顺序打包为 4×12、每格 256px 的 v3 图集。
-    /// 输入只接受源目录的直接子文件，拒绝软链接和非 PNG 文件，避免路径越界。
+    /// Pack 12 transparent 2×2 storyboard images in a fixed order into a 4×12 v3 atlas with 256px
+    /// cells. Only direct children of the source directory are accepted; symlinks and non-PNG files
+    /// are rejected to prevent path escape.
     static func packV3(srcDir: String, outputPath: String) throws {
         let fm = FileManager.default
         let sourceDirectory = URL(fileURLWithPath: srcDir, isDirectory: true)
@@ -222,7 +226,7 @@ enum MascotAssetPrep {
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
         try png.write(to: outputURL, options: .withoutOverwriting)
-        print("✓ v3 图集 \(atlasWidth)×\(atlasHeight): \(outputURL.path)")
+        print(L10n.format("✓ v3 atlas %@×%@: %@", zhHans: "✓ v3 图集 %@×%@: %@", String(atlasWidth), String(atlasHeight), String(outputURL.path)))
     }
 
     private static func hasTransparentCorners(_ image: CGImage) -> Bool {
@@ -251,17 +255,17 @@ private enum MascotAssetPrepError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidSourceDirectory:
-            "源目录不存在或不是文件夹"
+            L10n.text("Source directory does not exist or is not a folder", zhHans: "源目录不存在或不是文件夹")
         case .invalidOutput:
-            "输出路径必须是 PNG 文件"
+            L10n.text("Output path must be a PNG file", zhHans: "输出路径必须是 PNG 文件")
         case .outputAlreadyExists:
-            "输出文件已存在，为避免误覆盖已停止"
+            L10n.text("Output file already exists; stopped to avoid overwriting it", zhHans: "输出文件已存在，为避免误覆盖已停止")
         case .unsafeSource(let name):
-            "素材路径越界或格式不受支持：\(name)"
+            L10n.format("Asset path is outside the source directory or its format is unsupported: %@", zhHans: "素材路径越界或格式不受支持：%@", String(name))
         case .invalidSheet(let name):
-            "素材必须是 512...4096px、正方形、偶数尺寸、透明四角的普通 PNG：\(name)"
+            L10n.format("Asset must be a regular PNG, 512...4096px square, with even dimensions and transparent corners: %@", zhHans: "素材必须是 512...4096px、正方形、偶数尺寸、透明四角的普通 PNG：%@", String(name))
         case .cannotCreateAtlas:
-            "无法创建 v3 图集"
+            L10n.text("Unable to create v3 atlas", zhHans: "无法创建 v3 图集")
         }
     }
 }

@@ -1,17 +1,18 @@
 import EurekaKit
 import Foundation
 
-/// 增量 tail Gemini CLI 会话（~/.gemini/tmp/<slug>/chats/session-*.jsonl）。
-/// Gemini 无 hook/notify 回调，这是实时通道（与 grok/kimi tailer 同理）：
-/// 轮询近期有写入的会话文件，按 offset 续读、半行不消费；新发现文件只做尾部状态恢复。
-/// 生命周期映射：user 消息（非 session_context 注入）→ taskStarted；
-/// gemini 消息 → taskFinished(success)；error 消息 → taskFinished(error)。
-/// 上下文占用：gemini 消息行的 tokens.input + tokens.cached ≈ 当前上下文大小，
-/// 窗口按行内 model 查 ContextWindows（gemini-2.5/3 → 1M）。
-/// 工具活动不映射：实勘本机 ~/.gemini/tmp/*/chats/*.jsonl（2026-07，CLI 0.52）
-/// 只有 header/$set/user/info/gemini/error 行，工具调用不落盘（无 functionCall/
-/// toolCall 类字段），无从映射 activity(tool:)。
-/// cwd 由 projects.json 的 slug 反查；标题 = 首条真实用户消息摘要。
+/// Incrementally tails Gemini CLI sessions (~/.gemini/tmp/<slug>/chats/session-*.jsonl).
+/// Gemini has no hook/notify callback, so this is the live channel (same as the grok/kimi
+/// tailers): poll recently written session files, resume reading at the saved offset, never
+/// consume a partial line; newly discovered files only restore their tail state.
+/// Lifecycle mapping: user message (not a session_context injection) → taskStarted;
+/// gemini message → taskFinished(success); error message → taskFinished(error).
+/// Context usage: tokens.input + tokens.cached on a gemini line ≈ current context size;
+/// the window comes from ContextWindows by the line's model (gemini-2.5/3 → 1M).
+/// Tool activity is not mapped: local ~/.gemini/tmp/*/chats/*.jsonl (surveyed 2026-07, CLI 0.52)
+/// only has header/$set/user/info/gemini/error lines; tool calls are never written to disk
+/// (no functionCall/toolCall-like field), so there is nothing to map to activity(tool:).
+/// cwd is resolved from the slug via projects.json; title = summary of the first real user message.
 public final class GeminiChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -52,7 +53,8 @@ public final class GeminiChatTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must stay below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -66,7 +68,7 @@ public final class GeminiChatTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public so tests and launch can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentChatFiles() {
@@ -74,7 +76,7 @@ public final class GeminiChatTailer {
         }
     }
 
-    // MARK: - 文件发现
+    // MARK: - File discovery
 
     private func recentChatFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
@@ -102,7 +104,7 @@ public final class GeminiChatTailer {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
     }
 
-    // MARK: - 增量读取
+    // MARK: - Incremental reading
 
     private func tail(_ url: URL) {
         let path = url.path
@@ -112,7 +114,7 @@ public final class GeminiChatTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 会话恢复可能整写文件
+        if size < offset { offset = 0 }  // session resume may rewrite the whole file
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -125,8 +127,9 @@ public final class GeminiChatTailer {
         offsets[path] = offset + UInt64(consumed)
     }
 
-    /// 处理完整行（最后的半行不消费），返回消费字节数。
-    /// 单次 JSON 解析同时喂生命周期解码与旁路（gemini 行 tokens → ctx%）。
+    /// Processes complete lines (the trailing partial line is not consumed); returns bytes
+    /// consumed. One JSON parse feeds both the lifecycle decoder and the side channel (gemini line
+    /// tokens → ctx%).
     @discardableResult
     private func processLines(_ data: Data, url: URL, replay: Bool) -> Int {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
@@ -159,7 +162,7 @@ public final class GeminiChatTailer {
         return complete.count
     }
 
-    /// header / 首条真实用户消息 → 上下文（sessionId / 开始时间 / 标题）
+    /// header / first real user message → context (sessionId / start time / title)
     private func absorb(_ root: [String: Any], into ctx: inout FileContext) {
         if root["type"] == nil, let header = GeminiChatDecoder.parseHeader(root) {
             ctx.sessionId = header.sessionId
@@ -172,7 +175,7 @@ public final class GeminiChatTailer {
         }
     }
 
-    /// 消息行 → 生命周期事件
+    /// Message line → lifecycle event
     private func event(from root: [String: Any], context ctx: FileContext) -> TaskEvent? {
         guard let message = GeminiChatDecoder.parseMessage(root) else { return nil }
         let timestamp = message.timestamp ?? Date()
@@ -202,7 +205,8 @@ public final class GeminiChatTailer {
         }
     }
 
-    /// gemini 消息行的上下文用量旁路：input + cached ≈ 当前上下文大小（含缓存读的完整提示）
+    /// Context-usage side channel for gemini lines: input + cached ≈ current context size (the full
+    /// prompt incl. cache reads)
     private func contextUsage(_ root: [String: Any]) -> (model: String?, used: Int)? {
         guard let message = GeminiChatDecoder.parseMessage(root),
               message.type == "gemini",
@@ -212,11 +216,12 @@ public final class GeminiChatTailer {
         return used > 0 ? (message.model, used) : nil
     }
 
-    // MARK: - 上下文占用（gemini 行 tokens ÷ ContextWindows 窗口）
+    // MARK: - Context usage (gemini line tokens ÷ ContextWindows window)
 
-    /// 与 kimi/grok tailer 同例：按发射时刻 fresh 事件（stale 闸门会丢掉过期
-    /// contextUpdate），只在变化 ≥0.5 时补发避免刷屏。TaskStore 不为 contextUpdate
-    /// 建任务，且此处只对已跟踪会话发射，不会造幻影任务。
+    /// Same as the kimi/grok tailers: events are fresh as of emission (the stale gate would drop
+    /// an expired contextUpdate), and only re-emitted on a change ≥0.5 to avoid flooding.
+    /// TaskStore never creates a task for contextUpdate, and this only emits for tracked
+    /// sessions, so no phantom tasks appear.
     private func emitContext(
         for chatURL: URL, context ctx: FileContext,
         usage: (model: String?, used: Int)
@@ -232,14 +237,16 @@ public final class GeminiChatTailer {
             sessionStartedAt: ctx.sessionStartedAt), false)
     }
 
-    /// 首扫读取上限：头 64KB 建上下文（header/首条真实用户消息在头部），
-    /// 尾 256KB 恢复"最后状态"；更小的文件整读。大转录不再全量载入解析。
+    /// First-scan read limits: the first 64KB builds context (header / first real user message
+    /// sit at the head), the last 256KB restores the "last state"; smaller files are read whole.
+    /// Large transcripts are no longer loaded and parsed in full.
     private static let initialHeadBytes: UInt64 = 64 * 1024
     private static let initialTailBytes: UInt64 = 256 * 1024
 
-    /// 新发现文件：头 64KB 建上下文（header 在首行、标题在头部），只从尾 256KB
-    /// 恢复"最后状态"，不重放历史——仍在进行中（最后 user 晚于最后 gemini/error）
-    /// 补发 running，否则注册空闲。
+    /// Newly discovered file: the first 64KB builds context (header on the first line, title near
+    /// the head); the "last state" is restored only from the last 256KB, without replaying
+    /// history. Still in progress (last user later than last gemini/error) → emit running;
+    /// otherwise register as idle.
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
@@ -252,7 +259,8 @@ public final class GeminiChatTailer {
         var lastFinished: TaskEvent?
         var lastUsage: (model: String?, used: Int)?
 
-        /// 扫一个数据块（块边界的半行丢弃），建上下文 + 跟踪最后 started/finished
+        /// Scans one chunk (partial lines at chunk edges are dropped), builds context and tracks
+        /// the last started/finished
         func scan(_ data: Data, dropLeadingPartial: Bool, dropTrailingPartial: Bool) {
             var lines = data.split(separator: UInt8(ascii: "\n"))[...]
             if dropLeadingPartial, !lines.isEmpty { lines = lines.dropFirst() }
@@ -273,7 +281,8 @@ public final class GeminiChatTailer {
         }
 
         if size <= Self.initialHeadBytes + Self.initialTailBytes {
-            // 小文件整读（结尾半行 JSON 解析自然失败，与整读旧行为一致）
+            // Small files are read whole (a trailing partial JSON line simply fails to parse, as
+            // the old whole-read did)
             guard let data = try? handle.readToEnd() else { return }
             scan(data, dropLeadingPartial: false, dropTrailingPartial: false)
         } else {
@@ -309,17 +318,18 @@ public final class GeminiChatTailer {
             handler(event, false)
             titleEvent(from: event)
         }
-        // 尾部 tokens 反映最新上下文占用（有 gemini 行必已登记会话状态，安全）
+        // Tail tokens reflect the latest context usage (a gemini line means session state is
+        // already registered, so this is safe)
         if let lastUsage {
             emitContext(for: url, context: ctx, usage: lastUsage)
         }
     }
 
-    // MARK: - 上下文
+    // MARK: - Context
 
     private func context(for url: URL) -> FileContext {
         if let cached = contexts[url.path] { return cached }
-        // slug = chats 上级目录名；cwd 反查 projects.json
+        // slug = name of the directory above chats; cwd is resolved via projects.json
         let slug = url
             .deletingLastPathComponent()   // chats/
             .deletingLastPathComponent()   // <slug>/

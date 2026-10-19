@@ -3,28 +3,32 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 扫描 `~/.grok/sessions/<enc-cwd>/<uuid>/chat_history.jsonl`，把工具调用落成审计流水。
+/// Scans `~/.grok/sessions/<enc-cwd>/<uuid>/chat_history.jsonl` and records tool calls as audit
+/// entries.
 ///
-/// **为什么读 chat_history 而不是 events.jsonl**：`events.jsonl` 里的 `tool_started`
-/// 只有 `tool_name`，**没有任何参数**（实勘 709 条全无 arguments）。审计页的价值在完整
-/// 命令 / 文件路径，风险规则（`RiskRuleEngine`）也全靠 `detail` 判定 —— 只有名字的行
-/// 落进去就是一堆没有 detail、永不命中风险规则的空记录，比不做更糟。
-/// 真正带参数的是 `chat_history.jsonl` 的 `assistant` 行：
-/// `tool_calls: [{id, name, arguments}]`，`arguments` 是 JSON 字符串 ——
-/// 信封与 Codex 的 `function_call` 同形，但**词表是 Cursor 那套 snake_case**
-/// （`read_file`/`target_file` 而非 `exec_command`/`cmd`）→ 喂 `AuditExtractor.grok`，
-/// 它内部复用 Cursor 的映射并补上 Grok 独有的 `web_fetch`/`spawn_subagent`/`use_tool` 等。
+/// **Why chat_history instead of events.jsonl**: `tool_started` in `events.jsonl` only has
+/// `tool_name` and **no arguments at all** (all 709 surveyed lines lack arguments). The audit
+/// page's value is the full command / file path, and the risk rules (`RiskRuleEngine`) rely
+/// entirely on `detail` — name-only lines would become a pile of empty records with no detail
+/// that never match a risk rule, which is worse than nothing.
+/// The lines that actually carry arguments are the `assistant` lines in `chat_history.jsonl`:
+/// `tool_calls: [{id, name, arguments}]`, where `arguments` is a JSON string — the envelope
+/// matches Codex's `function_call`, but **the vocabulary is Cursor's snake_case set**
+/// (`read_file`/`target_file` rather than `exec_command`/`cmd`) → fed to `AuditExtractor.grok`,
+/// which reuses Cursor's mapping internally and adds Grok-only `web_fetch`/`spawn_subagent`/
+/// `use_tool` and the like.
 ///
-/// 增量方式与 `CodexAuditScanner` 一致：持久化 offset（`scan_files`，键带 `audit://`
-/// 前缀避开用量扫描器），`INSERT OR IGNORE` 保证重扫幂等。
-/// 幂等键取 `tool_calls[].id`（实勘形如 `call-<uuid>-0`，稳定唯一）；缺失时按行合成 hash。
+/// Incremental scanning matches `CodexAuditScanner`: a persisted offset (`scan_files`, keys
+/// prefixed `audit://` to stay clear of the usage scanners), and `INSERT OR IGNORE` keeps
+/// rescans idempotent. The idempotency key is `tool_calls[].id` (surveyed as
+/// `call-<uuid>-0`, stable and unique); when missing, a per-line hash is synthesized.
 public final class GrokAuditScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
     private let pipeline: AuditPipeline
     private let staleThreshold: TimeInterval
 
-    /// 每文件扫描私有状态（存 scan_files.extra）
+    /// Per-file private scan state (stored in scan_files.extra)
     private struct FileExtra: Codable {
         var sessionId: String?
         var cwd: String?
@@ -49,8 +53,8 @@ public final class GrokAuditScanner {
         return inserted
     }
 
-    /// `sessions/<enc-cwd>/<uuid>/chat_history.jsonl`（两级目录，不按 mtime 过滤 ——
-    /// scan_files 水位让无新数据的老文件近乎零成本）
+    /// `sessions/<enc-cwd>/<uuid>/chat_history.jsonl` (two directory levels, not filtered by
+    /// mtime — the scan_files watermark makes old files with no new data nearly free)
     private func historyFiles() -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -100,8 +104,9 @@ public final class GrokAuditScanner {
                     let calls = root["tool_calls"] as? [[String: Any]], !calls.isEmpty,
                     let sessionId = extra.sessionId
                 else { continue }
-                // chat_history 行不带时间戳（转录页也是按轮次从 events.jsonl 补的），
-                // 审计时间退文件 mtime——比记 Date() 更接近真实发生时刻
+                // chat_history lines carry no timestamp (the transcript page also fills it per turn
+                // from events.jsonl), so the audit time falls back to the file mtime — closer to
+                // when it really happened than Date()
                 let timestamp = Self.mtime(path: path) ?? Date()
                 let isStale = Date().timeIntervalSince(timestamp) > staleThreshold
 
@@ -129,8 +134,9 @@ public final class GrokAuditScanner {
         return inserted
     }
 
-    /// 会话归属：目录名即 session id；cwd 从 `summary.json` 取（父目录名是**百分号编码**
-    /// 的 cwd，但编码有损且不同 grok 版本不一致，不反解）
+    /// Session ownership: the directory name is the session id; cwd comes from `summary.json`
+    /// (the parent directory name is the **percent-encoded** cwd, but the encoding is lossy and
+    /// differs across grok versions, so it is not decoded)
     private func resolveOwnership(fileURL: URL, into extra: inout FileExtra) {
         let sessionDir = fileURL.deletingLastPathComponent()
         extra.sessionId = sessionDir.lastPathComponent
@@ -155,7 +161,7 @@ public final class GrokAuditScanner {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
     }
 
-    // MARK: - JSONL 增量读取（EurekaUsage.JSONLinesReader 跨模块不可见，此处自带）
+    // MARK: - Incremental JSONL reading (EurekaUsage.JSONLinesReader is not visible across modules, so this carries its own)
 
     private struct Chunk {
         var lines: [Data]

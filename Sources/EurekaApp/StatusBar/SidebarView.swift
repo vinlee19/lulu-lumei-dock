@@ -1,47 +1,54 @@
 import EurekaKit
 import SwiftUI
 
-/// 主窗口左侧导航栏（macOS 系统设置式：品牌头 + 分组条目 + 品牌色选中胶囊 + 底部品牌区）。
+/// Main window's left navigation bar (macOS System Settings style: brand header + grouped items +
+/// brand-colored selected capsule + bottom brand area).
 ///
-/// 从 `PopoverRootView` 里抽出来的独立视图，两个原因：
-///  1. 它能被离屏渲染器单独快照（`--render-shell`），改尺寸/间距不用再靠肉眼在真机上比；
-///  2. `PopoverRootView` 有 14 个注入依赖，而侧栏只需要「当前选中 + 限额徽标 + 版本号」。
+/// Extracted from `PopoverRootView` into its own view for two reasons:
+///  1. The offscreen renderer can snapshot it alone (`--render-shell`), so size/spacing changes no
+///     longer need eyeballing on a real machine;
+///  2. `PopoverRootView` has 14 injected dependencies, while the sidebar only needs "current
+///     selection + rate-limit badge + version".
 ///
-/// 品牌标只在**底部**出现一次。以前顶部 18pt、底部 13pt 各一个，同一个 165pt 宽的列里
-/// 两个品牌方块既重复、底部那个还比旁边导航图标的 20pt 槽更小。
+/// The brand mark appears only once, at the **bottom**. Previously there was an 18pt one at the top and a 13pt one at the bottom; in one
+/// 165pt-wide column the two brand tiles were redundant, and the bottom one was smaller than the neighboring nav icons' 20pt slot.
 struct SidebarView: View {
     let selected: PopoverRootView.Tab
-    /// 限额徽标（无数据时 nil）
+    /// Rate-limit badge (nil when there's no data)
     let limitsBadge: (text: String, color: Color)?
-    /// 历史条数徽标（0 时 nil；参照限额徽标接法）
+    /// History count badge (nil at 0; wired the same way as the rate-limit badge)
     var historyBadge: String? = nil
     let appVersion: String
     let onSelect: (PopoverRootView.Tab) -> Void
-    /// 点击底部品牌区（跳「设置 → 关于」）；渲染器可不传
+    /// Click on the bottom brand area (jumps to "Settings → About"); renderers may omit it
     var onOpenAbout: (() -> Void)?
 
-    /// 侧栏固定宽度。行内可用宽 = 165 − 8×2（外层）− 8×2（按钮内）= 133pt，
-    /// 这是任何图标/文案放大的硬上限。
+    /// Fixed sidebar width. Usable row width = 165 − 8×2 (outer) − 8×2 (inside the button) = 133pt,
+    /// the hard upper bound for enlarging any icon/label.
     static let width: CGFloat = 165
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             header
             Divider().padding(.vertical, 4).padding(.horizontal, 2)
-            // 条目区必须能滚。`MainWindowController` 用的是 `hosting.sizingOptions = []`
-            // ——内容超出窗口是**裁剪**而不是撑窗，且 `window.minSize` 540 是含标题栏的
-            // frame 高（内容区只有 ~512）。实测 12 个条目 + 5 个组标签 + 品牌脚注在 512
-            // 下只剩十几 pt 余量，再加一组或系统放大字号就会把脚注切掉。
-            // 包一层 ScrollView 后，无论多少组都不可能裁；有余量时内容自然顶到上边。
+            // The item area must scroll. `MainWindowController` uses `hosting.sizingOptions = []`
+            // -- overflowing content is **clipped** rather than growing the window, and
+            // `window.minSize` 540 is the frame height including the title bar (the content area is
+            // only ~512). Measured: 12 items + 5 group labels + brand footer leave only a dozen or
+            // so pt of slack at 512; one more group or a larger system font size would clip the
+            // footer. Wrapped in a ScrollView nothing can be clipped no matter how many groups;
+            // with slack the content naturally hugs the top.
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(PopoverRootView.Tab.sidebarGroups.enumerated()), id: \.offset) {
                         _, group in
-                        // 分组标签（小写灰强调，替代单纯分隔线）
-                        // 间距按最小窗高倒推：**12** 个条目 + 5 个组标签要在 ~512pt 内容高里
-                        // 尽量都露出来（露不全也不会裁 —— 外层 ScrollView 兜着）。
-                        // 加「指令」页签时这里连同 SidebarNavButton 的行高各收紧了 1pt：
-                        // 之前 512 下「系统 / 设置」整组会落到滚动区外，默认看不见设置入口。
+                        // Group label (small grey emphasis, replacing a plain divider) Spacing is
+                        // derived from the minimum window height: **12** items + 5 group labels
+                        // should all be visible within ~512pt of content height where possible (if
+                        // not, nothing clips -- the outer ScrollView is the fallback). Adding the
+                        // Instructions tab tightened this and SidebarNavButton's row height by 1pt
+                        // each: before that, at 512 the whole "System / Settings" group fell
+                        // outside the scroll area, hiding the Settings entry by default.
                         Text(group.label)
                             .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(.tertiary)
@@ -49,7 +56,7 @@ struct SidebarView: View {
                             .padding(.top, 2)
                         ForEach(group.tabs, id: \.self) { tab in
                             SidebarNavButton(
-                                title: tab.rawValue, icon: tab.icon, tileColor: tab.tileColor,
+                                title: tab.title, icon: tab.icon, tileColor: tab.tileColor,
                                 badge: tab == .limits ? limitsBadge?.text
                                     : (tab == .history ? historyBadge : nil),
                                 badgeColor: (tab == .limits ? limitsBadge?.color : nil)
@@ -71,7 +78,8 @@ struct SidebarView: View {
         .background(Theme.surfaceSecondary)
     }
 
-    /// 顶部只留字样（品牌方块已集中到底部，不再一列两个）
+    /// The top keeps only the wordmark (the brand tile is consolidated at the bottom, no longer two
+    /// per column)
     private var header: some View {
         HStack(spacing: 7) {
             Text("lulu-lumei-dock")
@@ -83,7 +91,8 @@ struct SidebarView: View {
         .padding(.top, 2)
     }
 
-    /// 左下角品牌区：放大的 logo + 名称 + 版本，整块可点 → 设置 → 关于
+    /// Bottom-left brand area: enlarged logo + name + version, the whole block clickable → Settings
+    /// → About
     private var brandFooter: some View {
         Button {
             onOpenAbout?()
@@ -106,7 +115,7 @@ struct SidebarView: View {
             .contentShape(RoundedRectangle(cornerRadius: Theme.radius.sidebar))
         }
         .buttonStyle(.plain)
-        .help("关于 lulu-lumei-dock")
+        .help(L10n.text("About lulu-lumei-dock", zhHans: "关于 lulu-lumei-dock"))
         .padding(.bottom, 4)
     }
 }

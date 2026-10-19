@@ -1,18 +1,20 @@
 import CoreGraphics
 import Foundation
 
-/// 灵动岛窗口几何：纯函数，便于单测。
-/// 约定：panel 固定为最大尺寸贴屏幕顶部居中，展开/收起靠内容动画；
-/// 所有坐标遵循 AppKit（原点左下，y 向上）。
+/// Dynamic Island window geometry: pure functions, easy to unit-test.
+/// Convention: the panel is fixed at its maximum size, pinned top-centre on the screen;
+/// expand/collapse is done by animating the content. All coordinates follow AppKit
+/// (origin bottom-left, y up).
 public enum IslandGeometry {
-    /// 屏幕信息（由 app 层从 NSScreen 提取，便于纯函数测试）
+    /// Screen info (extracted from NSScreen by the app layer so the pure functions are testable)
     public struct ScreenInfo: Equatable, Sendable {
         public var frame: CGRect
-        /// 刘海高度（NSScreen.safeAreaInsets.top），无刘海为 0
+        /// Notch height (NSScreen.safeAreaInsets.top); 0 without a notch
         public var safeAreaTopInset: CGFloat
-        /// 物理刘海宽度（由 auxiliaryTop*Area 推得），无刘海为 nil
+        /// Physical notch width (derived from auxiliaryTop*Area); nil without a notch
         public var notchWidth: CGFloat?
-        /// 菜单栏高度（frame.maxY - visibleFrame.maxY），无刘海屏悬浮定位用
+        /// Menu bar height (frame.maxY - visibleFrame.maxY); used for floating placement on
+        /// notchless screens
         public var menuBarHeight: CGFloat
 
         public var hasNotch: Bool { safeAreaTopInset > 1 }
@@ -31,19 +33,20 @@ public enum IslandGeometry {
     }
 
     public struct Layout: Equatable, Sendable {
-        /// panel 固定尺寸（覆盖最大展开态 + 阴影余量）
+        /// Fixed panel size (covers the largest expanded state + shadow margin)
         public var panelSize: CGSize
-        /// 展开卡片尺寸
+        /// Expanded card size
         public var expandedCardSize: CGSize
-        /// 无刘海屏的 compact 胶囊尺寸
+        /// Compact pill size on notchless screens
         public var compactPillNoNotchSize: CGSize
-        /// 刘海屏胶囊向两侧各延伸的"翼"宽
+        /// Width of the "wing" the pill extends on each side of the notch
         public var notchWingWidth: CGFloat
-        /// 无刘海屏内容与菜单栏的间距
+        /// Gap between content and the menu bar on notchless screens
         public var noNotchTopMargin: CGFloat
 
-        /// 1.0× 基准（内建刘海屏）。展开卡片宽:高 ≈ 黄金比 φ(1.618)。
-        /// panel 高度留足：任务列表满载(~254) + 展开子 agent 框(最多~168) ≈ 422 < 460。
+        /// 1.0× baseline (built-in notched screen). Expanded card width:height ≈ golden ratio
+        /// φ (1.618). Panel height has headroom: full task list (~254) + expanded subagent box
+        /// (up to ~168) ≈ 422 < 460.
         public static let standard = Layout(
             panelSize: CGSize(width: 440, height: 460),
             expandedCardSize: CGSize(width: 360, height: 222),  // 360/222 ≈ 1.62
@@ -66,7 +69,8 @@ public enum IslandGeometry {
             self.noNotchTopMargin = noNotchTopMargin
         }
 
-        /// 按缩放系数等比放大（noNotchTopMargin 跟随菜单栏、不缩放）
+        /// Scales proportionally by the factor (noNotchTopMargin follows the menu bar and is
+        /// not scaled)
         public func scaled(by factor: CGFloat) -> Layout {
             Layout(
                 panelSize: CGSize(
@@ -83,33 +87,37 @@ public enum IslandGeometry {
         }
     }
 
-    /// 按屏幕逻辑宽度换算的 UI 缩放系数：以 15″ MacBook Air（1512 宽）为基准 1.0，
-    /// 大屏（27″4K 等）按比例放大，钳制在 [0.9, 1.6] 防极端尺寸。
+    /// UI scale factor from the screen's logical width: a 15″ MacBook Air (1512 wide) is the
+    /// 1.0 baseline, larger screens (27″ 4K etc.) scale up proportionally, clamped to
+    /// [0.9, 1.6] to guard against extreme sizes.
     public static func scaleFactor(for screen: ScreenInfo) -> CGFloat {
         let referenceWidth: CGFloat = 1512
         let raw = screen.frame.width / referenceWidth
         return min(max(raw, 0.9), 1.6)
     }
 
-    /// 当前屏对应的布局：基准 × 该屏缩放系数。
+    /// Layout for the current screen: baseline × that screen's scale factor.
     public static func layout(for screen: ScreenInfo) -> Layout {
         Layout.standard.scaled(by: scaleFactor(for: screen))
     }
 
-    /// 任务列表里展开的子 agent 嵌套框高度（1.0× 基准，未乘 scale）。
-    /// 最多展示 6 行，超出加一行"…等 N 个"。须与 IslandViews 的行高/内距一致。
+    /// Height of the expanded subagent box nested in the task list (1.0× baseline, not
+    /// multiplied by scale). Shows at most 6 rows, plus one "…and N more" row beyond that.
+    /// Must match the row height/padding in IslandViews.
     public static func subagentBoxHeight(count: Int) -> CGFloat {
         guard count > 0 else { return 0 }
         let shown = min(count, 6)
-        let rows = CGFloat(shown) * 22       // 每行 22
-        let gaps = CGFloat(shown - 1) * 4    // 行距 4
+        let rows = CGFloat(shown) * 22       // 22 per row
+        let gaps = CGFloat(shown - 1) * 4    // 4 between rows
         let overflow: CGFloat = count > 6 ? 16 : 0
-        return rows + gaps + overflow + 16   // 16 = 框上下内距
+        return rows + gaps + overflow + 16   // 16 = box top + bottom padding
     }
 
-    /// 自定义位置是否仍然可用：面板顶部的「胶囊带」（顶部 72pt × 中央半宽）须完整落在某块屏内。
-    /// 仅擦边相交（如外接屏拔掉/重排后残留的旧坐标）判不可用 → 调用方清存档回默认位。
-    /// 纯函数（screens 传 frame 数组），便于单测。
+    /// Whether a custom position is still usable: the panel's top "pill band" (top 72pt ×
+    /// central half width) must lie entirely within some screen. A mere edge overlap (e.g.
+    /// stale coordinates left after an external display is unplugged/rearranged) counts as
+    /// unusable → the caller clears the saved position and falls back to the default.
+    /// Pure function (screens passed as an array of frames), easy to unit-test.
     public static func positionUsable(
         origin: CGPoint, panelSize: CGSize, screens: [CGRect]
     ) -> Bool {
@@ -122,7 +130,7 @@ public enum IslandGeometry {
         return screens.contains { $0.contains(band) }
     }
 
-    /// panel 的固定 frame：顶部居中、上沿与屏幕上沿齐平
+    /// Fixed panel frame: top-centred, top edge flush with the screen's top edge
     public static func panelFrame(screen: ScreenInfo, layout: Layout = .standard) -> CGRect {
         CGRect(
             x: screen.frame.midX - layout.panelSize.width / 2,
@@ -132,12 +140,14 @@ public enum IslandGeometry {
         )
     }
 
-    /// 内容距 panel 顶部的留白：刘海屏从顶端开始（与刘海融合），无刘海避开菜单栏
+    /// Content's top inset within the panel: notched screens start at the very top (blending
+    /// with the notch); notchless screens clear the menu bar
     public static func contentTopInset(screen: ScreenInfo, layout: Layout = .standard) -> CGFloat {
         screen.hasNotch ? 0 : screen.menuBarHeight + layout.noNotchTopMargin
     }
 
-    /// compact 胶囊尺寸：刘海屏 = 刘海高度 + 两翼；普通屏 = 固定小胶囊
+    /// Compact pill size: notched screen = notch height + two wings; regular screen = fixed
+    /// small pill
     public static func pillSize(screen: ScreenInfo, layout: Layout = .standard) -> CGSize {
         guard screen.hasNotch else { return layout.compactPillNoNotchSize }
         return CGSize(
@@ -146,13 +156,14 @@ public enum IslandGeometry {
         )
     }
 
-    /// 胶囊中部被物理刘海遮挡的宽度（内容布局需留空），无刘海为 0
+    /// Width in the middle of the pill hidden by the physical notch (content layout must
+    /// leave it empty); 0 without a notch
     public static func pillCenterGap(screen: ScreenInfo) -> CGFloat {
         screen.hasNotch ? (screen.notchWidth ?? 196) : 0
     }
 
-    /// 给定内容尺寸，算出其在 panel 坐标系（原点左下）中的实际区域。
-    /// hitTest 穿透与 hover 跟踪区域用。
+    /// Given a content size, computes its actual area in panel coordinates (origin
+    /// bottom-left). Used for hitTest pass-through and the hover tracking area.
     public static func interactiveRect(
         contentSize: CGSize, screen: ScreenInfo, layout: Layout = .standard
     ) -> CGRect {
@@ -163,7 +174,7 @@ public enum IslandGeometry {
         )
     }
 
-    /// 显式 topInset 版本（自定义位置的浮动模式 topInset = 0）
+    /// Explicit topInset variant (floating mode at a custom position uses topInset = 0)
     public static func interactiveRect(
         contentSize: CGSize, topInset: CGFloat, layout: Layout = .standard
     ) -> CGRect {
@@ -176,8 +187,8 @@ public enum IslandGeometry {
         )
     }
 
-    /// 原点左下 ↔ 原点左上 的矩形翻转（NSHostingView.isFlipped == true，
-    /// 视图内命中判断必须用翻转后的矩形）
+    /// Flips a rect between bottom-left and top-left origins (NSHostingView.isFlipped == true,
+    /// so hit testing inside the view must use the flipped rect)
     public static func flippedRect(_ rect: CGRect, containerHeight: CGFloat) -> CGRect {
         guard rect != .zero else { return .zero }
         return CGRect(

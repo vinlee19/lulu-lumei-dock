@@ -1,29 +1,33 @@
 import Foundation
 
-/// Cursor 的会话转录文件索引：`~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`。
+/// Index of Cursor session transcript files:
+/// `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`.
 ///
-/// Cursor 3.13.10 起除了往 `state.vscdb` 写，还会为每个 agent 回合落一份 Claude 式 JSONL。
-/// 两条通道的分工（别把它们当成互相替代）：
-///   - **库**是唯一完整来源：全部历史、token、ctx%、todos、子会话；
-///   - **转录**只覆盖「这个特性上线之后」的回合，没有 token / ctx%，
-///     但它有库没有的两样东西——显式的 `turn_ended`，和路径里自带的工程 slug。
+/// Since Cursor 3.13.10, besides writing to `state.vscdb`, it also writes a Claude-style JSONL for
+/// every agent turn. How the two channels divide the work (don't treat them as substitutes):
+///   - **the DB** is the only complete source: all history, tokens, ctx%, todos, child sessions;
+///   - **the transcript** only covers turns since this feature shipped and has no tokens / ctx%,
+///     but it has two things the DB lacks -- an explicit `turn_ended`, and the project slug built
+///     into its path.
 ///
-/// slug 是有损编码（`/` 与 `.` 都变 `-`，`Users-wl-xiao-vinlee-workspace-a-b` 反解不回去），
-/// 所以 cwd **不靠反解**：把已知的 workspace 目录正向编码成 slug 去比对，命中才算数。
+/// The slug is a lossy encoding (both `/` and `.` become `-`; `Users-wl-xiao-vinlee-workspace-a-b`
+/// can't be decoded back), so cwd **is never reverse-decoded**: known workspace dirs are encoded
+/// forward into slugs and compared; only a match counts.
 public enum CursorTranscriptIndex {
     public struct Entry: Equatable, Sendable {
         public var composerId: String
         public var url: URL
-        /// 工程目录；`empty-window` 或比不上已知 workspace 时为 nil
+        /// Project directory; nil for `empty-window` or when no known workspace matches
         public var cwd: String?
     }
 
     private static let lock = NSLock()
     private static var cache: [String: (value: [Entry], at: Date)] = [:]
-    /// 一个新回合会**新建**文件，缓存太久就会漏掉整轮 → 比 workspace 索引短得多
+    /// A new turn **creates** a new file, so a long-lived cache would miss whole turns → much
+    /// shorter than the workspace index's
     private static let cacheTTL: TimeInterval = 3
 
-    /// `<cliHome>/projects` 下所有转录文件
+    /// Every transcript file under `<cliHome>/projects`
     public static func entries(
         cliHome: URL = CursorPaths.cliHome(),
         workspaceStorageRoot: URL = CursorPaths.workspaceStorageRoot(),
@@ -36,7 +40,8 @@ public enum CursorTranscriptIndex {
         }
         lock.unlock()
 
-        // 已知 workspace 目录 → slug，用于正向匹配（不反解有损 slug）
+        // Known workspace dirs → slug, for forward matching (the lossy slug is never
+        // reverse-decoded)
         var slugToCwd: [String: String] = [:]
         for cwd in CursorWorkspaceIndex.folders(root: workspaceStorageRoot, now: now).values {
             slugToCwd[slug(forPath: cwd)] = cwd
@@ -68,7 +73,8 @@ public enum CursorTranscriptIndex {
         return results
     }
 
-    /// 有转录文件的会话 id 集合（库侧 tailer 用它让出生命周期事件的所有权）
+    /// Set of session ids that have a transcript file (the DB-side tailer uses it to yield
+    /// lifecycle-event ownership)
     public static func ownedComposerIds(
         cliHome: URL = CursorPaths.cliHome(),
         workspaceStorageRoot: URL = CursorPaths.workspaceStorageRoot(),
@@ -78,9 +84,10 @@ public enum CursorTranscriptIndex {
             .map(\.composerId))
     }
 
-    /// 绝对路径 → Cursor 的项目目录名。实勘 `/Users/wl.xiao/vinlee/workspace/aftership-semantic-layer`
-    /// → `Users-wl-xiao-vinlee-workspace-aftership-semantic-layer`：去掉开头的 `/`，
-    /// 其余 `/` 与 `.` 全换成 `-`。
+    /// Absolute path → Cursor's project dir name. Observed:
+    /// `/Users/wl.xiao/vinlee/workspace/aftership-semantic-layer` →
+    /// `Users-wl-xiao-vinlee-workspace-aftership-semantic-layer`: drop the leading `/`, and replace
+    /// every remaining `/` and `.` with `-`.
     public static func slug(forPath path: String) -> String {
         var text = path
         if text.hasPrefix("/") { text.removeFirst() }
@@ -89,7 +96,7 @@ public enum CursorTranscriptIndex {
             .replacingOccurrences(of: ".", with: "-")
     }
 
-    /// 仅供测试：清缓存，免得临时目录之间串台
+    /// Tests only: clear the cache so temp dirs don't bleed into each other
     public static func resetCacheForTesting() {
         lock.lock()
         cache.removeAll()

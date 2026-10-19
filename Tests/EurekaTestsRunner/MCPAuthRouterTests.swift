@@ -24,7 +24,7 @@ func mcpAuthRouterTests(_ t: TestRunner) {
                 snapshotScheme: "oauth", hasToken: true),
             .staticHeader(keys: ["Authorization"]),
             "配置了显式 Authorization 的 server，动线是编辑请求头，不是浏览器")
-        // 鉴权类键名的大小写与后缀识别
+        // Case and suffix recognition for auth-related key names
         try expect(MCPAuthRouter.isAuthHeaderKey("X-API-Key"))
         try expect(MCPAuthRouter.isAuthHeaderKey("x-goog-api-key"))
         try expect(MCPAuthRouter.isAuthHeaderKey("X-Auth-Token"))

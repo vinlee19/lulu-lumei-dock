@@ -7,7 +7,7 @@ import Foundation
 func geminiIngestTests(_ t: TestRunner) {
     t.suite("Gemini · 会话/对话/用量采集")
 
-    /// 造一个最小 ~/.gemini 布局：tmp/<slug>/chats/session-*.jsonl + projects.json
+    /// Builds a minimal ~/.gemini layout: tmp/<slug>/chats/session-*.jsonl + projects.json
     func makeHome() throws -> (home: URL, chat: URL) {
         let fm = FileManager.default
         let home = fm.temporaryDirectory
@@ -26,7 +26,9 @@ func geminiIngestTests(_ t: TestRunner) {
             #"{"id":"m2","timestamp":"2026-07-21T11:24:00.000Z","type":"user","content":[{"text":"帮我分析这个语义层项目"}]}"#,
             #"{"$set":{"lastUpdated":"2026-07-21T11:24:01.000Z"}}"#,
             #"{"id":"m3","timestamp":"2026-07-21T11:24:27.787Z","type":"gemini","content":"好的,我来分析。","thoughts":[],"tokens":{"input":17628,"output":36,"cached":8146,"thoughts":383,"tool":0,"total":18047},"model":"gemini-3.5-flash"}"#,
-            // CLI 流式写入会把同一 gemini 消息行重复写一次（真实观测）→ 同批次去重
+            // The CLI's streaming writes duplicate the same gemini message line (observed in
+            // practice)
+            // → dedup within the batch
             #"{"id":"m3","timestamp":"2026-07-21T11:24:27.787Z","type":"gemini","content":"好的,我来分析。","thoughts":[],"tokens":{"input":17628,"output":36,"cached":8146,"thoughts":383,"tool":0,"total":18047},"model":"gemini-3.5-flash"}"#,
             #"{"id":"m4","timestamp":"2026-07-21T11:25:00.000Z","type":"error","content":[{"text":"quota exceeded"}]}"#,
         ]
@@ -49,12 +51,12 @@ func geminiIngestTests(_ t: TestRunner) {
         try expectEqual(session.name, "帮我分析这个语义层项目")
         try expectEqual(session.cwd, "/work/my-proj")
         try expect(session.startedAt != nil)
-        // /var 与 /private/var 是同一位置的符号链接，解析后比较
+        // /var and /private/var are symlinks to the same location; compare after resolving
         try expectEqual(
             URL(fileURLWithPath: session.transcriptPath).resolvingSymlinksInPath().path,
             chat.resolvingSymlinksInPath().path)
 
-        // 只有 session_context、无真实用户输入 → 不进列表
+        // Only session_context, no real user input → not listed
         let emptyChat = chat.deletingLastPathComponent()
             .appendingPathComponent("session-2026-07-21T12-00-empty.jsonl")
         try [
@@ -106,16 +108,17 @@ func geminiIngestTests(_ t: TestRunner) {
         try expectEqual(totals[0].outputTokens, 36 + 383)
         try expectEqual(totals[0].cacheReadTokens, 8146)
 
-        // 重扫（水位不动）幂等
+        // Rescan (watermark unchanged) is idempotent
         try expectEqual(try scanner.scanOnce(), 0)
 
-        // 模拟会话恢复整写文件（同内容重写 → 水位失效回 0 重读）→ dedup 兜底不重复
+        // Simulate session resume rewriting the whole file (same content → watermark invalidated,
+        // back to 0 and reread) → dedup fallback prevents double counting
         let content = try String(contentsOf: chat, encoding: .utf8)
         try (content + #"{"$set":{"lastUpdated":"2026-07-21T11:26:00.000Z"}}"# + "\n")
             .write(to: chat, atomically: true, encoding: .utf8)
         try expectEqual(try scanner.scanOnce(), 0, "atomic 重写换 inode 全量重读，dedup 应挡住重复")
 
-        // 提问数入 session_stats
+        // Prompt counts go into session_stats
         let prompts = try store.sessionStats.promptCounts(for: ["ffb694fd-a055"])
         try expectEqual(prompts["ffb694fd-a055"], 1, "session_context 注入不计提问")
     }
@@ -174,7 +177,8 @@ func geminiIngestTests(_ t: TestRunner) {
             .write(to: home.appendingPathComponent("projects.json"),
                    atomically: true, encoding: .utf8)
 
-        /// 造一个 >320KB 的会话：头 = header+首条用户消息，中间 = 大量填充，尾 = 最后状态
+        /// Builds a >320KB session: head = header + first user message, middle = lots of filler,
+        /// tail = final state
         func makeBigChat(_ name: String, finished: Bool) throws -> URL {
             let chat = chats.appendingPathComponent(name)
             var lines = [
@@ -182,8 +186,9 @@ func geminiIngestTests(_ t: TestRunner) {
                 #"{"id":"m1","timestamp":"2026-07-21T11:23:00.000Z","type":"user","content":[{"text":"头部标题问题"}]}"#,
                 #"{"id":"m2","timestamp":"2026-07-21T11:24:00.000Z","type":"gemini","content":"先答头部。"}"#,
             ]
-            // 中间 ~450KB 填充（超出 头64KB+尾256KB 窗口，整块不该被读到）
-            let filler = String(repeating: "填", count: 1000)  // UTF-8 每行约 3KB
+            // ~450KB of filler in the middle (beyond the head 64KB + tail 256KB windows; none of it
+            // should be read)
+            let filler = String(repeating: "填", count: 1000)  // ~3KB per line in UTF-8
             for i in 0..<150 {
                 lines.append(
                     #"{"id":"f\#(i)","timestamp":"2026-07-21T12:00:00.000Z","type":"gemini","content":"\#(filler)"}"#)
@@ -211,7 +216,8 @@ func geminiIngestTests(_ t: TestRunner) {
         ) { events.append(($0, $1)) }
         tailer.scanOnce()
 
-        // 每个会话只补发一条状态 + 标题，不重放中间 150 条填充
+        // Each session re-emits only one state + title; the 150 filler lines in the middle are not
+        // replayed
         try expectEqual(events.count, 4, "首扫只发 状态+标题 ×2 会话: \(events.map(\.0.kind))")
 
         let run = events.filter { $0.0.sessionId == "session-big-run.jsonl-id" }
@@ -238,7 +244,7 @@ func geminiIngestTests(_ t: TestRunner) {
             tmpRoot: home.appendingPathComponent("tmp"),
             projectsFile: home.appendingPathComponent("projects.json")
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 初见：尾部 tokens 也应折算 ctx%（m3: 17628+8146=25774 / 1M）
+        tailer.scanOnce()  // First sight: tail tokens should also yield ctx% (m3: 17628+8146=25774 / 1M)
         func contextPercents() -> [Double] {
             events.compactMap { event, _ in
                 if case .contextUpdate(let percent) = event.kind { return percent }
@@ -254,7 +260,7 @@ func geminiIngestTests(_ t: TestRunner) {
         try expectEqual(ctxEvent?.0.cwd, "/work/my-proj")
         try expect(ctxEvent?.1 == false, "ctx% 按发射时刻 fresh 交付，不判 stale")
 
-        // 增量：新 gemini 行带更大 tokens → 按行内 model 窗口补发
+        // Incremental: a new gemini line with more tokens → re-emit using that line's model window
         events.removeAll()
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -268,7 +274,7 @@ func geminiIngestTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expectEqual(contextPercents(), [10.0], "100000/1M 应为 10%: \(contextPercents())")
 
-        // 变化 <0.5 不补发（防刷屏）
+        // Changes < 0.5 are not re-emitted (avoids flooding)
         events.removeAll()
         try appendLine(
             #"{"id":"m6","timestamp":"\#(now)","type":"gemini","content":"还是继续。","tokens":{"input":100100,"output":10,"cached":0,"thoughts":0},"model":"gemini-3.5-flash"}"#)

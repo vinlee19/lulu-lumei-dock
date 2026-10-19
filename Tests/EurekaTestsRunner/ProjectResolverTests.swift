@@ -44,14 +44,15 @@ func projectResolverTests(_ t: TestRunner) {
     }
 
     t.test("脏 cwd（含控制字符）不崩溃，安全回退") {
-        // 回归：含 NUL/控制字符的 cwd（来自二进制来源裸扫的碎片）曾让
-        // URL.appendingPathComponent 抛不可捕获的 NSException → 整个 app 崩溃。
+        // Regression: a cwd containing NUL/control characters (fragments from raw scans of binary
+        // sources) once made URL.appendingPathComponent throw an uncatchable NSException → the
+        // whole app crashed.
         let dirty = "/Users/me/proj\u{00}\u{0E}\u{03}\r"
-        let root = ProjectResolver.resolveRoot(cwd: dirty)  // 不应崩溃
+        let root = ProjectResolver.resolveRoot(cwd: dirty)  // must not crash
         try expect(!root.path.isEmpty)
-        try expectEqual(ProjectResolver.resolve(cwd: dirty), "proj")  // 截断到控制字符前
+        try expectEqual(ProjectResolver.resolve(cwd: dirty), "proj")  // truncated before the control character
         try expect(ProjectResolver().projectName(forCwd: dirty) == "proj")
-        // 纯控制字符 → 安全回退，不崩溃
+        // Control characters only → safe fallback, no crash
         _ = ProjectResolver.resolveRoot(cwd: "\u{00}\u{01}")
     }
 

@@ -5,49 +5,52 @@ import EurekaSync
 import EurekaUsage
 import Foundation
 
-/// 云端备份服务：定时（30 分钟）+ 手动触发的增量上传。
-/// 所有 IO（钥匙串子进程、文件枚举、网络上传、SQLite）都在私有 utility 队列上；
-/// @Published 状态回主线程发布（镜像 UsageService 的模式）。
+/// Cloud backup service: incremental uploads on a timer (30 minutes) + manual trigger. All IO
+/// (Keychain subprocess, file enumeration, network uploads, SQLite) runs on a private utility
+/// queue; @Published state is published back on the main thread (mirrors UsageService's pattern).
 final class SyncService: ObservableObject {
     @Published private(set) var syncing = false
     @Published private(set) var lastResult: String?
     @Published private(set) var lastError: String?
     @Published private(set) var credentialsConfigured = false
     @Published private(set) var connectionTest: ConnectionTest?
-    /// 同步进行中的实时进度（nil = 空闲）
+    /// Live progress of the running sync (nil = idle)
     @Published private(set) var progress: SyncProgress?
-    /// 同步历史当前页（持久化，倒序）与总轮数（分页用）
+    /// Current page of sync history (persisted, newest first) and total run count (for paging)
     @Published private(set) var runs: [SyncRunsRepo.Run] = []
     @Published private(set) var runsTotal = 0
-    /// 备份总量统计（sync_state 聚合）
+    /// Total backup stats (aggregated from sync_state)
     @Published private(set) var stats: SyncStateRepo.Stats?
-    /// 备份按来源构成（remote_key 来源段 → 文件数/字节；「构成」chips 用）
+    /// Backup composition by source (remote_key source segment → file count/bytes; for the
+    /// "composition" chips)
     @Published private(set) var sourceComposition: [String: (count: Int, bytes: Int64)] = [:]
-    /// 备份构成（两级：来源 → 类目），备份页的构成区用
+    /// Backup composition (two levels: source → category), for the backup page's composition
+    /// section
     @Published private(set) var composition: [SyncStateRepo.CompositionBucket] = []
-    /// 当前同步间隔（分钟，只读展示用）
-    /// 视图当前显示的历史页码（由 BackupView 同步过来，供每轮同步后原页刷新）
+    /// Current sync interval (minutes, read-only display) History page the view is currently
+    /// showing (synced from BackupView, so that page refreshes in place after each sync)
     var visibleRunsPage = 1
     @Published private(set) var intervalMinutes: Double = 30
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.sync", qos: .utility)
     private var timer: DispatchSourceTimer?
-    /// 只在 queue 上访问：skip-if-syncing 守卫
+    /// Accessed only on queue: skip-if-syncing guard
     private var running = false
-    /// 每轮开跑时从主线程快照的配置
+    /// Config snapshotted from the main thread at the start of each run
     private struct Config {
         var provider: StorageProvider
         var region: String
         var bucket: String
-        var endpointHost: String  // 仅 provider == .custom 时使用
+        var endpointHost: String  // only used when provider == .custom
         var keyPrefix: String
-        /// 单文件失败重试次数（0=关）与退避基数（秒，指数 ×2）
+        /// Per-file failure retry count (0 = off) and backoff base (seconds, exponential ×2)
         var retryAttempts = 2
         var retryBackoffSeconds: Double = 3
-        /// 用户自定义同步目录（仅 enabled 的会进 roots）
+        /// User-defined sync folders (only enabled ones go into roots)
         var customFolders: [CustomSyncFolder] = []
 
-        /// 按服务商预设解析 endpoint host；自定义用用户填写值（空 = 未配置）
+        /// Resolves the endpoint host from the provider preset; custom uses the user's value (empty
+        /// = not configured)
         var resolvedEndpointHost: String {
             provider.endpointHost(region: region) ?? endpointHost
         }
@@ -56,17 +59,20 @@ final class SyncService: ObservableObject {
         provider: .tencentCOS, region: "", bucket: "", endpointHost: "", keyPrefix: "eureka")
 
     private static let healthName = "云端备份"
-    /// 增量同步间隔（秒），由设置注入（最小 1 分钟），默认 30 分钟
+    /// Incremental sync interval (seconds), injected from settings (minimum 1 minute), default 30
+    /// minutes
     private var intervalSeconds: TimeInterval = 1800
 
-    // MARK: - 生命周期
+    // MARK: - Lifecycle
 
-    /// 开关打开时启动定时器（首次延迟避开启动扫描高峰，但不超过一个间隔）
+    /// Starts the timer when the toggle is on (the first fire is delayed to avoid the launch-scan
+    /// peak, but by no more than one interval)
     func start() {
         guard timer == nil else { return }
         HealthRegistry.shared.register(Self.healthName, expectedInterval: intervalSeconds)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于同步间隔
+        // leeway lets the system coalesce wakeups to save power; it must be less than the sync
+        // interval
         let leeway: DispatchTimeInterval = intervalSeconds >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(
@@ -84,7 +90,8 @@ final class SyncService: ObservableObject {
         timer = nil
     }
 
-    /// 更新同步间隔（分钟，最小 1）；定时器在跑则立即按新间隔重排
+    /// Updates the sync interval (minutes, minimum 1); a running timer is rescheduled immediately
+    /// at the new interval
     func updateInterval(minutes: Double) {
         let seconds = max(60, minutes * 60)
         intervalMinutes = seconds / 60
@@ -96,7 +103,7 @@ final class SyncService: ObservableObject {
         }
     }
 
-    /// 刷新备份总量统计（「备份」页签 onAppear + 每轮同步后调用）
+    /// Refreshes total backup stats (called on the Backup tab's onAppear + after each sync)
     func refreshStats() {
         queue.async { [weak self] in
             guard let self,
@@ -119,7 +126,7 @@ final class SyncService: ObservableObject {
         }
     }
 
-    /// 同步历史分页加载（page 从 1 起）
+    /// Paged loading of sync history (page starts at 1)
     func loadRuns(page: Int, pageSize: Int = 20) {
         queue.async { [weak self] in
             guard let self,
@@ -135,7 +142,7 @@ final class SyncService: ObservableObject {
         }
     }
 
-    /// 配置变更时由 UI 侧调用（每轮开跑读取最新快照）
+    /// Called from the UI side when config changes (each run reads the latest snapshot)
     func updateConfig(
         provider: StorageProvider, region: String, bucket: String,
         endpointHost: String, keyPrefix: String,
@@ -152,9 +159,9 @@ final class SyncService: ObservableObject {
         }
     }
 
-    // MARK: - 动作（全部 queue.async）
+    // MARK: - Actions (all queue.async)
 
-    /// 手动「立即同步」：放宽配额，一次尽量传完
+    /// Manual "Sync now": relaxes quotas to upload as much as possible in one go
     func syncNow() {
         queue.async { [weak self] in
             self?.runCycleIfIdle(limits: .relaxed)
@@ -169,20 +176,20 @@ final class SyncService: ObservableObject {
         case failure(String)
     }
 
-    /// HEAD Bucket 测试连接/凭证
+    /// HEAD Bucket to test the connection/credentials
     func testConnection() {
         publish { $0.connectionTest = .running }
         queue.async { [weak self] in
             guard let self else { return }
             guard let client = self.makeClient() else {
-                self.publish { $0.connectionTest = .failure("配置不完整：请填写地域、存储桶并保存密钥") }
+                self.publish { $0.connectionTest = .failure(L10n.text("Incomplete configuration: enter the region and bucket, and save your credentials", zhHans: "配置不完整：请填写地域、存储桶并保存密钥")) }
                 return
             }
             do {
                 try client.headBucket()
                 self.publish { $0.connectionTest = .success }
             } catch {
-                self.publish { $0.connectionTest = .failure("连接失败：\(error)") }
+                self.publish { $0.connectionTest = .failure(L10n.format("Connection failed: %@", zhHans: "连接失败：%@", String(describing: error))) }
             }
         }
     }
@@ -196,13 +203,14 @@ final class SyncService: ObservableObject {
             let ok = okId && okKey
             self?.publish {
                 $0.credentialsConfigured = ok
-                if !ok { $0.lastError = "密钥写入钥匙串失败" }
+                if !ok { $0.lastError = L10n.text("Failed to save credentials to Keychain", zhHans: "密钥写入钥匙串失败") }
             }
             DispatchQueue.main.async { completion?(ok) }
         }
     }
 
-    /// 设置页出现时探测钥匙串状态（后台，不阻塞 UI）
+    /// Probes Keychain state when the settings page appears (in the background, not blocking the
+    /// UI)
     func refreshCredentialStatus() {
         queue.async { [weak self] in
             let configured = KeychainStore.read(account: KeychainStore.secretIdAccount) != nil
@@ -211,7 +219,7 @@ final class SyncService: ObservableObject {
         }
     }
 
-    // MARK: - 同步循环（queue 上执行）
+    // MARK: - Sync loop (runs on queue)
 
     private func runCycleIfIdle(limits: SyncEngine.Limits) {
         guard !running else { return }
@@ -222,24 +230,26 @@ final class SyncService: ObservableObject {
         defer { publish { $0.syncing = false } }
 
         guard let client = makeClient() else {
-            publish { $0.lastError = "备份未运行：请填写地域、存储桶并保存密钥" }
+            publish { $0.lastError = L10n.text("Backup did not run: enter the region and bucket, and save your credentials", zhHans: "备份未运行：请填写地域、存储桶并保存密钥") }
             return
         }
         guard let store = try? EurekaStore(path: EurekaStore.defaultURL()) else {
-            publish { $0.lastError = "备份失败：本地数据库不可用" }
-            HealthRegistry.shared.failure(Self.healthName, note: "sqlite 打开失败")
+            publish { $0.lastError = L10n.text("Backup failed: local database unavailable", zhHans: "备份失败：本地数据库不可用") }
+            HealthRegistry.shared.failure(Self.healthName, note: L10n.text("Failed to open sqlite", zhHans: "sqlite 打开失败"))
             return
         }
 
-        Self.materializePlans()  // 物化 Codex/opencode/Grok/Kimi 计划到暂存，纳入本轮增量上传
+        Self.materializePlans()  // materialize Codex/opencode/Grok/Kimi plans into staging so this run's incremental upload includes them
 
-        // eureka 分析快照：三张事实表指纹变了才重建（详见 EurekaDBSnapshot 头注释——
-        // 整库上传会被 sync_state 记账自我触发成每轮必传）。服务器侧分析脚本见 Scripts/analytics/。
+        // eureka analytics snapshot: rebuilt only when the three fact tables' fingerprints change
+        // (see the EurekaDBSnapshot header comment -- uploading the whole DB would self-trigger via
+        // sync_state bookkeeping into an upload every run). Server-side analytics scripts are in
+        // Scripts/analytics/.
         let snapshotURL = Self.eurekaSnapshotURL()
         EurekaDBSnapshot.materializeIfChanged(
             dbPath: EurekaStore.defaultURL(), snapshotPath: snapshotURL)
 
-        // 重试参数与自定义目录来自配置快照
+        // Retry parameters and custom folders come from the config snapshot
         var effectiveLimits = limits
         effectiveLimits.maxRetries = config.retryAttempts
         effectiveLimits.retryBackoffSeconds = config.retryBackoffSeconds
@@ -254,7 +264,8 @@ final class SyncService: ObservableObject {
         if FileManager.default.fileExists(atPath: snapshotURL.path) {
             roots.eurekaSnapshot = snapshotURL
         }
-        // 审计归档：脱敏后按 UTC 日写 Parquet（只重写指纹变了的日期），随本轮一起上传
+        // Audit archive: redacted and written as Parquet per UTC day (only days whose fingerprint
+        // changed are rewritten), uploaded with this run
         let archiveActive = AuditArchiveSettings.isActive
         let archiveCutoff = AuditArchiveSettings.retentionCutoff
         if archiveActive {
@@ -262,11 +273,12 @@ final class SyncService: ObservableObject {
                 store: store, outDir: Self.auditArchiveDir(), host: SyncKeyMapper.deviceNamespace(),
                 appVersion: AuditArchiveSettings.appVersion, cutoff: archiveCutoff)
             if let error = outcome.errors.first {
-                HealthRegistry.shared.failure(Self.healthName, note: "审计归档：\(error)")
+                HealthRegistry.shared.failure(Self.healthName, note: L10n.format("Audit archive: %@", zhHans: "审计归档：%@", String(describing: error)))
             }
             roots.auditArchiveDir = Self.auditArchiveDir()
         }
-        // 项目级 skill 纳入备份（复用 Skills 页的项目发现；分类 <source>/skills/project/<项目名>）
+        // Project-level skills are included in backups (reuses the Skills page's project discovery;
+        // category <source>/skills/project/<project name>)
         roots.projectSkills = SkillMemoryIndexer
             .projectSkillRoots(repoRoots: ProjectScopeDiscovery.repoRoots(resolver: ProjectResolver()))
             .map { (root: $0.root, category: "\($0.source.rawValue)/skills/project/\($0.projectName)") }
@@ -281,7 +293,8 @@ final class SyncService: ObservableObject {
         let report = engine.runCycle()
         publish { $0.progress = nil }
         if archiveActive {
-            // 传上去的日期记入台账（审计页据此放行本地清理）；过期且已上传的本地文件删掉，远端保留
+            // Record uploaded days in the ledger (the audit page uses it to allow local cleanup);
+            // expired and uploaded local files are deleted, the remote copy is kept
             AuditArchive.reconcileUploads(store: store)
             if let archiveCutoff {
                 AuditArchive.removeUploadedLocalFiles(store: store, cutoff: archiveCutoff)
@@ -294,7 +307,8 @@ final class SyncService: ObservableObject {
         if let error = report.firstError {
             HealthRegistry.shared.failure(Self.healthName, note: error)
         }
-        // 有实质动作才记一轮（跳过无变化的空轮），持久化后修剪
+        // Record a run only when something actually happened (skip empty runs with no changes),
+        // then prune after persisting
         if report.uploaded > 0 || report.failed > 0 {
             try? store.syncRuns.insert(
                 date: Date(), uploaded: report.uploaded, uploadedBytes: report.uploadedBytes,
@@ -306,10 +320,11 @@ final class SyncService: ObservableObject {
         }
         publish {
             $0.lastResult = Self.describe(report)
-            $0.lastError = report.firstError.map { "部分失败（\(report.failed) 个）：\($0)" }
+            $0.lastError = report.firstError.map { L10n.format("Partially failed (%@ files): %@", zhHans: "部分失败（%@ 个）：%@", String(report.failed), String($0)) }
         }
-        // 只有用户当前就在第 1 页时才刷新列表：否则会把他翻到的页码顶回去
-        // （视图自己持有 historyPage，服务这边强刷会让两者对不上）
+        // Only refresh the list when the user is currently on page 1: otherwise it would bounce
+        // them off the page they paged to (the view owns historyPage itself; a forced refresh from
+        // the service would put the two out of sync)
         loadRuns(page: visibleRunsPage)
         refreshStats()
     }
@@ -365,41 +380,46 @@ final class SyncService: ObservableObject {
             antigravitySkills: AntigravityPaths.userSkillsRoot())
     }
 
-    /// 审计归档的本地落点（export/audit/dt=YYYY-MM-DD/audit-events-*.parquet）
+    /// Local location of the audit archive (export/audit/dt=YYYY-MM-DD/audit-events-*.parquet)
     static func auditArchiveDir() -> URL {
         EurekaStore.defaultURL().deletingLastPathComponent()
             .appendingPathComponent("export/audit", isDirectory: true)
     }
 
-    /// eureka 分析快照的固定落点（eureka.sqlite 同级的 export/ 子目录）
+    /// Fixed location of the eureka analytics snapshot (the export/ subdirectory next to
+    /// eureka.sqlite)
     static func eurekaSnapshotURL() -> URL {
         EurekaStore.defaultURL().deletingLastPathComponent()
             .appendingPathComponent("export/eureka-snapshot.sqlite")
     }
 
-    /// Trae 可备份的白名单根（技能 / 用户规则 ×已装渠道，加 CN 独有的记忆库）。
+    /// Whitelisted Trae roots that may be backed up (skills / user rules × installed channels, plus
+    /// the CN-only memory library).
     ///
-    /// ⚠️ 只列这几个具体目录。`~/.trae-cn` 本身有 `trae-jwt-token`（JWT）与 `mcp.json`
-    /// （可能含 API key），`Application Support/Trae CN` 有 Cookies 与 SQLCipher 加密的
-    /// 会话库 —— 任何一个都不能纳入。内置技能（`builtin_skills`、`builtin/global/skills`）
-    /// 随客户端分发、只读，也没有备份价值。
+    /// ⚠️ Only these specific directories are listed. `~/.trae-cn` itself holds `trae-jwt-token` (a JWT) and `mcp.json`
+    /// (may contain API keys); `Application Support/Trae CN` holds Cookies and the SQLCipher-encrypted
+    /// session DB -- none of them may be included. Built-in skills (`builtin_skills`, `builtin/global/skills`)
+    /// ship with the client and are read-only, so there's no value in backing them up either.
     static func traeRoots() -> [(root: URL, category: String)] {
         var result: [(root: URL, category: String)] = []
         for channel in TraePaths.installedChannels() {
             let suffix = channel == .cn ? "" : "-intl"
             result.append((TraePaths.skillsRoot(channel), "trae/skills\(suffix)"))
             result.append((TraePaths.userRulesDir(channel), "trae/rules\(suffix)"))
-            // 旧版单文件形态，与上面的目录形态并存 → 单点加入（它的父目录有 trae-jwt-token）
+            // The legacy single-file form coexists with the directory form above → added as a
+            // single entry (its parent directory has trae-jwt-token)
             result.append((TraePaths.userRulesFile(channel), "trae/rules\(suffix)"))
         }
-        // 记忆库只有 CN 版有（user_profile.md / projects/**/project_memory.md / topics.md）。
-        // markdownOnly 过滤会自动跳过 session_memory_*.jsonl 那些逐回合流水。
+        // Only the CN install has a memory library (user_profile.md / projects/**/project_memory.md
+        // / topics.md). The markdownOnly filter automatically skips the per-turn
+        // session_memory_*.jsonl logs.
         result.append((TraePaths.memoryRoot(), "trae/memory"))
         return result
     }
 
-    /// 物化 Codex / opencode / Grok / Kimi 计划到暂存目录（Claude 计划本就是 .md，无需物化）。
-    /// 在同步前调用，让本轮就能上传最新计划。
+    /// Materializes Codex / opencode / Grok / Kimi plans into a staging directory (Claude plans are
+    /// already .md and need no materializing). Called before syncing so this run can upload the
+    /// latest plans.
     static func materializePlans() {
         let staging = PlanMaterializer.defaultStagingRoot()
         PlanMaterializer.materializeCodex(
@@ -413,17 +433,17 @@ final class SyncService: ObservableObject {
 
     static func describe(_ report: SyncReport) -> String {
         if report.uploaded == 0 && report.failed == 0 && report.deferred == 0 {
-            return "已是最新（无变化）"
+            return L10n.text("Already up to date (no changes)", zhHans: "已是最新（无变化）")
         }
-        var parts = ["已上传 \(report.uploaded) 个文件"]
+        var parts = [L10n.format("Uploaded %@ files", zhHans: "已上传 %@ 个文件", String(report.uploaded))]
         if report.uploadedBytes > 0 {
             parts.append(formatSyncBytes(report.uploadedBytes))
         }
         if report.deferred > 0 {
-            parts.append("剩 \(report.deferred) 个下轮继续")
+            parts.append(L10n.format("%@ remaining for the next run", zhHans: "剩 %@ 个下轮继续", String(report.deferred)))
         }
         if report.skippedOversize > 0 {
-            parts.append("跳过超大文件 \(report.skippedOversize) 个")
+            parts.append(L10n.format("Skipped %@ oversized files", zhHans: "跳过超大文件 %@ 个", String(report.skippedOversize)))
         }
         return parts.joined(separator: " · ")
     }
@@ -436,8 +456,8 @@ final class SyncService: ObservableObject {
     }
 }
 
-/// 字节格式化（带 GB）。**备份页统一用这个**：`formatBytes`（SessionsView）只到 MB，
-/// 超过 1 GB 的备份会显示成「1234.5 MB」。
+/// Byte formatting (with GB). **The backup page uses this throughout**: `formatBytes`
+/// (SessionsView) stops at MB, so backups over 1 GB would show as "1234.5 MB".
 func formatSyncBytes(_ bytes: Int64) -> String {
     switch bytes {
     case ..<1024: return "\(bytes) B"

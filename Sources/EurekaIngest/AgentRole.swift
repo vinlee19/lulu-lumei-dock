@@ -1,43 +1,47 @@
+import EurekaKit
 import Foundation
 
-/// 子代理角色分类（Agents 页角色头像 / 标签 / 模型统计的语义轴）。
-/// 代码里没有显式 role 字段——角色从 agent 名称 + 描述启发式推导；纯字符串逻辑、无 IO、可单测。
-/// 颜色映射在 app 层 `Theme.roleColor(_:)` 完成（本模块不依赖 AppKit）。
+/// Subagent role classification (the semantic axis for role avatars / labels / model stats on the
+/// Agents page).
+/// There is no explicit role field: the role is inferred heuristically from the agent name +
+/// description; pure string logic, no IO, unit-testable.
+/// Colors are mapped in the app layer by `Theme.roleColor(_:)` (this module doesn't use AppKit).
 public enum AgentRole: String, CaseIterable, Sendable, Equatable {
-    case general    // 通用
-    case explore    // 探索
-    case implement  // 实现
-    case review     // 审查
-    case plan       // 规划
-    case model      // 建模
-    case doc        // 文档
+    case general    // General
+    case explore    // Explore
+    case implement  // Implement
+    case review     // Review
+    case plan       // Plan
+    case model      // Modeling
+    case doc        // Docs
 
     public var displayName: String {
         switch self {
-        case .general: return "通用"
-        case .explore: return "探索"
-        case .implement: return "实现"
-        case .review: return "审查"
-        case .plan: return "规划"
-        case .model: return "建模"
-        case .doc: return "文档"
+        case .general: return L10n.text("General", zhHans: "通用")
+        case .explore: return L10n.text("Explore", zhHans: "探索")
+        case .implement: return L10n.text("Implement", zhHans: "实现")
+        case .review: return L10n.text("Review", zhHans: "审查")
+        case .plan: return L10n.text("Plan", zhHans: "规划")
+        case .model: return L10n.text("Model", zhHans: "建模")
+        case .doc: return L10n.text("Document", zhHans: "文档")
         }
     }
 
-    /// 角色头像单字（通/探/实/审/规/建/文）
+    /// Single-glyph role avatar (one CJK character per role in zhHans, G/E/I/R/P/M/D in English)
     public var glyph: String {
         switch self {
-        case .general: return "通"
-        case .explore: return "探"
-        case .implement: return "实"
-        case .review: return "审"
-        case .plan: return "规"
-        case .model: return "建"
-        case .doc: return "文"
+        case .general: return L10n.text("G", zhHans: "通")
+        case .explore: return L10n.text("E", zhHans: "探")
+        case .implement: return L10n.text("I", zhHans: "实")
+        case .review: return L10n.text("R", zhHans: "审")
+        case .plan: return L10n.text("P", zhHans: "规")
+        case .model: return L10n.text("M", zhHans: "建")
+        case .doc: return L10n.text("D", zhHans: "文")
         }
     }
 
-    /// 从 agent 名称 + 描述启发式推断角色：已知内置名优先精确匹配，其余按关键词，兜底 通用。
+    /// Infers the role heuristically from agent name + description: known built-in names match
+    /// exactly first, the rest go by keyword, falling back to general.
     public static func classify(name: String, description: String? = nil) -> AgentRole {
         let n = name.lowercased()
         switch n {
@@ -54,7 +58,8 @@ public enum AgentRole: String, CaseIterable, Sendable, Equatable {
         }
         let hay = n + " " + (description?.lowercased() ?? "")
         func has(_ keywords: [String]) -> Bool { keywords.contains { hay.contains($0) } }
-        // 顺序敏感：先判更具体的角色（review 早于 plan，避免误吞）
+        // Order matters: check the more specific roles first (review before plan, so plan
+        // doesn't swallow it)
         if has(["review", "审查", "reviewer", "silent-failure", "type-design", "comment-analyz", "评审", "审阅"]) {
             return .review
         }
@@ -77,12 +82,17 @@ public enum AgentRole: String, CaseIterable, Sendable, Equatable {
     }
 }
 
-/// 模型名规整为展示标签（自由字符串 → Opus / Sonnet / Haiku / GPT-5-Codex / K2 / 继承…）。
-/// nil / 空 / inherit / default → 「继承」。用于 Agents 行/卡的模型芯片与「模型分布」统计。
+/// Normalizes a model name into a display label (free-form string → Opus / Sonnet / Haiku /
+/// GPT-5-Codex / K2 / Inherit...).
+/// nil / empty / inherit / default → the "Inherit" label. Used for the model chips on Agents
+/// rows/cards and the "model distribution" stats.
 public func normalizeModelName(_ raw: String?) -> String {
-    guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return "继承" }
+    // Display label, computed per interface language. The test suite is pinned to zhHans, so the
+    // spec still checks the zhHans "Inherit" label.
+    let inherited = L10n.text("Inherit", zhHans: "继承")
+    guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return inherited }
     let m = raw.lowercased()
-    if m == "inherit" || m == "default" { return "继承" }
+    if m == "inherit" || m == "default" { return inherited }
     if m.contains("opus") { return "Opus" }
     if m.contains("sonnet") { return "Sonnet" }
     if m.contains("haiku") { return "Haiku" }
@@ -94,9 +104,9 @@ public func normalizeModelName(_ raw: String?) -> String {
     if m.contains("gemini") { return "Gemini" }
     if m.contains("grok") { return "Grok" }
     if m.contains("qwen") { return "Qwen" }
-    if m.hasPrefix("glm") { return "GLM" }       // CodeBuddy（智谱 GLM 系，如 glm-5.2）
-    if m.hasPrefix("qmodel") { return "QModel" } // Qoder（qmodel_*）
-    // provider/model 形式（如 anthropic/claude-… 或 openai:…）取末段并首字母大写
+    if m.hasPrefix("glm") { return "GLM" }       // CodeBuddy (Zhipu GLM family, e.g. glm-5.2)
+    if m.hasPrefix("qmodel") { return "QModel" } // Qoder (qmodel_*)
+    // provider/model form (e.g. anthropic/claude-... or openai:...): capitalize the last segment
     let tail = raw.split(whereSeparator: { $0 == "/" || $0 == ":" }).last.map(String.init) ?? raw
     return tail.prefix(1).uppercased() + tail.dropFirst()
 }

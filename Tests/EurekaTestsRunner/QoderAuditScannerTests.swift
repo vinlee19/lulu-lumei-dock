@@ -3,9 +3,10 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// Qoder 审计扫描测试：fixture 按本机真实会话（~/.qoder-cn，v1.1.5 实勘）的行格式伪造
-/// （Claude 式信封，assistant message.content[] 里的 tool_use 块，ISO-8601 时间戳），
-/// 路径/会话 id 全部换成假值；全程临时目录，不碰真实 ~/。
+/// Qoder audit scanner tests: fixtures mimic the line format of real local sessions (~/.qoder-cn,
+/// observed on v1.1.5) (Claude-style envelope, tool_use blocks inside assistant message.content[],
+/// ISO-8601 timestamps), with all paths/session ids replaced by fake values; everything runs in a
+/// temp dir, real ~/ is never touched.
 func qoderAuditScannerTests(_ t: TestRunner) {
     t.suite("QoderAuditScanner · Qoder 审计采集")
 
@@ -15,7 +16,7 @@ func qoderAuditScannerTests(_ t: TestRunner) {
         return try EurekaStore(path: url)
     }
 
-    /// 临时 projects 树：<root>/<slug>/<sessionId>.jsonl
+    /// Temp projects tree: <root>/<slug>/<sessionId>.jsonl
     func makeProjects(
         slug: String = "-Users-me-work-demo", sessionId: String = "qd-parent-0001"
     ) throws -> (root: URL, file: URL) {
@@ -86,7 +87,7 @@ func qoderAuditScannerTests(_ t: TestRunner) {
         try expectEqual(try scanner.scanOnce(), 1)
         try expectEqual(try scanner.scanOnce(), 0, "重扫不应重复插入")
 
-        // 新实例复用 scan_state 里的 "audit://" 水位
+        // A new instance reuses the "audit://" watermark in scan_state
         let scanner2 = QoderAuditScanner(
             projectsRoot: root, store: store, pipeline: AuditPipeline(store: store))
         try expectEqual(try scanner2.scanOnce(), 0, "水位应跨实例保留")

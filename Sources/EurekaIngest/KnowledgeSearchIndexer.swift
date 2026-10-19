@@ -2,15 +2,20 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 知识面全文索引器：挂在 SkillMemoryService / PlansService 扫描完成点（事件驱动，非定时），
-/// 指纹（size+mtime）diff 增量重建。索引失败静默——面板会降级为元数据搜索，不挂功能。
+/// Full-text indexer for the knowledge surfaces: hooked to the scan-completion points of
+/// SkillMemoryService / PlansService (event-driven, not timed), rebuilt incrementally by
+/// fingerprint (size+mtime) diff. Indexing failures are silent — the panel degrades to metadata
+/// search instead of breaking.
 ///
-/// 放在 `EurekaIngest`（而非计划草案写的 `EurekaApp`）：它只依赖 `EurekaStore`/`Foundation`，
-/// 与同层的 `SkillMemoryIndexer`/`PlanMaterializer` 是天然邻居；`eureka-tests` 也只到这一层——
-/// SwiftPM 的 `.executableTarget` 互相依赖只对类型检查可见，链接期拿不到对方目标码
-/// （`swift run eureka-tests` 实测必链接失败），纯函数测不了，故不能放 app 层。
+/// Lives in `EurekaIngest` (not `EurekaApp` as the plan draft said): it depends only on
+/// `EurekaStore`/`Foundation` and is a natural neighbor of `SkillMemoryIndexer`/`PlanMaterializer`
+/// in the same layer; `eureka-tests` also reaches only this layer — dependencies between SwiftPM
+/// `.executableTarget`s are visible only to type checking, and the linker can't get the other
+/// target's object code (`swift run eureka-tests` reliably fails to link, verified), so pure
+/// functions couldn't be tested and it cannot live in the app layer.
 public final class KnowledgeSearchIndexer {
-    /// 单文件正文索引截断上限（计划文档可能很大；知识面搜索按头部命中足够）
+    /// Per-file body index truncation cap (plan documents can be large; head hits are enough for
+    /// knowledge search)
     static let bodyCap = 256 * 1024
 
     public struct Doc: Equatable {
@@ -28,7 +33,7 @@ public final class KnowledgeSearchIndexer {
 
     public init() {}
 
-    /// 条目 → doc 的纯映射（可测）；正文读取推迟到索引队列
+    /// Pure entry → doc mapping (testable); body reading is deferred to the index queue
     public static func docs(
         skills: [SkillEntry], memories: [MemoryEntry], plans: [PlanMaterializer.PlanEntry]
     ) -> [Doc] {
@@ -73,8 +78,8 @@ public final class KnowledgeSearchIndexer {
                 guard var body = try? String(contentsOfFile: doc.path, encoding: .utf8)
                 else { failures += 1; continue }
                 if body.utf8.count > Self.bodyCap {
-                    // 按字节截断（prefix 按 Character 数，纯中文会超上限 ~3 倍）；
-                    // 尾部可能出一个 U+FFFD，对索引无害
+                    // Truncate by bytes (prefix counts Characters, so pure CJK text would exceed
+                    // the cap ~3x); a trailing U+FFFD may appear, harmless to the index
                     body = String(decoding: body.utf8.prefix(Self.bodyCap), as: UTF8.self)
                 }
                 do {
@@ -84,16 +89,19 @@ public final class KnowledgeSearchIndexer {
                 } catch { failures += 1 }
             }
             try? store.knowledge.prune(keeping: Set(docs.map(\.path)))
-            // 降级保持静默（面板退回元数据搜索），但失败要可诊断（磁盘满/库损坏/非 UTF-8）
+            // Degrade silently (the panel falls back to metadata search), but failures must be
+            // diagnosable (disk full / corrupt db / non-UTF-8)
             if failures > 0 {
-                NSLog("KnowledgeSearchIndexer: %d/%d 篇正文索引失败", failures, docs.count)
+                NSLog("%@", L10n.format("KnowledgeSearchIndexer: failed to index %@/%@ documents", zhHans: "KnowledgeSearchIndexer: %@/%@ 篇正文索引失败", String(failures), String(docs.count)))
             }
         }
     }
 
-    /// Prompt 库索引：正文在内存（SQLite prompts 表）而非磁盘文件，与文件型知识面
-    /// 分开通道；指纹用 (text 字节数, timestamp) 近似——提取 upsert 后 timestamp/
-    /// 字节数未变即视为未变。独立 prune（kind 维度），不与文件型 docs 互删。
+    /// Prompt library index: bodies live in memory (the SQLite prompts table) rather than disk
+    /// files, so it is a separate channel from the file-based knowledge surfaces; the fingerprint
+    /// is approximated by (text byte count, timestamp) — unchanged timestamp/byte count after the
+    /// extraction upsert means unchanged. Pruned independently (by kind), never deleting file-based
+    /// docs or vice versa.
     public func indexPrompts(_ prompts: [PromptEntry]) {
         queue.async { [weak self] in
             guard let self else { return }

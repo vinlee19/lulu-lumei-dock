@@ -1,21 +1,24 @@
 import Foundation
 
-/// ~/.codex/sessions 下全部 rollout-*.jsonl 的递归枚举器。
+/// Recursive enumerator for every rollout-*.jsonl under ~/.codex/sessions.
 ///
-/// rollout 按会话**创建日**归档（YYYY/MM/DD）；resume 旧会话是在原文件原地追加
-/// （mtime 刷新、文件不挪窝），不会新建当天日期目录。因此"数最近 N 个日期目录"
-/// 必然漏掉老创建、新活跃的会话，各消费方（tailer/索引/审计）统一走整树遍历，
-/// 再按需用 mtime 过滤。EurekaUsage 不能依赖本模块，那里自带一份小拷贝
-/// （同 JSONL 读取的跨模块惯例）。
+/// Rollouts are filed by the session's **creation day** (YYYY/MM/DD); resuming an old session
+/// appends to the original file in place (mtime refreshes, the file doesn't move) and never creates
+/// today's date dir. So "count the latest N date dirs" is bound to miss sessions created long ago
+/// but active now; every consumer (tailer/index/audit) walks the whole tree, then filters by mtime
+/// as needed. EurekaUsage can't depend on this module, so it carries its own small copy (same
+/// cross-module convention as JSONL reading).
 enum CodexRolloutFiles {
-    /// 一个 rollout 文件及其 stat 信息；mtime 读取失败为 nil，由调用方决定取舍
+    /// A rollout file and its stat info; mtime is nil when it can't be read, and the caller decides
+    /// what to do
     struct Entry {
         let url: URL
         let mtime: Date?
         let size: UInt64
     }
 
-    /// 整树枚举 sessionsRoot 下所有 YYYY/MM/DD 数字目录里的 rollout-*.jsonl
+    /// Enumerate rollout-*.jsonl in every numeric YYYY/MM/DD dir under sessionsRoot across the
+    /// whole tree
     static func enumerate(sessionsRoot: URL) -> [Entry] {
         var results: [Entry] = []
         for year in numericSubdirs(of: sessionsRoot, digits: 4) {
@@ -41,7 +44,8 @@ enum CodexRolloutFiles {
         return results
     }
 
-    /// 列出 N 位纯数字命名的子目录（YYYY=4 位，MM/DD=2 位），其余条目一律跳过
+    /// List subdirectories named with exactly N digits (YYYY = 4, MM/DD = 2); skip every other
+    /// entry
     private static func numericSubdirs(of dir: URL, digits: Int) -> [URL] {
         let children = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []

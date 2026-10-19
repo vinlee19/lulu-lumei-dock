@@ -59,13 +59,13 @@ func memoryIndexRepairTests(_ t: TestRunner) {
     }
 
     t.test("frontmatter 标题命中即算收录（与 unindexedEntries 判据一致）") {
-        // 文件名 real-file.md 没被链接，但索引里链的是它的 frontmatter name
+        // The file name real-file.md isn't linked, but the index links to its frontmatter name
         let index = "- [别名](my-alias.md)\n"
         let outcome = MemoryIndexRepair.repair(
             indexText: index,
             entries: [entry("real-file.md", title: "my_alias")])
-        // normalizeKey 把 _ 归一成 -，标题命中 → 无需补录；my-alias.md 目标也因
-        // 标题键命中不算悬空
+        // normalizeKey folds _ into -, so the title matches → no backfill needed; the my-alias.md
+        // target also isn't dangling because the title key matches
         try expect(outcome == nil, "标题已被收录时不应有任何修复：\(String(describing: outcome))")
     }
 

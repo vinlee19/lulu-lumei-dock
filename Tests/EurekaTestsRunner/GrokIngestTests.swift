@@ -17,11 +17,11 @@ func grokPathsTests(_ t: TestRunner) {
         try expectEqual(GrokPaths.sessionsRoot(environment: env).path, "/tmp/gk-sess")
         try expectEqual(GrokPaths.skillsRoot(environment: env).path, "/tmp/gk-skills")
         try expectEqual(GrokPaths.memoryRoot(environment: env).path, "/tmp/gk-mem")
-        // 无 EUREKA_GROK_SESSIONS 时落在 home 下
+        // Without EUREKA_GROK_SESSIONS it lands under home
         try expectEqual(
             GrokPaths.sessionsRoot(environment: ["EUREKA_GROK_HOME": "/tmp/gk-home"]).path,
             "/tmp/gk-home/sessions")
-        // agentsRoots：用户 agents + 内置 bundled/agents
+        // agentsRoots: user agents + built-in bundled/agents
         let agents = GrokPaths.agentsRoots(environment: ["EUREKA_GROK_HOME": "/tmp/gk-home"])
         try expectEqual(agents.count, 2)
         try expect(agents[0].path.hasSuffix("/agents"))
@@ -87,7 +87,7 @@ func grokEventDecoderTests(_ t: TestRunner) {
     }
 }
 
-/// 在临时目录搭一个 grok 会话树：<root>/<enc-cwd>/<uuid>/{events.jsonl, summary.json}
+/// Builds a grok session tree in a temp dir: <root>/<enc-cwd>/<uuid>/{events.jsonl, summary.json}
 private func makeGrokSession() throws -> (root: URL, events: URL) {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("eureka-grok-\(UUID().uuidString)", isDirectory: true)
@@ -124,14 +124,15 @@ func grokRolloutTests(_ t: TestRunner) {
 
     t.test("初见恢复运行 + 标题（从 summary.json）；增量产出等待/完成") {
         let session = try makeGrokSession()
-        // 无 updates.jsonl → 不发 context；modelsCache 指向不存在路径保持 hermetic
+        // No updates.jsonl → no context emitted; modelsCache points at a nonexistent path to stay
+        // hermetic
         var events: [(TaskEvent, Bool)] = []
         let tailer = GrokRolloutTailer(
             sessionsRoot: session.root,
             modelsCacheURL: session.root.appendingPathComponent("nope.json")
         ) { events.append(($0, $1)) }
 
-        // 初见：仅 turn_started → 恢复 running + 从 summary 补标题
+        // First sight: only turn_started → restore running + fill the title from summary
         try appendLines([turnStart], to: session.events)
         tailer.scanOnce()
         guard case .taskStarted = events.first?.0.kind else {
@@ -142,7 +143,7 @@ func grokRolloutTests(_ t: TestRunner) {
         try expect(events.contains { $0.0.kind == .titleUpdate(title: "补全语义层缓存") },
                    "应从 summary 补标题")
 
-        // 增量：permission_requested → waiting；turn_ended → finished
+        // Incremental: permission_requested → waiting; turn_ended → finished
         events.removeAll()
         try appendLines([permReq, permResolved, turnEnd], to: session.events)
         tailer.scanOnce()
@@ -162,10 +163,10 @@ func grokRolloutTests(_ t: TestRunner) {
         ) { events.append(($0, $1)) }
 
         try appendLines([turnStart], to: session.events)
-        tailer.scanOnce()  // 初见定基线
+        tailer.scanOnce()  // First sight sets the baseline
         events.removeAll()
 
-        // 写半行（无换行）→ 不产出
+        // Write half a line (no newline) → nothing emitted
         let handle = try FileHandle(forWritingTo: session.events)
         _ = try handle.seekToEnd()
         try handle.write(contentsOf: Data(String(turnEnd.prefix(turnEnd.count / 2)).utf8))
@@ -173,7 +174,7 @@ func grokRolloutTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expect(events.isEmpty, "半行不该产出: \(events.map(\.0.kind))")
 
-        // 补全后半行 + 换行 → 产出完成
+        // Complete the second half + newline → finished emitted
         let handle2 = try FileHandle(forWritingTo: session.events)
         _ = try handle2.seekToEnd()
         try handle2.write(contentsOf: Data((String(turnEnd.suffix(turnEnd.count - turnEnd.count / 2)) + "\n").utf8))
@@ -214,21 +215,21 @@ func grokUsageScannerTests(_ t: TestRunner) {
         try expectEqual(try count("read_file"), 2)
         try expectEqual(try count("bash"), 1)
 
-        // 提问数 = turn_started 数 = 2（按会话 id join）
+        // Prompt count = number of turn_started = 2 (joined by session id)
         try expectEqual(
             try store.sessionStats.promptCounts(for: ["grok-sess-1"])["grok-sess-1"] ?? 0, 2)
 
-        // 没有 updates.jsonl（老版本 grok）→ 不写 usage_records
+        // No updates.jsonl (older grok) → no usage_records written
         let usageRows = try store.usage.totalsForSessions(["grok-sess-1"])
         try expect(usageRows["grok-sess-1"] == nil, "grok 不应有用量行")
 
-        // 再扫一次：水位已过，计数不翻倍
+        // Scan again: the watermark is past, counts do not double
         _ = try scanner.scanOnce()
         try expectEqual(try count("read_file"), 2)
         try expectEqual(
             try store.sessionStats.promptCounts(for: ["grok-sess-1"])["grok-sess-1"] ?? 0, 2)
     }
-    /// 合成的 turn_completed 行（字段结构照抄 Grok 1.0.41；数值自拟）
+    /// Synthetic turn_completed line (field structure copied from Grok 1.0.41; values made up)
     func turnCompleted(
         promptId: String, ms: Int, input: Int, cached: Int, output: Int, ticks: Int
     ) -> String {
@@ -247,7 +248,7 @@ func grokUsageScannerTests(_ t: TestRunner) {
         try appendLines([#"{"ts":"2026-09-20T09:00:00.000Z","type":"turn_started"}"#], to: session.events)
         let updates = session.events.deletingLastPathComponent().appendingPathComponent("updates.jsonl")
         try appendLines([
-            // 流式正文行：不是 turn_completed，必须忽略
+            // Streamed body line: not turn_completed, must be ignored
             #"{"timestamp":1790067000,"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"hi"}}}}"#,
             turnCompleted(promptId: "p1", ms: 1_790_067_696_000,
                           input: 1_000_000, cached: 800_000, output: 50_000, ticks: 27_941_104_400),
@@ -261,15 +262,15 @@ func grokUsageScannerTests(_ t: TestRunner) {
         var row = try expectSome(rows.first)
         try expectEqual(row.model, "grok-4.7-build")
         try expectEqual(row.provider, "xai")
-        try expectEqual(row.inputTokens, 200_000)   // 1M − 缓存读 800k
+        try expectEqual(row.inputTokens, 200_000)   // 1M − 800k cache reads
         try expectEqual(row.cacheReadTokens, 800_000)
         try expectEqual(row.outputTokens, 50_000)
         try expect(abs((row.reportedCostUSD ?? 0) - 2.79411044) < 1e-9, "\(String(describing: row.reportedCostUSD))")
-        // 费用直接采用自报值，不走价格表
+        // Cost uses the self-reported value directly, not the price table
         try expectEqual(PricingTable(models: []).cost(of: row), row.reportedCostUSD)
         try expectEqual(PricingTable(models: []).resolution(of: row).source, .reported)
 
-        // 增量：追加一轮只新增一轮
+        // Incremental: appending one turn adds only one turn
         try appendLines([
             turnCompleted(promptId: "p2", ms: 1_790_067_800_000,
                           input: 500_000, cached: 100_000, output: 10_000, ticks: 10_000_000_000),
@@ -281,7 +282,7 @@ func grokUsageScannerTests(_ t: TestRunner) {
         try expectEqual(row.requestCount, 2)
         try expect(abs((row.reportedCostUSD ?? 0) - 3.79411044) < 1e-9)
 
-        // 文件被重写（新 inode）：从头重扫，先清后写，不翻倍
+        // File rewritten (new inode): rescan from the start, clear then write, no doubling
         let content = try Data(contentsOf: updates)
         try FileManager.default.removeItem(at: updates)
         try content.write(to: updates)
@@ -296,13 +297,15 @@ func grokSessionIndexerTests(_ t: TestRunner) {
 
     t.test("索引 summary.json：id/cwd/标题/transcriptPath") {
         let session = try makeGrokSession()
-        // 索引读 lastActive（summary last_active_at）判窗口；写一个 chat_history 以有 size
+        // The indexer reads lastActive (summary last_active_at) for the window; write a
+        // chat_history so there is a size
         try Data(#"{"type":"assistant","content":"hi"}"#.utf8).write(
             to: session.events.deletingLastPathComponent()
                 .appendingPathComponent("chat_history.jsonl"))
 
-        // 窗口必须显式放大：fixture 的 last_active_at 是固定日期（2026-07-09），
-        // 用默认 30 天窗口会随墙钟时间推移把 fixture 滤掉（时间炸弹）
+        // The window must be widened explicitly: the fixture's last_active_at is a fixed date
+        // (2026-07-09), and the default 30-day window would filter it out as wall-clock time moves
+        // on (time bomb)
         let sessions = GrokSessionIndexer.index(
             sessionsRoot: session.root, window: .greatestFiniteMagnitude)
         try expectEqual(sessions.count, 1)

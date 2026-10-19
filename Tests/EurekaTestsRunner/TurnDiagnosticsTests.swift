@@ -1,7 +1,8 @@
 import EurekaKit
 import Foundation
 
-/// TurnDiagnostics：图的形状 → 提示词问题。每条信号都要能指回一个可执行的改进动作。
+/// TurnDiagnostics: graph shape → prompt problems. Every signal must point back to an actionable
+/// improvement.
 func turnDiagnosticsTests(_ t: TestRunner) {
     t.suite("TurnDiagnostics · 逐轮诊断")
 
@@ -33,7 +34,8 @@ func turnDiagnosticsTests(_ t: TestRunner) {
     }
 
     t.test("探索开销比：只在步数够多时才判，短轮不误报") {
-        // 短轮：2 步里 2 步检索，比例 100% 但不该报（样本太小）
+        // Short turn: 2 of 2 steps are searches; the ratio is 100% but it shouldn't fire (sample
+        // too small)
         let short = evaluate(TurnInput(
             turnIndex: 0, promptMessageId: 0, promptText: "找找",
             steps: [
@@ -42,7 +44,8 @@ func turnDiagnosticsTests(_ t: TestRunner) {
             ]))
         try expect(!short.signals.contains { $0.rule == "explore-heavy" })
 
-        // 长轮：8 个节点里 6 个在找 → 报「大半轮在找文件」
+        // Long turn: 6 of 8 nodes are searching → fires the "most of the turn spent finding files"
+        // signal
         var steps: [TurnInput.Step] = []
         for index in 0..<6 {
             steps.append(step(.search, "Grep", "p\(index)", batch: index + 1, index: index))
@@ -58,7 +61,7 @@ func turnDiagnosticsTests(_ t: TestRunner) {
     }
 
     t.test("回读：同一文件被反复回看 → 上下文没一次给够") {
-        // Edit 之后再 Read 同一文件，构成回读回边
+        // Reading the same file again after Edit forms a re-read back edge
         var steps: [TurnInput.Step] = []
         var index = 0
         for round in 0..<4 {
@@ -93,8 +96,9 @@ func turnDiagnosticsTests(_ t: TestRunner) {
     }
 
     t.test("反复改同一文件：不产生回边，但必须报出来") {
-        // 真实会话里出现过 `Edit X.java ×8`。连续同文件编辑不产生任何回边，
-        // 只看边的规则会完全漏掉这个很强的「没想清就动手」信号。
+        // Real sessions have shown `Edit X.java ×8`. Consecutive edits to one file produce no back
+        // edge at all, so edge-only rules would completely miss this strong "acting before thinking
+        // it through" signal.
         var steps: [TurnInput.Step] = []
         for index in 0..<6 {
             steps.append(step(.edit, "Edit", "/w/Parser.java", batch: index + 1, index: index))
@@ -108,7 +112,7 @@ func turnDiagnosticsTests(_ t: TestRunner) {
         try expect(signal.advice.contains("Parser.java"), "建议要指名道姓，否则没法执行")
         try expect(result.rereadCount == 0, "连续同文件编辑本来就没有回边")
 
-        // 改两次不该报（正常的分两步落笔）
+        // Two edits shouldn't fire (normal two-step writing)
         let twice = evaluate(TurnInput(
             turnIndex: 0, promptMessageId: 0, promptText: "改",
             steps: [

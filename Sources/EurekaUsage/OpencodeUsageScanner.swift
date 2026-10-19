@@ -2,14 +2,16 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 扫描 opencode.db 的 message 表（assistant 行）累计 token 用量。
-/// 只读打开外部库；按 message.rowid 水位增量，只结算「已完成」的消息，
-/// 进行中的 turn 停在水位前、下次再扫（故每条消息只计一次，无需跨文件去重）。
+/// Scans cumulative token usage from the message table (assistant rows) of opencode.db. Opens the
+/// external DB read-only; advances by a message.rowid watermark and settles only "completed"
+/// messages, so an in-progress turn stays before the watermark until the next scan (each message
+/// counts once, no cross-file dedup needed).
 public final class OpencodeUsageScanner {
     private let dbPath: URL
     private let store: EurekaStore
     private let projectResolver = ProjectResolver()
-    /// 超过此时长仍未完成的消息视为终态（防止异常中断的 turn 卡死水位）
+    /// Messages still incomplete after this long are treated as terminal (keeps an abnormally
+    /// interrupted turn from pinning the watermark)
     private let staleAfterMs: Double = 5 * 60 * 1000
 
     private static let dayFormatter: DateFormatter = {
@@ -30,7 +32,8 @@ public final class OpencodeUsageScanner {
         guard FileManager.default.fileExists(atPath: path),
               let db = try? SQLiteDB(path: path, readOnly: true) else { return 0 }
 
-        // 水位 = 上次处理到的 message.rowid；db 重建（inode 变）则归零重扫
+        // Watermark = the last processed message.rowid; a rebuilt db (inode changed) resets to zero
+        // and rescans
         let inode = fileInode(path)
         let saved = try store.scanState.fileState(path: path)
         let watermark: Int64 = (saved?.inode == inode ? saved?.offset : nil) ?? 0
@@ -52,14 +55,14 @@ public final class OpencodeUsageScanner {
             guard let dataBytes,
                   let object = try? JSONSerialization.jsonObject(with: dataBytes),
                   let data = object as? [String: Any] else {
-                newWatermark = rowid  // 解析失败（不应发生）：推进以免卡死
+                newWatermark = rowid  // Parse failure (should not happen): advance so we do not get stuck
                 continue
             }
             if (data["role"] as? String) == "assistant" {
                 let time = data["time"] as? [String: Any]
                 let completed = time?["completed"] != nil
                 let stale = timeUpdated < nowMs - staleAfterMs
-                if !completed && !stale { break loop }  // 进行中的 turn：停在此，下次再扫
+                if !completed && !stale { break loop }  // In-progress turn: stop here and rescan next time
                 if let record = usageRecord(data: data, sessionId: sessionId, directory: directory) {
                     records.append(record)
                 }
@@ -82,13 +85,16 @@ public final class OpencodeUsageScanner {
         return inserted
     }
 
-    // MARK: - opencode 2.x：session_message 表
+    // MARK: - opencode 2.x: session_message table
 
-    /// assistant 行 → 用量 + 工具计数。独立 rowid 水位（键 "<db>#v2"），同 message 表的规则：
-    /// 只结算已完成的行，进行中的 turn 停在水位前、下次再扫。表不存在（1.x 库）→ 查询失败 → 0。
+    /// assistant rows → usage + tool counts. Own rowid watermark (key "<db>#v2"), same rules as the
+    /// message table: only completed rows are settled; an in-progress turn stays behind the
+    /// watermark until the next scan. Missing table (1.x database) → query fails → 0.
     ///
-    /// 升级时 1.x 会话连同消息按原 id 复制进 session_message，这些行的用量已由 message 表那条路径
-    /// 计过 → 按消息 id 逐行排除。不按会话排除：迁移会话之后续聊的新消息只在 2.x 表里，要照常计
+    /// On upgrade, 1.x sessions are copied into session_message with their messages under the
+    /// original ids; their usage was already counted via the message table path → exclude row by
+    /// row by message id. Not by session: new messages continued in a migrated session exist only
+    /// in the 2.x table and must be counted as usual
     private func scanSessionMessages(db: SQLiteDB, inode: Int64, nowMs: Double) throws -> Int {
         let key = dbPath.path + "#v2"
         let saved = try store.scanState.fileState(path: key)
@@ -113,13 +119,13 @@ public final class OpencodeUsageScanner {
             guard let dataBytes,
                   let object = try? JSONSerialization.jsonObject(with: dataBytes),
                   let data = object as? [String: Any] else {
-                newWatermark = rowid  // 解析失败（不应发生）：推进以免卡死
+                newWatermark = rowid  // Parse failure (shouldn't happen): advance to avoid stalling
                 continue
             }
             let time = data["time"] as? [String: Any]
             let completed = time?["completed"] != nil
             let stale = timeUpdated < nowMs - staleAfterMs
-            if !completed && !stale { break loop }  // 进行中的 turn：停在此，下次再扫
+            if !completed && !stale { break loop }  // In-progress turn: stop here and rescan next time
             let model = data["model"] as? [String: Any]
             var flattened = data
             flattened["modelID"] = model?["id"]
@@ -152,8 +158,9 @@ public final class OpencodeUsageScanner {
         return records.count
     }
 
-    /// 2.x 每会话用户提问数。迁移会话的 session_message 是 message 表的超集（含迁移后续聊的提问），
-    /// 本函数在 1.x 那次之后跑、同样 reset 覆盖写 → 以 2.x 的数为准
+    /// 2.x per-session user prompt counts. A migrated session's session_message is a superset of
+    /// the message table (including prompts continued after the migration); this runs after the 1.x
+    /// pass and likewise overwrites via reset → the 2.x count wins
     private func recordV2PromptCounts(db: SQLiteDB) throws {
         let rows = (try? db.query("""
             SELECT session_id, COUNT(*) FROM session_message
@@ -170,9 +177,11 @@ public final class OpencodeUsageScanner {
         }
     }
 
-    /// 每会话的用户提问数。共享库来源没有「每会话一个文件」，故 scan_files 那套字节水位用不上：
-    /// 直接一条聚合查询取**绝对值**，用 `<db>#<sessionId>` 作 path、`reset: true` 覆盖写。
-    /// 这样不依赖 rowid 水位，重扫幂等，也不会因为水位停在进行中的 turn 而少算。
+    /// User prompt count per session. A shared-DB source has no "one file per session", so the
+    /// scan_files byte watermark does not apply: a single aggregate query fetches the **absolute
+    /// value**, written with `<db>#<sessionId>` as path and `reset: true` to overwrite. This does
+    /// not depend on the rowid watermark, rescans are idempotent, and nothing is undercounted when
+    /// the watermark stops at an in-progress turn.
     private func recordPromptCounts(db: SQLiteDB) throws {
         let rows = (try? db.query("""
             SELECT session_id, COUNT(*) FROM message
@@ -189,12 +198,14 @@ public final class OpencodeUsageScanner {
         }
     }
 
-    /// part 表 tool 类型分片 → 工具调用计数（独立 rowid 水位，键 "<db>#parts"）
+    /// Tool-type parts in the part table → tool-call counts (separate rowid watermark, key
+    /// "<db>#parts")
     private func scanPartsForTools(db: SQLiteDB, inode: Int64) throws {
         let key = dbPath.path + "#parts"
         let saved = try store.scanState.fileState(path: key)
         let watermark: Int64 = (saved?.inode == inode ? saved?.offset : nil) ?? 0
-        // part 表在旧版 opencode 库可能不存在 → 查询失败视为无工具数据（不影响用量扫描）
+        // The part table may not exist in older opencode DBs → a failed query means no tool data
+        // (usage scanning is unaffected)
         let rows = (try? db.query("""
             SELECT rowid, time_created, data FROM part WHERE rowid > ? ORDER BY rowid ASC
             """, [.int(watermark)]) { row -> (Int64, Double, String?) in
@@ -240,7 +251,8 @@ public final class OpencodeUsageScanner {
             return nil
         }
         let model = (data["modelID"] as? String) ?? (data["providerID"] as? String) ?? "opencode"
-        // providerID 区分同名模型的计费方式（volcengine-agent-plan 订阅 vs zhipuai 按量…）
+        // providerID distinguishes billing for same-named models (volcengine-agent-plan
+        // subscription vs zhipuai pay-as-you-go…)
         let provider = data["modelID"] != nil ? data["providerID"] as? String : nil
         let createdMs = ((data["time"] as? [String: Any])?["created"] as? NSNumber)?.doubleValue ?? 0
         let timestamp = createdMs > 0 ? Date(timeIntervalSince1970: createdMs / 1000) : Date()
@@ -251,14 +263,16 @@ public final class OpencodeUsageScanner {
             sessionId: sessionId,
             timestamp: timestamp,
             inputTokens: input,
-            outputTokens: output + reasoning,  // reasoning 计入 output 侧
+            outputTokens: output + reasoning,  // reasoning counts on the output side
             cacheCreationTokens: cacheWrite,
             cacheReadTokens: cacheRead,
             provider: provider)
     }
 
-    /// 一次性回填 provider：provider 列上线前入库的行都是 NULL，而水位已越过它们、不会重扫。
-    /// 按 (会话, 模型, 时间戳) 精确匹配回写（ts 与入库时同一算法，双精度相等），只动 NULL 行。
+    /// One-time provider backfill: rows stored before the provider column existed are NULL, and the
+    /// watermark is past them so they are never rescanned. Writes back on an exact (session, model,
+    /// timestamp) match (ts uses the same algorithm as at insert time, so doubles compare equal),
+    /// touching only NULL rows.
     private func backfillProviders(db: SQLiteDB, inode: Int64) throws {
         let key = dbPath.path + "#provider-v1"
         guard try store.scanState.fileState(path: key)?.inode != inode else { return }

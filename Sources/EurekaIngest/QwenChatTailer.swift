@@ -1,13 +1,14 @@
 import EurekaKit
 import Foundation
 
-/// 增量 tail Qwen 会话（~/.qwen/projects/<encoded>/chats/<uuid>.jsonl）。
-/// Qwen 无 hook/notify 回调，这是实时通道（与 gemini/kimi tailer 同理）。
-/// 生命周期映射：user 消息 → taskStarted；assistant 消息 → taskFinished(success)；
-/// api_response status_code ≠ 200 → taskFinished(error)。cwd 从消息行 cwd 字段带出。
-/// assistant 消息的 functionCall parts → activity(工具名)（长工具运行的心跳）。
-/// 上下文占用：api_response 遥测行的 input_token_count（含缓存读，≈ 当前上下文
-/// 大小）÷ ContextWindows 窗口（qwen 系暂无官方确数 → 默认 200k）。
+/// Incrementally tails Qwen sessions (~/.qwen/projects/<encoded>/chats/<uuid>.jsonl). Qwen has no
+/// hook/notify callbacks, so this is the live channel (same as the gemini/kimi tailers). Lifecycle
+/// mapping: user message → taskStarted; assistant message → taskFinished(success); api_response
+/// status_code ≠ 200 → taskFinished(error). cwd comes from the message line's cwd field.
+/// functionCall parts of assistant messages → activity(tool name) (heartbeat for long tool runs).
+/// Context usage: input_token_count of the api_response telemetry line (includes cache reads, ≈
+/// current context size) ÷ the ContextWindows window (no official figure for the qwen family yet →
+/// default 200k).
 public final class QwenChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -45,7 +46,8 @@ public final class QwenChatTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must be smaller than the poll
+        // interval (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -59,7 +61,7 @@ public final class QwenChatTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public for tests and synchronous calls at launch
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentChatFiles() {
@@ -96,7 +98,7 @@ public final class QwenChatTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 会话恢复可能整写文件
+        if size < offset { offset = 0 }  // Session resume may rewrite the whole file
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -137,9 +139,9 @@ public final class QwenChatTailer {
         }
     }
 
-    /// 单行 → 领域事件（0..n 个：一条 assistant 可带多个 functionCall）
+    /// One line → domain events (0..n: one assistant message can carry several functionCalls)
     private func events(from root: [String: Any], context ctx: FileContext) -> [TaskEvent] {
-        // API 错误（status_code ≠ 200）→ 出错收尾
+        // API error (status_code ≠ 200) → finish with error
         if let response = QwenChatDecoder.apiResponse(root),
            let status = (response["status_code"] as? NSNumber)?.intValue, status != 200 {
             return [TaskEvent(
@@ -162,7 +164,8 @@ public final class QwenChatTailer {
             return [event(.taskStarted(title: summarizeTitle(message.text)))]
         case "assistant":
             var results: [TaskEvent] = []
-            // functionCall parts → 工具心跳（此前直接丢弃，长工具运行无动静）
+            // functionCall parts → tool heartbeat (previously dropped, so long tool runs showed no
+            // activity)
             for tool in message.toolCalls {
                 results.append(event(.activity(tool: tool)))
             }
@@ -176,8 +179,8 @@ public final class QwenChatTailer {
         }
     }
 
-    /// api_response 遥测行的上下文用量旁路：input_token_count 含缓存读
-    /// （口径与 QwenUsageScanner 一致），≈ 当前上下文大小
+    /// Side channel for context usage from api_response telemetry lines: input_token_count includes
+    /// cache reads (same accounting as QwenUsageScanner), ≈ current context size
     private func contextUsage(_ root: [String: Any]) -> (model: String?, used: Int)? {
         guard let response = QwenChatDecoder.apiResponse(root),
               let input = (response["input_token_count"] as? NSNumber)?.intValue,
@@ -186,11 +189,12 @@ public final class QwenChatTailer {
         return (response["model"] as? String, input)
     }
 
-    // MARK: - 上下文占用（api_response input_token_count ÷ ContextWindows 窗口）
+    // MARK: - Context usage (api_response input_token_count ÷ ContextWindows window)
 
-    /// 与 kimi/grok tailer 同例：按发射时刻 fresh 事件（stale 闸门会丢掉过期
-    /// contextUpdate），只在变化 ≥0.5 时补发避免刷屏。TaskStore 不为 contextUpdate
-    /// 建任务，且此处只对已跟踪会话发射，不会造幻影任务。
+    /// Same as the kimi/grok tailers: events are fresh as of emission time (the stale gate would
+    /// drop an outdated contextUpdate), and re-emitted only on a change ≥0.5 to avoid flooding.
+    /// TaskStore doesn't create tasks for contextUpdate, and we only emit for tracked sessions, so
+    /// no phantom tasks appear.
     private func emitContext(
         for chatURL: URL, context ctx: FileContext,
         usage: (model: String?, used: Int)
@@ -206,12 +210,14 @@ public final class QwenChatTailer {
             sessionStartedAt: ctx.sessionStartedAt), false)
     }
 
-    /// 首扫读取上限：头 64KB 建上下文（cwd/标题/开始时间取自头部消息），
-    /// 尾 256KB 恢复"最后状态"；更小的文件整读。大转录不再全量载入解析。
+    /// First-scan read limits: the first 64KB builds context (cwd/title/start time come from the
+    /// head messages), the last 256KB restores the "last state"; smaller files are read whole.
+    /// Large transcripts are no longer fully loaded and parsed.
     private static let initialHeadBytes: UInt64 = 64 * 1024
     private static let initialTailBytes: UInt64 = 256 * 1024
 
-    /// 新发现文件：头 64KB 建上下文，只从尾 256KB 恢复"最后状态"，不重放历史
+    /// Newly discovered file: build context from the first 64KB, restore the "last state" only from
+    /// the last 256KB, no history replay
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
@@ -224,7 +230,8 @@ public final class QwenChatTailer {
         var lastFinished: TaskEvent?
         var lastUsage: (model: String?, used: Int)?
 
-        /// 扫一个数据块（块边界的半行丢弃），建上下文 + 跟踪最后 started/finished
+        /// Scan one chunk (partial lines at chunk boundaries are dropped), building context +
+        /// tracking the last started/finished
         func scan(_ data: Data, dropLeadingPartial: Bool, dropTrailingPartial: Bool) {
             var lines = data.split(separator: UInt8(ascii: "\n"))[...]
             if dropLeadingPartial, !lines.isEmpty { lines = lines.dropFirst() }
@@ -246,7 +253,8 @@ public final class QwenChatTailer {
         }
 
         if size <= Self.initialHeadBytes + Self.initialTailBytes {
-            // 小文件整读（结尾半行 JSON 解析自然失败，与整读旧行为一致）
+            // Small files are read whole (a trailing partial line simply fails JSON parsing,
+            // matching the old whole-file behavior)
             guard let data = try? handle.readToEnd() else { return }
             scan(data, dropLeadingPartial: false, dropTrailingPartial: false)
         } else {
@@ -281,7 +289,8 @@ public final class QwenChatTailer {
             handler(event, false)
             titleEvent(from: event)
         }
-        // 尾部遥测反映最新上下文占用（TaskStore 对未知会话直接丢弃，安全）
+        // Tail telemetry reflects the latest context usage (TaskStore drops unknown sessions, so
+        // this is safe)
         if let lastUsage {
             emitContext(for: url, context: ctx, usage: lastUsage)
         }

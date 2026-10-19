@@ -1,27 +1,32 @@
 import EurekaKit
 import Foundation
 
-/// Prompt 库采集端：从会话 transcript 提取用户提问（`role == .user`）。
+/// Prompt library collector: extracts user prompts (`role == .user`) from session transcripts.
 ///
-/// 复用 `TranscriptReader` 的全部源加载器——12 个源可直接提取（含共享 DB 的
-/// opencode/hermes/cursor/zcode，按 sessionId 查询即可）；antigravity（protobuf）
-/// 与 trae（SQLCipher）各只回一条 toolNote，天然提取不出任何条目。
+/// Reuses every source loader in `TranscriptReader` — 12 sources can be extracted directly
+/// (including the shared-DB opencode/hermes/cursor/zcode, queried by sessionId); antigravity
+/// (protobuf) and trae (SQLCipher) each return only a single toolNote, so naturally nothing
+/// is extracted from them.
 public enum PromptExtractor {
-    /// 单会话提取：全量解析 transcript、过滤用户消息，并做三层排噪
-    /// （实勘 2395 条里 12.4% 是伪用户消息 —— 复用库存它们毫无意义）：
-    /// 1. `TurnSlicer.realPrompt` 按块剥注入标签（caveat 后跟真实提问的能保留），剩空跳过；
-    /// 2. `PromptClassifier.isInjectedArtifact` 补 TurnSlicer 清单外的前缀
-    ///    （bash-input / Codex 环境上下文）与裸斜杠命令；
-    /// 3. `truncateForStorage` 截断超长粘贴（实勘最长 1.98MB 日志）。
-    /// `firstSeen` 由调用方传入（同一批扫描共享一个时间戳，排序稳定）。
+    /// Single-session extraction: fully parses the transcript, filters user messages and applies
+    /// three layers of noise removal (12.4% of the 2395 surveyed entries were pseudo-user
+    /// messages — storing them for reuse is pointless):
+    /// 1. `TurnSlicer.realPrompt` strips injected tags block by block (a caveat followed by a real
+    ///    prompt is kept); skip if nothing remains;
+    /// 2. `PromptClassifier.isInjectedArtifact` covers prefixes outside TurnSlicer's list
+    ///    (bash-input / Codex environment context) and bare slash commands;
+    /// 3. `truncateForStorage` truncates oversized pastes (the longest surveyed was a 1.98MB log).
+    /// `firstSeen` is passed in by the caller (one scan batch shares a timestamp, keeping order
+    /// stable).
     public static func extract(from session: AgentSessionInfo, at now: Date) -> [PromptEntry] {
         extract(
             messages: TranscriptReader.load(session: session).messages,
             session: session, at: now)
     }
 
-    /// 纯函数重载：调用方自己 load 好 messages（提取与轮次评价共享同一次解析——
-    /// transcript 全量重解析是提取管线的主要成本，不能为评价再 load 一遍）
+    /// Pure-function overload: the caller loads messages itself (extraction and turn evaluation
+    /// share one parse — fully re-parsing the transcript is the main cost of the extraction
+    /// pipeline, so it must not be loaded again for evaluation)
     public static func extract(
         messages: [TranscriptMessage], session: AgentSessionInfo, at now: Date
     ) -> [PromptEntry] {

@@ -72,13 +72,13 @@ func knowledgeLinkTests(_ t: TestRunner) {
         try expectEqual(hits.count, 1)
         try expectEqual(hits[0].kind, "memory")
         try expectEqual(hits[0].title, "worktree 约定")
-        // 同 path 重写覆盖旧文
+        // Rewriting the same path replaces the old text
         try store.knowledge.replaceDoc(
             path: "/tmp/b/mem.md", kind: "memory", source: "claude",
             title: "worktree 约定", project: "eureka", size: 12, mtime: 2,
             body: "改为别的内容")
         try expectEqual(try store.knowledge.search("worktree").count, 0, "旧正文应被覆盖")
-        // prune 清掉消失的文件
+        // prune removes files that disappeared
         try store.knowledge.prune(keeping: ["/tmp/b/mem.md"])
         try expectEqual(try store.knowledge.search("测试先行").count, 0, "被 prune 的技能不该再命中")
     }
@@ -97,7 +97,7 @@ func knowledgeLinkTests(_ t: TestRunner) {
         let path = tempStorePath()
         defer { try? FileManager.default.removeItem(at: path) }
         let store = try EurekaStore(path: path)
-        // indexPrompts 写入的形态：path 就是 prompt 库 id（"source:sessionId:msgIdx"）
+        // Shape written by indexPrompts: path is the prompt library id ("source:sessionId:msgIdx")
         try store.knowledge.replaceDoc(
             path: "claude:sess-1:3", kind: "prompt", source: "claude",
             title: "修复分页越界", project: "eureka", size: 10, mtime: 1,
@@ -110,7 +110,8 @@ func knowledgeLinkTests(_ t: TestRunner) {
         try expectEqual(hits.map(\.kind).sorted(), ["prompt", "skill"])
         let prompt = hits.first { $0.kind == "prompt" }
         try expectEqual(prompt?.path, "claude:sess-1:3", "prompt 命中的 path 就是库 id，⌘K 直达靠它")
-        // 文件型 prune 不能拿 prompt id 当路径误删；prompt 自己的 prune 也不碰文件型
+        // File-type prune must not mistake a prompt id for a path and delete it; the prompt prune
+        // doesn't touch file-type rows either
         try store.knowledge.prune(keeping: ["/tmp/a/SKILL.md"])
         try expectEqual(
             try store.knowledge.search("分页越界").count, 2, "文件型 prune 不该删 prompt 文档")
@@ -152,9 +153,10 @@ func knowledgeLinkTests(_ t: TestRunner) {
         try expectEqual(docs.first { $0.path == "/tmp/p.md" }?.kind, "plan")
     }
 
-    // CommandPaletteService（Sources/EurekaApp）的 Kind/Hit/merge/snippet 实际转发自
-    // EurekaKit.CommandPalette——eureka-tests 链不到 app 壳目标码（同 KnowledgeSearchIndexer
-    // 挪层的教训），纯逻辑测这层即可，服务只是薄壳转发。
+    // CommandPaletteService (Sources/EurekaApp) actually forwards Kind/Hit/merge/snippet to
+    // EurekaKit.CommandPalette — eureka-tests can't link the app shell target (same lesson as
+    // moving KnowledgeSearchIndexer down a layer), so testing the pure logic here is enough; the
+    // service is a thin forwarder.
     t.test("palette：合并去重（同目标取先出现者）并按组截断") {
         let a = CommandPalette.Hit(
             kind: .skill, key: "/tmp/s.md", title: "tdd", subtitle: "claude", snippet: nil,
@@ -173,7 +175,8 @@ func knowledgeLinkTests(_ t: TestRunner) {
     t.test("palette：Prompt 类别 —— 有显示名、reveal 不带 kind（走 .eurekaRevealPrompt）、参与合并与截断") {
         try expectEqual(CommandPalette.Kind.prompt.label, "Prompt")
         try expect(CommandPalette.Kind.prompt.revealKind == nil, "Prompt 直达走专用通知，不走知识页 kind 路由")
-        // 元数据命中（标题）与 FTS 命中（正文）指向同一条 prompt：按 key（库 id）去重取先出现者
+        // A metadata hit (title) and an FTS hit (body) point at the same prompt: dedup by key
+        // (library id), keeping the first
         let meta = CommandPalette.Hit(
             kind: .prompt, key: "claude:s:1", title: "修复分页越界", subtitle: "Claude Code",
             snippet: nil, sessionId: nil, messageIdx: nil)

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 配置文件的安全写入：写前备份（保留最近 N 份）+ 原子替换
+/// Safe config-file writes: back up first (keeping the latest N copies), then replace atomically.
 public enum ConfigFile {
     public static func read(_ path: URL) -> String {
         (try? String(contentsOf: path, encoding: .utf8)) ?? ""
@@ -36,7 +36,7 @@ public enum ConfigFile {
             at: dir, includingPropertiesForKeys: nil)) ?? []
         return files
             .filter { $0.lastPathComponent.hasPrefix(prefix) }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }  // 时间戳倒序，最新在前
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }  // Newest timestamp first
     }
 
     private static func pruneBackups(for path: URL, keep: Int) {

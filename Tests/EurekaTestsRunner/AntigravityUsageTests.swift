@@ -3,7 +3,7 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-/// 测试用最小 protobuf 编码器（与 ProtobufReader 对拍）
+/// Minimal protobuf encoder for tests (cross-checked against ProtobufReader)
 private enum PB {
     static func varint(_ value: UInt64) -> Data {
         var value = value
@@ -33,7 +33,7 @@ private enum PB {
     }
 }
 
-/// 一条 gen_metadata：1{4{usage}, 19 model, 20{last_step_index}}
+/// One gen_metadata: 1{4{usage}, 19 model, 20{last_step_index}}
 private func genMetadata(model: String?, input: UInt64, output: UInt64, cacheRead: UInt64, step: Int) -> Data {
     let usage = PB.uint(1, 1318) + PB.uint(2, input) + PB.uint(3, output) + PB.uint(5, cacheRead)
         + PB.uint(9, output / 2) + PB.uint(10, output - output / 2)
@@ -55,7 +55,7 @@ private func makeConversation(in dir: URL, id: String) throws -> URL {
 
 private func insertCall(_ url: URL, idx: Int, data: Data, step: Int, at seconds: UInt64) throws {
     let db = try SQLiteDB(path: url.path)
-    // SQLiteValue 没有 blob：用 SQL 的 unhex 写真 BLOB
+    // SQLiteValue has no blob: write a real BLOB with SQL's unhex
     try db.run("INSERT INTO gen_metadata (idx, data) VALUES (?, unhex(?))",
                [.int(Int64(idx)), .text(data.map { String(format: "%02x", $0) }.joined())])
     let metadata = PB.bytes(1, PB.uint(1, seconds) + PB.uint(2, 5))
@@ -79,8 +79,8 @@ func antigravityUsageTests(_ t: TestRunner) {
     t.test("截断 / 非法 wire type 返回 nil 不崩") {
         let data = PB.bytes(1, Data(repeating: 0x41, count: 10))
         try expect(ProtobufReader.fields(data.prefix(5)) == nil)
-        try expect(ProtobufReader.fields(Data([0x0B])) == nil)  // wire type 3（group）
-        try expect(ProtobufReader.fields(Data([0x08, 0xFF])) == nil)  // varint 未结束
+        try expect(ProtobufReader.fields(Data([0x0B])) == nil)  // wire type 3 (group)
+        try expect(ProtobufReader.fields(Data([0x08, 0xFF])) == nil)  // unterminated varint
         try expect(ProtobufReader.fields(Data()) == [])
     }
 
@@ -102,7 +102,7 @@ func antigravityUsageTests(_ t: TestRunner) {
         let store = try EurekaStore(path: root.appendingPathComponent("eureka.sqlite"))
         let scanner = AntigravityUsageScanner(
             conversationsRoot: conversations, store: store, cwdResolver: { _ in "/Users/me/demo" })
-        try expectEqual(try scanner.scanOnce(), 1)  // 全零那行跳过
+        try expectEqual(try scanner.scanOnce(), 1)  // the all-zero row is skipped
         var rows = try store.usage.totalsForSessions(["conv-1"])["conv-1"] ?? []
         let row = try expectSome(rows.first)
         try expectEqual(row.model, "gemini-3.8-flash")
@@ -113,16 +113,16 @@ func antigravityUsageTests(_ t: TestRunner) {
         let records = try store.usage.recentRecords(limit: 5)
         try expectEqual(records.first?.ts, Date(timeIntervalSince1970: 1_790_000_000))
 
-        // 指纹没变：不重扫
+        // Fingerprint unchanged: no rescan
         try expectEqual(try scanner.scanOnce(), 0)
-        // 新增一行：只入新行
+        // One new row: only the new row is ingested
         try insertCall(conv, idx: 2, data: genMetadata(
             model: "gemini-3.8-flash", input: 10, output: 20, cacheRead: 0, step: 5),
             step: 5, at: 1_790_000_200)
         try expectEqual(try scanner.scanOnce(), 1)
         rows = try store.usage.totalsForSessions(["conv-1"])["conv-1"] ?? []
         try expectEqual(rows.first?.requestCount, 2)
-        // 扫描不留临时副本
+        // Scanning leaves no temp copy behind
         let leftovers = (try? FileManager.default.contentsOfDirectory(
             atPath: FileManager.default.temporaryDirectory.path))?.filter { $0.hasPrefix("eureka-agy-") && !$0.hasPrefix("eureka-agy-test-") } ?? []
         try expect(leftovers.isEmpty, "\(leftovers)")

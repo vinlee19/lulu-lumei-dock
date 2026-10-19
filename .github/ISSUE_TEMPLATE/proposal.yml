@@ -1,0 +1,65 @@
+name: Proposal · 设计提案
+description: Design review before implementing a significant change. · 重要改动实现前的设计评审。
+title: "[Proposal] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Required for: a new agent source, pipeline / `TaskStore` / relay-contract changes, SQLite schema or spool changes, anything in *Critical invariants* (CLAUDE.md), new dependencies, new top-level UI surfaces, or reading credentials / new external databases.
+        适用于：新增 Agent 数据源、事件管线 / `TaskStore` / relay 契约变更、SQLite schema 或 spool 变更、触及 CLAUDE.md「关键不变量」、新增依赖、新的一级 UI 界面、读取凭证或新的外部数据库。
+        Large designs go in `docs/specs/YYYY-MM-DD-<slug>-design.md`; link it below. · 篇幅较大的设计写入 `docs/specs/`，并在下方链接。
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation · 动机
+      description: The problem, who it affects, and why now. · 要解决的问题、影响谁、为什么是现在。
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Design · 设计方案
+      description: Data flow, new types / tables / files, UI sketch. · 数据流、新增类型 / 表 / 文件、界面草图。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Affected modules and invariants · 影响的模块与不变量
+      description: Which targets change, and which CLAUDE.md invariants this touches and how they stay true. · 改动哪些 target；触及哪些不变量，如何保证仍成立。
+      placeholder: |
+        Modules: EurekaIngest, EurekaApp
+        Invariants: stale-event suppression (new tailer computes isStale from the event timestamp)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives · 备选方案
+      description: What else you considered and why it lost. · 考虑过哪些方案，为什么不选。
+    validations:
+      required: true
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout, migration and rollback · 上线、迁移与回滚
+      description: Feature flag / default-off? Data migration? How to undo safely? · 是否默认关闭？是否迁移数据？如何安全回退？
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan · 验证计划
+      description: Tests to add and manual checks to run. · 计划新增的测试与手工验证。
+    validations:
+      required: true
+  - type: input
+    id: doc
+    attributes:
+      label: Design doc · 设计文档
+      placeholder: docs/specs/2026-10-17-example-design.md
+  - type: textarea
+    id: questions
+    attributes:
+      label: Open questions · 待决问题

@@ -1,14 +1,16 @@
 import Foundation
 
-/// 索引用的会话发现：扫各源默认根路径 → `[AgentSessionInfo]`。
+/// Session discovery for indexing: scan each source's default root → `[AgentSessionInfo]`.
 ///
-/// 抽出来是因为**发现本身就是主要成本**：实测 267 个会话、逐文件解析文件头约 60s，
-/// 而全文索引与逐轮指标索引原本各自调一遍同样的 8 个 indexer —— 每分钟白付两次。
-/// 现在由调用方（`UsageService`）发现一次、两个消费者共用。
+/// Factored out because **discovery itself is the main cost**: measured at 267 sessions, parsing
+/// each file's head takes ~60s, and the full-text index and the per-turn metrics index each used to
+/// call the same 8 indexers on their own -- paying twice a minute for nothing. Now the caller
+/// (`UsageService`) discovers once and both consumers share the result.
 ///
-/// 不含共享库的源（opencode / hermes / cursor / trae / zcode）与 antigravity：
-/// 前者以 `transcriptPath` 为主键会互相整片覆盖，后者是 protobuf 解不出内容。
-/// trae 还多一层：会话库是 SQLCipher 加密的，压根没有可索引的正文（见 `TraeSessionIndexer`）。
+/// Excludes shared-library sources (opencode / hermes / cursor / trae / zcode) and antigravity:
+/// the former key on `transcriptPath` and would overwrite each other wholesale; the latter is
+/// protobuf whose content can't be decoded. Trae has one more layer: its session DB is
+/// SQLCipher-encrypted, so there is no indexable body at all (see `TraeSessionIndexer`).
 public enum AgentSessionDiscovery {
     public static func forIndexing() -> [AgentSessionInfo] {
         var sessions = ClaudeSessionIndexer.index(

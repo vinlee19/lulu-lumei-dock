@@ -1,7 +1,8 @@
 import Foundation
 
-/// 限额百分比采样仓库：每次限额刷新落一行，预测"何时打满"用。
-/// 观测数据（不可重推导）→ 与 task_history 同待遇，升级不 DROP；保留 14 天定期清理。
+/// Rate-limit percentage sample repo: one row per rate-limit refresh, used to predict "when the
+/// quota fills". Observed data (not re-derivable) → treated like task_history, never DROPped on
+/// upgrade; periodically pruned to 14 days.
 public final class LimitSamplesRepo {
     private let db: SQLiteDB
 
@@ -15,7 +16,7 @@ public final class LimitSamplesRepo {
             [.date(ts), .text(source), .text(window), .real(percent)])
     }
 
-    /// 某源某窗口自 since 起的采样（按时间升序）
+    /// Samples for one source and window since `since` (time ascending)
     public func samples(
         source: String, window: String, since: Date
     ) throws -> [(ts: Date, percent: Double)] {

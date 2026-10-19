@@ -1,41 +1,46 @@
+import EurekaKit
 import Foundation
 
-/// 技能跨源传播：把一个技能目录完整复制到另一个 agent 的技能根。
+/// Cross-source skill propagation: copies a whole skill directory into another agent's skills root.
 ///
-/// 12/14 个源的技能是字节级同构的 `<目录>/SKILL.md`（frontmatter name/description），
-/// 所以"安装到另一个源"就是目录复制 —— 不改写内容、不碰任何配置文件，
-/// 失败最多留下一个目标 CLI 读不懂的目录，可随时废纸篓删除。
+/// For 12/14 sources a skill is a byte-identical `<dir>/SKILL.md` (frontmatter name/description),
+/// so "install into another source" is just a directory copy: no content rewriting, no config files touched,
+/// and a failure at worst leaves a directory the target CLI can't read, which can be trashed any time.
 ///
-/// 复制的剪枝口径与扫描不同：扫描剪掉 references/scripts/assets 是因为里面不会有
-/// **独立技能**，但它们正是技能自带的素材，复制时必须保留；这里只剪依赖/缓存目录
-/// 和隐藏项（.git 等由隐藏规则覆盖）。
+/// Copying prunes differently from scanning: the scan prunes references/scripts/assets because they never hold
+/// **standalone skills**, but they are exactly the skill's own assets and must be kept when
+/// copying; here we only prune dependency/cache directories and hidden entries (.git etc. are
+/// covered by the hidden rule).
 public enum SkillPropagator {
     public enum PropagationError: Error, LocalizedError, Equatable {
-        /// 目标根下已有同名技能目录（含停用区同名也算，避免"装上了却被停用区遮蔽"的错觉）
+        /// A skill directory with the same name already exists under the target root (a same-named
+        /// one in the disabled area counts too, to avoid the illusion of "installed but shadowed by
+        /// the disabled area")
         case alreadyExists(String)
-        /// 源目录里没有 SKILL.md（不是一个合法技能目录）
+        /// The source directory has no SKILL.md (not a valid skill directory)
         case missingSkillFile(String)
 
         public var errorDescription: String? {
             switch self {
-            case .alreadyExists(let path): return "目标已存在同名技能：\(path)"
-            case .missingSkillFile(let path): return "源目录缺少 SKILL.md：\(path)"
+            case .alreadyExists(let path): return L10n.format("A skill with the same name already exists at the destination: %@", zhHans: "目标已存在同名技能：%@", String(path))
+            case .missingSkillFile(let path): return L10n.format("The source directory is missing SKILL.md: %@", zhHans: "源目录缺少 SKILL.md：%@", String(path))
             }
         }
     }
 
-    /// 复制时整棵跳过的目录（依赖 / 缓存；隐藏目录另有统一规则）
+    /// Directories skipped wholesale when copying (dependencies / caches; hidden directories have
+    /// their own rule)
     static let prunedDirs: Set<String> = [
         "node_modules", "venv", "site-packages", "__pycache__",
     ]
 
-    /// 把 `skillDirectory` 复制为 `targetRoot/<slug>`（slug 缺省 = 源目录名）。
-    /// 返回目标技能目录。
+    /// Copies `skillDirectory` to `targetRoot/<slug>` (slug defaults to the source directory name).
+    /// Returns the target skill directory.
     ///
-    /// `overwrite = false`（默认）：目标已存在（启用区或停用区）则抛错——安装新技能的语义。
-    /// `overwrite = true`：**覆盖更新**——先把新版整树复制进隐藏暂存目录（扫描器
-    /// skipsHiddenFiles 看不到半成品），旧版移入废纸篓（可找回；废纸篓不可用时退回
-    /// 隐藏备份目录），再把暂存换入。目标此前在停用区就更新停用区，不改变启停状态。
+    /// `overwrite = false` (default): throws if the target exists (enabled or disabled area); install-new-skill semantics.
+    /// `overwrite = true`: **update in place**. First copy the new tree into a hidden staging directory (the scanner's
+    /// skipsHiddenFiles can't see the half-built copy), move the old version to the Trash (recoverable; falls back to a
+    /// hidden backup directory when the Trash is unavailable), then swap the staged copy in. A target in the disabled area is updated there, without changing its enabled state.
     @discardableResult
     public static func install(
         skillDirectory: URL, into targetRoot: URL, slug: String? = nil,
@@ -56,10 +61,12 @@ public enum SkillPropagator {
             if existsEnabled { throw PropagationError.alreadyExists(dest.path) }
             if existsDisabled { throw PropagationError.alreadyExists(disabledTwin.path) }
         }
-        // 停用区同名且启用区没有 → 就地更新停用区，不悄悄"顺便启用"
+        // Same name in the disabled area and none in the enabled area → update the disabled area in
+        // place, never silently "enable along the way"
         let finalDest = (!existsEnabled && existsDisabled) ? disabledTwin : dest
 
-        // 先复制进隐藏暂存目录：复制半途失败时旧版一个字节都没动
+        // Copy into the hidden staging directory first: if the copy fails midway, the old version
+        // is untouched
         let staging = targetRoot.appendingPathComponent(
             ".\(name).eureka-staging", isDirectory: true)
         try? fm.removeItem(at: staging)
@@ -74,7 +81,8 @@ public enum SkillPropagator {
             do {
                 try fm.trashItem(at: finalDest, resultingItemURL: nil)
             } catch {
-                // 无废纸篓的卷（网络盘/临时目录等）：退回隐藏备份，扫描器同样看不到
+                // Volumes without a Trash (network drives / temp directories etc.): fall back to a
+                // hidden backup, also invisible to the scanner
                 let backup = targetRoot.appendingPathComponent(
                     ".\(name).eureka-replaced", isDirectory: true)
                 try? fm.removeItem(at: backup)
@@ -85,7 +93,8 @@ public enum SkillPropagator {
         return finalDest
     }
 
-    /// 递归复制目录树：跳过隐藏项与剪枝目录；符号链接不跟随（技能不该带链接，防越界复制）
+    /// Recursively copy a directory tree: skip hidden entries and pruned directories; symlinks are
+    /// not followed (skills shouldn't carry links; prevents copying outside the tree)
     private static func copyTree(from source: URL, to dest: URL) throws {
         let fm = FileManager.default
         let children = try fm.contentsOfDirectory(

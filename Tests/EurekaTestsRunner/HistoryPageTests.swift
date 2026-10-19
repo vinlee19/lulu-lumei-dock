@@ -2,13 +2,15 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-// 历史页改版配套：TaskHistoryRepo 新查询 + 四档分组边界。
-// 分组逻辑是纯函数（Sources/EurekaKit/HistoryGrouping.swift），用固定日期构造边界。
+// Companion to the history page redesign: new TaskHistoryRepo queries + four-bucket grouping
+// boundaries. Grouping is a pure function (Sources/EurekaKit/HistoryGrouping.swift); boundaries are
+// built from fixed dates.
 
 func historyPageTests(_ t: TestRunner) {
     t.suite("TaskHistoryRepo · 区间查询与按天聚合")
 
-    /// 内存库替代：临时文件库（schema 迁移走正式路径，与线上同构）
+    /// In-memory DB substitute: a temp-file DB (schema migration takes the production path, same
+    /// shape as live)
     func makeStore() throws -> (EurekaStore, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-history-\(UUID().uuidString)", isDirectory: true)
@@ -25,15 +27,16 @@ func historyPageTests(_ t: TestRunner) {
             finishedAt: finishedAt, outcome: outcome)
     }
 
-    // 固定参考时间：2026-08-09 12:00 本地（历史页窗口语义与墙钟无关，全靠 since 过滤）
-    let base = Date(timeIntervalSince1970: 1_786_248_000)  // 2026-08-09 附近
+    // Fixed reference time: 2026-08-09 12:00 local (the history window ignores the wall clock; it
+    // relies entirely on the since filter)
+    let base = Date(timeIntervalSince1970: 1_786_248_000)  // around 2026-08-09
     let cal = Calendar.current
     let day0 = cal.startOfDay(for: base)
 
     t.test("tasks(since:limit:)：区间过滤 + finished_at 倒序 + limit") {
         let (store, dir) = try makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        // 区间内 3 条 + 区间外 1 条
+        // 3 inside the range + 1 outside
         try store.history.insert(task("old", finishedAt: day0.addingTimeInterval(-15 * 86400)))
         try store.history.insert(task("a", finishedAt: day0.addingTimeInterval(-2 * 86400)))
         try store.history.insert(task("b", finishedAt: day0.addingTimeInterval(-86400)))
@@ -41,7 +44,7 @@ func historyPageTests(_ t: TestRunner) {
 
         let since = day0.addingTimeInterval(-14 * 86400)
         let all = try store.history.tasks(since: since, limit: 200)
-        try expectEqual(all.map(\.sessionId), ["c", "b", "a"])  // 倒序，old 被区间滤掉
+        try expectEqual(all.map(\.sessionId), ["c", "b", "a"])  // Descending; old is filtered out by the range
 
         let limited = try store.history.tasks(since: since, limit: 2)
         try expectEqual(limited.map(\.sessionId), ["c", "b"])
@@ -58,7 +61,7 @@ func historyPageTests(_ t: TestRunner) {
 
         let rows = try store.history.dailyOutcomeCounts(
             since: day0.addingTimeInterval(-14 * 86400))
-        // (day, outcome, count) 聚合：昨天 interrupted 1，今天 success 2 + error 1
+        // (day, outcome, count) aggregate: yesterday interrupted 1, today success 2 + error 1
         let lookup = Dictionary(
             rows.map { ("\($0.day)|\($0.outcome)", $0.count) },
             uniquingKeysWith: +)
@@ -75,8 +78,10 @@ func historyPageTests(_ t: TestRunner) {
 
     t.suite("HistoryGrouping · 四档边界")
 
-    // 固定 now：2026-08-12（周三）12:00 本地 —— 刻意取周中：无论周日首还是周一首，
-    // 周起点都严格早于「昨天」，周界断言才确定（周日取 now 时周起点=今天，前一天归昨天）。
+    // Fixed now: 2026-08-12 (Wednesday) 12:00 local — deliberately mid-week: whether weeks start
+    // Sunday or Monday, the week start is strictly before "yesterday", so the week-boundary
+    // assertions are deterministic (on a Sunday now, week start = today and the prior day is
+    // yesterday).
     let now = cal.date(
         bySettingHour: 12, minute: 0, second: 0,
         of: base.addingTimeInterval(3 * 86400))!
@@ -99,13 +104,13 @@ func historyPageTests(_ t: TestRunner) {
 
     t.test("本周更早：周起点及之后（不含昨今）归本周更早，周起点前一天归更早") {
         let weekStart = cal.dateInterval(of: .weekOfYear, for: now)!.start
-        // 周起点当天（只要不是今天/昨天）→ 本周更早
+        // The week-start day itself (as long as it is not today/yesterday) → earlier this week
         if weekStart < todayStart.addingTimeInterval(-86400) {
             try expectEqual(
                 HistoryGrouping.group(of: weekStart, now: now, calendar: cal),
                 .earlierThisWeek)
         }
-        // 周起点前一秒 → 更早
+        // One second before the week start → earlier
         try expectEqual(
             HistoryGrouping.group(
                 of: weekStart.addingTimeInterval(-1), now: now, calendar: cal),
@@ -175,8 +180,8 @@ func historyPageTests(_ t: TestRunner) {
                  finished: s.addingTimeInterval(7260)),
         ])
         try expectEqual(merged.count, 1)
-        try expectEqual(merged[0].outcome, .success)  // 最近一轮成功
-        try expectEqual(merged[0].detail, "第二次中断")  // 最近的非 success 轮
+        try expectEqual(merged[0].outcome, .success)  // latest turn succeeded
+        try expectEqual(merged[0].detail, "第二次中断")  // latest non-success turn
     }
 
     t.test("title 为 nil 的最近轮回退到其它轮的 title；无 startedAt 的轮不计时长") {
@@ -193,7 +198,7 @@ func historyPageTests(_ t: TestRunner) {
         try expectEqual(merged.count, 1)
         try expectEqual(merged[0].title, "有标题")
         try expectEqual(merged[0].totalDuration, 60)
-        // 两轮都无 startedAt 时 totalDuration 为 nil
+        // totalDuration is nil when neither turn has startedAt
         var a = FinishedTask(source: .claude, sessionId: "s2",
                              finishedAt: s, outcome: .success)
         a.startedAt = nil

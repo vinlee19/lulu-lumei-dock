@@ -23,13 +23,13 @@ func syncRunsRepoTests(_ t: TestRunner) {
         }
         try expectEqual(try store.syncRuns.count(), 5)
 
-        // 倒序：最新（ts=5000）在前
+        // Descending: newest (ts=5000) first
         let page1 = try store.syncRuns.recent(limit: 2)
         try expectEqual(page1.map(\.uploaded), [5, 4])
         let page2 = try store.syncRuns.recent(limit: 2, offset: 2)
         try expectEqual(page2.map(\.uploaded), [3, 2])
 
-        // 文件明细 JSON 往返
+        // File-detail JSON round-trip
         try expectEqual(page1[0].files, [SyncRunsRepo.RunFile(name: "f5.jsonl", size: 500)])
         try expectEqual(page1[0].uploadedBytes, 500)
     }
@@ -49,7 +49,7 @@ func syncRunsRepoTests(_ t: TestRunner) {
         try expectEqual(run.files[0].category, "claude/skills")
         try expectEqual(run.files[1].category, "custom/docs")
 
-        // 老记录 JSON 无 "c" → category nil，不炸
+        // Old record JSON without "c" → category nil, no crash
         let legacy = SyncRunsRepo.decodeFiles(#"[{"n":"old.jsonl","s":7}]"#)
         try expectEqual(legacy.count, 1)
         try expectEqual(legacy[0].name, "old.jsonl")
@@ -100,7 +100,8 @@ func syncRunsRepoTests(_ t: TestRunner) {
     }
 }
 
-/// 备份构成（两级）：新行走 category 列，老行回退 remote_key。
+/// Backup composition (two levels): new rows use the category column, old rows fall back to
+/// remote_key.
 func syncCompositionTests(_ t: TestRunner) {
     t.suite("SyncStateRepo · 备份构成两级拆分")
 
@@ -110,19 +111,20 @@ func syncCompositionTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: tmp) }
         let store = try EurekaStore(path: tmp)
 
-        // 新行：category 精确
+        // New row: category is exact
         try store.syncState.upsert(.init(
             path: "/a/1.md", remoteKey: "eureka/host/claude/skills/x/SKILL.md",
             size: 100, mtime: 1, uploadedAt: Date(), category: "claude/skills"))
-        // 项目级技能：category 是 claude/skills/project/<名> → 类目应归到 skills
+        // Project-level skill: category is claude/skills/project/<name> → the bucket should be
+        // skills
         try store.syncState.upsert(.init(
             path: "/a/2.md", remoteKey: "eureka/host/claude/skills/project/p/SKILL.md",
             size: 200, mtime: 1, uploadedAt: Date(), category: "claude/skills/project/p"))
-        // 老行（category 为 nil）：段数 6 → 第 4 段 sessions 是类目
+        // Old row (category nil): 6 segments → the 4th segment, sessions, is the bucket
         try store.syncState.upsert(.init(
             path: "/a/3.jsonl", remoteKey: "eureka/host/codex/sessions/2026/r.jsonl",
             size: 400, mtime: 1, uploadedAt: Date()))
-        // 老行且段数 4 → 第 4 段是文件名，属根文件（kind = nil）
+        // Old row with 4 segments → the 4th segment is the file name, a root file (kind = nil)
         try store.syncState.upsert(.init(
             path: "/a/SOUL.md", remoteKey: "eureka/host/hermes/SOUL.md",
             size: 50, mtime: 1, uploadedAt: Date()))
@@ -137,10 +139,10 @@ func syncCompositionTests(_ t: TestRunner) {
         try expectEqual(
             bucket("hermes", nil)?.count, 1,
             "老行段数=4 时第 4 段是文件名 → 根文件（kind 为 nil），不能造出假类目")
-        // 字节降序
+        // bytes descending
         try expectEqual(buckets.first?.source, "codex")
 
-        // 兼容旧调用点
+        // compatible with old call sites
         let bySource = try store.syncState.sourceComposition()
         try expectEqual(bySource["claude"]?.count, 2)
         try expectEqual(bySource["hermes"]?.bytes, 50)

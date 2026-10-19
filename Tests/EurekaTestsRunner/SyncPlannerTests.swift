@@ -75,29 +75,29 @@ func syncPlannerTests(_ t: TestRunner) {
         try write("claude/memories/note.md")
         try write("claude/projects/-proj/sess.jsonl")
         try write("claude/projects/-proj/sess/subagents/agent.jsonl")
-        try write("claude/projects/-proj/other.txt")           // 不该收
-        try write("claude/projects/-proj/memory/MEMORY.md")     // 项目记忆该收
+        try write("claude/projects/-proj/other.txt")           // must not be collected
+        try write("claude/projects/-proj/memory/MEMORY.md")     // project memory, collected
         try write("claude/skills/foo/SKILL.md")
-        try write("claude/skills.eureka-disabled/bar/SKILL.md") // 停用区该收
+        try write("claude/skills.eureka-disabled/bar/SKILL.md") // disabled area, collected
         // Codex + opencode
         try write("codex/AGENTS.md")
         try write("codex/AGENTS.override.md")
         try write("codex/sessions/2026/07/07/rollout-1.jsonl")
         try write("codex/skills/baz/SKILL.md")
         try write("oc-skills/s/SKILL.md")
-        // 计划：Claude 直接目录 + 物化暂存 codex/opencode
+        // Plans: Claude's directory directly + materialized staging for codex/opencode
         try write("claude/plans/my-plan.md")
         try write("plans-staging/codex/roll.md")
         try write("plans-staging/opencode/s1.md")
-        // grok：memory md + session jsonl + skill
+        // grok: memory md + session jsonl + skill
         try write("grok/memory/m1.md")
         try write("grok/sessions/-enc/uuid/events.jsonl")
         try write("grok/skills/gk/SKILL.md")
-        // kimi：session wire.jsonl + state.json + skill
+        // kimi: session wire.jsonl + state.json + skill
         try write("kimi/sessions/wd_x/session_1/agents/main/wire.jsonl")
         try write("kimi/sessions/wd_x/session_1/state.json")
         try write("kimi/skills/kk/SKILL.md")
-        // 自定义目录：任意文件类型都收
+        // Custom directory: any file type is collected
         try write("mydocs/note.txt")
 
         var roots = SyncRoots(
@@ -159,7 +159,7 @@ func syncPlannerTests(_ t: TestRunner) {
             "eureka/mac/kimi/sessions/wd_x/session_1/state.json"), "kimi state.json 必须收（恢复会话要用）")
         try expect(keys.contains("eureka/mac/kimi/skills/kk/SKILL.md"), "kimi 技能必须收")
         try expect(keys.contains("eureka/mac/custom/docs/note.txt"), "自定义目录必须收")
-        // category 已随候选携带（历史记录按来源分组用）
+        // category is carried with the candidate (used to group history records by source)
         try expect(result.candidates.contains {
             $0.category == "custom/docs" && $0.remoteKey.hasSuffix("note.txt")
         }, "自定义目录候选应带 category")
@@ -169,7 +169,8 @@ func syncPlannerTests(_ t: TestRunner) {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("eureka-projskill-\(UUID())")
         defer { try? fm.removeItem(at: base) }
-        // <repo>/.claude/skills/foo/SKILL.md：.claude 是隐藏段，但它在 root 路径里、不在相对路径里
+        // <repo>/.claude/skills/foo/SKILL.md: .claude is a hidden segment, but it is in the root
+        // path, not the relative path
         let skillsRoot = base.appendingPathComponent("myrepo/.claude/skills")
         let deep = skillsRoot.appendingPathComponent("foo")
         try fm.createDirectory(at: deep, withIntermediateDirectories: true)

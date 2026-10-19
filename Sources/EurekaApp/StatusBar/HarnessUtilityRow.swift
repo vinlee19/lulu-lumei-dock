@@ -1,3 +1,4 @@
+import EurekaKit
 import SwiftUI
 
 /// One row standing in for a run of harness background calls (memory compaction, branch-name
@@ -15,7 +16,7 @@ struct HarnessUtilityRow: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
-                Text("后台调用 \(count) 次")
+                Text(L10n.format("%@ background calls", zhHans: "后台调用 %@ 次", String(count)))
                     .font(Theme.font.themed(12, .medium))
                 Text(subtitle)
                     .font(Theme.font.themed(10.5))

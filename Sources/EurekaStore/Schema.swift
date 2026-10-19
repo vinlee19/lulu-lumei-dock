@@ -1,49 +1,61 @@
 import Foundation
 
 enum Schema {
-    /// （v24 内补列，不升版本）prompts 新增 hidden_at（用户"移除"= 软删除时间戳）。
-    ///      硬删会被下一次增量提取 upsert 复活（会话还活跃时整批重写），所以移除必须像
-    ///      favorite 一样是留在行上的用户事实。补列走幂等 ALTER；不升版本是因为升版本会
-    ///      DROP 全部派生表触发一次全量重扫，为一列不值。老版本读这张表也不受影响。
-    /// v24：新增 prompt_eval（Prompt 评价：轮内诊断 + 轮后纠偏 + 静态结构，全列由
-    ///      transcript 重算可得 → 纯派生表，走 DROP 块，丢了只会触发一次全量重评价）。
-    /// v23：新增 prompts + prompt_sessions（Prompt 库）。prompts 混合派生与事实：
-    ///      正文/时间戳可由 transcript 重提取，但 favorite/tags/use_count/last_used_at
-    ///      是用户写入 → 与 task_history 同待遇，升级不 DROP；prompt_sessions 是纯
-    ///      派生的提取指纹（走 DROP 块，丢了只会触发一次全量重提取）。
-    /// v22：ZCode usage 口径修正 —— rollout 的 inputTokens 是 OpenAI 口径（已含 cacheRead），
-    ///      旧版把两者分别入账导致 token/费用近乎双计（实测本机 14.14M vs 真值 7.15M）。
-    ///      扫描已改为入库前减掉缓存读；旧行是错的，派生表升级重建全量重扫修正。
-    /// v21：Claude 工具调用计数算法修正 —— 改为按 tool_use id 逐调用持久去重（`tc:<id>`），
-    ///      不再按 assistant 消息键末次覆盖、也不再依附"用量首次入库"分支；子代理转录的调用
-    ///      归属父会话。旧行是错的（实测技能调用 68 / 真值 78），派生表升级重建全量回填。
-    /// v20：tool_calls 主键加 session_id（技能→会话反查；派生表升级重建全量回填）；
-    ///      新增 knowledge_fts + knowledge_docs（知识面全文搜索，扫描完成后事件驱动重索引）
-    /// v19：移除逐轮诊断（`turn_metrics` / `turn_files`）—— 诊断页与它的落库链路已删除，
-    ///      两张表连同索引一起丢掉，不再随扫描重建。
-    /// v18：Codex 会话 id 解析修复 —— 旧版 `CodexSessionIndexer.headInfo` 会被 resume 写入的
-    ///      第二条 `session_meta` 覆盖 id，导致 `turn_metrics` / `fts_docs` 里 30 个会话的
-    ///      `session_id` 指向别的会话（实测 97 个 codex 文件只有 91 个唯一 id）。
-    ///      指纹未变不会自动重建，只能靠版本跳变强制重扫。
-    /// v17：新增 turn_metrics + turn_files（逐轮诊断指标；已于 v19 移除）
-    /// v16：修 session_terminals 主键含可空列导致 upsert 失效（见下方一次性重建）
-    /// v15：新增 session_terminals（会话 ↔ 终端绑定；只能在事件发生时采集，不可重推导，升级不 DROP）
-    /// v14：新增 limit_samples（限额百分比采样，预测打满时间用；观测数据不可重推导，升级不 DROP）
-    /// v13：新增全文搜索三件套 transcript_fts（FTS5 trigram）/ fts_docs / fts_files（派生表，升级重建全量重索引）
-    /// v12：tool_calls 增列 last_ts（最近调用时间）+ tokens（触发时 token，仅 Claude 有值），派生表升级重建
-    /// v11：新增 audit_events（agent 操作审计流水，非派生表，升级不 DROP）
-    /// v10：新增 tool_calls（技能/插件/子代理/工具调用计数，派生表，升级重建全量重扫）
-    /// v9：新增 sync_runs（云端备份轮次历史 + 文件明细，非派生表，升级不 DROP）
-    /// v8：新增 sync_state（云端备份状态，非派生表，升级不 DROP）
-    /// v7：task_history 新增 session_started_at（会话最初开始时间，历史"开始时间"排序用）
-    /// v6：新增 session_stats（每会话对话数），派生表重建全量重扫
+    /// (column added within v24, no version bump) prompts gains hidden_at (user "remove" =
+    /// soft-delete timestamp).
+    ///      A hard delete would be revived by the next incremental extraction upsert (an active session is rewritten in batches), so removal must,
+    ///      like favorite, be a user fact that stays on the row. The column goes in via idempotent ALTER; no version bump because bumping would
+    ///      DROP every derived table and trigger a full rescan, which isn't worth one column. Old versions reading this table are unaffected.
+    /// v24: adds prompt_eval (prompt evaluation: in-turn diagnostics + post-turn correction +
+    /// static structure; every column
+    ///      can be recomputed from transcripts → purely derived, goes in the DROP block; losing it only triggers one full re-evaluation).
+    /// v23: adds prompts + prompt_sessions (prompt library). prompts mixes derived data and facts:
+    ///      body/timestamps can be re-extracted from transcripts, but favorite/tags/use_count/last_used_at
+    ///      are user-written → treated like task_history, never DROPped on upgrade; prompt_sessions is a purely
+    ///      derived extraction fingerprint (goes in the DROP block; losing it only triggers one full re-extraction).
+    /// v22: ZCode usage accounting fix — the rollout's inputTokens follows OpenAI semantics
+    /// (already includes cacheRead);
+    ///      old versions recorded both separately, nearly double-counting tokens/cost (measured locally 14.14M vs actual 7.15M).
+    ///      The scanner now subtracts cache reads before storing; old rows are wrong, so the derived-table rebuild rescans to fix them.
+    /// v21: Claude tool-call counting fix — now dedups persistently per call by tool_use id
+    /// (`tc:<id>`),
+    ///      no longer last-write-wins per assistant message key, nor tied to the "usage first stored" branch; subagent transcript calls
+    ///      are attributed to the parent session. Old rows are wrong (measured 68 skill calls vs actual 78); the derived-table rebuild back-fills everything.
+    /// v20: tool_calls primary key gains session_id (skill → session reverse lookup; derived-table
+    /// rebuild back-fills everything);
+    ///      adds knowledge_fts + knowledge_docs (knowledge-surface full-text search, event-driven reindex after scans finish)
+    /// v19: removes per-turn diagnostics (`turn_metrics` / `turn_files`) — the diagnostics page and
+    /// its persistence path were deleted,
+    ///      both tables are dropped along with their indexes and no longer rebuilt by scans.
+    /// v18: Codex session id parsing fix — the old `CodexSessionIndexer.headInfo` let the second
+    /// `session_meta` written by resume
+    ///      override the id, so `session_id` for 30 sessions in `turn_metrics` / `fts_docs`
+    ///      pointed at other sessions (measured: 97 codex files, only 91 unique ids).
+    ///      Unchanged fingerprints never rebuild automatically; only a version bump forces the rescan.
+    /// v17: adds turn_metrics + turn_files (per-turn diagnostic metrics; removed in v19) v16: fixes
+    /// session_terminals' primary key containing a nullable column, which broke upsert (see the
+    /// one-off rebuild below) v15: adds session_terminals (session ↔ terminal binding; can only be
+    /// captured when events happen, not re-derivable, never DROPped on upgrade) v14: adds
+    /// limit_samples (rate-limit percentage samples for predicting when the quota fills; observed
+    /// data, not re-derivable, never DROPped on upgrade) v13: adds the full-text search trio
+    /// transcript_fts (FTS5 trigram) / fts_docs / fts_files (derived tables, rebuilt and fully
+    /// reindexed on upgrade) v12: tool_calls gains last_ts (last call time) + tokens (tokens at
+    /// trigger, Claude only); derived table rebuilt on upgrade v11: adds audit_events (agent
+    /// operation audit log; not derived, never DROPped on upgrade) v10: adds tool_calls
+    /// (skill/plugin/subagent/tool call counts; derived table, rebuilt and fully rescanned on
+    /// upgrade) v9: adds sync_runs (cloud backup run history + file details; not derived, never
+    /// DROPped on upgrade) v8: adds sync_state (cloud backup state; not derived, never DROPped on
+    /// upgrade) v7: task_history gains session_started_at (when the session first started; for
+    /// sorting history by "start time") v6: adds session_stats (conversation count per session);
+    /// derived table rebuilt with a full rescan
     static let version: Int64 = 24
 
     static func migrate(_ db: SQLiteDB) throws {
         let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
         if current < version {
-            // 用量派生表全部可由本地 transcript/rollout 重扫派生 → 结构变更直接重建，
-            // 下轮扫描自动恢复（task_history / sync_state / sync_runs 记录真实事实，绝不 DROP）
+            // Every usage-derived table can be re-derived by rescanning local transcripts/rollouts
+            // → schema changes just rebuild, and the next scan restores them (task_history /
+            // sync_state / sync_runs record real facts and are never DROPped)
             try db.execute("""
             DROP TABLE IF EXISTS dedup_keys;
             DROP TABLE IF EXISTS scan_files;
@@ -61,9 +73,11 @@ enum Schema {
             DROP TABLE IF EXISTS prompt_eval;
             """)
         }
-        // v15 建的 session_terminals 主键含可空列，upsert 失效攒了重复行。该表尚未随任何
-        // 版本发布，且内容会随后续事件重新累积 → 一次性重建。**只在 15→16 这一跳生效**，
-        // 不进上面那串 DROP（那是给可重推导的派生表用的，本表仍属"升级不 DROP"）。
+        // session_terminals as created in v15 had a nullable column in its primary key, so upsert
+        // failed and duplicate rows piled up. The table hasn't shipped in any release yet and its
+        // contents re-accumulate from later events → rebuild once. **Only applies to the 15→16
+        // step**, and stays out of the DROP list above (that's for re-derivable derived tables;
+        // this table is still "never DROPped on upgrade").
         if current == 15 {
             try db.execute("DROP TABLE IF EXISTS session_terminals;")
         }
@@ -327,23 +341,30 @@ enum Schema {
             ON prompt_eval(severity) WHERE severity > 0;
         """)
 
-        // task_history 不参与 drop/重建（真实历史），旧库补列走幂等 ALTER
+        // task_history takes no part in drop/rebuild (real history); old DBs get missing columns
+        // via idempotent ALTER
         try addColumnIfMissing(db, table: "task_history", column: "session_started_at", type: "REAL")
-        // sync_state 也是事实表（记录远端已有什么），同样只补列不重建。
-        // category 是备份构成分两级展示的依据；老行为 NULL → 回退按 remote_key 解析。
+        // sync_state is also a fact table (records what the remote already has), so it likewise
+        // only gains columns, never rebuilds. category drives the two-level backup composition
+        // display; old rows are NULL → fall back to parsing remote_key.
         try addColumnIfMissing(db, table: "sync_state", column: "category", type: "TEXT")
-        // prompts 同为事实表（收藏/标签/移除是用户写入），v24 库补软删除列，不重建。
+        // prompts is a fact table too (favorites/tags/removal are user-written); v24 DBs gain the
+        // soft-delete column, no rebuild.
         try addColumnIfMissing(db, table: "prompts", column: "hidden_at", type: "REAL")
-        // usage_records 补计费 provider（区分同名模型的订阅/按量）。不升版本：升版本会整表重扫，
-        // 已删除的 transcript 用量就永久丢了。老行为 NULL → 价格解析按模型名推断厂商。
+        // usage_records gains the billing provider (tells subscription vs pay-as-you-go apart for
+        // same-named models). No version bump: bumping rescans the whole table, and usage from
+        // already-deleted transcripts would be lost forever. Old rows are NULL → price resolution
+        // infers the vendor from the model name.
         try addColumnIfMissing(db, table: "usage_records", column: "provider", type: "TEXT")
-        // agent 自报费用（Grok costUsdTicks 折算）；有值时优先于价格表
+        // Agent-reported cost (converted from Grok costUsdTicks); when present it takes precedence
+        // over the price table
         try addColumnIfMissing(db, table: "usage_records", column: "reported_cost_usd", type: "REAL")
 
         try db.execute("PRAGMA user_version = \(version)")
     }
 
-    /// 幂等加列：仅当 table 不含该列时 ALTER，安全用于全新库与升级库
+    /// Idempotent column add: ALTER only when table lacks the column; safe for both fresh and
+    /// upgraded DBs
     private static func addColumnIfMissing(
         _ db: SQLiteDB, table: String, column: String, type: String
     ) throws {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// 灵动岛关怀卡内容
+/// Dynamic Island wellness card content
 public struct IslandNotice: Equatable, Sendable, Identifiable {
     public var id: String
     public var emoji: String
@@ -15,14 +15,16 @@ public struct IslandNotice: Equatable, Sendable, Identifiable {
     }
 }
 
-/// 健康提示规则引擎：纯逻辑（输入快照 → 提示 + 新状态），便于单测。
-/// 规则：连续活跃超阈值（之后每小时最多一次）、并发会话过多（4h 冷却）、
-/// 深夜还在跑任务（每晚一次）。文案按池随机（注入索引保证可测）。
+/// Wellness tip rule engine: pure logic (input snapshot → tip + new state), easy to unit-test.
+/// Rules: continuous activity over a threshold (then at most once per hour), too many concurrent
+/// sessions (4h cooldown), tasks still running late at night (once per night). Copy is picked
+/// randomly from a pool (injected index keeps it testable).
 public enum WellnessAdvisor {
     public struct State: Equatable, Sendable {
         public var lastDurationRemindAt: Date?
         public var lastSessionsRemindAt: Date?
-        /// 上次深夜提醒的"夜晚标识"（当晚 18:00 起算的天序数）
+        /// "Night key" of the last late-night reminder (day ordinal counted from 18:00 that
+        /// evening)
         public var lastNightKey: Int?
 
         public init(
@@ -38,11 +40,11 @@ public enum WellnessAdvisor {
 
     public struct Input {
         public var now: Date
-        /// 当前连续活跃段的起点（无活跃任务时为 nil）
+        /// Start of the current continuous-activity stretch (nil when no task is active)
         public var streakStartAt: Date?
-        /// 运行/等待中的任务数
+        /// Number of running/waiting tasks
         public var activeSessionCount: Int
-        /// 含空闲的存活会话总数
+        /// Total live sessions, including idle ones
         public var aliveSessionCount: Int
         public var thresholdSeconds: TimeInterval
         public var enabled: Bool
@@ -62,10 +64,10 @@ public enum WellnessAdvisor {
         }
     }
 
-    /// 并发会话提醒阈值与冷却
+    /// Concurrent-session reminder threshold and cooldown
     static let sessionsThreshold = 5
     static let sessionsCooldown: TimeInterval = 4 * 3600
-    /// 时长提醒的重复间隔
+    /// Repeat interval of the duration reminder
     static let durationRepeat: TimeInterval = 3600
 
     public static func evaluate(
@@ -77,7 +79,7 @@ public enum WellnessAdvisor {
         var state = state
         var notices: [IslandNotice] = []
 
-        // 1) 连续活跃过久
+        // 1) Active continuously for too long
         if let start = input.streakStartAt {
             let streak = input.now.timeIntervalSince(start)
             let sinceLast = state.lastDurationRemindAt.map {
@@ -87,12 +89,15 @@ public enum WellnessAdvisor {
                 state.lastDurationRemindAt = input.now
                 let hours = streak / 3600
                 let display = hours >= 1.95
-                    ? "\(Int(hours.rounded())) 小时"
-                    : String(format: "%.1f 小时", hours)
+                    ? L10n.format("%@ hours", zhHans: "%@ 小时", String(Int(hours.rounded())))
+                    : L10n.format("%@ hours", zhHans: "%@ 小时", String(format: "%.1f", hours))
                 let pool = [
-                    ("🧘", "连续 vibe coding \(display) 了", "站起来伸个懒腰、喝口水吧——任务有我盯着。"),
-                    ("🌿", "已经专注 \(display)", "眼睛离开屏幕 20 秒，看看远处，agent 跑得很稳。"),
-                    ("☕️", "\(display)没停了", "去续杯水或咖啡？回来正好收割任务结果。"),
+                    ("🧘", L10n.format("You've been vibe coding for %@", zhHans: "连续 vibe coding %@ 了", display),
+                     L10n.text("Stand up, stretch, and drink some water—I'll keep an eye on your tasks.", zhHans: "站起来伸个懒腰、喝口水吧——任务有我盯着。")),
+                    ("🌿", L10n.format("You've been focused for %@", zhHans: "已经专注 %@", display),
+                     L10n.text("Look away from the screen for 20 seconds and focus on something distant. Your agent is running smoothly.", zhHans: "眼睛离开屏幕 20 秒，看看远处，agent 跑得很稳。")),
+                    ("☕️", L10n.format("You've gone %@ without a break", zhHans: "%@没停了", display),
+                     L10n.text("Time to refill your water or coffee? Your task results may be ready when you're back.", zhHans: "去续杯水或咖啡？回来正好收割任务结果。")),
                 ]
                 let chosen = pool[pick(pool.count) % pool.count]
                 notices.append(IslandNotice(
@@ -100,11 +105,11 @@ public enum WellnessAdvisor {
                     emoji: chosen.0, headline: chosen.1, body: chosen.2))
             }
         } else {
-            // 歇下来了，下个连续段重新计
+            // Took a break; the next continuous stretch counts from scratch
             state.lastDurationRemindAt = nil
         }
 
-        // 2) 并发会话过多
+        // 2) Too many concurrent sessions
         if input.aliveSessionCount >= sessionsThreshold {
             let sinceLast = state.lastSessionsRemindAt.map {
                 input.now.timeIntervalSince($0)
@@ -114,15 +119,15 @@ public enum WellnessAdvisor {
                 notices.append(IslandNotice(
                     id: "sessions-\(Int(input.now.timeIntervalSince1970))",
                     emoji: "🤹",
-                    headline: "同时开着 \(input.aliveSessionCount) 个会话",
-                    body: "上下文切换也是有成本的——挑一两个收个尾，会更轻松。"))
+                    headline: L10n.format("You have %@ sessions open at once", zhHans: "同时开着 %@ 个会话", String(input.aliveSessionCount)),
+                    body: L10n.text("Context switching takes effort too—wrap up one or two sessions to make things easier.", zhHans: "上下文切换也是有成本的——挑一两个收个尾，会更轻松。")))
             }
         }
 
-        // 3) 深夜还在跑（23:00 - 06:00，每晚一次）
+        // 3) Still running late at night (23:00 - 06:00, once per night)
         let hour = calendar.component(.hour, from: input.now)
         if (hour >= 23 || hour < 6) && input.activeSessionCount > 0 {
-            // 夜晚标识：把"当晚"折算成同一个 key（凌晨归前一晚）
+            // Night key: fold "tonight" into one key (early morning counts as the previous night)
             let nightAnchor = input.now.addingTimeInterval(-6 * 3600)
             let nightKey = Int(nightAnchor.timeIntervalSince1970 / 86400)
             if state.lastNightKey != nightKey {
@@ -132,8 +137,8 @@ public enum WellnessAdvisor {
                 notices.append(IslandNotice(
                     id: "night-\(nightKey)",
                     emoji: "🌙",
-                    headline: "已经 \(formatter.string(from: input.now)) 了",
-                    body: "今天的进度已经很棒。长任务挂着就好，剩下的明天再说？"))
+                    headline: L10n.format("It's already %@", zhHans: "已经 %@ 了", formatter.string(from: input.now)),
+                    body: L10n.text("You've made great progress today. Leave the long tasks running and pick up the rest tomorrow?", zhHans: "今天的进度已经很棒。长任务挂着就好，剩下的明天再说？")))
             }
         }
 

@@ -1,11 +1,11 @@
 import EurekaKit
 import Foundation
 
-/// 会话 ↔ 终端绑定仓库：记录每个会话在哪些终端里跑过。
+/// Session ↔ terminal binding repo: records which terminals each session has run in.
 ///
-/// 复合主键 `(source, session_id, term_bundle, tty)` 让"换终端 resume"自然变成新的一行，
-/// 于是历史免费得到；同一终端里的重复事件只更新 `last_seen`。
-/// 观测数据（只能在事件发生时采到，不可由本地文件重推导）→ 升级不 DROP。
+/// The composite primary key `(source, session_id, term_bundle, tty)` turns "resume in another terminal" into a new row naturally,
+/// so history comes for free; repeated events in the same terminal only update `last_seen`.
+/// Observed data (only capturable when events happen, not re-derivable from local files) → never DROPped on upgrade.
 public final class SessionTerminalsRepo {
     private let db: SQLiteDB
 
@@ -13,10 +13,11 @@ public final class SessionTerminalsRepo {
         self.db = db
     }
 
-    /// 落一次绑定（同键 upsert：首次插入记 first_seen，之后只推进 last_seen）。
+    /// Persist one binding (upsert on the same key: first insert records first_seen, later ones
+    /// only advance last_seen).
     ///
-    /// `origin` 用 MAX 合并 —— 字典序上 'probe' > 'hook'，所以这里显式取"更可信的那个"：
-    /// 一旦被 hook 精确采过，后续探测结果不把它降级。
+    /// `origin` is merged with MAX — lexicographically 'probe' > 'hook', so this explicitly picks "the more trustworthy one":
+    /// once a hook has captured it precisely, later probe results never downgrade it.
     public func record(
         source: AgentSource, sessionId: String, binding: TerminalBinding, at: Date
     ) throws {
@@ -34,7 +35,8 @@ public final class SessionTerminalsRepo {
         """, [
             .text(source.rawValue), .text(sessionId),
             binding.app.map { .text($0) } ?? .null,
-            // 主键列写空串而非 NULL —— NULL 进主键会让 upsert 永不命中
+            // Primary-key columns store an empty string rather than NULL — NULL in the primary key
+            // makes upsert never match
             .text(binding.bundleId ?? ""),
             .text(binding.tty ?? ""),
             binding.tmuxPane.map { .text($0) } ?? .null,
@@ -42,7 +44,8 @@ public final class SessionTerminalsRepo {
         ])
     }
 
-    /// 某会话的全部绑定，最近活跃在前（详情页「曾在 N 个终端运行」用）
+    /// Every binding of a session, most recently active first (for the detail page's "ran in N
+    /// terminals")
     public func bindings(
         source: AgentSource, sessionId: String
     ) throws -> [(binding: TerminalBinding, firstSeen: Date, lastSeen: Date)] {
@@ -60,13 +63,14 @@ public final class SessionTerminalsRepo {
         }
     }
 
-    /// 最近一次绑定（跳转目标）
+    /// Most recent binding (the jump target)
     public func latest(source: AgentSource, sessionId: String) throws -> TerminalBinding? {
         try bindings(source: source, sessionId: sessionId).first?.binding
     }
 
-    /// 批量取"每会话的最近一次绑定"，供列表页一次查完（避免每行一次查询）。
-    /// 键为 `AgentTask.key(source:sessionId:)`，与 UI 侧的会话标识口径一致。
+    /// Fetch "each session's most recent binding" in bulk so the list page needs one query (instead
+    /// of one per row). Keys are `AgentTask.key(source:sessionId:)`, matching how the UI identifies
+    /// sessions.
     public func latestBySession(source: AgentSource? = nil) throws -> [String: TerminalBinding] {
         var sql = """
         SELECT source, session_id, term_app, term_bundle, tty, tmux_pane, origin, last_seen
@@ -77,7 +81,7 @@ public final class SessionTerminalsRepo {
             sql += " WHERE source = ?"
             binds.append(.text(source.rawValue))
         }
-        sql += " ORDER BY last_seen ASC"  // 升序 → 后写的覆盖先写的，最终留下最新那条
+        sql += " ORDER BY last_seen ASC"  // Ascending → later writes overwrite earlier ones, leaving the newest
         var result: [String: TerminalBinding] = [:]
         let rows = try db.query(sql, binds) { row -> (String, TerminalBinding)? in
             guard let sourceRaw = row.text(0), let source = AgentSource(rawValue: sourceRaw),
@@ -101,7 +105,8 @@ public final class SessionTerminalsRepo {
             origin: TerminalBinding.Origin(rawValue: row.text(4) ?? "") ?? .probe)
     }
 
-    /// 主键列以空串代替 NULL 存盘，读出来要还原成 nil（否则 isEmpty / 展示逻辑会误判）
+    /// Primary-key columns are stored as empty strings instead of NULL; restore them to nil on read
+    /// (otherwise isEmpty / display logic misjudges)
     private static func blankToNil(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }
         return value

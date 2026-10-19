@@ -2,33 +2,43 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 跨源配置一致性卡（审计页顶部）。
+/// Cross-source config consistency card (top of the audit page).
 ///
-/// 这是「本地 agent CLI 管理助手」最该干、也最没人干的一件事：12 个 CLI 各有一套技能 / 指令 /
-/// 记忆，横向对不上账的地方全靠人肉记。这里只报**三类能自动判定、且用户确实在意**的缺口：
-///  1. 项目指令文件配了一半（本机实勘：一个仓库完全没配、两个各缺一种）
-///  2. 某个源缺了已在其它源配置的技能 —— **按源聚合**，不按技能逐条列
-///     （25 个同名技能全都是"5 源有、codex/grok 无"，逐条列会刷出 25 行说同一件事）
-///  3. 记忆库索引漂移（未被 MEMORY.md 收录的死记忆）
+/// This is the thing a "local agent CLI management assistant" should do most and nobody does:
+/// 12 CLIs each have their own skills / instructions /
+/// memory, and where they don't line up across sources is tracked purely by memory. Only **three
+/// kinds of gaps that can be judged automatically and that users really care about** are reported:
+///  1. Project instruction files half configured (observed on this machine: one repo with none at
+///     all, two each missing one kind)
+///  2. A source is missing skills already configured in other sources: **aggregated per source**,
+///     not listed per skill
+///     (all 25 same-named skills were "present in 5 sources, missing in codex/grok"; listing them
+///     one by one would spew 25 rows saying the same thing)
+///  3. Memory library index drift (dead memories not listed in MEMORY.md)
 ///
-/// 口径都是**自适应**的：拿用户自己已有的约定去对账，不照理想清单挑刺 ——
-/// 否则就会报「你没配 Gemini 的指令文件」这类纯噪声。判据与阈值见 `ConsistencyChecker`（有单测）。
+/// The criteria are all **adaptive**: they reconcile against conventions the user already has,
+/// rather than nitpicking against an ideal checklist;
+/// otherwise it would report pure noise like "you haven't configured Gemini's instruction file".
+/// Rules and thresholds are in `ConsistencyChecker` (unit tested).
 struct ConsistencyCard: View {
     @ObservedObject var service: SkillMemoryService
-    /// MCP 同名异义（同一 server 名在多源定义冲突；AuditView 传入，默认空）
+    /// MCP same-name conflicts (one server name defined differently across sources; passed in by
+    /// AuditView, empty by default)
     var mcpDrifts: [ConsistencyChecker.MCPDrift] = []
 
     @State private var expanded = false
-    /// 待确认的"补齐"目标（点了某条技能缺口的补齐按钮）
+    /// Pending "fill in" target (the fill-in button on a skill-gap row was tapped)
     @State private var fixGap: ConsistencyReportAlias.SkillSourceGap?
-    /// 补齐结果反馈（短暂显示；重扫后缺口条目自然消失）
+    /// Fill-in result feedback (shown briefly; the gap rows disappear on their own after the
+    /// rescan)
     @State private var fixNote: String?
 
     var body: some View {
         let report = service.consistencyReport
         let clean = report.isClean && mcpDrifts.isEmpty
         let issueCount = report.issueCount + mcpDrifts.count
-        // 还没扫完就不占版面（此时全是空的，报"一切正常"是假的）
+        // Take no space until the scan finishes (everything is empty then, so reporting "all good"
+        // would be a lie)
         if service.lastScanAt != nil {
             VStack(alignment: .leading, spacing: expanded ? 10 : 0) {
                 header(report, clean: clean, issueCount: issueCount)
@@ -44,17 +54,20 @@ struct ConsistencyCard: View {
                 }
             }
             .confirmationDialog(
-                "把 \(fixGap?.missing.count ?? 0) 个技能安装到 \(fixGap?.source.displayName ?? "")？",
+                L10n.format(
+                    "Install %@ skills onto %@?",
+                    zhHans: "把 %@ 个技能安装到 %@？",
+                    String(fixGap?.missing.count ?? 0), fixGap?.source.displayName ?? ""),
                 isPresented: Binding(
                     get: { fixGap != nil },
                     set: { if !$0 { fixGap = nil } }),
                 titleVisibility: .visible
             ) {
-                Button("复制这些技能过去") { runFix() }
-                Button("取消", role: .cancel) {}
+                Button(L10n.text("Copy these skills over", zhHans: "复制这些技能过去")) { runFix() }
+                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
             } message: {
                 if let gap = fixGap {
-                    Text(gap.missing.joined(separator: "、"))
+                    Text(gap.missing.joined(separator: L10n.text(", ", zhHans: "、")))
                 }
             }
             .padding(12)
@@ -80,7 +93,7 @@ struct ConsistencyCard: View {
                 .font(.system(size: 13))
                 .foregroundStyle(clean ? Theme.enabledGreen : Theme.gold)
             VStack(alignment: .leading, spacing: 1) {
-                Text("配置一致性").font(.system(size: 12.5, weight: .semibold))
+                Text(L10n.text("Configuration consistency", zhHans: "配置一致性")).font(.system(size: 12.5, weight: .semibold))
                 Text(summary(report, clean: clean))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -88,7 +101,7 @@ struct ConsistencyCard: View {
             }
             Spacer(minLength: 8)
             if !clean {
-                Button(expanded ? "收起" : "查看 \(issueCount) 项") {
+                Button(expanded ? L10n.text("Collapse", zhHans: "收起") : L10n.format("View %@ items", zhHans: "查看 %@ 项", String(issueCount))) {
                     withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
                 }
                 .buttonStyle(.borderless)
@@ -98,22 +111,40 @@ struct ConsistencyCard: View {
     }
 
     private func summary(_ report: ConsistencyReportAlias, clean: Bool) -> String {
-        guard !clean else { return "指令文件、技能分布、记忆库索引与 MCP 定义都对得上" }
+        guard !clean else {
+            return L10n.text(
+                "Instruction files, skill coverage, memory-library indexes, and MCP definitions all match",
+                zhHans: "指令文件、技能分布、记忆库索引与 MCP 定义都对得上")
+        }
         var parts: [String] = []
         if !report.instructionGaps.isEmpty {
-            parts.append("\(report.instructionGaps.count) 个仓库的指令文件不完整")
+            parts.append(L10n.format(
+                "%@ repositories have incomplete instruction files",
+                zhHans: "%@ 个仓库的指令文件不完整",
+                String(report.instructionGaps.count)))
         }
         if !report.skillGaps.isEmpty {
             parts.append(report.skillGaps
-                .map { "\($0.source.displayName) 缺 \($0.missing.count) 个技能" }
-                .joined(separator: "、"))
+                .map {
+                    L10n.format(
+                        "%1$@ is missing %2$@ skills",
+                        zhHans: "%1$@ 缺 %2$@ 个技能",
+                        $0.source.displayName, String($0.missing.count))
+                }
+                .joined(separator: L10n.text(", ", zhHans: "、")))
         }
         if !report.libraryDrifts.isEmpty {
             let total = report.libraryDrifts.reduce(0) { $0 + $1.unindexed }
-            parts.append("\(total) 条记忆未被索引收录")
+            parts.append(L10n.format(
+                "%@ memories are not in the index",
+                zhHans: "%@ 条记忆未被索引收录",
+                String(total)))
         }
         if !mcpDrifts.isEmpty {
-            parts.append("\(mcpDrifts.count) 个 MCP server 同名异义")
+            parts.append(L10n.format(
+                "%@ MCP servers share a name but differ",
+                zhHans: "%@ 个 MCP server 同名异义",
+                String(mcpDrifts.count)))
         }
         return parts.joined(separator: " · ")
     }
@@ -122,44 +153,44 @@ struct ConsistencyCard: View {
     private func details(_ report: ConsistencyReportAlias) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !report.instructionGaps.isEmpty {
-                section("项目指令缺口", hint: "按你在其它仓库的习惯推断") {
+                section(L10n.text("Project instruction gaps", zhHans: "项目指令缺口"), hint: L10n.text("Inferred from how your other repositories are set up", zhHans: "按你在其它仓库的习惯推断")) {
                     ForEach(report.instructionGaps) { gap in
                         HStack(spacing: 8) {
                             Text(gap.project)
                                 .font(Theme.font.monoSkillName(11, weight: .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 8)
-                            ForEach(gap.missing, id: \.self) { TagChip("缺 \($0)", tint: Theme.gold) }
+                            ForEach(gap.missing, id: \.self) { TagChip(L10n.format("Missing %@", zhHans: "缺 %@", $0), tint: Theme.gold) }
                             ForEach(gap.present, id: \.self) { TagChip($0, neutral: true) }
                         }
                     }
                 }
             }
             if !report.skillGaps.isEmpty {
-                section("技能跨源缺口", hint: "已在其它源配置、这个源没有") {
+                section(L10n.text("Cross-source skill gaps", zhHans: "技能跨源缺口"), hint: L10n.text("Configured on other sources, missing on this one", zhHans: "已在其它源配置、这个源没有")) {
                     ForEach(report.skillGaps) { gap in
                         HStack(alignment: .top, spacing: 8) {
                             SourceLogoTile(source: gap.source, size: 18)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("\(gap.source.displayName) 缺 \(gap.missing.count) 个")
+                                Text(L10n.format("%1$@ is missing %2$@", zhHans: "%1$@ 缺 %2$@ 个", gap.source.displayName, String(gap.missing.count)))
                                     .font(.system(size: 11, weight: .medium))
-                                Text(gap.missing.prefix(6).joined(separator: "、")
-                                    + (gap.missing.count > 6 ? " 等" : ""))
+                                Text(gap.missing.prefix(6).joined(separator: L10n.text(", ", zhHans: "、"))
+                                    + (gap.missing.count > 6 ? L10n.text(" etc.", zhHans: " 等") : ""))
                                     .font(.system(size: 10))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
                             }
                             Spacer(minLength: 8)
-                            Button("补齐 \(gap.missing.count) 个") { fixGap = gap }
+                            Button(L10n.format("Fill in %@", zhHans: "补齐 %@ 个", String(gap.missing.count))) { fixGap = gap }
                                 .buttonStyle(.borderless)
                                 .font(.system(size: 10.5))
-                                .help("把这些技能从已配置的源复制到 \(gap.source.displayName)")
+                                .help(L10n.format("Copy these skills from a configured source to %@", zhHans: "把这些技能从已配置的源复制到 %@", gap.source.displayName))
                         }
                     }
                 }
             }
             if !mcpDrifts.isEmpty {
-                section("MCP 同名异义", hint: "同一 server 名在多源定义冲突（详情见 MCP 页）") {
+                section(L10n.text("MCP names that disagree", zhHans: "MCP 同名异义"), hint: L10n.text("The same server name is defined differently across sources (see the MCP page)", zhHans: "同一 server 名在多源定义冲突（详情见 MCP 页）")) {
                     ForEach(mcpDrifts) { drift in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(drift.name)
@@ -176,7 +207,7 @@ struct ConsistencyCard: View {
                 }
             }
             if !report.libraryDrifts.isEmpty {
-                section("记忆库索引漂移", hint: "未收录的条目 agent 读不到") {
+                section(L10n.text("Memory-library index drift", zhHans: "记忆库索引漂移"), hint: L10n.text("Entries left out of the index are invisible to the agent", zhHans: "未收录的条目 agent 读不到")) {
                     ForEach(report.libraryDrifts) { drift in
                         HStack(spacing: 8) {
                             Text(drift.projectName)
@@ -184,10 +215,10 @@ struct ConsistencyCard: View {
                                 .lineLimit(1)
                             Spacer(minLength: 8)
                             if drift.unindexed > 0 {
-                                TagChip("\(drift.unindexed) 条未收录", tint: Theme.gold)
+                                TagChip(L10n.format("%@ not indexed", zhHans: "%@ 条未收录", String(drift.unindexed)), tint: Theme.gold)
                             }
                             if drift.dangling > 0 {
-                                TagChip("\(drift.dangling) 条空引用", tint: Theme.failureRed)
+                                TagChip(L10n.format("%@ dangling references", zhHans: "%@ 条空引用", String(drift.dangling)), tint: Theme.failureRed)
                             }
                         }
                     }
@@ -196,18 +227,28 @@ struct ConsistencyCard: View {
         }
     }
 
-    /// 执行"补齐"（confirmationDialog 确认后）：批量复制 + 单次重扫；结果短暂显示在卡内
+    /// Runs "fill in" (after confirmationDialog confirms): batch copy + a single rescan; the result
+    /// is shown briefly inside the card
     private func runFix() {
         guard let gap = fixGap else { return }
         fixGap = nil
         let targetName = gap.source.displayName
-        fixNote = "正在把 \(gap.missing.count) 个技能安装到 \(targetName)…"
+        fixNote = L10n.format(
+            "Installing %@ skills onto %@…",
+            zhHans: "正在把 %@ 个技能安装到 %@…",
+            String(gap.missing.count), targetName)
         service.propagateAll(names: gap.missing, to: gap.source) { succeeded, failures in
             if failures.isEmpty {
-                fixNote = "已把 \(succeeded) 个技能安装到 \(targetName)"
+                fixNote = L10n.format(
+                    "Installed %@ skills onto %@",
+                    zhHans: "已把 %@ 个技能安装到 %@",
+                    String(succeeded), targetName)
             } else {
-                fixNote = "安装到 \(targetName)：成功 \(succeeded) 个、失败 \(failures.count) 个"
-                    + (failures.first.map { "（\($0)）" } ?? "")
+                fixNote = L10n.format(
+                    "Install onto %1$@: %2$@ succeeded, %3$@ failed",
+                    zhHans: "安装到 %1$@：成功 %2$@ 个、失败 %3$@ 个",
+                    targetName, String(succeeded), String(failures.count))
+                    + (failures.first.map { L10n.format(" (%@)", zhHans: "（%@）", $0) } ?? "")
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { fixNote = nil }
         }
@@ -227,5 +268,6 @@ struct ConsistencyCard: View {
     }
 }
 
-/// `ConsistencyChecker.Report` 的短别名（嵌套类型名太长，视图里到处写不好读）
+/// Short alias for `ConsistencyChecker.Report` (the nested type name is too long to read well
+/// when written all over the view)
 typealias ConsistencyReportAlias = ConsistencyChecker.Report

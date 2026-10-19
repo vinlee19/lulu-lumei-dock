@@ -1,13 +1,14 @@
 import EurekaKit
 import Foundation
 
-/// Cursor 转录行（`agent-transcripts/<id>/<id>.jsonl`）→ `TaskEvent`。
+/// Cursor transcript line (`agent-transcripts/<id>/<id>.jsonl`) → `TaskEvent`.
 ///
-/// 信封是 Claude 式的，但**工具词表也是 Claude 式的**（实勘 `Read` / `Glob` / `Grep` / `Shell`），
-/// 与库里那套 Cursor 私有名（`read_file` / `glob_file_search` / `run_terminal_cmd`）**不是一回事**。
-/// 所以这里不套 `CursorToolNames`——那是给库侧用的。
+/// The envelope is Claude-style, and **so is the tool vocabulary** (observed `Read` / `Glob` /
+/// `Grep` / `Shell`), which is **not the same thing** as the DB's private Cursor names (`read_file`
+/// / `glob_file_search` / `run_terminal_cmd`). So `CursorToolNames` is not applied here -- that one
+/// is for the DB side.
 ///
-/// 实勘到的三种行：
+/// The three line kinds observed:
 ///   `{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>…</timestamp>\n<user_query>\n…\n</user_query>"}]}}`
 ///   `{"role":"assistant","message":{"content":[{"type":"text",…},{"type":"tool_use","name":"Read","input":{…}}]}}`
 ///   `{"type":"turn_ended","status":"success"}`
@@ -39,19 +40,21 @@ public enum CursorTranscriptDecoder {
             guard let text = userQuery(root), !text.isEmpty else { return nil }
             return event(.taskStarted(title: summarizeTitle(text)))
         case "assistant":
-            // 一行里可能有多个 tool_use，取最后一个当「当前在做什么」
+            // A line may hold several tool_use entries; take the last as "what it's doing now"
             if let tool = lastToolName(root) {
                 return event(.activity(tool: tool))
             }
-            // 纯文本行（最终答复或中间叙述）当心跳，别让长回合被 4h reaper 收走
+            // Plain text lines (final answer or intermediate narration) count as heartbeats so long
+            // turns aren't taken by the 4h reaper
             return hasText(root) ? event(.activity(tool: nil)) : nil
         default:
             return nil
         }
     }
 
-    /// 用户输入被包在 `<user_query>…</user_query>` 里，外面还裹了一层 `<timestamp>`；
-    /// 取不到标签就退回整段文本（Cursor 换了包装也不至于整条丢掉）。
+    /// User input is wrapped in `<user_query>…</user_query>`, with another `<timestamp>` layer
+    /// around it; if the tag can't be found, fall back to the whole text (so a Cursor wrapper
+    /// change doesn't drop the entire entry).
     public static func userQuery(_ root: [String: Any]) -> String? {
         guard let raw = joinedText(root) else { return nil }
         guard let start = raw.range(of: "<user_query>"),
@@ -63,7 +66,7 @@ public enum CursorTranscriptDecoder {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 该行最后一个 `tool_use` 的名字（Claude 词表：Read / Glob / Grep / Shell …）
+    /// Name of the line's last `tool_use` (Claude vocabulary: Read / Glob / Grep / Shell …)
     public static func lastToolName(_ root: [String: Any]) -> String? {
         content(root)
             .filter { $0["type"] as? String == "tool_use" }
@@ -86,8 +89,9 @@ public enum CursorTranscriptDecoder {
         (root["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
     }
 
-    /// `turn_ended.status`：实勘只见过 `success`；其余按关键字宽松归类，
-    /// 认不出的一律算正常完成（宁可少报错，也不给用户假红点）。
+    /// `turn_ended.status`: only `success` has been observed; anything else is loosely classified
+    /// by keyword, and anything unrecognised counts as a normal finish (better to under-report
+    /// errors than show the user a false red dot).
     static func outcome(status: String?) -> TaskOutcome {
         let text = (status ?? "").lowercased()
         func mentions(_ tokens: [String]) -> Bool { tokens.contains { text.contains($0) } }

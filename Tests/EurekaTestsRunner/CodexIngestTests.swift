@@ -15,7 +15,7 @@ func codexNotifyInstallerTests(_ t: TestRunner) {
         let firstTableIndex = lines.firstIndex { $0.hasPrefix("[") }
         try expect(notifyIndex != nil && firstTableIndex != nil)
         try expect(notifyIndex! < firstTableIndex!, "notify 必须在首个 table 之前")
-        // 原有内容逐行保留
+        // Existing content is preserved line by line
         for line in ["model = \"gpt-5.5\"", "[mcp_servers.notion]", "[apps.example]", "key = \"value\""] {
             try expect(result.contains(line), "应保留: \(line)")
         }
@@ -116,12 +116,12 @@ func codexNotifyInstallerTests(_ t: TestRunner) {
 
     t.test("TOMLStringArray：子集之外一律 nil（调用方据此拒绝改写）") {
         for bad in [
-            "[\"a\",",            // 跨行未闭合
-            "[\"a\", 1]",         // 非字符串元素
-            "[\"\"\"multi\"\"\"]",  // 多行字符串
-            "[\"a\"] trailing",   // 尾部垃圾
-            "\"a\"",              // 不是数组
-            "[\"bad\\q\"]",     // 非法转义
+            "[\"a\",",            // unclosed across lines
+            "[\"a\", 1]",         // non-string element
+            "[\"\"\"multi\"\"\"]",  // multi-line string
+            "[\"a\"] trailing",   // trailing garbage
+            "\"a\"",              // not an array
+            "[\"bad\\q\"]",     // invalid escape
         ] {
             try expect(TOMLStringArray.parse(bad) == nil, "应拒绝: \(bad)")
         }
@@ -131,7 +131,7 @@ func codexNotifyInstallerTests(_ t: TestRunner) {
 func codexRolloutTests(_ t: TestRunner) {
     t.suite("CodexRolloutTailer")
 
-    /// 在临时 sessions 树（今天的日期目录）里建一个 rollout 文件
+    /// Creates a rollout file in a temporary sessions tree (today's date directory)
     struct Spool {
         let root: URL
         let file: URL
@@ -150,7 +150,7 @@ func codexRolloutTests(_ t: TestRunner) {
         return Spool(root: root, file: file)
     }
 
-    /// fixture 行集（lifecycle 文件）按行号取
+    /// Fixture lines (lifecycle file), indexed by line number
     let lifecycleLines = try! fixtureString("codex-rollout-lifecycle.jsonl")
         .components(separatedBy: "\n").filter { !$0.isEmpty }
 
@@ -180,7 +180,8 @@ func codexRolloutTests(_ t: TestRunner) {
             handler: { events.append(($0, $1)) }
         )
 
-        // 初见：session_meta + task_started → 恢复 running（不受 stale 抑制）
+        // First sight: session_meta + task_started → restore running (not subject to stale
+        // suppression)
         try append(Array(lifecycleLines[0...1]), to: spool.file)
         tailer.scanOnce()
         try expectEqual(events.count, 1)
@@ -190,10 +191,10 @@ func codexRolloutTests(_ t: TestRunner) {
         try expectEqual(events[0].0.sessionId, "fixture-codex-1")
         try expectEqual(events[0].0.turnId, "turn-001")
         try expect(events[0].1 == false, "恢复的 running 不该标 stale")
-        // started_at 来自 epoch 字段
+        // started_at comes from the epoch field
         try expectEqual(events[0].0.timestamp, Date(timeIntervalSince1970: 1_781_006_401))
 
-        // 追加 user_message + token_count + agent_message + task_complete
+        // Append user_message + token_count + agent_message + task_complete
         events.removeAll()
         try append(Array(lifecycleLines[2...5]), to: spool.file)
         tailer.scanOnce()
@@ -201,7 +202,7 @@ func codexRolloutTests(_ t: TestRunner) {
         guard case .taskStarted(title: "跑一下集成测试并修复失败用例") = kinds[0] else {
             throw ExpectationError(description: "user_message 应补标题: \(kinds[0])")
         }
-        // token_count 应产出上下文占用：19629 / 258400 ≈ 7.6%
+        // token_count should yield context usage: 19629 / 258400 ≈ 7.6%
         guard case .contextUpdate(let percent) = kinds[1] else {
             throw ExpectationError(description: "应有 contextUpdate: \(kinds)")
         }
@@ -215,7 +216,7 @@ func codexRolloutTests(_ t: TestRunner) {
         try expectEqual(snapshots[0].secondary?.windowMinutes, 10080)
         try expectEqual(snapshots[0].planType, "plus")
 
-        // 追加 turn-002 start + abort
+        // Append turn-002 start + abort
         events.removeAll()
         try append(Array(lifecycleLines[6...7]), to: spool.file)
         tailer.scanOnce()
@@ -230,9 +231,9 @@ func codexRolloutTests(_ t: TestRunner) {
         let tailer = CodexRolloutTailer(sessionsRoot: spool.root) { events.append(($0, $1)) }
 
         try append([lifecycleLines[0]], to: spool.file)
-        tailer.scanOnce()  // 初见
+        tailer.scanOnce()  // first sight
 
-        // 写半行（无换行符）
+        // Write half a line (no newline)
         let half = lifecycleLines[1]
         let mid = half.index(half.startIndex, offsetBy: half.count / 2)
         let handle = try FileHandle(forWritingTo: spool.file)
@@ -314,11 +315,12 @@ func codexRolloutTests(_ t: TestRunner) {
         let indexURL = spool.root.appendingPathComponent("session_index.jsonl")
         let sessionId = "codex-fingerprint"
 
-        // 两个标题字节数相同，覆写后 size 不变
+        // Both titles have the same byte count, so size is unchanged after the overwrite
         try append([
             try jsonLine(["id": sessionId, "thread_name": "标题甲"]),
         ], to: indexURL)
-        // setAttributes 的 Date→纳秒转换有精度损失，整秒时间戳才能精确往返
+        // setAttributes loses precision converting Date → nanoseconds; only whole-second timestamps
+        // round-trip exactly
         let fixedMtime = Date(timeIntervalSince1970: 1_784_990_000)
         try FileManager.default.setAttributes(
             [.modificationDate: fixedMtime], ofItemAtPath: indexURL.path)
@@ -327,9 +329,10 @@ func codexRolloutTests(_ t: TestRunner) {
         let tailer = CodexRolloutTailer(
             sessionsRoot: spool.root, sessionIndexURL: indexURL
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 首次加载建立基线
+        tailer.scanOnce()  // first load establishes the baseline
 
-        // 覆写为同 size 内容并把 mtime 改回同一值：指纹不变 → 不应重解析出新标题
+        // Overwrite with same-size content and restore the same mtime: fingerprint unchanged → must
+        // not reparse a new title
         try Data((try jsonLine(["id": sessionId, "thread_name": "标题乙"]) + "\n").utf8)
             .write(to: indexURL)
         try FileManager.default.setAttributes(
@@ -337,7 +340,7 @@ func codexRolloutTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expect(events.isEmpty, "指纹未变应跳过重解析，不该出现 titleUpdate: \(events)")
 
-        // 真正追加一行：size/mtime 变化 → 应实时送达新标题
+        // Actually append a line: size/mtime change → the new title should arrive live
         try append([
             try jsonLine(["id": sessionId, "thread_name": "标题丙"]),
         ], to: indexURL)
@@ -373,13 +376,14 @@ func codexRolloutTests(_ t: TestRunner) {
         let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
         try fm.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
 
-        // resume 的旧会话：创建日目录很老，但原地追加使 mtime 是刚刚
+        // A resumed old session: its creation-day directory is old, but in-place appends make the
+        // mtime recent
         let resumedFile = oldDayDir.appendingPathComponent(
             "rollout-2025-01-01T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0003.jsonl")
         try append(Array(lifecycleLines[0...1]), to: resumedFile)
         try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumedFile.path)
 
-        // 真正冷掉的历史：老目录 + 老 mtime → 不在 recentWindow 内，不该 tail
+        // Truly cold history: old directory + old mtime → outside recentWindow, must not be tailed
         let ancientDir = root.appendingPathComponent("2024/12/31", isDirectory: true)
         try fm.createDirectory(at: ancientDir, withIntermediateDirectories: true)
         let ancientFile = ancientDir.appendingPathComponent(
@@ -401,7 +405,8 @@ func codexRolloutTests(_ t: TestRunner) {
         var events: [(TaskEvent, Bool)] = []
         let tailer = CodexRolloutTailer(sessionsRoot: root) { events.append(($0, $1)) }
 
-        // 初见：老目录里的 resume 会话恢复 running；冷历史完全不出事件
+        // First sight: the resumed session in the old directory restores running; cold history
+        // emits no events at all
         tailer.scanOnce()
         try expectEqual(events.count, 1, "只有 resume 会话应出事件: \(events)")
         try expectEqual(events[0].0.sessionId, "fixture-codex-1")
@@ -409,7 +414,7 @@ func codexRolloutTests(_ t: TestRunner) {
             throw ExpectationError(description: "resume 会话应恢复 running: \(events)")
         }
 
-        // 增量追加：事件继续实时流动（live 监控覆盖老目录）
+        // Incremental append: events keep flowing live (live monitoring covers old directories)
         events.removeAll()
         try append(Array(lifecycleLines[2...5]), to: resumedFile)
         try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumedFile.path)
@@ -429,16 +434,16 @@ func contextEstimatorTests(_ t: TestRunner) {
     t.test("取最近主链 assistant 的输入侧 token，按模型窗口（fable=1M）折算") {
         let percent = ClaudeContextEstimator.estimate(
             transcriptPath: try fixtureURL("claude-transcript-usage-dups.jsonl").path)
-        // 最后主链 assistant = msg_01BBB（claude-fable-5，1M 窗口）：
+        // Last main-chain assistant = msg_01BBB (claude-fable-5, 1M window):
         // 3400 + 8000 cache_read = 11400 / 1_000_000 = 1.14%
-        // （末尾的 sidechain haiku 行应被跳过）
+        // (the trailing sidechain haiku line should be skipped)
         try expect(percent != nil)
         try expect(abs(percent! - 1.14) < 0.01, "got \(percent!)")
     }
 
     t.test("ContextWindows：前缀匹配 + 覆盖优先 + 默认 200k") {
         try expectEqual(ContextWindows.window(forModel: "claude-fable-5"), 1_000_000)
-        // 企业版 1M 实况收录：opus-5 / opus-4-8 → 1M；旧 opus 仍走默认
+        // Enterprise 1M as observed: opus-5 / opus-4-8 → 1M; older opus still uses the default
         try expectEqual(ContextWindows.window(forModel: "claude-opus-5"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "claude-opus-4-8"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "claude-opus-4-1"), 200_000)
@@ -450,37 +455,40 @@ func contextEstimatorTests(_ t: TestRunner) {
     }
 
     t.test("ContextWindows：gemini-2.5/3 → 1M；glm/qwen 刻意落默认 200k") {
-        // 前缀命中内建表（无需精确全名）
+        // Prefix match against the built-in table (no exact full name needed)
         try expectEqual(ContextWindows.window(forModel: "gemini-2.5-pro"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "gemini-2.5-flash"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "gemini-3-pro-preview"), 1_000_000)
         try expectEqual(ContextWindows.window(forModel: "gemini-3.5-flash"), 1_000_000)
-        // 无官方确数的模型不进表 → 落默认，ctx% 宁可保守
+        // Models without an official figure stay out of the table → default; ctx% errs on the
+        // conservative side
         try expectEqual(ContextWindows.window(forModel: "glm-5.2"), 200_000)
         try expectEqual(ContextWindows.window(forModel: "qwen3.7-max"), 200_000)
-        // 最长前缀优先：用户覆盖更长的 key 胜出，其余前缀仍命中内建
+        // Longest prefix wins: a longer user-override key wins, other prefixes still hit the
+        // built-in table
         ContextWindows.overrides = ["gemini-3-pro": 500_000]
         defer { ContextWindows.overrides = [:] }
         try expectEqual(ContextWindows.window(forModel: "gemini-3-pro-preview"), 500_000)
         try expectEqual(ContextWindows.window(forModel: "gemini-3.5-flash"), 1_000_000)
-        // percent 口径：used ÷ 命中窗口
+        // percent semantics: used ÷ matched window
         try expectEqual(ContextWindows.percent(used: 250_000, model: "gemini-2.5-pro"), 25.0)
         try expectEqual(ContextWindows.percent(used: 250_000, model: "glm-5.2"), 125.0)
     }
 
     t.test("ContextWindows：kimi k3 → 1M，k3-256k / k2 系 → 256K（最长前缀优先）") {
-        // 线上真实模型 ID（usage_records 实测）：kimi-code/k3、kimi-k3、k3 → 1M
+        // Real model IDs seen in production (measured from usage_records): kimi-code/k3, kimi-k3,
+        // k3 → 1M
         try expectEqual(ContextWindows.window(forModel: "kimi-code/k3"), 1_048_576)
         try expectEqual(ContextWindows.window(forModel: "kimi-k3"), 1_048_576)
         try expectEqual(ContextWindows.window(forModel: "k3"), 1_048_576)
-        // 256K 档位变体必须压过短前缀
+        // 256K tier variants must beat the shorter prefix
         try expectEqual(ContextWindows.window(forModel: "kimi-code/k3-256k"), 262_144)
         try expectEqual(ContextWindows.window(forModel: "kimi-k3-256k"), 262_144)
         try expectEqual(ContextWindows.window(forModel: "k3-256k"), 262_144)
-        // K2 系（含 k2.7-code）官方 256K
+        // K2 family (including k2.7-code) is officially 256K
         try expectEqual(ContextWindows.window(forModel: "kimi-k2.7-code"), 262_144)
         try expectEqual(ContextWindows.window(forModel: "kimi-k2-thinking"), 262_144)
-        // 订阅档位降档由用户覆盖接管（覆盖优先于内建）
+        // Subscription tier downgrades are handled by user overrides (overrides beat built-ins)
         ContextWindows.overrides = ["kimi-code/k3": 262_144]
         defer { ContextWindows.overrides = [:] }
         try expectEqual(ContextWindows.window(forModel: "kimi-code/k3"), 262_144)
@@ -507,11 +515,11 @@ func sessionBootstrapTests(_ t: TestRunner) {
         }
         try expectEqual(title, "重构数据管道的增量加载逻辑")
         try expectEqual(events.first?.sessionId, "fixture-running-1")
-        // startedAt 用真实 prompt 时间（10:00:00Z），计时准确
+        // startedAt uses the real prompt time (10:00:00Z), so timing is accurate
         try expectEqual(
             events.first?.timestamp,
             ISO8601DateFormatter().date(from: "2026-06-09T10:00:00Z"))
-        // tool_result（content 为数组的 user 行）不算新 prompt
+        // tool_result (user lines whose content is an array) does not count as a new prompt
         let kinds = events.map(\.kind)
         try expect(kinds.contains(.titleUpdate(title: "重构数据管道增量加载")), "ai-title 应跟上")
         try expect(kinds.contains { if case .contextUpdate = $0 { return true } else { return false } })
@@ -563,7 +571,8 @@ func sessionBootstrapTests(_ t: TestRunner) {
     }
 
     t.test("超长 turn 中段：尾窗只有执行痕迹（无 prompt 无结束标记）→ 判运行") {
-        // 模拟巨型 turn 的尾窗：只有 assistant + tool_result，prompt 早已滚出
+        // Simulate the tail window of a huge turn: only assistant + tool_result, the prompt
+        // scrolled out long ago
         let lines = """
         {"type":"assistant","isSidechain":false,"uuid":"u-m1","timestamp":"2026-06-09T12:30:00.000Z","message":{"id":"msg_M1","model":"claude-fable-5","role":"assistant","usage":{"input_tokens":4000,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":170000,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0}}},"sessionId":"fixture-midturn-1","cwd":"/Users/me/work/big"}
         {"type":"user","isMeta":false,"uuid":"u-m2","timestamp":"2026-06-09T12:30:05.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"sessionId":"fixture-midturn-1","cwd":"/Users/me/work/big"}
@@ -578,7 +587,8 @@ func sessionBootstrapTests(_ t: TestRunner) {
         guard case .taskStarted = events.first?.kind else {
             throw ExpectationError(description: "应判运行中: \(events)")
         }
-        // startedAt 用尾窗最早时间戳兜底（至少不低估时长）
+        // startedAt falls back to the earliest timestamp in the tail window (at least it doesn't
+        // underestimate duration)
         try expectEqual(
             events.first?.timestamp,
             ISO8601DateFormatter().date(from: "2026-06-09T12:30:00Z"))
@@ -597,7 +607,8 @@ func transcriptWatcherTests(_ t: TestRunner) {
         let file = dir.appendingPathComponent("s1.jsonl")
         try FileManager.default.copyItem(
             at: fixtureURL("claude-transcript-running.jsonl"), to: file)
-        // copyItem 保留源 mtime（可能很旧）→ 刷成现在，落进活跃窗
+        // copyItem keeps the source mtime (possibly very old) → bump it to now so it lands in the
+        // active window
         try FileManager.default.setAttributes(
             [.modificationDate: Date()], ofItemAtPath: file.path)
 
@@ -612,7 +623,8 @@ func transcriptWatcherTests(_ t: TestRunner) {
         }
         try expectEqual(title, "重构数据管道的增量加载逻辑")
 
-        // 追加 turn 结束标记（mtime 强制前移，文件系统秒级粒度防 flake）
+        // Append the turn-end marker (mtime forced forward; the filesystem's one-second granularity
+        // would otherwise make this flaky)
         events.removeAll()
         let endLine = """
         {"type":"system","subtype":"turn_duration","durationMs":30000,"timestamp":"2026-06-09T10:00:30.000Z","uuid":"u-2009","sessionId":"fixture-running-1","cwd":"/Users/me/work/pipeline"}
@@ -631,13 +643,13 @@ func transcriptWatcherTests(_ t: TestRunner) {
         }
         try expectEqual(finishes.count, 1, "收尾应产出恰好一次完成: \(events)")
 
-        // 无新写入：不再产出
+        // No new writes: nothing more is emitted
         events.removeAll()
         watcher.scanOnce()
         try expect(events.isEmpty, "无变化不该有事件: \(events)")
     }
 
-    /// 把 fixture 复制成 projects/<项目>/<会话>.jsonl，mtime 刷成现在
+    /// Copies the fixture to projects/<project>/<session>.jsonl and bumps its mtime to now
     func makeSession(_ fixture: String) throws -> (root: URL, file: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-watch-\(UUID().uuidString)", isDirectory: true)
@@ -650,7 +662,8 @@ func transcriptWatcherTests(_ t: TestRunner) {
         return (root, file)
     }
 
-    /// 追加行并把 mtime 前移（文件系统秒级粒度防 flake）
+    /// Appends lines and moves the mtime forward (guards against flakes from second-granularity
+    /// filesystem timestamps)
     func append(_ lines: String, to file: URL) throws {
         let handle = try FileHandle(forWritingTo: file)
         _ = try handle.seekToEnd()
@@ -735,7 +748,7 @@ func transcriptWatcherTests(_ t: TestRunner) {
         try expectEqual(events.first?.timestamp, ISO8601DateFormatter().date(from: "2026-10-18T08:05:00Z"))
         try expectEqual(finishes(events), [.success])
 
-        // 端到端：经 TaskStore 出一张完成卡
+        // End to end: one finished card through TaskStore
         let store = TaskStore()
         let effects = events.flatMap { store.apply($0) }
         try expectEqual(effects.filter {
@@ -778,19 +791,19 @@ func sessionIndexerTests(_ t: TestRunner) {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fm = FileManager.default
 
-        // 有 ai-title 的会话
+        // Session with an ai-title
         let withTitle = dir.appendingPathComponent("aaaa-1111.jsonl")
         try fm.copyItem(at: fixtureURL("claude-transcript-usage-dups.jsonl"), to: withTitle)
         try fm.setAttributes(
             [.modificationDate: Date().addingTimeInterval(-100)], ofItemAtPath: withTitle.path)
 
-        // 只有 prompt 的会话（更新）
+        // Session with only a prompt (newer)
         let promptOnly = dir.appendingPathComponent("bbbb-2222.jsonl")
         try fm.copyItem(at: fixtureURL("claude-transcript-api-error.jsonl"), to: promptOnly)
         try fm.setAttributes(
             [.modificationDate: Date()], ofItemAtPath: promptOnly.path)
 
-        // 窗口外的老会话
+        // Old session outside the window
         let ancient = dir.appendingPathComponent("cccc-3333.jsonl")
         try fm.copyItem(at: fixtureURL("claude-transcript-running.jsonl"), to: ancient)
         try fm.setAttributes(
@@ -799,7 +812,7 @@ func sessionIndexerTests(_ t: TestRunner) {
 
         let sessions = ClaudeSessionIndexer.index(projectsRoot: root)
         try expectEqual(sessions.count, 2, "窗口外的不索引: \(sessions.map(\.id))")
-        // 默认按 mtime 倒序
+        // Sorted by mtime descending by default
         try expectEqual(sessions[0].id, "bbbb-2222")
         try expectEqual(sessions[0].name, "继续重构数据管道")
         try expectEqual(sessions[1].name, "修复登录页 Safari 兼容性报错")
@@ -881,9 +894,10 @@ func sessionIndexerTests(_ t: TestRunner) {
     }
 
     t.test("Codex 索引：一个文件里两条 session_meta，只认第一条（id 不被 resume 的 meta 覆盖）") {
-        // 复现真实 bug：resume / fork 出来的 rollout 会写入第二条 session_meta。
-        // 原来「id 与 name 都拿到才停」会一路扫到文件末尾，途中把 id 覆盖成**别的会话的 id**
-        // —— 本机 121 个 rollout 因此只解析出 91 个唯一 id，30 个会话在列表/索引里被错误合并。
+        // Reproduces a real bug: resumed / forked rollouts write a second session_meta. The old
+        // "stop once both id and name are found" logic scanned all the way to EOF, overwriting the
+        // id with **another session's id** along the way — so the 121 local rollouts parsed into
+        // only 91 unique ids, and 30 sessions were wrongly merged in the list/index.
         let fm = FileManager.default
         let root = fm.temporaryDirectory
             .appendingPathComponent("eureka-cxidx-dualmeta-\(UUID().uuidString)", isDirectory: true)
@@ -903,7 +917,7 @@ func sessionIndexerTests(_ t: TestRunner) {
                 "timestamp": "2026-07-21T08:00:01.000Z", "type": "event_msg",
                 "payload": ["type": "user_message", "message": "第一个会话的提问"],
             ]),
-            // resume 带进来的第二条 meta：绝不能覆盖上面的 id/cwd
+            // The second meta carried in by resume: must never overwrite the id/cwd above
             try line([
                 "timestamp": "2026-07-21T09:00:00.000Z", "type": "session_meta",
                 "payload": ["id": "second-thread", "cwd": "/Users/me/work/second"],
@@ -918,9 +932,11 @@ func sessionIndexerTests(_ t: TestRunner) {
     }
 
     t.test("Codex 索引：没有 user_message 的大文件不整文件扫（超出上界即放弃标题）") {
-        // 这类会话（子代理 / 自动化 / compact 后）实勘占 121 个里的 29 个。原来它们永远不满足
-        // 停止条件 → 整文件逐行 JSON 解析（单文件最大 70 MB）。现在超过 headScanLimit 就收手：
-        // id/cwd 仍来自第一行，name 退回 nil，UI 由 displayName 兜底显示「会话 <id前8>」。
+        // Such sessions (subagent / automation / post-compact) are 29 of 121 as observed.
+        // Previously they never met the stop condition → the whole file was JSON-parsed line by
+        // line (up to 70 MB per file). Now we stop past headScanLimit: id/cwd still come from the
+        // first line, name falls back to nil, and the UI's displayName fallback shows the "Session
+        // <first 8 of id>" label.
         let fm = FileManager.default
         let root = fm.temporaryDirectory
             .appendingPathComponent("eureka-cxidx-nouser-\(UUID().uuidString)", isDirectory: true)
@@ -934,13 +950,13 @@ func sessionIndexerTests(_ t: TestRunner) {
             "timestamp": "2026-07-21T08:00:00.000Z", "type": "session_meta",
             "payload": ["id": "no-user", "cwd": "/Users/me/work/auto"],
         ]) + "\n"
-        // 填过 headScanLimit（1 MB）的无关行
+        // Unrelated lines that fill past headScanLimit (1 MB)
         let filler = try line([
             "timestamp": "2026-07-21T08:00:02.000Z", "type": "response_item",
             "payload": ["kind": String(repeating: "f", count: 4096)],
         ]) + "\n"
         while body.utf8.count < (1 << 20) + (64 << 10) { body += filler }
-        // 上界之后才出现的 user_message：**不该**被读到
+        // A user_message that appears only past the limit: must **not** be read
         body += try line([
             "timestamp": "2026-07-21T09:00:00.000Z", "type": "event_msg",
             "payload": ["type": "user_message", "message": "上界之外的标题不该出现"],
@@ -964,13 +980,13 @@ func sessionIndexerTests(_ t: TestRunner) {
         let oldDayDir = root.appendingPathComponent("2025/01/01", isDirectory: true)
         try fm.createDirectory(at: oldDayDir, withIntermediateDirectories: true)
 
-        // resume 的旧会话：创建日目录很老，但 mtime 是刚刚 → 应被索引
+        // A resumed old session: old creation-day directory but recent mtime → should be indexed
         let resumed = oldDayDir.appendingPathComponent(
             "rollout-2025-01-01T10-00-00-019eaaaa-bbbb-7ccc-8ddd-eeeeffff0005.jsonl")
         try fm.copyItem(at: fixtureURL("codex-rollout-lifecycle.jsonl"), to: resumed)
         try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: resumed.path)
 
-        // 真正冷掉的历史：老目录 + 老 mtime → 窗口过滤应排除
+        // Truly cold history: old directory + old mtime → the window filter should exclude it
         let ancientDir = root.appendingPathComponent("2024/12/31", isDirectory: true)
         try fm.createDirectory(at: ancientDir, withIntermediateDirectories: true)
         let ancient = ancientDir.appendingPathComponent(
@@ -983,12 +999,13 @@ func sessionIndexerTests(_ t: TestRunner) {
         let sessions = CodexSessionIndexer.index(sessionsRoot: root)
         try expectEqual(sessions.count, 1, "老 mtime 的应被窗口排除: \(sessions.map(\.transcriptPath))")
         try expectEqual(sessions[0].id, "fixture-codex-1")
-        // 枚举返回的路径带 /private 前缀（macOS tmp 符号链接），只比文件名
+        // Enumerated paths carry a /private prefix (macOS tmp symlink); compare file names only
         try expect(
             sessions[0].transcriptPath.hasSuffix(resumed.lastPathComponent),
             "应索引 resume 文件: \(sessions[0].transcriptPath)")
 
-        // "显示全部" UI 传 .greatestFiniteMagnitude：不得溢出/崩溃，冷历史也返回
+        // The "Show all" UI passes .greatestFiniteMagnitude: must not overflow/crash, and cold
+        // history is returned too
         let all = CodexSessionIndexer.index(
             sessionsRoot: root, window: .greatestFiniteMagnitude)
         try expectEqual(all.count, 2, "全量窗口应连冷历史一起索引: \(all.map(\.transcriptPath))")

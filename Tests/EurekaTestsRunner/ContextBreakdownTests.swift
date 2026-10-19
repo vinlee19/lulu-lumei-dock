@@ -3,7 +3,8 @@ import EurekaKit
 import EurekaUsage
 import Foundation
 
-// 上下文用量估算：TokenEstimator 启发式、reconcile 对账数学、AgentContextProfile 配置表。
+// Context usage estimation: TokenEstimator heuristics, reconcile math, AgentContextProfile
+// config table.
 
 func contextBreakdownTests(_ t: TestRunner) {
     t.suite("ContextBreakdown")
@@ -21,7 +22,7 @@ func contextBreakdownTests(_ t: TestRunner) {
     }
 
     t.test("混合文本介于两种口径之间且可预期") {
-        // 100 个 ASCII + 20 个 CJK = 25 + 20
+        // 100 ASCII + 20 CJK = 25 + 20
         let mixed = String(repeating: "a", count: 100) + String(repeating: "汉", count: 20)
         try expectEqual(TokenEstimator.estimate(mixed), 45)
     }
@@ -55,7 +56,7 @@ func contextBreakdownTests(_ t: TestRunner) {
         try expectEqual(sum, 500, "缩放后合计必须等于 R（舍入残差补最大类）")
         try expectEqual(breakdown.totalTokens, 500)
         try expect(breakdown.totalIsReal)
-        // 等比：原本均分的三类缩放后仍近似相等
+        // Proportional: three categories that started equal stay roughly equal after scaling
         try expect(abs(breakdown.tokens(for: .systemPrompt)
             - breakdown.tokens(for: .tools)) <= 1)
     }
@@ -131,10 +132,12 @@ func contextBreakdownTests(_ t: TestRunner) {
         try expect(!profile.skillDirs.isEmpty)
     }
 
-    // MARK: - LastTurnUsageReader 行格式（Claude 口径，经 reconcile 链路的真实值来源）
+    // MARK: - LastTurnUsageReader line format (Claude accounting; the source of real values on the
+    // reconcile path)
 
     t.test("estimate 端到端：真实总量压缩过高估算") {
-        // 不依赖磁盘配置：未知源 + 空 home → 只有基线 + 消息文本
+        // No dependence on on-disk config: unknown source + empty home → only baseline + message
+        // text
         let messages = [
             TranscriptMessage(id: 0, role: .user, text: String(repeating: "a", count: 400)),
         ]
@@ -149,19 +152,19 @@ func contextBreakdownTests(_ t: TestRunner) {
         try expectEqual(sum, 1_000)
     }
 
-    // MARK: - 窗口分母：会话数据自带的真实值优先
+    // MARK: - Window denominator: real values carried by session data win
 
     t.test("windowOverride 优先于内建表；nil 回退按模型查表") {
         let messages = [
             TranscriptMessage(id: 0, role: .user, text: String(repeating: "a", count: 400)),
         ]
-        // codex 会话自带 model_context_window=258400 → 不用内建表/默认值
+        // The codex session carries model_context_window=258400 → no built-in table / default used
         let real = ContextBreakdownEstimator.estimate(
             source: .codex, cwd: nil, messages: messages, model: "gpt-5.4",
             lastTurnTotalTokens: 1_000, windowOverride: 258_400,
             home: URL(fileURLWithPath: "/tmp/nonexistent-home"))
         try expectEqual(real.windowTokens, 258_400)
-        // 无 override → 回退内建表（kimi-k3 → 1M）
+        // No override → fall back to the built-in table (kimi-k3 → 1M)
         let builtin = ContextBreakdownEstimator.estimate(
             source: .kimi, cwd: nil, messages: messages, model: "kimi-code/k3",
             lastTurnTotalTokens: 1_000,
@@ -185,11 +188,11 @@ func contextBreakdownTests(_ t: TestRunner) {
             LastTurnUsageReader.lastContextWindow(
                 source: .codex, transcriptPath: file.path),
             272_000)
-        // 非 codex 源一律 nil
+        // Non-codex sources are always nil
         try expect(
             LastTurnUsageReader.lastContextWindow(
                 source: .kimi, transcriptPath: file.path) == nil)
-        // 无窗口字段的文件 → nil
+        // A file without the window field → nil
         let empty = dir.appendingPathComponent("empty.jsonl")
         try #"{"type":"response_item","payload":{}}"#
             .write(to: empty, atomically: true, encoding: .utf8)
@@ -217,10 +220,10 @@ func contextBreakdownTests(_ t: TestRunner) {
             KimiConfigWindows.window(forModel: "kimi-code/k3", configURL: config), 1_048_576)
         try expectEqual(
             KimiConfigWindows.window(forModel: "kimi-code/k3-256k", configURL: config), 262_144)
-        // 未收录模型 → Kimi Code 默认窗口 256K
+        // Unlisted model → Kimi Code's default 256K window
         try expectEqual(
             KimiConfigWindows.window(forModel: "kimi-code/k2.7", configURL: config), 262_144)
-        // 文件缺失 → 兜底默认值而非 nil
+        // Missing file → fall back to the default rather than nil
         try expectEqual(
             KimiConfigWindows.window(
                 forModel: "kimi-code/k3",

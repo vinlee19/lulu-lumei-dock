@@ -14,7 +14,8 @@ func mcpStoreStatsTests(_ t: TestRunner) {
         let path = tempStorePath()
         defer { try? FileManager.default.removeItem(at: path) }
         let store = try EurekaStore(path: path)
-        // Claude 形态 mcp__server__tool；codex/kimi 形态 server.tool；非 mcp 的 kind 不计入
+        // Claude shape mcp__server__tool; codex/kimi shape server.tool; non-mcp kinds are not
+        // counted
         try store.toolCalls.bump(
             day: "2026-08-01", source: .claude, kind: "mcp", name: "mcp__notion__search", ts: 100)
         try store.toolCalls.bump(

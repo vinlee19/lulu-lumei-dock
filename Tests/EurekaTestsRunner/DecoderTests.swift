@@ -84,27 +84,28 @@ func decoderTests(_ t: TestRunner) {
         ], receivedAt: now)
         try expectEqual(bash?.kind, .toolPending(tool: "Bash", detail: "rm -rf build/"))
 
-        // 文件类取路径
+        // File tools use the path
         let edit = ClaudeHookDecoder.decode(payload: [
             "hook_event_name": "PreToolUse", "session_id": "s1",
             "tool_name": "Edit", "tool_input": ["file_path": "/repo/src/main.swift"],
         ], receivedAt: now)
         try expectEqual(edit?.kind, .toolPending(tool: "Edit", detail: "/repo/src/main.swift"))
 
-        // 多行命令只取首行（沿用 ToolStepExtractor 的既有裁剪口径）
+        // Multi-line commands keep only the first line (same trimming rule as ToolStepExtractor)
         let multi = ClaudeHookDecoder.decode(payload: [
             "hook_event_name": "PreToolUse", "session_id": "s1",
             "tool_name": "Bash", "tool_input": ["command": "echo one\necho two"],
         ], receivedAt: now)
         try expectEqual(multi?.kind, .toolPending(tool: "Bash", detail: "echo one …"))
 
-        // 无参数工具：detail 为 nil 而不是空串（UI 据此不拼多余的空格）
+        // Tool without arguments: detail is nil, not an empty string (so the UI doesn't add a stray
+        // space)
         let bare = ClaudeHookDecoder.decode(payload: [
             "hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "TodoWrite",
         ], receivedAt: now)
         try expectEqual(bare?.kind, .toolPending(tool: "TodoWrite", detail: nil))
 
-        // 缺 tool_name 不该产出事件
+        // Missing tool_name must not produce an event
         try expect(ClaudeHookDecoder.decode(payload: [
             "hook_event_name": "PreToolUse", "session_id": "s1",
         ], receivedAt: now) == nil)

@@ -2,7 +2,7 @@ import Foundation
 import EurekaKit
 import EurekaStore
 
-/// 用量汇总（今日 / 本周，本地时区，周一起算）
+/// Usage summary (today / this week, local time zone, weeks start on Monday)
 public struct UsageSummary: Equatable, Sendable {
     public struct ModelLine: Equatable, Sendable {
         public var model: String
@@ -18,7 +18,7 @@ public struct UsageSummary: Equatable, Sendable {
         public var cacheReadTokens: Int
         public var cacheWriteTokens: Int
         public var costUSD: Double?
-        /// 未定价模型的 token 数（>0 时 UI 提示"部分未计价"）
+        /// Tokens of unpriced models (when > 0 the UI notes "partially unpriced")
         public var unpricedTokens: Int
         public var models: [ModelLine]
 
@@ -69,7 +69,7 @@ public enum UsageAggregator {
         calendar.startOfDay(for: date)
     }
 
-    /// 周一为一周起点
+    /// Monday is the first day of the week
     public static func weekStart(of date: Date, calendar: Calendar = .current) -> Date {
         var cal = calendar
         cal.firstWeekday = 2
@@ -79,7 +79,7 @@ public enum UsageAggregator {
 
     /// Report week `[Monday 00:00, next Monday 00:00)`, `offset` weeks back from `now`.
     /// Pins Monday regardless of the calendar's `firstWeekday` so the weekly report and the
-    /// "本周" dashboard period (both Monday-based) describe the same seven days.
+    /// "This week" dashboard period (both Monday-based) describe the same seven days.
     public static func weekRange(
         offset: Int, now: Date = Date(), calendar: Calendar = .current
     ) -> (start: Date, end: Date) {
@@ -92,7 +92,7 @@ public enum UsageAggregator {
         return (start, end)
     }
 
-    /// 自然月起点（本地时区）
+    /// Start of the calendar month (local time zone)
     public static func monthStart(of date: Date, calendar: Calendar = .current) -> Date {
         calendar.dateInterval(of: .month, for: date)?.start
             ?? calendar.startOfDay(for: date)
@@ -120,13 +120,14 @@ public enum UsageAggregator {
         )
     }
 
-    /// 按项目折叠（同项目跨来源/模型合并；费用按各模型分别计价后求和）
+    /// Folds by project (same project merged across sources/models; cost is priced per model, then
+    /// summed)
     static func foldProjects(
         _ rows: [(project: String?, totals: UsageTotals)], pricing: PricingTable
     ) -> [UsageSummary.ProjectLine] {
         var byProject: [String: UsageSummary.ProjectLine] = [:]
         for (project, totals) in rows {
-            let name = project ?? "（未知项目）"
+            let name = project ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
             var line = byProject[name]
                 ?? UsageSummary.ProjectLine(name: name, totalTokens: 0, costUSD: nil)
             line.totalTokens += totals.inputTokens + totals.outputTokens
@@ -139,7 +140,7 @@ public enum UsageAggregator {
         return byProject.values.sorted { $0.totalTokens > $1.totalTokens }
     }
 
-    /// 按来源折叠 (source, model) 聚合行
+    /// Folds (source, model) aggregate rows by source
     static func fold(_ totals: [UsageTotals], pricing: PricingTable) -> [UsageSummary.SourceSummary] {
         var bySource: [AgentSource: UsageSummary.SourceSummary] = [:]
         for row in totals {
@@ -162,8 +163,9 @@ public enum UsageAggregator {
             } else {
                 summary.unpricedTokens += rowTokens
             }
-            // 同名模型可能按 provider 拆成多行（订阅 vs 按量），展示按模型合并：
-            // 费用为已定价部分之和，全部未定价才是 nil
+            // The same model may be split into several rows by provider (subscription vs
+            // pay-as-you-go); display merges them by model: cost is the sum of the priced parts,
+            // and nil only when all of it is unpriced
             if let index = summary.models.firstIndex(where: { $0.model == row.model }) {
                 summary.models[index].totalTokens += rowTokens
                 if let cost {

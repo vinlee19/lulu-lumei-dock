@@ -22,7 +22,8 @@ private extension EnvironmentValues {
     }
 }
 
-/// 统一逐帧时钟：最多 20fps，隐藏时只渲染一张静态帧，恢复时按 epoch 重锚。
+/// Shared per-frame clock: at most 20fps; renders a single static frame while hidden and re-anchors
+/// by epoch on resume.
 private struct MascotTimeline<Content: View>: View {
     let interval: TimeInterval
     var staticTime: TimeInterval = 0
@@ -43,7 +44,7 @@ private struct MascotTimeline<Content: View>: View {
     }
 }
 
-/// 桌面吉祥物根视图:圆角贴纸卡 + 气泡;随状态切动画。
+/// Desktop mascot root view: rounded sticker card + bubble; switches animation with state.
 struct MascotRootView: View {
     @ObservedObject var viewModel: MascotViewModel
     @ObservedObject var animationRuntime: MascotAnimationRuntime
@@ -66,14 +67,15 @@ struct MascotRootView: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.8), value: viewModel.bubble)
         .animation(.easeInOut(duration: 0.25), value: viewModel.state)
         .contextMenu {
-            Button("打开设置") { onOpenSettings() }
-            Button("隐藏吉祥物") { onHide() }
+            Button(L10n.text("Open Settings", zhHans: "打开设置")) { onOpenSettings() }
+            Button(L10n.text("Hide Mascot", zhHans: "隐藏吉祥物")) { onHide() }
         }
         .environment(\.mascotAnimationsActive, animationRuntime.animationsActive)
         .environment(\.mascotAnimationEpoch, animationRuntime.epoch)
     }
 
-    // 透明浮动角色(无白卡)+ 落地软阴影 + 状态切换大动作过场 + 点击俏皮反应
+    // Transparent floating character (no white card) + soft ground shadow + big transition move on
+    // state change + playful reaction on click
     private var card: some View {
         MotionContainer(state: viewModel.state, profile: viewModel.motionProfile) {
             mascot
@@ -125,7 +127,8 @@ struct MascotRootView: View {
     }
 }
 
-/// 从任意规则网格精灵图裁出帧序列。裁切只做一次，播放期间复用 NSImage。
+/// Cut a frame sequence from any regular-grid sprite sheet. Cropping happens once; NSImages are
+/// reused during playback.
 private struct SpriteSequenceAnimator: View {
     let sheet: MascotSpriteSheet
     let cells: [MascotSpriteCell]
@@ -145,7 +148,8 @@ private struct SpriteSequenceAnimator: View {
     }
 }
 
-/// 鼠标扫过 16 向视线时会频繁换格；缓存整张图和裁切结果，避免反复从磁盘解码 4MB 图集。
+/// Sweeping the mouse across the 16-direction gaze switches cells often; cache the whole image and
+/// crops to avoid re-decoding the 4MB atlas from disk.
 enum MascotSpriteCache {
     private static let atlasCache = NSCache<NSURL, NSImage>()
     private static let frameCache = NSCache<NSString, NSImage>()
@@ -188,7 +192,7 @@ enum MascotSpriteCache {
     }
 }
 
-/// PNG 帧按 fps 循环(全彩,避免 GIF 色带)
+/// PNG frames looped at fps (full color, avoids GIF banding)
 private struct FrameAnimator: View {
     let urls: [URL]
     let fps: Double
@@ -206,7 +210,7 @@ private struct FrameAnimator: View {
     }
 }
 
-/// 帧序列使用本地起点计时，确保点击/唤醒可以从第 0 帧重新播放。
+/// Frame sequences time from a local start point, so a click/wake can replay from frame 0.
 private struct FrameTimeline: View {
     let images: [NSImage]
     let fps: Double
@@ -237,7 +241,7 @@ private struct FrameTimeline: View {
     }
 }
 
-/// GIF/APNG 用 NSImageView 原生播放
+/// GIF/APNG played natively by NSImageView
 private struct AnimatedImageView: NSViewRepresentable {
     let url: URL
     @Environment(\.mascotAnimationsActive) private var animationsActive
@@ -256,7 +260,8 @@ private struct AnimatedImageView: NSViewRepresentable {
     }
 }
 
-/// 给静态贴纸叠加"肢体语言":每状态不同的呼吸/抖动/小跳/摇摆,最高 20fps。
+/// Overlay "body language" on static stickers: per-state breathing / jitter / hop / sway, up to
+/// 20fps.
 private struct MotionContainer<Content: View>: View {
     let state: MascotState
     let profile: MascotMotionProfile
@@ -275,10 +280,10 @@ private struct MotionContainer<Content: View>: View {
     }
 }
 
-/// 艺术字的动作风格
+/// Motion style of the word art
 private enum ArtMotion { case bob, pulse, wobble, shake, sway, bounce, waveRainbow }
 
-/// 每状态一套艺术字风格(配色 + 动作),让文字"变换各种风格"。
+/// One word-art style per state (palette + motion), so the text "changes styles".
 private struct ArtTextStyle {
     var colors: [Color]
     var motion: ArtMotion
@@ -299,7 +304,8 @@ private struct ArtTextStyle {
     }
 }
 
-/// 贴纸上的动态英文艺术字:白描边 + 倾斜,配色与动作随状态切换(success 用彩虹逐字波浪)。
+/// Animated English word art on the sticker: white outline + slant; palette and motion switch with
+/// state (success uses a per-letter rainbow wave).
 struct ArtTextView: View {
     let text: String
     let state: MascotState
@@ -323,7 +329,7 @@ struct ArtTextView: View {
         }
     }
 
-    // MARK: 整词(渐变流光 + 各自动作)
+    // MARK: Whole word (gradient shimmer + per-style motion)
 
     private func word(t: Double) -> some View {
         let motion = wordMotion(t: t)
@@ -353,7 +359,7 @@ struct ArtTextView: View {
         }
     }
 
-    // MARK: success 彩虹逐字波浪
+    // MARK: success per-letter rainbow wave
 
     private func rainbowLetters(t: Double) -> some View {
         HStack(spacing: 0) {
@@ -369,7 +375,7 @@ struct ArtTextView: View {
         }
     }
 
-    // MARK: 字形 + 描边
+    // MARK: Glyphs + outline
 
     private func outlineLayer(_ string: String) -> some View {
         ZStack {
@@ -392,7 +398,8 @@ struct ArtTextView: View {
 }
 
 enum MascotMotion {
-    /// 返回某状态在时刻 t 的形变(缩放/旋转/位移),幅度刻意克制以免廉价感。
+    /// Transform (scale / rotation / offset) for a state at time t; amplitudes are deliberately
+    /// restrained to avoid looking cheap.
     static func transform(
         for state: MascotState, profile: MascotMotionProfile = .stateDefault, t: Double
     ) -> (scale: CGSize, rotation: Angle, offset: CGSize) {
@@ -430,27 +437,27 @@ enum MascotMotion {
             break
         }
         switch state {
-        case .idle:  // 慢呼吸 + 轻浮
+        case .idle:  // Slow breathing + gentle float
             let b = wave(3.2)
             return (CGSize(width: 1, height: 1 + 0.015 * b), .zero, CGSize(width: 0, height: -1.5 * b))
-        case .working:  // 敲键盘的细微抖动
+        case .working:  // Subtle typing jitter
             let s = wave(0.22)
             return (none, .degrees(0.6 * s), CGSize(width: 0.8 * s, height: 0))
-        case .waiting:  // 期待小跳 + 摇
+        case .waiting:  // Expectant hop + sway
             let bob = abs(wave(0.6))
             return (none, .degrees(2 * wave(0.6)), CGSize(width: 0, height: -5 * bob))
-        case .success:  // 开心蹦
+        case .success:  // Happy bounce
             let bob = abs(wave(0.4))
             return (CGSize(width: 1 + 0.03 * bob, height: 1 + 0.03 * bob), .zero,
                     CGSize(width: 0, height: -8 * bob))
-        case .error:  // 耷拉 + 轻微摇头
+        case .error:  // Droop + slight head shake
             return (none, .degrees(1.4 * wave(0.5)), CGSize(width: 0, height: 2))
-        case .sleeping:  // 深呼吸
+        case .sleeping:  // Deep breathing
             let b = wave(4.0)
             return (CGSize(width: 1, height: 1 + 0.025 * b), .zero, CGSize(width: 0, height: -1 * b))
-        case .relax:  // 轻轻摇摆
+        case .relax:  // Gentle sway
             return (none, .degrees(2.5 * wave(3.4)), .zero)
-        case .night:  // 打盹点头
+        case .night:  // Dozing nod
             let nod = wave(3.0)
             return (none, .degrees(2 * nod), CGSize(width: 0, height: -1.5 * nod))
         case .poke, .wake:

@@ -11,25 +11,26 @@ func terminalBindingTests(_ t: TestRunner) {
             .appendingPathComponent("eureka-terminal-\(UUID()).sqlite")
     }
 
-    // MARK: - 展示名
+    // MARK: - display name
 
     t.test("展示名：已收录 bundle id 翻正式名，未收录退到 TERM_PROGRAM") {
         try expectEqual(
             TerminalBinding(app: "iTerm.app", bundleId: "com.googlecode.iterm2",
                             tty: "/dev/ttys004").displayName,
             "iTerm2 · ttys004")
-        // Apple_Terminal 这个原值不好看，要翻成 Terminal
+        // The raw value Apple_Terminal looks bad and must be shown as Terminal
         try expectEqual(
             TerminalBinding(app: "Apple_Terminal", bundleId: "com.apple.Terminal",
                             tty: "/dev/ttys012").displayName,
             "Terminal · ttys012")
-        // 未收录的 bundle id：有 TERM_PROGRAM 就用它（去掉 .app 后缀）
+        // Unlisted bundle id: use TERM_PROGRAM if present (minus the .app suffix)
         try expectEqual(
             TerminalBinding(app: "Foo.app", bundleId: "com.example.foo").terminalName, "Foo")
-        // 连 TERM_PROGRAM 都没有 → 取 bundle id 末段，总比整串好看
+        // Not even TERM_PROGRAM → take the last segment of the bundle id, still nicer than the
+        // whole string
         try expectEqual(
             TerminalBinding(bundleId: "com.example.weird").terminalName, "weird")
-        // tmux 会话额外标出 pane
+        // tmux sessions additionally show the pane
         try expectEqual(
             TerminalBinding(app: "iTerm.app", bundleId: "com.googlecode.iterm2",
                             tty: "/dev/ttys004", tmuxPane: "%3").displayName,
@@ -39,11 +40,11 @@ func terminalBindingTests(_ t: TestRunner) {
     t.test("空绑定可识别（调用方据此不落库）") {
         try expect(TerminalBinding().isEmpty)
         try expect(!TerminalBinding(tty: "/dev/ttys001").isEmpty)
-        // 只有 tty 时没有终端名可言，但不该显示成空白
+        // With only a tty there is no terminal name, but it must not display as blank
         try expectEqual(TerminalBinding(tty: "/dev/ttys001").displayName, "终端 · ttys001")
     }
 
-    // MARK: - 信封解码
+    // MARK: - envelope decoding
 
     t.test("信封：terminal 是顶层字段，缺失/全空都解成 nil（向后兼容旧 relay）") {
         func envelope(_ extra: String) -> Data {
@@ -52,7 +53,8 @@ func terminalBindingTests(_ t: TestRunner) {
              "payload":{"hook_event_name":"Stop","session_id":"s1"}}
             """.utf8)
         }
-        // 旧版 relay 写的文件没有 terminal 键 → nil，且事件本身照常解出
+        // Files written by an older relay have no terminal key → nil, and the event itself still
+        // decodes
         let old = try require(RawEvent(data: envelope("")))
         try expect(old.terminal == nil, "缺 terminal 键应为 nil")
         try expectEqual(old.channel, "claude-hook")
@@ -67,7 +69,8 @@ func terminalBindingTests(_ t: TestRunner) {
         try expectEqual(binding.tmuxPane, "%1")
         try expectEqual(binding.origin, .hook, "信封来的一律算 hook 精度")
 
-        // 空对象 / 空串值 → 视作没采到，不该产出一个空绑定
+        // Empty object / empty-string values → treated as not collected; must not produce an empty
+        // binding
         let emptyObject = try require(RawEvent(data: envelope(",\"terminal\":{}")))
         try expect(emptyObject.terminal == nil, "空对象应被当作未采到")
         let emptyValue = try require(RawEvent(data: envelope(",\"terminal\":{\"app\":\"\"}")))
@@ -85,7 +88,7 @@ func terminalBindingTests(_ t: TestRunner) {
         try expectEqual(try require(events[0].terminal).bundleId, "com.apple.Terminal")
     }
 
-    // MARK: - 仓库
+    // MARK: - repository
 
     t.test("仓库：同会话换终端 resume → 两条绑定，最近的在前") {
         let path = tempStorePath()
@@ -128,9 +131,10 @@ func terminalBindingTests(_ t: TestRunner) {
     }
 
     t.test("仓库：只有 bundleId（无 tty / 无 TERM_PROGRAM）时同样 upsert 而非攒重复行") {
-        // 实测踩过的真实形态：Claude Code 跑在 IDE 里时既没有 TERM_PROGRAM 也没有控制终端，
-        // 只剩 __CFBundleIdentifier。可空列进主键会让 SQLite 的 upsert 永不命中
-        // （NULL != NULL），同一会话瞬间攒出十几条重复行。
+        // A real shape we hit in practice: when Claude Code runs inside an IDE there is neither
+        // TERM_PROGRAM nor a controlling terminal, only __CFBundleIdentifier. A nullable column in
+        // the primary key makes SQLite's upsert never match (NULL != NULL), so one session
+        // instantly piles up a dozen duplicate rows.
         let path = tempStorePath()
         defer { try? FileManager.default.removeItem(at: path) }
         let store = try EurekaStore(path: path)
@@ -143,7 +147,7 @@ func terminalBindingTests(_ t: TestRunner) {
         let rows = try store.sessionTerminals.bindings(source: .claude, sessionId: "s1")
         try expectEqual(rows.count, 1, "缺 tty 时也必须 upsert，不能每个事件插一行")
         try expectEqual(rows[0].lastSeen.timeIntervalSince1970, 1500)
-        // 空串不该被当成有值漏出到 UI
+        // An empty string must not leak into the UI as if it had a value
         try expect(rows[0].binding.tty == nil, "存盘的空串要还原成 nil")
         try expect(rows[0].binding.app == nil)
         try expectEqual(rows[0].binding.displayName, "IntelliJ IDEA")
@@ -173,7 +177,7 @@ func terminalBindingTests(_ t: TestRunner) {
             binding: TerminalBinding(app: key.app, bundleId: key.bundle, tty: key.tty,
                                      origin: .hook),
             at: Date(timeIntervalSince1970: 1000))
-        // 之后探测又报了一次同一个终端 —— 不该把 origin 写回 probe
+        // Later the probe reports the same terminal again — it must not write origin back to probe
         try store.sessionTerminals.record(
             source: .claude, sessionId: "s1",
             binding: TerminalBinding(app: key.app, bundleId: key.bundle, tty: key.tty,
@@ -209,7 +213,7 @@ func terminalBindingTests(_ t: TestRunner) {
         try expectEqual(
             try require(map[AgentTask.key(source: .codex, sessionId: "s2")]).bundleId,
             "com.mitchellh.ghostty")
-        // 按源过滤
+        // filter by source
         try expectEqual(try store.sessionTerminals.latestBySession(source: .codex).count, 1)
     }
 
@@ -223,7 +227,7 @@ func terminalBindingTests(_ t: TestRunner) {
             try store.sessionTerminals.bindings(source: .claude, sessionId: "s1").count, 0)
     }
 
-    // MARK: - 状态机透传
+    // MARK: - state machine pass-through
 
     t.test("状态机：终端绑定每次都更新（resume 换终端后跳转要落到当前那个）") {
         let store = TaskStore()
@@ -243,12 +247,12 @@ func terminalBindingTests(_ t: TestRunner) {
             "com.apple.Terminal", "不能只设一次，否则换了终端还跳老的")
     }
 
-    // MARK: - 迁移安全
+    // MARK: - migration safety
 
     t.test("迁移 v14→v15：task_history 与 session_terminals 都不能被 DROP") {
         let path = tempStorePath()
         defer { try? FileManager.default.removeItem(at: path) }
-        // 先建库并写入事实数据
+        // Create the DB and write fact data first
         do {
             let store = try EurekaStore(path: path)
             try store.history.insert(FinishedTask(
@@ -260,7 +264,8 @@ func terminalBindingTests(_ t: TestRunner) {
                 binding: TerminalBinding(bundleId: "com.googlecode.iterm2", tty: "/dev/ttys001"),
                 at: Date(timeIntervalSince1970: 1500))
         }
-        // 把版本号退回 14，模拟"从旧版升级"，再开一次触发迁移
+        // Roll the version back to 14 to simulate "upgrading from an old version", then reopen to
+        // trigger migration
         do {
             let db = try SQLiteDB(path: path.path)
             try db.execute("PRAGMA user_version = 14")
@@ -273,7 +278,7 @@ func terminalBindingTests(_ t: TestRunner) {
     }
 }
 
-/// 小工具：Optional 解包失败即报错（避免测试里散落 force unwrap）
+/// Helper: fail when an Optional can't be unwrapped (avoids scattering force unwraps through tests)
 private func require<T>(
     _ value: T?, file: StaticString = #filePath, line: UInt = #line
 ) throws -> T {
@@ -283,7 +288,8 @@ private func require<T>(
     return value
 }
 
-/// PreToolUse / PreCompact 的状态机行为（岛上信息密度那一组改动的保障）
+/// State machine behavior for PreToolUse / PreCompact (the safety net for the island
+/// information-density changes)
 func toolPendingTests(_ t: TestRunner) {
     t.suite("岛上信息密度 · 即将执行 / 压缩上下文")
 
@@ -301,12 +307,14 @@ func toolPendingTests(_ t: TestRunner) {
         try expectEqual(task.currentActivity, "Edit")
         try expectEqual(task.currentToolDetail, "/repo/a.swift")
 
-        // PostToolUse 只带工具名。同一个工具 → 对象串保留（还是那件事）
+        // PostToolUse carries only the tool name. Same tool → keep the object string (still the
+        // same thing)
         store.apply(event(.activity(tool: "Edit"), at: 120))
         task = try require(store.activeTasks["claude:s1"])
         try expectEqual(task.currentToolDetail, "/repo/a.swift", "同工具不该清掉对象串")
 
-        // 换了工具 → 旧对象串必须清掉，否则会显示成「Bash /repo/a.swift」这种错配
+        // Tool changed → the old object string must be cleared, or it would show a mismatch like
+        // "Bash /repo/a.swift"
         store.apply(event(.activity(tool: "Bash"), at: 130))
         task = try require(store.activeTasks["claude:s1"])
         try expectEqual(task.currentActivity, "Bash")
@@ -338,9 +346,9 @@ func toolPendingTests(_ t: TestRunner) {
         try expectEqual(store.apply(event(.compacting, at: 110)), [.activeTasksChanged])
         let compacting = try require(store.activeTasks["claude:s1"])
         try expect(compacting.isCompacting)
-        // 重复的 PreCompact 不该再刷一次 UI
+        // A repeated PreCompact must not refresh the UI again
         try expectEqual(store.apply(event(.compacting, at: 115)), [])
-        // 压缩结束后随便一个工具心跳都该把标记清掉
+        // After compaction ends, any tool heartbeat should clear the marker
         store.apply(event(.activity(tool: "Bash"), at: 120))
         let afterTool = try require(store.activeTasks["claude:s1"])
         try expect(!afterTool.isCompacting)
@@ -353,7 +361,8 @@ func toolPendingTests(_ t: TestRunner) {
     }
 }
 
-/// 岛上「在做什么」标签的压缩规则（路径取末段 / 命令截头部 / 预算兜底）
+/// Compression rules for the island's "what it's doing" label (path → last segment / command → head
+/// / budget fallback)
 func compactToolLabelTests(_ t: TestRunner) {
     t.suite("岛上工具标签 · 压缩规则")
 
@@ -362,13 +371,14 @@ func compactToolLabelTests(_ t: TestRunner) {
             compactToolLabel(tool: "Edit", detail: "/repo/src/main.swift"), "Edit main.swift")
         try expectEqual(
             compactToolLabel(tool: "Read", detail: "~/notes/todo.md"), "Read todo.md")
-        // 结尾斜杠不该产出空末段
+        // A trailing slash must not produce an empty last segment
         try expectEqual(
             compactToolLabel(tool: "Read", detail: "/a/b/logs/"), "Read logs")
     }
 
     t.test("命令从头部截 —— rm -rf 这种关键前缀必须留住") {
-        // 命令里带斜杠不代表它是路径（曾按路径处理，结果把整条命令当末段）
+        // A slash in a command doesn't make it a path (it used to be treated as a path, taking the
+        // whole command as the last segment)
         try expectEqual(
             compactToolLabel(tool: "Bash", detail: "rm -rf node_modules/", budget: 12),
             "Bash rm -rf node_…")
@@ -390,8 +400,8 @@ func compactToolLabelTests(_ t: TestRunner) {
     }
 }
 
-/// 进程探测兜底（无 hook 的源）：只测可确定的纯逻辑与安全性质，
-/// 不断言"当前机器上有哪些进程"——那不可复现。
+/// Process-probe fallback (sources without hooks): tests only the deterministic pure logic and
+/// safety properties, never "which processes exist on this machine" — that isn't reproducible.
 func terminalProberTests(_ t: TestRunner) {
     t.suite("终端归属 · 进程探测兜底")
 
@@ -410,18 +420,18 @@ func terminalProberTests(_ t: TestRunner) {
         try expectEqual(
             TerminalProber.appBundleRoot(of: "/Applications/iTerm.app/Contents/MacOS/iTerm2"),
             "/Applications/iTerm.app")
-        // 名字带空格的应用（本机的 IntelliJ IDEA 就是）
+        // App names with spaces (like IntelliJ IDEA on this machine)
         try expectEqual(
             TerminalProber.appBundleRoot(
                 of: "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea"),
             "/Applications/IntelliJ IDEA.app")
-        // 不是 .app 里的可执行文件 → nil（普通 CLI 不该被当成宿主）
+        // Not an executable inside a .app → nil (a plain CLI must not be taken as the host)
         try expect(TerminalProber.appBundleRoot(of: "/bin/zsh") == nil)
         try expect(TerminalProber.appBundleRoot(of: "/opt/homebrew/bin/tmux") == nil)
     }
 
     t.test("控制终端设备号 → 路径；无控制终端返回 nil") {
-        // -1 / 0 都表示没有控制终端（GUI 应用派生的进程）
+        // -1 / 0 both mean no controlling terminal (processes spawned by GUI apps)
         try expect(TerminalProber.ttyPath(of: -1) == nil)
         try expect(TerminalProber.ttyPath(of: 0) == nil)
     }
@@ -433,7 +443,7 @@ func terminalProberTests(_ t: TestRunner) {
         let path = try require(TerminalProber.processPath(me))
         try expect(path.contains("/"))
         try expect(!TerminalProber.processTable().isEmpty)
-        // 本进程必定在表里
+        // This process is always in the table
         try expect(TerminalProber.processTable().contains { $0.pid == me })
     }
 
@@ -443,7 +453,8 @@ func terminalProberTests(_ t: TestRunner) {
             source: .claude, sessionId: "s1", kind: .taskStarted(title: "活儿"),
             timestamp: Date(timeIntervalSince1970: 100),
             terminal: TerminalBinding(bundleId: "com.googlecode.iterm2", origin: .hook)))
-        // 探测报了个不一样的终端 —— 不该覆盖已有的精确结果
+        // The probe reports a different terminal — it must not overwrite the existing precise
+        // result
         let changed = store.attachTerminal(
             TerminalBinding(bundleId: "com.apple.Terminal", origin: .probe),
             source: .claude, sessionId: "s1")
@@ -461,13 +472,13 @@ func terminalProberTests(_ t: TestRunner) {
         try expect(store.attachTerminal(
             TerminalBinding(bundleId: "com.apple.Terminal", origin: .probe),
             source: .claude, sessionId: "s1"))
-        // hook 后到 → 允许升级精度
+        // Hook arrives later → upgrading precision is allowed
         try expect(store.attachTerminal(
             TerminalBinding(bundleId: "com.googlecode.iterm2", origin: .hook),
             source: .claude, sessionId: "s1"))
         let task = try require(store.activeTasks["claude:s1"])
         try expectEqual(task.terminal?.origin, .hook)
-        // 重复同一个绑定不算改动（免得白刷 UI）
+        // Repeating the same binding isn't a change (avoids a pointless UI refresh)
         try expect(!store.attachTerminal(
             TerminalBinding(bundleId: "com.googlecode.iterm2", origin: .hook),
             source: .claude, sessionId: "s1"))

@@ -1,8 +1,9 @@
+import EurekaKit
 import EurekaStore
 import SwiftUI
 
-/// 活跃时段热力图卡片：周 × 24 小时网格，看什么时段用得最多。
-/// 数据跟随仪表盘当前时间段/来源筛选（"今日"只有一列属预期）。
+/// Active-hours heatmap card: weekday × 24-hour grid showing when usage peaks. Data follows the
+/// dashboard's current period/source filter ("Today" having only one column is expected).
 struct UsageHeatmapView: View {
     let cells: [UsageRepo.HeatmapCell]
 
@@ -11,13 +12,30 @@ struct UsageHeatmapView: View {
     private enum Metric: String, CaseIterable {
         case requests = "请求数"
         case tokens = "Tokens"
+
+        var title: String {
+            switch self {
+            case .requests: return L10n.text("Requests", zhHans: "请求数")
+            case .tokens: return "Tokens"
+            }
+        }
     }
 
-    /// 显示行序：周一在上（SQLite %w 语义 0=周日 … 6=周六）
+    /// Display row order: Monday on top (SQLite %w semantics: 0 = Sunday ... 6 = Saturday)
     private static let displayWeekdays = [1, 2, 3, 4, 5, 6, 0]
-    private static let weekdayNames = ["日", "一", "二", "三", "四", "五", "六"]
+    private static func weekdayName(_ weekday: Int) -> String {
+        switch weekday {
+        case 0: return L10n.text("Sun", zhHans: "日")
+        case 1: return L10n.text("Mon", zhHans: "一")
+        case 2: return L10n.text("Tue", zhHans: "二")
+        case 3: return L10n.text("Wed", zhHans: "三")
+        case 4: return L10n.text("Thu", zhHans: "四")
+        case 5: return L10n.text("Fri", zhHans: "五")
+        default: return L10n.text("Sat", zhHans: "六")
+        }
+    }
 
-    /// (weekday*24+hour) → 格子
+    /// (weekday*24+hour) → cell
     private var cellMap: [Int: UsageRepo.HeatmapCell] {
         var map: [Int: UsageRepo.HeatmapCell] = [:]
         for cell in cells where (0..<7).contains(cell.weekday) && (0..<24).contains(cell.hour) {
@@ -34,15 +52,15 @@ struct UsageHeatmapView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("活跃时段")
+                Text(L10n.text("Active hours", zhHans: "活跃时段"))
                     .font(Theme.font.themed(12, .semibold))
                 Spacer()
                 ThemedSegmentedPicker(
                     selection: $metric, options: Metric.allCases,
-                    label: \.rawValue, classicWidth: 130, controlSize: .mini)
+                    label: \.title, classicWidth: 130, controlSize: .mini)
             }
             if cells.isEmpty {
-                Text("该时段暂无用量")
+                Text(L10n.text("No usage in this range", zhHans: "该时段暂无用量"))
                     .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -60,10 +78,10 @@ struct UsageHeatmapView: View {
         let map = cellMap
         let maxValue = max(1, map.values.map { value($0) }.max() ?? 1)
         return VStack(spacing: 2) {
-            // 顶行小时标签（每 6 小时一个）
+            // Hour labels on the top row (one every 6 hours)
             HStack(spacing: 2) {
                 Text("")
-                    .frame(width: 16)
+                    .frame(width: 26)
                 ForEach(0..<24, id: \.self) { hour in
                     Text(hour % 6 == 0 ? "\(hour)" : "")
                         .font(Theme.font.themedMono(8))
@@ -73,10 +91,10 @@ struct UsageHeatmapView: View {
             }
             ForEach(Self.displayWeekdays, id: \.self) { weekday in
                 HStack(spacing: 2) {
-                    Text(Self.weekdayNames[weekday])
+                    Text(Self.weekdayName(weekday))
                         .font(Theme.font.themed(8.5))
                         .foregroundStyle(.tertiary)
-                        .frame(width: 16)
+                        .frame(width: 26)
                     ForEach(0..<24, id: \.self) { hour in
                         let cell = map[weekday * 24 + hour]
                         RoundedRectangle(cornerRadius: 2)
@@ -90,7 +108,8 @@ struct UsageHeatmapView: View {
         }
     }
 
-    /// 单色阶梯度；sqrt 压长尾（个别高峰小时不把其余压成看不出深浅）
+    /// Single-hue gradient; sqrt compresses the long tail (a few peak hours don't flatten the rest
+    /// into indistinguishable shades)
     private func color(_ value: Int, maxValue: Int) -> Color {
         guard value > 0 else { return Color.primary.opacity(0.04) }
         let normalized = (Double(value) / Double(maxValue)).squareRoot()
@@ -98,15 +117,24 @@ struct UsageHeatmapView: View {
     }
 
     private func helpText(weekday: Int, hour: Int, cell: UsageRepo.HeatmapCell?) -> String {
-        let name = "周\(Self.weekdayNames[weekday])"
-        guard let cell else { return "\(name) \(hour) 时 · 无用量" }
-        return "\(name) \(hour) 时 · \(cell.requests) 次 · \(formatTokens(cell.tokens)) tokens"
+        let name = Self.weekdayName(weekday)
+        let hourText = String(hour)
+        guard let cell else {
+            return L10n.format(
+                "%1$@ %2$@:00 · no usage",
+                zhHans: "周%1$@ %2$@ 时 · 无用量",
+                name, hourText)
+        }
+        return L10n.format(
+            "%1$@ %2$@:00 · %3$@ requests · %4$@ tokens",
+            zhHans: "周%1$@ %2$@ 时 · %3$@ 次 · %4$@ tokens",
+            name, hourText, String(cell.requests), formatTokens(cell.tokens))
     }
 
     private var legend: some View {
         HStack(spacing: 3) {
             Spacer(minLength: 0)
-            Text("少")
+            Text(L10n.text("Less", zhHans: "少"))
                 .font(Theme.font.themed(8.5))
                 .foregroundStyle(.tertiary)
             ForEach(0..<5, id: \.self) { step in
@@ -116,7 +144,7 @@ struct UsageHeatmapView: View {
                         : Theme.brand.opacity(0.15 + 0.85 * Double(step) / 4))
                     .frame(width: 13, height: 10)
             }
-            Text("多")
+            Text(L10n.text("More", zhHans: "多"))
                 .font(Theme.font.themed(8.5))
                 .foregroundStyle(.tertiary)
         }

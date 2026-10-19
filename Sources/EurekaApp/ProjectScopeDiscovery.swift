@@ -2,20 +2,25 @@ import EurekaIngest
 import EurekaUsage
 import Foundation
 
-/// 近期会话 cwd（全部 11 个 agent 源，见 ProjectRoots.recentCwds）→ 去重的项目仓库根（含项目名）。
-/// 供「项目级技能」「项目级 agent」发现共用：技能扫 `<root>/.claude|.codex|.opencode|.grok|
-/// .gemini|.kimi-code|.qwen/skills`，agent 扫 `<root>/.claude|.opencode|.grok/agents`。
-/// 仓库根解析走 ProjectResolver（向上找 .git）。
+/// Recent session cwds (all 11 agent sources, see ProjectRoots.recentCwds) → deduped project repo
+/// roots (with project names).
+/// Shared by "project-level skills" and "project-level agents" discovery: skills scan
+/// `<root>/.claude|.codex|.opencode|.grok|
+/// .gemini|.kimi-code|.qwen/skills`, agents scan `<root>/.claude|.opencode|.grok/agents`.
+/// Repo roots are resolved via ProjectResolver (walks up looking for .git).
 enum ProjectScopeDiscovery {
-    /// 近期 cwd 的短期缓存。
+    /// Short-lived cache of recent cwds.
     ///
-    /// **为什么需要**：启动预热会连着付 4 次同样的 IO —— `SkillMemoryService` 一次 refresh 里就调两次
-    /// （`repoRoots` + `codexInstructionScopes`），`PlansService`、`AgentConfigService` 各一次。
-    /// 这份发现要遍历 12 个源的会话并逐个读文件头，修完 Codex 索引器后仍需约 6 s，×4 就是 24 s
-    /// 的纯重复。索引侧早就共享过一次发现（见 `AgentSessionDiscovery.forIndexing` 的注释），
-    /// 知识库这侧一直没有。
+    /// **Why it exists**: startup warm-up pays for the same IO 4 times in a row:
+    /// `SkillMemoryService` calls it twice in a single refresh (`repoRoots` +
+    /// `codexInstructionScopes`), and `PlansService` and `AgentConfigService` once each. This
+    /// discovery walks the sessions of 12 sources and reads each file's head; even after the Codex
+    /// indexer fix it still takes about 6 s, so ×4 is 24 s of pure repetition. The indexing side
+    /// has long shared a single discovery (see the comment on `AgentSessionDiscovery.forIndexing`);
+    /// the knowledge side never did.
     ///
-    /// TTL 取 60 s：预热的四次调用集中在启动后几秒内，够覆盖；用户点「刷新」时也不会拿到隔夜数据。
+    /// TTL is 60 s: the four warm-up calls cluster within a few seconds of launch, so that covers them;
+    /// a user hitting "Refresh" won't get day-old data either.
     private static let cacheTTL: TimeInterval = 60
     private static let cacheLock = NSLock()
     private static var cachedCwds: (value: [String], at: Date)?
@@ -28,8 +33,10 @@ enum ProjectScopeDiscovery {
         }
         cacheLock.unlock()
 
-        // 锁外做慢活：这函数要几秒，持锁会把并发的服务线程全串起来。
-        // 代价是极端情况下可能有两个线程同时算一遍 —— 结果相同、幂等，比串行等待划算。
+        // Do the slow work outside the lock: this function takes seconds, and holding the lock
+        // would serialize every concurrent service thread. The cost is that in the extreme case two
+        // threads may compute it at the same time; the result is identical and idempotent, which
+        // beats waiting in line.
         let fresh = ProjectRoots.recentCwds(
             claudeProjectsRoot: ClaudeSessionBootstrap.defaultProjectsRoot(),
             codexSessionsRoot: CodexRolloutTailer.defaultSessionsRoot(),
@@ -41,7 +48,8 @@ enum ProjectScopeDiscovery {
         return fresh
     }
 
-    /// 用户点「强制刷新」时丢弃缓存（否则 60 s 内点刷新拿到的还是旧发现）。
+    /// Drops the cache when the user hits "Force Refresh" (otherwise a refresh within 60 s would
+    /// still return the old discovery).
     static func invalidateCache() {
         cacheLock.lock()
         cachedCwds = nil
@@ -49,9 +57,10 @@ enum ProjectScopeDiscovery {
     }
 
     static func repoRoots(resolver: ProjectResolver) -> [(root: URL, name: String)] {
-        // home 自身不是项目：ProjectResolver 找不到 .git 时回退 cwd，若会话就在 ~ 里跑过，
-        // 回退值即 home——那样 ~/.claude/skills 等系统根会被当成「项目级」再扫一遍，
-        // 同一文件产出两条同 path 条目（计数翻倍 + SwiftUI 网格因重复 id 出现空洞）。
+        // home itself is not a project: ProjectResolver falls back to cwd when it finds no .git, so
+        // if a session ever ran in ~, the fallback is home, and system roots like ~/.claude/skills
+        // would be scanned a second time as "project-level", yielding two entries with the same
+        // path for one file (doubled counts + holes in the SwiftUI grid from duplicate ids).
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
         var seen = Set<String>()
         var roots: [(root: URL, name: String)] = []
@@ -66,7 +75,8 @@ enum ProjectScopeDiscovery {
         return roots
     }
 
-    /// Codex 对每个近期 cwd 按项目根 → cwd 逐级查找 AGENTS.override.md / AGENTS.md。
+    /// For each recent cwd, Codex looks for AGENTS.override.md / AGENTS.md level by level from the
+    /// project root → cwd.
     static func codexInstructionScopes(
         resolver: ProjectResolver
     ) -> [(directory: URL, projectName: String, scope: String)] {

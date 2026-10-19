@@ -3,37 +3,39 @@ import EurekaKit
 import EurekaStore
 import SwiftUI
 
-/// 技能 & 记忆管理（紫金改版）：统计概览卡 + 来源筛选 chips + 扁平列表/图标双视图 + 内嵌详情。
-/// Skills / Memory 两个同级页签共用此视图，由 mode 决定只显示技能或只显示记忆。
-/// 技能行/卡带启停开关（绿=启用/灰=停用）；记忆无启停，按范围（全局/项目）标注。
+/// Skills & memory manager (purple-gold redesign): stats overview card + source filter chips + flat
+/// list/icon views + inline detail. The sibling Skills / Memory tabs share this view; mode decides
+/// whether it shows only skills or only memories. Skill rows/cards carry an enable toggle (green =
+/// enabled / grey = disabled); memories have no toggle and are labeled by scope (global/project).
 struct SkillMemoryView: View {
-    /// 页签模式：技能 / 记忆 / 指令（三页共用这一个视图）
+    /// Tab mode: skills / memory / instructions (all three pages share this one view)
     enum Mode {
         case skills
         case memory
-        /// CLAUDE.md / AGENTS.md 这类用户维护的持久指令。**与记忆分开**：它们是写给 agent 的规则，
-        /// 不是 agent 攒下来的记忆，混在一个数字里会让「记忆有多少」失去意义。
+        /// User-maintained persistent instructions like CLAUDE.md / AGENTS.md. **Kept apart from
+        /// memory**: they're rules written for the agent, not memories the agent accumulated;
+        /// mixing them into one number would make "how many memories" meaningless.
         case instructions
 
         var title: String {
             switch self {
             case .skills: return "Skills"
             case .memory: return "Memory"
-            case .instructions: return "指令"
+            case .instructions: return L10n.text("Instructions", zhHans: "指令")
             }
         }
         var searchPlaceholder: String {
             switch self {
-            case .skills: return "搜索技能"
-            case .memory: return "搜索记忆"
-            case .instructions: return "搜索指令文件"
+            case .skills: return L10n.text("Search skills", zhHans: "搜索技能")
+            case .memory: return L10n.text("Search memories", zhHans: "搜索记忆")
+            case .instructions: return L10n.text("Search instruction files", zhHans: "搜索指令文件")
             }
         }
         var noun: String {
             switch self {
-            case .skills: return "技能"
-            case .memory: return "记忆"
-            case .instructions: return "指令"
+            case .skills: return L10n.text("skills", zhHans: "技能")
+            case .memory: return L10n.text("memories", zhHans: "记忆")
+            case .instructions: return L10n.text("instructions", zhHans: "指令")
             }
         }
     }
@@ -41,28 +43,31 @@ struct SkillMemoryView: View {
     @ObservedObject var service: SkillMemoryService
     let mode: Mode
     @ObservedObject var usageService: UsageService
-    /// 技能详情页「最近调用会话」跳转用；nil 时该卡片按不可达灰显（兼容 PreviewRenderer 等既有构造点）
+    /// Used by the skill detail page's "recent sessions" jump; when nil that card greys out as
+    /// unreachable (compatible with PreviewRenderer and other existing construction sites)
     var sessionBrowser: SessionBrowserService? = nil
 
-    /// 内嵌技能详情（卡片点击进入；nil = 列表）
+    /// Inline skill detail (entered by clicking a card; nil = list)
     @State private var detail: SkillDetailTarget?
-    /// 内嵌记忆详情（nil = 列表）
+    /// Inline memory detail (nil = list)
     @State private var memoryDetail: MemoryEntry?
-    /// 展开的记忆库（点库行进入；nil = 顶层列表）
+    /// Opened memory library (entered by clicking a library row; nil = top-level list)
     @State private var openedLibrary: MemoryLibrary?
-    /// 顶层图谱模式当前看的是哪个库（nil = 取第一个，即条目最多的那个）
+    /// Which library the top-level graph mode is showing (nil = the first one, i.e. the one with
+    /// the most entries)
     @State private var graphLibraryKey: String?
-    /// 来源筛选（nil = 全部）
+    /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
-    /// 管理区布局：列表 / 图标网格（默认列表，对齐设计稿）
+    /// Management area layout: list / icon grid (list by default, matching the design mockup)
     @State private var layout: KnowledgeLayout = .list
 
     @State private var creating: CreateTarget?
     @State private var newName = ""
     @State private var deleting: DeleteTarget?
 
-    /// 离屏渲染/预览专用：指定初始布局与直接展开的记忆库
-    /// （二级页没有别的入口能被离屏渲染器点到 —— 它只会渲第一帧）
+    /// Offscreen rendering/preview only: sets the initial layout and a memory library to open
+    /// directly (the second-level page has no other entry the offscreen renderer can click -- it
+    /// only renders the first frame)
     init(service: SkillMemoryService, mode: Mode, usageService: UsageService,
          sessionBrowser: SessionBrowserService? = nil,
          initialLayout: KnowledgeLayout = .list,
@@ -92,8 +97,9 @@ struct SkillMemoryView: View {
                     onBack: { withAnimation(.easeOut(duration: 0.15)) { detail = nil } },
                     onDelete: { deleting = .skill($0) },
                     sessionBrowser: sessionBrowser)
-                    // detail 从技能 A 直切技能 B 时（⌘K 直达）target 变了但 view identity 不变，
-                    // SwiftUI 会复用旧状态；用 target.id 强制重建，让 onAppear 重新加载四个状态
+                    // When detail switches straight from skill A to skill B (⌘K jump), target
+                    // changes but view identity doesn't, so SwiftUI reuses the old state; target.id
+                    // forces a rebuild so onAppear reloads all four states
                     .id(target.id)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             } else if let memory = memoryDetail {
@@ -122,16 +128,17 @@ struct SkillMemoryView: View {
             service.refresh()
             if mode == .skills {
                 usageService.loadSkillStats()
-                // 本周命中总数（统计卡副标题）：全来源、本周窗口，一次性拉取
+                // This week's total hits (stats card subtitle): all sources, this week's window,
+                // fetched once
                 usageService.loadSkillRanking(source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
             }
             consumeFocus()
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .alert("新建" + (creating?.label ?? ""), isPresented: creatingBinding) {
-            TextField("名称", text: $newName)
-            Button("创建") {
+        .alert(L10n.format("New %@", zhHans: "新建%@", creating?.label ?? ""), isPresented: creatingBinding) {
+            TextField(L10n.text("Name", zhHans: "名称"), text: $newName)
+            Button(L10n.text("Create", zhHans: "创建")) {
                 if let creating, !newName.trimmingCharacters(in: .whitespaces).isEmpty {
                     if creating.isSkill {
                         service.createSkill(source: creating.source, name: newName)
@@ -141,22 +148,27 @@ struct SkillMemoryView: View {
                 }
                 newName = ""
             }
-            Button("取消", role: .cancel) { newName = "" }
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { newName = "" }
         }
         .confirmationDialog(
-            deleting.map { "删除「\($0.title)」？文件会移入废纸篓，可恢复。" } ?? "",
+            deleting.map {
+                L10n.format(
+                    "Delete “%@”? The file moves to the Trash and can be restored.",
+                    zhHans: "删除「%@」？文件会移入废纸篓，可恢复。",
+                    $0.title)
+            } ?? "",
             isPresented: deletingBinding, titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 deleting?.perform(service)
                 detail = nil
                 memoryDetail = nil
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
-    // MARK: - 顶部栏（标题 + 搜索 + 新建 + 刷新 + 布局切换）
+    // MARK: - Top bar (title + search + new + refresh + layout toggle)
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -170,10 +182,11 @@ struct SkillMemoryView: View {
             ScanStatusLabel(
                 scanning: service.scanning, phase: service.scanPhase,
                 lastScanAt: service.lastScanAt)
-            RefreshButton(help: "强制重扫" + mode.noun) {
+            RefreshButton(help: L10n.format("Force rescan %@", zhHans: "强制重扫%@", mode.noun)) {
                 service.refresh(force: true)
             }
-            // 图谱只对记忆有意义（记忆之间有 [[链接]]、还指向来源会话；技能之间没有这种关系）
+            // The graph only makes sense for memories (memories have [[links]] between them and
+            // point at origin sessions; skills have no such relations)
             LayoutToggle(
                 layout: $layout,
                 cases: mode == .memory ? KnowledgeLayout.allCases : KnowledgeLayout.withoutGraph)
@@ -182,54 +195,57 @@ struct SkillMemoryView: View {
         .padding(.vertical, 10)
     }
 
-    /// 「新建」：紧凑紫色图标菜单（与刷新按钮同款圆底），各 CLI 分列菜单项。
+    /// "New": compact purple icon menu (same round background as the refresh button), one menu item
+    /// per CLI.
     private var createMenu: some View {
         RoundGlyphMenu(
             icon: "plus",
-            help: mode == .skills ? "新建技能" : (mode == .memory ? "新建记忆" : "新建指令文件")
+            help: mode == .skills ? L10n.text("New skill", zhHans: "新建技能") : (mode == .memory ? L10n.text("New memory", zhHans: "新建记忆") : L10n.text("New instruction file", zhHans: "新建指令文件"))
         ) {
             if mode == .skills {
-                Button("Claude 技能") { startCreate(.claude, isSkill: true, "Claude 技能") }
-                Button("Codex 技能") { startCreate(.codex, isSkill: true, "Codex 技能") }
-                Button("OpenCode 技能") { startCreate(.opencode, isSkill: true, "OpenCode 技能") }
-                Button("Grok 技能") { startCreate(.grok, isSkill: true, "Grok 技能") }
-                Button("Antigravity 技能") { startCreate(.antigravity, isSkill: true, "Antigravity 技能") }
-                Button("Kimi 技能") { startCreate(.kimi, isSkill: true, "Kimi 技能") }
-                Button("Gemini 技能") { startCreate(.gemini, isSkill: true, "Gemini 技能") }
-                Button("Qwen 技能") { startCreate(.qwen, isSkill: true, "Qwen 技能") }
-                Button("Hermes 技能") { startCreate(.hermes, isSkill: true, "Hermes 技能") }
-                Button("Cursor 技能") { startCreate(.cursor, isSkill: true, "Cursor 技能") }
-                Button("CodeBuddy 技能") { startCreate(.codebuddy, isSkill: true, "CodeBuddy 技能") }
-                Button("Qoder 技能") { startCreate(.qoder, isSkill: true, "Qoder 技能") }
-                Button("Trae 技能") { startCreate(.trae, isSkill: true, "Trae 技能") }
-                Button("ZCode 技能") { startCreate(.zcode, isSkill: true, "ZCode 技能") }
+                Button(L10n.text("Claude skill", zhHans: "Claude 技能")) { startCreate(.claude, isSkill: true, L10n.text("Claude skill", zhHans: "Claude 技能")) }
+                Button(L10n.text("Codex skill", zhHans: "Codex 技能")) { startCreate(.codex, isSkill: true, L10n.text("Codex skill", zhHans: "Codex 技能")) }
+                Button(L10n.text("OpenCode skill", zhHans: "OpenCode 技能")) { startCreate(.opencode, isSkill: true, L10n.text("OpenCode skill", zhHans: "OpenCode 技能")) }
+                Button(L10n.text("Grok skill", zhHans: "Grok 技能")) { startCreate(.grok, isSkill: true, L10n.text("Grok skill", zhHans: "Grok 技能")) }
+                Button(L10n.text("Antigravity skill", zhHans: "Antigravity 技能")) { startCreate(.antigravity, isSkill: true, L10n.text("Antigravity skill", zhHans: "Antigravity 技能")) }
+                Button(L10n.text("Kimi skill", zhHans: "Kimi 技能")) { startCreate(.kimi, isSkill: true, L10n.text("Kimi skill", zhHans: "Kimi 技能")) }
+                Button(L10n.text("Gemini skill", zhHans: "Gemini 技能")) { startCreate(.gemini, isSkill: true, L10n.text("Gemini skill", zhHans: "Gemini 技能")) }
+                Button(L10n.text("Qwen skill", zhHans: "Qwen 技能")) { startCreate(.qwen, isSkill: true, L10n.text("Qwen skill", zhHans: "Qwen 技能")) }
+                Button(L10n.text("Hermes skill", zhHans: "Hermes 技能")) { startCreate(.hermes, isSkill: true, L10n.text("Hermes skill", zhHans: "Hermes 技能")) }
+                Button(L10n.text("Cursor skill", zhHans: "Cursor 技能")) { startCreate(.cursor, isSkill: true, L10n.text("Cursor skill", zhHans: "Cursor 技能")) }
+                Button(L10n.text("CodeBuddy skill", zhHans: "CodeBuddy 技能")) { startCreate(.codebuddy, isSkill: true, L10n.text("CodeBuddy skill", zhHans: "CodeBuddy 技能")) }
+                Button(L10n.text("Qoder skill", zhHans: "Qoder 技能")) { startCreate(.qoder, isSkill: true, L10n.text("Qoder skill", zhHans: "Qoder 技能")) }
+                Button(L10n.text("Trae skill", zhHans: "Trae 技能")) { startCreate(.trae, isSkill: true, L10n.text("Trae skill", zhHans: "Trae 技能")) }
+                Button(L10n.text("ZCode skill", zhHans: "ZCode 技能")) { startCreate(.zcode, isSkill: true, L10n.text("ZCode skill", zhHans: "ZCode 技能")) }
             } else if mode == .memory {
-                Button("Claude 记忆") { startCreate(.claude, isSkill: false, "Claude 记忆") }
-                Button("OpenCode 记忆") { startCreate(.opencode, isSkill: false, "OpenCode 记忆") }
-                Button("Grok 记忆") { startCreate(.grok, isSkill: false, "Grok 记忆") }
-                Button("Qwen 记忆") { startCreate(.qwen, isSkill: false, "Qwen 记忆") }
-                Button("CodeBuddy 记忆") { startCreate(.codebuddy, isSkill: false, "CodeBuddy 记忆") }
-                Button("Qoder 记忆") { startCreate(.qoder, isSkill: false, "Qoder 记忆") }
-                // hermes 记忆 = 固定 memories/MEMORY.md（name 忽略，见 createMemory）
-                Button("Hermes 记忆（MEMORY.md）") { service.createMemory(source: .hermes, name: "MEMORY") }
-                // trae 记忆 = 固定 memory/user_profile.md（只有 CN 版有记忆库，见 createMemory）
-                Button("Trae 记忆（user_profile.md）") {
+                Button(L10n.text("Claude memory", zhHans: "Claude 记忆")) { startCreate(.claude, isSkill: false, L10n.text("Claude memory", zhHans: "Claude 记忆")) }
+                Button(L10n.text("OpenCode memory", zhHans: "OpenCode 记忆")) { startCreate(.opencode, isSkill: false, L10n.text("OpenCode memory", zhHans: "OpenCode 记忆")) }
+                Button(L10n.text("Grok memory", zhHans: "Grok 记忆")) { startCreate(.grok, isSkill: false, L10n.text("Grok memory", zhHans: "Grok 记忆")) }
+                Button(L10n.text("Qwen memory", zhHans: "Qwen 记忆")) { startCreate(.qwen, isSkill: false, L10n.text("Qwen memory", zhHans: "Qwen 记忆")) }
+                Button(L10n.text("CodeBuddy memory", zhHans: "CodeBuddy 记忆")) { startCreate(.codebuddy, isSkill: false, L10n.text("CodeBuddy memory", zhHans: "CodeBuddy 记忆")) }
+                Button(L10n.text("Qoder memory", zhHans: "Qoder 记忆")) { startCreate(.qoder, isSkill: false, L10n.text("Qoder memory", zhHans: "Qoder 记忆")) }
+                // hermes memory = fixed memories/MEMORY.md (name ignored, see createMemory)
+                Button(L10n.text("Hermes memory (MEMORY.md)", zhHans: "Hermes 记忆（MEMORY.md）")) { service.createMemory(source: .hermes, name: "MEMORY") }
+                // trae memory = fixed memory/user_profile.md (only the CN install has a memory
+                // library, see createMemory)
+                Button(L10n.text("Trae memory (user_profile.md)", zhHans: "Trae 记忆（user_profile.md）")) {
                     service.createMemory(source: .trae, name: "user_profile")
                 }
             } else {
-                // 指令文件：这三个 CLI 的"全局记忆"其实就是一份固定名字的指令文件，
-                // 所以创建入口跟着指令页走（Claude 的 CLAUDE.md 由用户自己或 /init 生成，不在这提供）
-                Button("Codex 指令（AGENTS.md）") { service.createMemory(source: .codex, name: "AGENTS") }
-                Button("Kimi 指令（AGENTS.md）") { service.createMemory(source: .kimi, name: "AGENTS") }
-                Button("Gemini 指令（GEMINI.md）") { service.createMemory(source: .gemini, name: "GEMINI") }
-                Button("Trae 指令（user_rules.md）") {
+                // Instruction files: for these three CLIs the "global memory" is really a
+                // fixed-name instruction file, so the create entry follows the Instructions page
+                // (Claude's CLAUDE.md is made by the user or /init, not offered here)
+                Button(L10n.text("Codex instructions (AGENTS.md)", zhHans: "Codex 指令（AGENTS.md）")) { service.createMemory(source: .codex, name: "AGENTS") }
+                Button(L10n.text("Kimi instructions (AGENTS.md)", zhHans: "Kimi 指令（AGENTS.md）")) { service.createMemory(source: .kimi, name: "AGENTS") }
+                Button(L10n.text("Gemini instructions (GEMINI.md)", zhHans: "Gemini 指令（GEMINI.md）")) { service.createMemory(source: .gemini, name: "GEMINI") }
+                Button(L10n.text("Trae instructions (user_rules.md)", zhHans: "Trae 指令（user_rules.md）")) {
                     service.createMemory(source: .trae, name: "user_rules")
                 }
             }
         }
     }
 
-    // MARK: - 主体（统计概览卡 + 来源 chips + 扁平列表/网格）
+    // MARK: - Body (stats overview card + source chips + flat list/grid)
 
     private let gridColumns = [GridItem(.flexible(), spacing: 14),
                                GridItem(.flexible(), spacing: 14),
@@ -242,7 +258,7 @@ struct SkillMemoryView: View {
                 statsCard
                 SourceFilterBar(
                     selected: $selectedSource,
-                    allLabel: "全部",
+                    allLabel: L10n.text("All", zhHans: "全部"),
                     allIcon: allSourcesIcon,
                     totalCount: totalCount,
                     sources: sourcesByCount,
@@ -298,7 +314,8 @@ struct SkillMemoryView: View {
                 }
             }
         case .instructions:
-            // 指令文件没有记忆库、没有图谱（它们之间没有 [[链接]] 也没有来源会话）→ 只有列表/卡片
+            // Instruction files have no memory library and no graph (no [[links]] between them, no
+            // origin sessions) → list/cards only
             let items = instructionItems
             if items.isEmpty {
                 emptyState.padding(.top, 40)
@@ -348,7 +365,8 @@ struct SkillMemoryView: View {
             } else {
                 KnowledgeListContainer {
                     VStack(spacing: 0) {
-                        // 记忆库先列：一个项目 70+ 条记忆折成一行，点进去看条目
+                        // Memory libraries come first: a project's 70+ memories fold into one row;
+                        // click in to see entries
                         ForEach(libraries) { library in
                             MemoryLibraryRow(library: library, onOpen: { open(library) })
                             Divider().opacity(0.4).padding(.leading, 50)
@@ -368,16 +386,23 @@ struct SkillMemoryView: View {
         }
     }
 
-    /// 顶层图谱模式：先挑一个记忆库（图谱天然是「一库一张」），再画它的关系图
+    /// Top-level graph mode: pick a memory library first (a graph is naturally "one per library"),
+    /// then draw its relation graph
     @ViewBuilder
     private func memoryGraphBoard(_ libraries: [MemoryLibrary]) -> some View {
         if libraries.isEmpty {
             EmptyStateView(
                 icon: "point.3.filled.connected.trianglepath.dotted",
-                title: service.scanning ? "正在扫描…" : "还没有记忆库",
+                title: service.scanning
+                    ? L10n.text("Scanning…", zhHans: "正在扫描…")
+                    : L10n.text("No memory libraries yet", zhHans: "还没有记忆库"),
                 hint: service.isSearching
-                    ? "搜索中不显示图谱（清空搜索框看图）"
-                    : "记忆库来自 Claude / Qwen 的 projects/<项目>/memory 目录")
+                    ? L10n.text(
+                        "The graph stays hidden while you search (clear the search box to see it)",
+                        zhHans: "搜索中不显示图谱（清空搜索框看图）")
+                    : L10n.text(
+                        "Memory libraries come from Claude / Qwen projects/<project>/memory directories",
+                        zhHans: "记忆库来自 Claude / Qwen 的 projects/<项目>/memory 目录"))
                 .padding(.top, 40)
         } else {
             let picked = libraries.first { $0.key == graphLibraryKey } ?? libraries[0]
@@ -401,9 +426,9 @@ struct SkillMemoryView: View {
         }
     }
 
-    // MARK: - 统计概览卡
+    // MARK: - Stats overview card
 
-    /// 「全部」chip 的图标（各页语义不同）
+    /// Icon of the "All" chip (meaning differs per page)
     private var allSourcesIcon: String {
         switch mode {
         case .skills: return "sparkles"
@@ -417,47 +442,56 @@ struct SkillMemoryView: View {
         if mode == .instructions {
             let scope = service.instructionScopeBreakdown
             StatOverviewCard(
-                value: "\(totalCount)", unit: "指令文件",
-                subtitle: "\(service.instructionSourceCount) 来源 · "
-                    + formatBytes(service.instructionTotalBytes),
-                distributionTitle: "范围分布",
+                value: "\(totalCount)", unit: L10n.text("instruction files", zhHans: "指令文件"),
+                subtitle: L10n.format(
+                    "%1$@ sources · %2$@",
+                    zhHans: "%1$@ 来源 · %2$@",
+                    String(service.instructionSourceCount),
+                    formatBytes(service.instructionTotalBytes)),
+                distributionTitle: L10n.text("Scope", zhHans: "范围分布"),
                 segments: [
-                    .init(label: "全局", count: scope.global, color: Theme.brand),
-                    .init(label: "项目根", count: scope.project, color: Theme.gold),
+                    .init(label: L10n.text("Global", zhHans: "全局"), count: scope.global, color: Theme.brand),
+                    .init(label: L10n.text("Project root", zhHans: "项目根"), count: scope.project, color: Theme.gold),
                 ])
         } else if mode == .skills {
             let enabled = service.skills.filter(\.enabled).count
             let projectCount = service.skills.filter { $0.scope.projectName != nil }.count
             let weekHits = usageService.skillRanking.reduce(0) { $0 + $1.count }
             StatOverviewCard(
-                value: "\(totalCount)", unit: "技能",
-                subtitle: "本周命中 \(weekHits)",
-                distributionTitle: "启用分布",
+                value: "\(totalCount)", unit: L10n.text("skills", zhHans: "技能"),
+                subtitle: L10n.format("Hits this week %@", zhHans: "本周命中 %@", String(weekHits)),
+                distributionTitle: L10n.text("Enablement", zhHans: "启用分布"),
                 segments: [
-                    .init(label: "启用", count: enabled, color: Theme.enabledGreen),
-                    .init(label: "停用", count: totalCount - enabled, color: Theme.draftGray),
+                    .init(label: L10n.text("Enabled", zhHans: "启用"), count: enabled, color: Theme.enabledGreen),
+                    .init(label: L10n.text("Disabled", zhHans: "停用"), count: totalCount - enabled, color: Theme.draftGray),
                 ],
-                trailingNote: projectCount > 0 ? "项目级 \(projectCount)" : nil)
+                trailingNote: projectCount > 0
+                    ? L10n.format("Project-level %@", zhHans: "项目级 %@", String(projectCount)) : nil)
         } else {
-            // 口径：service.memoryEntries（独立条目 + 全部库内文件）。
-            // 以前这里读被过滤后的列表数组，97 条项目记忆一条都没算进来 —— 数字因此总是偏小。
+            // Basis: service.memoryEntries (standalone entries + every file inside libraries). This
+            // used to read the filtered list array, which counted none of the 97 project memories
+            // -- so the number was always low.
             let scope = service.memoryScopeBreakdown
             let libraryNote = service.libraries.isEmpty
-                ? nil : "\(service.libraries.count) 个记忆库"
+                ? nil : L10n.format(
+                    "%@ memory libraries", zhHans: "%@ 个记忆库", String(service.libraries.count))
             StatOverviewCard(
-                value: "\(totalCount)", unit: "记忆",
-                subtitle: "\(service.memorySourceCount) 来源 · "
-                    + formatBytes(service.memoryTotalBytes),
-                distributionTitle: "范围分布",
+                value: "\(totalCount)", unit: L10n.text("memories", zhHans: "记忆"),
+                subtitle: L10n.format(
+                    "%1$@ sources · %2$@",
+                    zhHans: "%1$@ 来源 · %2$@",
+                    String(service.memorySourceCount),
+                    formatBytes(service.memoryTotalBytes)),
+                distributionTitle: L10n.text("Scope", zhHans: "范围分布"),
                 segments: [
-                    .init(label: "全局", count: scope.global, color: Theme.brand),
-                    .init(label: "项目记忆库", count: scope.library, color: Theme.enabledGreen),
+                    .init(label: L10n.text("Global", zhHans: "全局"), count: scope.global, color: Theme.brand),
+                    .init(label: L10n.text("Project libraries", zhHans: "项目记忆库"), count: scope.library, color: Theme.enabledGreen),
                 ],
                 trailingNote: libraryNote)
         }
     }
 
-    // MARK: - 计数 / 筛选 / 排序
+    // MARK: - Counting / filtering / sorting
 
     private var totalCount: Int {
         switch mode {
@@ -475,11 +509,13 @@ struct SkillMemoryView: View {
         }
     }
 
-    /// 有数据的来源，按计数降序（chips 顺序贴合设计稿）。
+    /// Sources with data, by count descending (chip order matches the design mockup).
     ///
-    /// **先把计数算成字典再排**：比较器里调 `count(for:)` 会让每次比较都 filter 一遍全表
-    /// （12 个源约 30 次比较 × 两次调用 × 数百条数据 = 每帧上万次遍历，而 body 会反复求值）。
-    /// 顺带用 rawValue 做同名次的 tiebreak —— `sorted` 不保证稳定，否则同计数的 chips 顺序会抖。
+    /// **Compute counts into a dictionary first, then sort**: calling `count(for:)` in the
+    /// comparator filters the whole table on every comparison (12 sources ≈ 30 comparisons × two
+    /// calls × hundreds of rows = tens of thousands of passes per frame, and body re-evaluates
+    /// repeatedly). rawValue also breaks ties -- `sorted` isn't stable, so chips with equal counts
+    /// would otherwise jitter.
     private var sourcesByCount: [AgentSource] {
         var counts: [AgentSource: Int] = [:]
         for source in AgentSource.allCases {
@@ -493,7 +529,8 @@ struct SkillMemoryView: View {
         }
     }
 
-    /// 技能：来源筛选 + 按命中次数降序（无命中数据的排后、按名），并预取统计避免重复建表
+    /// Skills: source filter + hit count descending (those without hit data last, by name),
+    /// prefetching stats to avoid rebuilding the table
     private var skillContext: (items: [SkillEntry], stats: [SkillEntry.ID: ToolCallsRepo.SkillUsageStat], maxHit: Int) {
         var map: [String: ToolCallsRepo.SkillUsageStat] = [:]
         for stat in usageService.skillStats {
@@ -534,7 +571,7 @@ struct SkillMemoryView: View {
         return groups
     }
 
-    /// 记忆：来源筛选 + 全局优先、再按修改时间降序
+    /// Memories: source filter + global first, then modification time descending
     private var memoryItems: [MemoryEntry] {
         service.memories
             .filter { selectedSource == nil || $0.source == selectedSource }
@@ -546,12 +583,14 @@ struct SkillMemoryView: View {
             }
     }
 
-    /// 记忆库（搜索时 service.libraries 为空 —— 那时库内条目已扁平并入 memoryItems）
+    /// Memory libraries (service.libraries is empty while searching -- library entries are then
+    /// flattened into memoryItems)
     private var libraryItems: [MemoryLibrary] {
         service.libraries(for: selectedSource)
     }
 
-    /// 指令文件：来源筛选 + 全局优先、再按修改时间降序（与记忆同一套次序）
+    /// Instruction files: source filter + global first, then modification time descending (same
+    /// ordering as memories)
     private var instructionItems: [MemoryEntry] {
         service.instructions
             .filter { selectedSource == nil || $0.source == selectedSource }
@@ -569,10 +608,12 @@ struct SkillMemoryView: View {
         }
     }
 
-    /// 跨页直达落点：按路径找到本签条目并打开详情（找不到不清空——可能属于别的签，或扫描还没跑完）。
-    /// 用 `knowledgeSnapshot()`（全集）而非 `service.skills`/`memoryEntries`/`instructions`：
-    /// 那三个是搜索过滤过的当前视图，⌘K 索引口径本就是全集，消费口径必须与之一致，否则
-    /// 带着 searchText 残留切页会导致明明存在的条目查不到。
+    /// Cross-page jump target: find this tab's entry by path and open its detail (not cleared if
+    /// not found -- it may belong to another tab, or scanning hasn't finished). Uses
+    /// `knowledgeSnapshot()` (the full set) rather than
+    /// `service.skills`/`memoryEntries`/`instructions`: those three are the current search-filtered
+    /// views, while the ⌘K index is built over the full set; the consumer must use the same basis,
+    /// or switching pages with leftover searchText makes entries that do exist impossible to find.
     private func consumeFocus() {
         guard let path = service.focusPath else { return }
         let snap = service.knowledgeSnapshot()
@@ -602,19 +643,25 @@ struct SkillMemoryView: View {
         if service.scanning {
             VStack(spacing: 8) {
                 ProgressView()
-                Text("正在扫描…").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L10n.text("Scanning…", zhHans: "正在扫描…")).font(.system(size: 12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         } else {
             EmptyStateView(
                 icon: emptyIcon,
                 title: service.isSearching || selectedSource != nil
-                    ? "没有匹配项" : "还没有\(mode.noun)",
+                    ? L10n.text("No matches", zhHans: "没有匹配项")
+                    : L10n.format("No %@ yet", zhHans: "还没有%@", mode.noun),
                 hint: service.isSearching || selectedSource != nil
                     ? nil
                     : (mode == .instructions
-                        ? "各仓库根的 CLAUDE.md / AGENTS.md / GEMINI.md 会出现在这里"
-                        : "点右上角「＋」创建各 CLI 的\(mode.noun)"))
+                        ? L10n.text(
+                            "CLAUDE.md / AGENTS.md / GEMINI.md at each repository root shows up here",
+                            zhHans: "各仓库根的 CLAUDE.md / AGENTS.md / GEMINI.md 会出现在这里")
+                        : L10n.format(
+                            "Use + at the top right to create %@ for each CLI",
+                            zhHans: "点右上角「＋」创建各 CLI 的%@",
+                            mode.noun)))
         }
     }
 
@@ -626,7 +673,7 @@ struct SkillMemoryView: View {
         }
     }
 
-    // MARK: - 动作
+    // MARK: - Actions
 
     private func startCreate(_ source: AgentSource, isSkill: Bool, _ label: String) {
         newName = ""
@@ -641,13 +688,13 @@ struct SkillMemoryView: View {
     }
 }
 
-/// 家目录缩写为 ~（记忆路径展示）
+/// Abbreviates the home directory to ~ (for displaying memory paths)
 private func abbreviateHome(_ path: String) -> String {
     let home = NSHomeDirectory()
     return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
 }
 
-// MARK: - 数据载体
+// MARK: - Data carriers
 
 private struct CreateTarget: Identifiable {
     let id = UUID()
@@ -674,33 +721,34 @@ private enum DeleteTarget {
     }
 }
 
-// MARK: - 卡片
+// MARK: - Cards
 
-/// 技能操作菜单（卡片 / 列表行共用）
+/// Skill action menu (shared by cards / list rows)
 @ViewBuilder
 private func skillContextMenu(
     _ skill: SkillEntry, service: SkillMemoryService, onOpen: @escaping () -> Void,
     onDelete: @escaping () -> Void
 ) -> some View {
-    Button("查看详情") { onOpen() }
-    Button(skill.enabled ? "停用" : "启用") { service.setSkillEnabled(skill, !skill.enabled) }
-    Button("用默认编辑器打开") { service.openInEditor(path: skill.path) }
-    Button("在 Finder 中显示") { service.reveal(path: skill.path) }
+    Button(L10n.text("View details", zhHans: "查看详情")) { onOpen() }
+    Button(skill.enabled ? L10n.text("Disable", zhHans: "停用") : L10n.text("Enable", zhHans: "启用")) { service.setSkillEnabled(skill, !skill.enabled) }
+    Button(L10n.text("Open in default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: skill.path) }
+    Button(L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: skill.path) }
     Divider()
-    Button("删除", role: .destructive) { onDelete() }
+    Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) { onDelete() }
 }
 
 private func skillActions(
     _ skill: SkillEntry, service: SkillMemoryService, onDelete: @escaping () -> Void
 ) -> [CardAction] {
     [
-        CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: skill.path) },
-        CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: skill.path) },
-        CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() },
+        CardAction(icon: "pencil", help: L10n.text("Open in default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: skill.path) },
+        CardAction(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: skill.path) },
+        CardAction(icon: "trash", destructive: true, help: L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）")) { onDelete() },
     ]
 }
 
-/// 技能图标卡：logo + 等宽名 + 启用开关 + 描述（2 行）+ 命中次数 · 项目 · 最近；悬停浮现动作
+/// Skill icon card: logo + monospaced name + enable toggle + description (2 lines) + hit count ·
+/// project · last used; actions appear on hover
 private struct SkillCard: View {
     let skill: SkillEntry
     let service: SkillMemoryService
@@ -725,7 +773,8 @@ private struct SkillCard: View {
                     Spacer(minLength: 4)
                     MiniSwitch(isOn: skill.enabled) { service.setSkillEnabled(skill, !skill.enabled) }
                 }
-                // 恒占 2 行：网格卡片等高，避免 LazyVGrid 参差留白
+                // Always takes 2 lines: grid cards stay equal height, avoiding ragged gaps in
+                // LazyVGrid
                 Text(skill.description ?? "")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
@@ -735,7 +784,7 @@ private struct SkillCard: View {
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
                     if let stat, stat.count > 0 {
-                        Text("命中 \(stat.count) 次")
+                        Text(L10n.format("%@ hits", zhHans: "命中 %@ 次", String(stat.count)))
                             .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
                             .foregroundStyle(Theme.brandFg)
                     }
@@ -791,7 +840,9 @@ private struct SkillGroupRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .help("装在 \(group.skills.count) 处，点开第一份")
+                .help(L10n.format(
+                    "Installed in %@ places; opens the first one",
+                    zhHans: "装在 %@ 处，点开第一份", String(group.skills.count)))
             }
         } menu: {
             EmptyView()
@@ -799,7 +850,8 @@ private struct SkillGroupRow: View {
     }
 }
 
-/// 技能列表行：logo + 名称/描述两行 + 用量条·命中次数 + 最近 + 启用开关；悬停浮现动作
+/// Skill list row: logo + two-line name/description + usage bar · hit count + last used + enable
+/// toggle; actions appear on hover
 private struct SkillListRow: View {
     let skill: SkillEntry
     let service: SkillMemoryService
@@ -846,7 +898,7 @@ private struct SkillListRow: View {
                         Capsule().fill(Theme.brand)
                             .frame(width: max(4, 72 * CGFloat(stat.count) / CGFloat(maxHit)), height: 6)
                     }
-                Text("\(stat.count) 次")
+                Text(L10n.format("%@ times", zhHans: "%@ 次", String(stat.count)))
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .foregroundStyle(Theme.brandFg)
             }
@@ -863,32 +915,37 @@ private func memoryActions(
     _ memory: MemoryEntry, service: SkillMemoryService, onDelete: @escaping () -> Void
 ) -> [CardAction] {
     var acts: [CardAction] = []
-    // 多个来源会话时这个按钮跳最近的那个；要精选走右键菜单（Codex 的 MEMORY.md 关联 15 个）
+    // With several origin sessions this button jumps to the most recent; picking one goes through
+    // the context menu (Codex's MEMORY.md links 15)
     let jumpable = memory.relatedSessions.filter(\.exists)
     if let first = jumpable.first {
         acts.append(CardAction(
             icon: "bubble.left.and.bubble.right",
             help: jumpable.count > 1
-                ? "跳到最近一次相关会话（共 \(jumpable.count) 个，右键可选）"
-                : "跳到写下这条记忆的会话"
+                ? L10n.format(
+                    "Jump to the latest related session (%@ total; right-click to choose)",
+                    zhHans: "跳到最近一次相关会话（共 %@ 个，右键可选）",
+                    String(jumpable.count))
+                : L10n.text("Jump to the session that wrote this memory", zhHans: "跳到写下这条记忆的会话")
         ) { revealSession(first.sessionId) })
     }
     if memory.isEditable {
-        acts.append(CardAction(icon: "pencil", help: "用默认编辑器打开") { service.openInEditor(path: memory.path) })
+        acts.append(CardAction(icon: "pencil", help: L10n.text("Open in default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: memory.path) })
     }
-    acts.append(CardAction(icon: "folder", help: "在 Finder 中显示") { service.reveal(path: memory.path) })
+    acts.append(CardAction(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: memory.path) })
     if memory.isDeletable {
-        acts.append(CardAction(icon: "trash", destructive: true, help: "移入废纸篓（可恢复）") { onDelete() })
+        acts.append(CardAction(icon: "trash", destructive: true, help: L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）")) { onDelete() })
     }
     return acts
 }
 
-/// 跳「会话」页并选中：与用量页/诊断页同一条链路（接收端在 PopoverRootView）
+/// Jumps to the Sessions page and selects it: the same path as the usage/diagnostics pages
+/// (receiver is in PopoverRootView)
 private func revealSession(_ sessionId: String) {
     NotificationCenter.default.post(name: .eurekaRevealSession, object: sessionId)
 }
 
-/// 「来源会话」按钮/菜单的标签（详情页工具条用）
+/// Label of the "origin session" button/menu (used by the detail page toolbar)
 private func sessionLabel(_ text: String) -> some View {
     HStack(spacing: 3) {
         Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 10))
@@ -896,19 +953,23 @@ private func sessionLabel(_ text: String) -> some View {
     }
 }
 
-/// 「来源会话」菜单项：0 个不显示，1 个是按钮，多个折成子菜单
-/// （Claude 一条记忆对一个会话；Codex 的 MEMORY.md 聚合 15 个）。
-/// 记录文件已删除的置灰而不是隐藏 —— 让人知道这条记忆有来源，只是追不回去了。
+/// "Origin session" menu items: hidden for 0, a button for 1, folded into a submenu for several
+/// (one Claude memory maps to one session; Codex's MEMORY.md aggregates 15). Ones whose transcript
+/// file was deleted are greyed out rather than hidden -- so it's clear the memory has an origin
+/// that just can't be traced anymore.
 @ViewBuilder
 private func sessionMenuItems(_ memory: MemoryEntry) -> some View {
     let refs = memory.relatedSessions
     if refs.count == 1, let ref = refs[0] as MemorySessionRef? {
-        Button("跳到来源会话") { revealSession(ref.sessionId) }
+        Button(L10n.text("Jump to source session", zhHans: "跳到来源会话")) { revealSession(ref.sessionId) }
             .disabled(!ref.exists)
     } else if refs.count > 1 {
-        Menu("来源会话（\(refs.filter(\.exists).count)/\(refs.count) 可跳转）") {
+        Menu(L10n.format(
+            "Source sessions (%1$@/%2$@ available)",
+            zhHans: "来源会话（%1$@/%2$@ 可跳转）",
+            String(refs.filter(\.exists).count), String(refs.count))) {
             ForEach(refs) { ref in
-                Button("会话 \(ref.sessionId.prefix(8))") { revealSession(ref.sessionId) }
+                Button(L10n.format("Session %@", zhHans: "会话 %@", String(ref.sessionId.prefix(8)))) { revealSession(ref.sessionId) }
                     .disabled(!ref.exists)
             }
         }
@@ -920,19 +981,20 @@ private func memoryContextMenu(
     _ memory: MemoryEntry, service: SkillMemoryService, onOpen: @escaping () -> Void,
     onDelete: @escaping () -> Void
 ) -> some View {
-    Button(memory.isEditable ? "查看 / 编辑" : "查看") { onOpen() }
+    Button(memory.isEditable ? L10n.text("View / Edit", zhHans: "查看 / 编辑") : L10n.text("View", zhHans: "查看")) { onOpen() }
     sessionMenuItems(memory)
     if memory.isEditable {
-        Button("用默认编辑器打开") { service.openInEditor(path: memory.path) }
+        Button(L10n.text("Open in default editor", zhHans: "用默认编辑器打开")) { service.openInEditor(path: memory.path) }
     }
-    Button("在 Finder 中显示") { service.reveal(path: memory.path) }
+    Button(L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) { service.reveal(path: memory.path) }
     if memory.isDeletable {
         Divider()
-        Button("删除", role: .destructive) { onDelete() }
+        Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) { onDelete() }
     }
 }
 
-/// 记忆类型 chip（库内条目才有意义：全局 CLAUDE.md 之类没有 frontmatter 分类）
+/// Memory type chip (only meaningful for library entries: global ones like CLAUDE.md have no
+/// frontmatter type)
 @ViewBuilder
 private func memoryTypeChip(_ memory: MemoryEntry) -> some View {
     if memory.libraryKey != nil, memory.memoryType != .other {
@@ -940,7 +1002,7 @@ private func memoryTypeChip(_ memory: MemoryEntry) -> some View {
     }
 }
 
-/// 图例用的一条水平线段（供 stroke 上虚线样式）
+/// A horizontal line segment for the legend (to apply a dashed stroke style)
 private struct LegendLine: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -950,7 +1012,8 @@ private struct LegendLine: Shape {
     }
 }
 
-/// 记忆类型配色（库统计卡的类型分布段、图例共用）。只用现成语义色，不引入新色板。
+/// Memory type colors (shared by the library stats card's type distribution segments and the
+/// legend). Uses only existing semantic colors, no new palette.
 private func typeColor(_ type: MemoryType) -> Color {
     switch type {
     case .feedback: return Theme.brand
@@ -961,9 +1024,10 @@ private func typeColor(_ type: MemoryType) -> Color {
     }
 }
 
-// MARK: - 记忆库（一个项目的 memory/ 目录折成一行）
+// MARK: - Memory library (a project's memory/ directory folded into one row)
 
-/// 记忆库列表行：项目名 + 条目数 + 目录 + 可跳会话数 + 体积 · 最近更新 + chevron
+/// Memory library list row: project name + entry count + directory + jumpable session count + size
+/// · last updated + chevron
 private struct MemoryLibraryRow: View {
     let library: MemoryLibrary
     let onOpen: () -> Void
@@ -974,19 +1038,21 @@ private struct MemoryLibraryRow: View {
                 SourceLogoTile(source: library.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("\(library.projectName) 记忆库")
+                        Text(L10n.format("%@ memory library", zhHans: "%@ 记忆库", library.projectName))
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .lineLimit(1).truncationMode(.middle)
-                        // 0 条 = 只有一份 MEMORY.md（Qwen 会先建空索引），说清楚而不是显示个 0
+                        // 0 entries = only a MEMORY.md (Qwen creates an empty index first); say so
+                        // instead of showing a 0
                         if library.count == 0 {
-                            TagChip("仅索引", neutral: true)
+                            TagChip(L10n.text("Index only", zhHans: "仅索引"), neutral: true)
                         } else {
-                            TagChip("\(library.count) 条", tint: Theme.brand)
+                            TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), tint: Theme.brand)
                         }
-                        if library.index == nil { TagChip("无索引", neutral: true) }
-                        // 未被 MEMORY.md 收录 = agent 读不到的死记忆，必须显式报出来
+                        if library.index == nil { TagChip(L10n.text("No index", zhHans: "无索引"), neutral: true) }
+                        // Not listed in MEMORY.md = dead memory the agent can't read; must be
+                        // reported explicitly
                         if !library.unindexedEntries.isEmpty {
-                            TagChip("\(library.unindexedEntries.count) 条未收录", tint: Theme.gold)
+                            TagChip(L10n.format("%@ not indexed", zhHans: "%@ 条未收录", String(library.unindexedEntries.count)), tint: Theme.gold)
                         }
                     }
                     Text(abbreviateHome(library.directory))
@@ -1004,15 +1070,16 @@ private struct MemoryLibraryRow: View {
                 }
                 .fixedSize()
             }
-            // 同名不同源的库（Claude 与 Qwen 都有 aftership-semantic-layer）靠 logo 与路径区分
+            // Same-name libraries from different sources (Claude and Qwen both have
+            // aftership-semantic-layer) are told apart by logo and path
             .help(abbreviateHome(library.directory))
         } menu: {
-            Button("查看记忆库") { onOpen() }
+            Button(L10n.text("View memory library", zhHans: "查看记忆库")) { onOpen() }
         }
     }
 }
 
-/// 记忆库图标卡（图标布局用）
+/// Memory library icon card (for the icon layout)
 private struct MemoryLibraryCard: View {
     let library: MemoryLibrary
     let onOpen: () -> Void
@@ -1026,11 +1093,11 @@ private struct MemoryLibraryCard: View {
                         .font(Theme.font.monoSkillName(13))
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
-                    // 与列表行同一套口径：0 条 = 只有一份 MEMORY.md
+                    // Same basis as the list row: 0 entries = only a MEMORY.md
                     if library.count == 0 {
-                        TagChip("仅索引", neutral: true)
+                        TagChip(L10n.text("Index only", zhHans: "仅索引"), neutral: true)
                     } else {
-                        TagChip("\(library.count) 条", tint: Theme.brand)
+                        TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), tint: Theme.brand)
                     }
                 }
                 Text(abbreviateHome(library.directory))
@@ -1039,18 +1106,19 @@ private struct MemoryLibraryCard: View {
                     .lineLimit(2).truncationMode(.middle)
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
-                    Text("记忆库").font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                    Text(L10n.text("Memory library", zhHans: "记忆库")).font(.system(size: 9.5)).foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
                     MemoryLibraryMeta(library: library)
                 }
             }
         } menu: {
-            Button("查看记忆库") { onOpen() }
+            Button(L10n.text("View memory library", zhHans: "查看记忆库")) { onOpen() }
         }
     }
 }
 
-/// 库的尾部 meta：可跳会话数 + 体积 · 最近更新（行与卡共用，口径一致）
+/// Library trailing meta: jumpable session count + size · last updated (shared by row and card,
+/// same basis)
 private struct MemoryLibraryMeta: View {
     let library: MemoryLibrary
 
@@ -1064,7 +1132,10 @@ private struct MemoryLibraryMeta: View {
                         .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
                 }
                 .foregroundStyle(Theme.goldFg)
-                .help("\(library.linkedSessionCount) 个来源会话的记录还在，可以点开")
+                .help(L10n.format(
+                    "%@ source sessions still have transcripts you can open",
+                    zhHans: "%@ 个来源会话的记录还在，可以点开",
+                    String(library.linkedSessionCount)))
             }
             Text(formatBytes(library.sizeBytes))
                 .font(.system(size: 9.5).monospacedDigit()).foregroundStyle(.tertiary)
@@ -1075,7 +1146,8 @@ private struct MemoryLibraryMeta: View {
     }
 }
 
-/// 记忆图标卡：左色脊（全局紫 / 项目金）+ logo + 名 + 范围徽标 + 路径 + 项目 chip + 大小·时间
+/// Memory icon card: left color spine (global purple / project gold) + logo + name + scope badge +
+/// path + project chip + size · time
 private struct MemoryCard: View {
     let memory: MemoryEntry
     let service: SkillMemoryService
@@ -1085,7 +1157,8 @@ private struct MemoryCard: View {
     private var isGlobal: Bool { memory.projectName == nil }
 
     var body: some View {
-        // 边框与 Skills / Plans / Agents 完全一致（不加范围色脊）；范围由 ScopeBadge 表达
+        // Border identical to Skills / Plans / Agents (no scope color spine); scope is expressed by
+        // ScopeBadge
         KnowledgeCard(
             minHeight: 78,
             actions: memoryActions(memory, service: service, onDelete: onDelete),
@@ -1094,8 +1167,9 @@ private struct MemoryCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     SourceLogoTile(source: memory.source, size: 28)
-                    // 标题用条目自己的名字（frontmatter name / 文件名）。用 scope 的话，
-                    // 同一项目的几十条记忆会整列重名。
+                    // The title is the entry's own name (frontmatter name / file name). Using the
+                    // scope would give dozens of memories in the same project identical titles down
+                    // the column.
                     Text(memory.title)
                         .font(Theme.font.monoSkillName(13))
                         .lineLimit(1).truncationMode(.middle)
@@ -1111,7 +1185,7 @@ private struct MemoryCard: View {
                 HStack(spacing: 6) {
                     memoryTypeChip(memory)
                     if let project = memory.projectName { TagChip(project) }
-                    if memory.kind == .generated { TagChip("只读", neutral: true) }
+                    if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     Spacer(minLength: 0)
                     Text(formatBytes(memory.sizeBytes))
                         .font(.system(size: 9.5).monospacedDigit()).foregroundStyle(.tertiary)
@@ -1126,14 +1200,16 @@ private struct MemoryCard: View {
     }
 }
 
-/// 记忆列表行：logo + 名/范围徽标 + 路径 + 项目 chip + 大小 · 时间；悬停浮现动作（无启停）
+/// Memory list row: logo + name/scope badge + path + project chip + size · time; actions appear on
+/// hover (no toggle)
 private struct MemoryListRow: View {
     let memory: MemoryEntry
     let service: SkillMemoryService
     let onOpen: () -> Void
     let onDelete: () -> Void
-    /// 记忆库二级页传 false：库里每条都属于同一个项目，标题已经写明，
-    /// 再逐行重复「项目」徽标 + 项目名会白占大半行宽
+    /// The memory library page passes false: every entry in a library belongs to the same project,
+    /// already named in the title; repeating the "Project" badge + project name on each row would
+    /// waste most of the row width
     var showsScope = true
 
     private var isGlobal: Bool { memory.projectName == nil }
@@ -1151,7 +1227,7 @@ private struct MemoryListRow: View {
                             .lineLimit(1).truncationMode(.middle)
                         if showsScope { ScopeBadge(isGlobal: isGlobal) }
                         memoryTypeChip(memory)
-                        if memory.kind == .generated { TagChip("只读", neutral: true) }
+                        if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     }
                     Text(memory.summary ?? abbreviateHome(memory.path))
                         .font(memory.summary == nil
@@ -1179,21 +1255,21 @@ private struct MemoryListRow: View {
     }
 }
 
-// MARK: - 记忆内嵌详情（文档卡渲染 + 预览/编辑切换，与计划详情同排版）
+// MARK: - Inline memory detail (document card rendering + preview/edit switch, same layout as plan detail)
 
 private struct MemoryDetailView: View {
     let memory: MemoryEntry
     let service: SkillMemoryService
     let onBack: () -> Void
     let onDelete: () -> Void
-    /// 关联小图里点到别的记忆 → 打开那一条
+    /// Clicking another memory in the relation mini-graph → open that one
     var onOpenMemory: ((MemoryEntry) -> Void)?
 
     @State private var text: String
     @State private var editing = false
     @State private var saveNote: String?
     @State private var selectedNode: MemoryGraph.NodeID?
-    /// 关联小图默认展开（它是这条记忆"为什么存在"的唯一线索）
+    /// Relation mini-graph expanded by default (it's the only clue to "why this memory exists")
     @State private var showRelations = true
 
     init(
@@ -1206,7 +1282,8 @@ private struct MemoryDetailView: View {
         self.onBack = onBack
         self.onDelete = onDelete
         self.onOpenMemory = onOpenMemory
-        // init 即加载：避免首帧空白（记忆均为小文件，主线程读取无感）
+        // Load in init: avoids a blank first frame (memories are all small files, reading on the
+        // main thread is imperceptible)
         _text = State(initialValue: service.readContent(path: memory.path) ?? "")
     }
 
@@ -1230,8 +1307,9 @@ private struct MemoryDetailView: View {
         }
     }
 
-    /// 预览时剥掉 frontmatter：name / description / type / originSessionId 已经由顶栏与
-    /// 关联区呈现，正文再照抄一遍 YAML 只是噪声。**编辑态与保存写回的始终是原文**。
+    /// Strips frontmatter in preview: name / description / type / originSessionId are already shown
+    /// by the top bar and relation area; repeating the YAML in the body is just noise. **Edit mode
+    /// and save always use the raw text**.
     static func strippingFrontmatter(_ raw: String) -> String {
         let lines = raw.components(separatedBy: "\n")
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---",
@@ -1243,9 +1321,10 @@ private struct MemoryDetailView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: 关联小图（本条 + 引用它/它引用的记忆 + 来源会话）
+    // MARK: Relation mini-graph (this entry + memories referencing it / referenced by it + origin sessions)
 
-    /// nil = 这条记忆不属于记忆库，或它没有任何关联（那就别占版面画一个孤点）
+    /// nil = this memory isn't in a memory library, or has no relations at all (then don't spend
+    /// space drawing a lone dot)
     private var relation: (library: MemoryLibrary, graph: MemoryGraph.Graph)? {
         guard let library = service.library(containing: memory) else { return nil }
         let graph = service.graph(for: library)
@@ -1261,17 +1340,18 @@ private struct MemoryDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                     .font(.system(size: 10)).foregroundStyle(Theme.brandFg)
-                Text("关联").font(.system(size: 11, weight: .semibold))
-                Text("\(relation.graph.nodes.count - 1) 处")
+                Text(L10n.text("Related", zhHans: "关联")).font(.system(size: 11, weight: .semibold))
+                Text(L10n.format("%@ links", zhHans: "%@ 处", String(relation.graph.nodes.count - 1)))
                     .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
                 Spacer()
-                Button(showRelations ? "收起" : "展开") { showRelations.toggle() }
+                Button(showRelations ? L10n.text("Collapse", zhHans: "收起") : L10n.text("Expand", zhHans: "展开")) { showRelations.toggle() }
                     .buttonStyle(.borderless)
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
             }
             if showRelations {
                 GeometryReader { geo in
-                    // 高度固定 + 双向滚动：布局高度要等排完才知道，拿不到就先给一个够用的框
+                    // Fixed height + two-axis scrolling: the layout height is only known after
+                    // layout, so start with a frame big enough
                     let result = MemoryGraphLayout.layout(
                         relation.graph, metrics: .compact(width: max(280, geo.size.width)))
                     ScrollView([.horizontal, .vertical], showsIndicators: false) {
@@ -1294,8 +1374,9 @@ private struct MemoryDetailView: View {
         .background(Theme.surfaceTertiary)
     }
 
-    /// 关联区高度：按**最长那一列**的节点数算，别把最后一行切一半。
-    /// 行高取自 `Metrics.compact`（不硬编码，改度量时这里跟着变），上限 260 后由滚动接管。
+    /// Relation area height: based on the node count of the **longest column**, so the last row
+    /// isn't cut in half. Row height comes from `Metrics.compact` (not hardcoded, so it follows
+    /// metric changes); capped at 260, after which scrolling takes over.
     static func relationHeight(_ graph: MemoryGraph.Graph) -> CGFloat {
         let metrics = MemoryGraphLayout.Metrics.compact(width: 0)
         var perColumn: [String: Int] = [:]
@@ -1317,7 +1398,7 @@ private struct MemoryDetailView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(.system(size: 11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
                 }
             }
             .buttonStyle(.borderless)
@@ -1328,50 +1409,51 @@ private struct MemoryDetailView: View {
             if let project = memory.projectName { TagChip(project) }
             memoryTypeChip(memory)
             Spacer(minLength: 8)
-            // 来源会话：只在记录文件还在时给入口（跳过去是空页面比没入口更糟）。
-            // 多个时折成下拉（Codex 的 MEMORY.md 聚合 15 次会话）。
+            // Origin sessions: only offer an entry while the transcript file still exists (jumping
+            // to an empty page is worse than no entry). Several fold into a dropdown (Codex's
+            // MEMORY.md aggregates 15 sessions).
             let jumpable = memory.relatedSessions.filter(\.exists)
             if jumpable.count == 1, let ref = jumpable.first {
-                Button { revealSession(ref.sessionId) } label: { sessionLabel("来源会话") }
+                Button { revealSession(ref.sessionId) } label: { sessionLabel(L10n.text("Source session", zhHans: "来源会话")) }
                     .buttonStyle(.borderless)
                     .foregroundStyle(Theme.goldFg)
-                    .help("跳到写下这条记忆的那次会话")
+                    .help(L10n.text("Jump to the session that wrote this memory", zhHans: "跳到写下这条记忆的那次会话"))
             } else if jumpable.count > 1 {
                 Menu {
                     ForEach(jumpable) { ref in
-                        Button("会话 \(ref.sessionId.prefix(8))") { revealSession(ref.sessionId) }
+                        Button(L10n.format("Session %@", zhHans: "会话 %@", String(ref.sessionId.prefix(8)))) { revealSession(ref.sessionId) }
                     }
                 } label: {
-                    sessionLabel("来源会话 \(jumpable.count)")
+                    sessionLabel(L10n.format("Source sessions %@", zhHans: "来源会话 %@", String(jumpable.count)))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .foregroundStyle(Theme.goldFg)
-                .help("这条记忆聚合了 \(jumpable.count) 次会话")
+                .help(L10n.format("This memory aggregates %@ sessions", zhHans: "这条记忆聚合了 %@ 次会话", String(jumpable.count)))
             }
             if memory.isEditable {
                 CapsuleTabTray {
-                    CapsuleTabButton(title: "预览", fillWidth: false, isSelected: !editing) { editing = false }
-                    CapsuleTabButton(title: "编辑", fillWidth: false, isSelected: editing) { editing = true }
+                    CapsuleTabButton(title: L10n.text("Preview", zhHans: "预览"), fillWidth: false, isSelected: !editing) { editing = false }
+                    CapsuleTabButton(title: L10n.text("Edit", zhHans: "编辑"), fillWidth: false, isSelected: editing) { editing = true }
                 }
                 Button { service.openInEditor(path: memory.path) } label: {
                     Image(systemName: "square.and.pencil").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("用默认编辑器打开")
+                .help(L10n.text("Open in default editor", zhHans: "用默认编辑器打开"))
             }
             Button { service.reveal(path: memory.path) } label: {
                 Image(systemName: "folder").font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("在 Finder 中显示")
+            .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
             if memory.isDeletable {
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless)
-                .help("移入废纸篓（可恢复）")
+                .help(L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
             }
         }
         .padding(.horizontal, 12)
@@ -1380,7 +1462,7 @@ private struct MemoryDetailView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text(memory.isEditable ? memory.path : "Codex 生成状态（只读） · \(memory.path)")
+            Text(memory.isEditable ? memory.path : L10n.format("Codex generated state (read-only) · %@", zhHans: "Codex 生成状态（只读） · %@", memory.path))
                 .font(.system(size: 9).monospaced())
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -1392,9 +1474,9 @@ private struct MemoryDetailView: View {
                     .foregroundStyle(.secondary)
             }
             if editing {
-                PrimaryButton(title: "保存", shortcut: KeyboardShortcut("s", modifiers: .command)) {
+                PrimaryButton(title: L10n.text("Save", zhHans: "保存"), shortcut: KeyboardShortcut("s", modifiers: .command)) {
                     service.save(path: memory.path, content: text) { ok in
-                        saveNote = ok ? "已保存（写前留有备份）" : "保存失败"
+                        saveNote = ok ? L10n.text("Saved (a backup was kept before writing)", zhHans: "已保存（写前留有备份）") : L10n.text("Couldn't save", zhHans: "保存失败")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveNote = nil }
                     }
                 }
@@ -1405,9 +1487,10 @@ private struct MemoryDetailView: View {
     }
 }
 
-// MARK: - 记忆库二级页（库统计 + 类型筛选 + 列表/图谱）
+// MARK: - Memory library page (library stats + type filter + list/graph)
 
-/// 一个记忆库的内容页。交互与 `SkillDetailView` 同构（顶部返回 + 内嵌，不开新窗口）。
+/// Content page of one memory library. Interaction mirrors `SkillDetailView` (back button at top +
+/// inline, no new window).
 private struct MemoryLibraryView: View {
     let library: MemoryLibrary
     @ObservedObject var service: SkillMemoryService
@@ -1416,11 +1499,12 @@ private struct MemoryLibraryView: View {
     let onDelete: (MemoryEntry) -> Void
 
     @State private var layout: KnowledgeLayout = .list
-    /// 类型筛选（nil = 全部）
+    /// Type filter (nil = all)
     @State private var typeFilter: MemoryType?
-    /// 只看「未被索引收录」的条目（漂移提示里的开关）
+    /// Show only entries "not listed in the index" (the toggle in the drift hint)
     @State private var showingUnindexedOnly = false
-    /// 索引一键修复进行中（防连点；完成后强制重扫会让漂移提示自行消失）
+    /// One-click index repair in progress (guards double clicks; the forced rescan afterwards makes
+    /// the drift hint disappear on its own)
     @State private var repairingIndex = false
 
     var body: some View {
@@ -1450,12 +1534,12 @@ private struct MemoryLibraryView: View {
             Button(action: onBack) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("返回").font(.system(size: 11))
+                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
                 }
             }
             .buttonStyle(.borderless)
             SourceBadge(source: library.source, size: 12)
-            Text("\(library.projectName) 记忆库")
+            Text(L10n.format("%@ memory library", zhHans: "%@ 记忆库", library.projectName))
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
@@ -1464,7 +1548,7 @@ private struct MemoryLibraryView: View {
                 Image(systemName: "folder").font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("在 Finder 中显示记忆库目录")
+            .help(L10n.text("Show the memory library folder in Finder", zhHans: "在 Finder 中显示记忆库目录"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -1473,21 +1557,27 @@ private struct MemoryLibraryView: View {
     private var stats: some View {
         let breakdown = library.typeBreakdown
         return StatOverviewCard(
-            value: "\(library.count)", unit: "条记忆",
-            subtitle: formatBytes(library.sizeBytes)
-                + " · 最近 " + relativeFormatter.localizedString(
-                    for: library.latestModifiedAt, relativeTo: Date()),
-            distributionTitle: "类型分布",
+            value: "\(library.count)", unit: L10n.text("memories", zhHans: "条记忆"),
+            subtitle: L10n.format(
+                "%1$@ · updated %2$@",
+                zhHans: "%1$@ · 最近 %2$@",
+                formatBytes(library.sizeBytes),
+                relativeFormatter.localizedString(
+                    for: library.latestModifiedAt, relativeTo: Date())),
+            distributionTitle: L10n.text("Types", zhHans: "类型分布"),
             segments: MemoryType.allCases.compactMap { type in
                 guard let count = breakdown[type], count > 0 else { return nil }
                 return .init(label: type.label, count: count, color: typeColor(type))
             },
             trailingNote: library.linkedSessionCount > 0
-                ? "可跳会话 \(library.linkedSessionCount)" : nil)
+                ? L10n.format(
+                    "%@ openable sessions", zhHans: "可跳会话 %@",
+                    String(library.linkedSessionCount)) : nil)
     }
 
-    /// 索引漂移提示。**这是这一页最有用的一句话**：未被 `MEMORY.md` 收录的条目，
-    /// agent 下次读索引时看不到，等于白写。点一下就把列表筛到这些条目上。
+    /// Index drift hint. **This is the most useful sentence on the page**: entries not listed in
+    /// `MEMORY.md` are invisible to the agent the next time it reads the index, so they're wasted.
+    /// One click filters the list to them.
     @ViewBuilder
     private var driftNotice: some View {
         let unindexed = library.unindexedEntries
@@ -1497,16 +1587,16 @@ private struct MemoryLibraryView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11)).foregroundStyle(Theme.goldFg)
-                    Text("索引与目录不一致").font(.system(size: 11.5, weight: .semibold))
+                    Text(L10n.text("Index and directory are out of sync", zhHans: "索引与目录不一致")).font(.system(size: 11.5, weight: .semibold))
                     Spacer(minLength: 8)
                     if !unindexed.isEmpty {
-                        Button(showingUnindexedOnly ? "显示全部" : "只看未收录") {
+                        Button(showingUnindexedOnly ? L10n.text("Show all", zhHans: "显示全部") : L10n.text("Unindexed only", zhHans: "只看未收录")) {
                             showingUnindexedOnly.toggle()
                         }
                         .buttonStyle(.borderless)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                     }
-                    Button(repairingIndex ? "修复中…" : "一键修复") {
+                    Button(repairingIndex ? L10n.text("Repairing…", zhHans: "修复中…") : L10n.text("Repair", zhHans: "一键修复")) {
                         repairingIndex = true
                         service.repairLibraryIndex(library) { _ in
                             repairingIndex = false
@@ -1516,17 +1606,23 @@ private struct MemoryLibraryView: View {
                     .buttonStyle(.borderless)
                     .font(.system(size: 10.5, weight: .medium))
                     .disabled(repairingIndex)
-                    .help("补录未收录条目、删除指向已不存在文件的索引行（写前自动备份 MEMORY.md）")
+                    .help(L10n.text("Add missing entries and drop index lines that point at files that no longer exist (MEMORY.md is backed up before writing)", zhHans: "补录未收录条目、删除指向已不存在文件的索引行（写前自动备份 MEMORY.md）"))
                 }
                 if !unindexed.isEmpty {
-                    Text("\(unindexed.count) 条记忆没被 MEMORY.md 收录 —— agent 读索引时看不到它们："
-                        + unindexed.prefix(3).map(\.title).joined(separator: "、")
-                        + (unindexed.count > 3 ? " 等" : ""))
+                    Text(L10n.format(
+                        "%1$@ memories are not listed in MEMORY.md — the agent will not see them when it reads the index: %2$@",
+                        zhHans: "%1$@ 条记忆没被 MEMORY.md 收录 —— agent 读索引时看不到它们：%2$@",
+                        String(unindexed.count),
+                        unindexed.prefix(3).map(\.title).joined(separator: L10n.text(", ", zhHans: "、"))
+                            + (unindexed.count > 3 ? L10n.text(" etc.", zhHans: " 等") : "")))
                         .font(.system(size: 10.5)).foregroundStyle(.secondary)
                 }
                 if !dangling.isEmpty {
-                    Text("\(dangling.count) 条索引条目指向已不存在的文件："
-                        + dangling.prefix(3).joined(separator: "、"))
+                    Text(L10n.format(
+                        "%1$@ index entries point at files that no longer exist: %2$@",
+                        zhHans: "%1$@ 条索引条目指向已不存在的文件：%2$@",
+                        String(dangling.count),
+                        dangling.prefix(3).joined(separator: L10n.text(", ", zhHans: "、"))))
                         .font(.system(size: 10.5)).foregroundStyle(.secondary)
                 }
             }
@@ -1548,7 +1644,7 @@ private struct MemoryLibraryView: View {
         if present.count > 1 {
             CapsuleTabTray {
                 CapsuleTabButton(
-                    title: "全部 \(library.count)", fillWidth: false, isSelected: typeFilter == nil
+                    title: L10n.format("All %@", zhHans: "全部 %@", String(library.count)), fillWidth: false, isSelected: typeFilter == nil
                 ) { typeFilter = nil }
                 ForEach(present, id: \.self) { type in
                     CapsuleTabButton(
@@ -1560,7 +1656,8 @@ private struct MemoryLibraryView: View {
         }
     }
 
-    /// 索引在最前（它是这个库的目录），其后是按类型 / 未收录筛选后的条目
+    /// The index comes first (it's this library's table of contents), followed by entries filtered
+    /// by type / unindexed
     private var items: [MemoryEntry] {
         if showingUnindexedOnly { return library.unindexedEntries }
         let entries = library.entries.filter { typeFilter == nil || $0.memoryType == typeFilter }
@@ -1572,7 +1669,7 @@ private struct MemoryLibraryView: View {
     private var list: some View {
         let rows = items
         if rows.isEmpty {
-            EmptyStateView(icon: "brain.fill", title: "没有匹配的记忆")
+            EmptyStateView(icon: "brain.fill", title: L10n.text("No matching memories", zhHans: "没有匹配的记忆"))
         } else {
             KnowledgeListContainer {
                 VStack(spacing: 0) {
@@ -1592,10 +1689,11 @@ private struct MemoryLibraryView: View {
     }
 }
 
-// MARK: - 图谱区块（图例 + 画布；顶层图谱模式与库二级页共用）
+// MARK: - Graph section (legend + canvas; shared by top-level graph mode and the library page)
 
-/// 一个记忆库的关系图。画布宽度由 `GeometryReader` 给，超宽时横向滚动
-/// （`MemoryGraphLayout` 只在节点过多时降级，不会因为多一条泳道就不画）。
+/// A memory library's relation graph. Canvas width comes from `GeometryReader`; scrolls
+/// horizontally when too wide (`MemoryGraphLayout` only degrades with too many nodes; it won't
+/// refuse to draw because of one extra swimlane).
 private struct MemoryGraphSection: View {
     let library: MemoryLibrary
     @ObservedObject var service: SkillMemoryService
@@ -1607,11 +1705,15 @@ private struct MemoryGraphSection: View {
         let graph = service.graph(for: library)
         VStack(alignment: .leading, spacing: 10) {
             if graph.entryCount == 0 {
-                // 只有一份 MEMORY.md 的库（Qwen 会先建空索引）：画布会是空的，说清楚而不是留个空框
+                // A library with only a MEMORY.md (Qwen creates an empty index first): the canvas
+                // would be empty; say so instead of leaving a blank frame
                 EmptyStateView(
                     icon: "books.vertical",
-                    title: "这个记忆库还只有索引",
-                    hint: "\(library.projectName) 的 memory/ 目录里只有 MEMORY.md，还没有记忆条目")
+                    title: L10n.text("This memory library is still only an index", zhHans: "这个记忆库还只有索引"),
+                    hint: L10n.format(
+                        "%@'s memory/ directory only has MEMORY.md — no memory entries yet",
+                        zhHans: "%@ 的 memory/ 目录里只有 MEMORY.md，还没有记忆条目",
+                        library.projectName))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
             } else {
@@ -1625,7 +1727,8 @@ private struct MemoryGraphSection: View {
     private func canvas(_ graph: MemoryGraph.Graph) -> some View {
         Group {
             GeometryReader { geo in
-                // 走 service 的缓存：这里在 body 里，不缓存就是每帧重排 126 个节点
+                // Goes through the service cache: this is inside body, and without caching 126
+                // nodes would be re-laid out every frame
                 let result = service.layout(for: library, width: max(320, geo.size.width))
                 if let degraded = result.degraded {
                     degradedNote(degraded)
@@ -1654,27 +1757,27 @@ private struct MemoryGraphSection: View {
         }
     }
 
-    /// 图例 + **把省掉的东西说出来**：解析不到的 `[[链接]]`、已删除的来源会话都要显式计数，
-    /// 不能让人以为图上画的就是全部。
+    /// Legend + **say what was left out**: unresolved `[[links]]` and deleted origin sessions are
+    /// counted explicitly, so nobody assumes the graph shows everything.
     @ViewBuilder
     private func legend(_ graph: MemoryGraph.Graph) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 12) {
-                legendItem("引用", color: Theme.brand.opacity(0.55), dashed: false)
-                legendItem("收录", color: Theme.brand.opacity(0.28), dashed: true)
-                legendItem("来源会话", color: Theme.gold.opacity(0.7), dashed: true)
+                legendItem(L10n.text("References", zhHans: "引用"), color: Theme.brand.opacity(0.55), dashed: false)
+                legendItem(L10n.text("Included", zhHans: "收录"), color: Theme.brand.opacity(0.28), dashed: true)
+                legendItem(L10n.text("Source sessions", zhHans: "来源会话"), color: Theme.gold.opacity(0.7), dashed: true)
                 Spacer(minLength: 0)
-                Text("\(graph.entryCount) 条记忆 · \(graph.sessionCount) 个会话")
+                Text(L10n.format("%1$@ memories · %2$@ sessions", zhHans: "%1$@ 条记忆 · %2$@ 个会话", String(graph.entryCount), String(graph.sessionCount)))
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
             if graph.unresolvedLinkCount > 0 || graph.missingSessionCount > 0 {
                 HStack(spacing: 10) {
                     if graph.unresolvedLinkCount > 0 {
-                        Text("\(graph.unresolvedLinkCount) 条 [[链接]] 找不到目标，未画边")
+                        Text(L10n.format("%@ [[links]] have no target and were not drawn", zhHans: "%@ 条 [[链接]] 找不到目标，未画边", String(graph.unresolvedLinkCount)))
                     }
                     if graph.missingSessionCount > 0 {
-                        Text("\(graph.missingSessionCount) 条记忆的来源会话已删除（灰色虚线，点不开）")
+                        Text(L10n.format("%@ memories have a deleted source session (gray dashed line, not clickable)", zhHans: "%@ 条记忆的来源会话已删除（灰色虚线，点不开）", String(graph.missingSessionCount)))
                     }
                 }
                 .font(.system(size: 9.5))
@@ -1685,8 +1788,9 @@ private struct MemoryGraphSection: View {
 
     private func legendItem(_ label: String, color: Color, dashed: Bool) -> some View {
         HStack(spacing: 4) {
-            // 必须 stroke 一条真的线段：`Capsule().strokeBorder` 在 1.4pt 高的 frame 里
-            // 会退化成看不见（描边比形状还厚），图例就只剩文字了
+            // Must stroke a real line segment: `Capsule().strokeBorder` in a 1.4pt-tall frame
+            // degenerates to invisible (the stroke is thicker than the shape), leaving the legend
+            // with text only
             LegendLine()
                 .stroke(color, style: StrokeStyle(lineWidth: 1.4, dash: dashed ? [2.5, 2.5] : []))
                 .frame(width: 16, height: 1.4)
@@ -1700,8 +1804,11 @@ private struct MemoryGraphSection: View {
         case .tooManyNodes(let count, let limit):
             EmptyStateView(
                 icon: "square.stack.3d.up.slash",
-                title: "这个库太大，图谱不画了",
-                hint: "\(count) 个节点超过上限 \(limit)；用上面的类型筛选缩小范围，或看列表")
+                title: L10n.text("This library is too big to graph", zhHans: "这个库太大，图谱不画了"),
+                hint: L10n.format(
+                    "%1$@ nodes is over the limit of %2$@; narrow it with the type filter above, or use the list",
+                    zhHans: "%1$@ 个节点超过上限 %2$@；用上面的类型筛选缩小范围，或看列表",
+                    String(count), String(limit)))
         }
     }
 }

@@ -1,10 +1,12 @@
 import Foundation
 
-/// Prompt 毕业（升级为技能 / 指令）时写盘的文档正文。纯字符串函数、零依赖、可单测；
-/// 写盘、备份、路径解析留在 app 层（SkillMemoryService）。
+/// Document body written when a prompt graduates (is promoted to a skill / instruction). Pure
+/// string functions, dependency-free, unit-testable; writing to disk, backups and path resolution
+/// stay in the app layer (SkillMemoryService).
 public enum PromptGraduationDocument {
-    /// SKILL.md 全文。description 进 YAML 值：压成单行 + 双引号包裹（反斜杠先转义再转义
-    /// 引号，顺序不可换），冒号/引号都安全；正文尾部收成恰好一个换行。
+    /// Full SKILL.md text. description goes into a YAML value: collapsed to one line and wrapped in
+    /// double quotes (escape backslashes first, then quotes - the order matters), so colons and
+    /// quotes are safe; the body ends with exactly one newline.
     public static func skill(slug: String, description: String, body: String) -> String {
         let desc = description
             .replacingOccurrences(of: "\r", with: "")
@@ -15,8 +17,9 @@ public enum PromptGraduationDocument {
             + singleTrailingNewline(body)
     }
 
-    /// 向共享指令文件追加一节（读-追加-写里的"追加"）。existing = nil 表示文件不存在，
-    /// 以 defaultHeader 起头；否则原文尾部空行收成恰好一个空行再接新节。
+    /// Appends a section to a shared instruction file (the "append" in read-append-write).
+    /// existing = nil means the file does not exist, so it starts with defaultHeader; otherwise the
+    /// original's trailing blank lines collapse to exactly one before the new section.
     public static func appendingInstructionSection(
         to existing: String?, title: String, body: String,
         defaultHeader: String = "# AGENTS.md"
@@ -26,13 +29,14 @@ public enum PromptGraduationDocument {
             + singleTrailingNewline(body)
     }
 
-    /// Codex 每一级目录只加载 AGENTS.override.md / AGENTS.md 中第一个存在的文件，
-    /// 追加必须写进真正生效的那个 —— override 存在时写 AGENTS.md 等于写进黑洞。
+    /// In each directory Codex loads only the first existing file of AGENTS.override.md /
+    /// AGENTS.md, so appends must go into the one that actually takes effect - writing AGENTS.md
+    /// while an override exists goes into a black hole.
     public static func codexInstructionFileName(overrideExists: Bool) -> String {
         overrideExists ? "AGENTS.override.md" : "AGENTS.md"
     }
 
-    /// 去掉尾部全部换行后补恰好一个换行
+    /// Strips all trailing newlines, then adds exactly one
     static func singleTrailingNewline(_ text: String) -> String {
         var trimmed = Substring(text)
         while let last = trimmed.last, last == "\n" || last == "\r" {

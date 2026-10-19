@@ -1,14 +1,15 @@
 import Foundation
 import EurekaKit
 
-/// Grok 配额：零网络请求——读 `~/.grok/logs/unified.jsonl` 里最后一条
-/// `billing: fetched credits config` 快照（grok CLI 每次拉取账单都会写这行）。
-/// 与 CodexRateLimitProvider 同构（本地日志尾读、按"截至"时间判 stale/过期）。
-/// Grok 是单一统一配额池（无 5h/周双窗），故 secondary 恒为 nil。
+/// Grok quota: zero network requests - reads the last `billing: fetched credits config` snapshot
+/// in `~/.grok/logs/unified.jsonl` (the grok CLI writes this line every time it fetches billing).
+/// Same design as CodexRateLimitProvider (tail-reads a local log, judges stale/expired by the
+/// "as of" time).
+/// Grok has a single unified quota pool (no 5h/weekly dual windows), so secondary is always nil.
 public struct GrokRateLimitProvider: RateLimitProvider {
     public let source = AgentSource.grok
     private let logURL: URL
-    /// 快照多旧仍可用（默认 7 天；再旧视为无数据）
+    /// How old a snapshot may be and still be used (default 7 days; older counts as no data)
     private let maxAge: TimeInterval
 
     public init(logURL: URL, maxAge: TimeInterval = 7 * 86400) {
@@ -20,12 +21,13 @@ public struct GrokRateLimitProvider: RateLimitProvider {
         guard let snapshot = Self.lastBilling(in: logURL) else { return nil }
         guard Date().timeIntervalSince(snapshot.asOf) < maxAge else { return nil }
         var result = snapshot
-        // 超过 10 分钟的快照标 stale（UI 显示"截至 HH:mm"）
+        // Snapshots older than 10 minutes are marked stale (UI shows "as of HH:mm")
         result.isStale = Date().timeIntervalSince(snapshot.asOf) > 600
         return result
     }
 
-    /// 文件尾部 256KB 中最后一条 billing 快照（billing 行相对稀疏，取大些的窗口）
+    /// Last billing snapshot in the file's trailing 256KB (billing lines are relatively sparse, so
+    /// the window is larger)
     public static func lastBilling(in url: URL) -> RateLimitSnapshot? {
         guard
             let handle = FileHandle(forReadingAtPath: url.path),
@@ -44,7 +46,7 @@ public struct GrokRateLimitProvider: RateLimitProvider {
         return latest
     }
 
-    /// 解析一行 unified.jsonl；非 billing 行返回 nil。
+    /// Parses one unified.jsonl line; nil for non-billing lines.
     public static func parse(_ line: Data) -> RateLimitSnapshot? {
         guard
             let object = try? JSONSerialization.jsonObject(with: line),
@@ -54,11 +56,11 @@ public struct GrokRateLimitProvider: RateLimitProvider {
             let config = ctx["config"] as? [String: Any]
         else { return nil }
 
-        // proto3 省略零值：0% 那周 creditUsagePercent 缺省 → 记 0
+        // proto3 omits zero values: in a 0% week creditUsagePercent is absent → record 0
         let usedPercent = (config["creditUsagePercent"] as? NSNumber)?.doubleValue ?? 0
         let asOf = parseDate(root["ts"] as? String) ?? Date()
 
-        var windowMinutes = 10080  // 默认按周
+        var windowMinutes = 10080  // Weekly by default
         var resetsAt: Date?
         if let period = config["currentPeriod"] as? [String: Any] {
             let type = (period["type"] as? String) ?? ""
@@ -75,7 +77,7 @@ public struct GrokRateLimitProvider: RateLimitProvider {
             secondary: nil)
     }
 
-    // ts 带小数秒（…Z），currentPeriod.end 不带 → 两种都试
+    // ts has fractional seconds (...Z), currentPeriod.end doesn't → try both
     private static let isoFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

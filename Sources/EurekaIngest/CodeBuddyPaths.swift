@@ -1,12 +1,12 @@
 import Foundation
 
-/// CodeBuddy CLI 的本地数据路径（默认 `~/.codebuddy`）。
-/// 布局：`projects/<cwd-slug>/<sessionId>.jsonl`（slug = cwd 的 `/` → `-`），
-/// 子代理在同名目录 `<sessionId>/subagents/agent-*.jsonl`；活会话注册表 `sessions/<pid>.json`；
-/// 全局记忆 `memery/`（官方拼写如此，见下）。⚠️ `settings.json` / `mcp.json` 可能含
-/// API key / token，任何备份/上传都不得纳入。
+/// Local data paths for the CodeBuddy CLI (default `~/.codebuddy`). Layout:
+/// `projects/<cwd-slug>/<sessionId>.jsonl` (slug = cwd with `/` → `-`), subagents in the same-named
+/// dir `<sessionId>/subagents/agent-*.jsonl`; live session registry `sessions/<pid>.json`; global
+/// memory `memery/` (that's the official spelling, see below). Warning: `settings.json` /
+/// `mcp.json` may hold API keys / tokens and must never be included in any backup/upload.
 public enum CodeBuddyPaths {
-    /// 配置主目录（env `EUREKA_CODEBUDDY_HOME` > `CODEBUDDY_CONFIG_DIR` > `~/.codebuddy`）
+    /// Config home (env `EUREKA_CODEBUDDY_HOME` > `CODEBUDDY_CONFIG_DIR` > `~/.codebuddy`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -20,7 +20,7 @@ public enum CodeBuddyPaths {
             .appendingPathComponent(".codebuddy", isDirectory: true)
     }
 
-    /// 会话根 `<home>/projects`（每项目一个 cwd-slug 目录）
+    /// Session root `<home>/projects` (one cwd-slug directory per project)
     public static func projectsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -28,7 +28,7 @@ public enum CodeBuddyPaths {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
-    /// 活会话注册表 `<home>/sessions`（`<pid>.json`：sessionId + lastHeartbeat）
+    /// Live session registry `<home>/sessions` (`<pid>.json`: sessionId + lastHeartbeat)
     public static func liveSessionsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -36,8 +36,10 @@ public enum CodeBuddyPaths {
             .appendingPathComponent("sessions", isDirectory: true)
     }
 
-    /// 全局记忆目录 `<home>/memery`（官方拼写就是 memery，不是 memory，勿"修正"）
-    /// 技能根 `<home>/skills`（SKILL.md 与 Claude 同构；实勘 23 个真目录，非软链）
+    /// Global memory dir `<home>/memery` (the official spelling really is memery, not memory --
+    /// don't "fix" it)
+    /// Skills root `<home>/skills` (SKILL.md has the same shape as Claude's; surveyed 23 real
+    /// directories, not symlinks)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

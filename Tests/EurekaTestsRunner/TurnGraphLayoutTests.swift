@@ -2,8 +2,8 @@ import CoreGraphics
 import EurekaKit
 import Foundation
 
-/// TurnGraphLayout 的**不变量**测试。
-/// 布局对不对没法靠肉眼看（图会随数据变），只能靠这几条能被机器验的性质兜住。
+/// **Invariant** tests for TurnGraphLayout. Layout correctness can't be judged by eye (the graph
+/// changes with the data); only these machine-checkable properties can guard it.
 func turnGraphLayoutTests(_ t: TestRunner) {
     t.suite("TurnGraphLayout · 布局不变量")
 
@@ -33,12 +33,13 @@ func turnGraphLayoutTests(_ t: TestRunner) {
             answerMessageIds: [9], answerText: "改好了")
     }
 
-    /// 线段是否与矩形相交（端点贴边不算）
+    /// Whether a segment intersects a rectangle (endpoints touching the edge don't count)
     func crosses(_ a: CGPoint, _ b: CGPoint, _ rect: CGRect) -> Bool {
         let shrunk = rect.insetBy(dx: 0.5, dy: 0.5)
         guard !shrunk.isEmpty else { return false }
         if shrunk.contains(a) || shrunk.contains(b) { return true }
-        // 折线只有水平/竖直段，逐段做区间相交即可
+        // Polylines have only horizontal/vertical segments, so per-segment interval overlap
+        // suffices
         if abs(a.y - b.y) < 0.001 {
             let (lo, hi) = (min(a.x, b.x), max(a.x, b.x))
             return a.y > shrunk.minY && a.y < shrunk.maxY && hi > shrunk.minX && lo < shrunk.maxX
@@ -50,11 +51,11 @@ func turnGraphLayoutTests(_ t: TestRunner) {
         return false
     }
 
-    /// 全部不变量一次跑完（每个用例都调它，不必逐条重写）
+    /// Runs every invariant at once (each case calls it, so nothing is rewritten per case)
     func checkInvariants(
         _ result: TurnGraphLayout.Result, _ metrics: TurnGraphLayout.Metrics, _ label: String
     ) throws {
-        // 1. 节点互不重叠
+        // 1. Nodes don't overlap
         for i in result.nodes.indices {
             for j in (i + 1)..<result.nodes.count {
                 let a = result.nodes[i].frame.insetBy(dx: 0.5, dy: 0.5)
@@ -64,7 +65,8 @@ func turnGraphLayoutTests(_ t: TestRunner) {
                     "\(label): 节点重叠 \(result.nodes[i].node.title)/\(result.nodes[j].node.title)")
             }
         }
-        // 2. **边不穿节点**（最值钱的一条：正交折线 + gutter 正中的结构性保证）
+        // 2. **Edges don't cross nodes** (the most valuable one: structurally guaranteed by
+        //    orthogonal polylines + running down the gutter center)
         for edge in result.edges {
             let endpoints: Set<TurnGraph.NodeID> = [edge.from, edge.to]
             for index in 0..<(edge.points.count - 1) {
@@ -75,7 +77,7 @@ func turnGraphLayoutTests(_ t: TestRunner) {
                 }
             }
         }
-        // 3. 不超出画布（横向裁剪就永远看不见了）
+        // 3. Stays within the canvas (anything clipped horizontally can never be seen)
         for placed in result.nodes {
             try expect(placed.frame.minX >= 0, "\(label): 节点越左界")
             try expect(
@@ -84,7 +86,7 @@ func turnGraphLayoutTests(_ t: TestRunner) {
             try expect(
                 placed.frame.maxY <= result.canvasSize.height + 0.5, "\(label): 节点越下界")
         }
-        // 4. 分层单调：前向边必然从上层指向下层
+        // 4. Monotonic layering: forward edges always point from an upper layer to a lower one
         let layerByID = Dictionary(
             uniqueKeysWithValues: result.nodes.map { ($0.id, $0.layer) })
         let frameByID = Dictionary(
@@ -96,7 +98,8 @@ func turnGraphLayoutTests(_ t: TestRunner) {
             try expect(from < to, "\(label): 前向边层序倒挂")
             try expect(fromFrame.maxY < toFrame.minY, "\(label): 前向边 y 倒挂")
         }
-        // 5. 折线闭合：每段都是水平或竖直（正交约束，斜线会破坏不穿节点的证明）
+        // 5. Polyline closure: every segment is horizontal or vertical (orthogonal constraint; a
+        //    diagonal would break the no-crossing proof)
         for edge in result.edges {
             try expect(edge.points.count >= 2, "\(label): 折线点数不足")
             for index in 0..<(edge.points.count - 1) {
@@ -124,7 +127,8 @@ func turnGraphLayoutTests(_ t: TestRunner) {
         try expectEqual(TurnGraphLayout.Metrics.standard(width: 638).maxColumns, 3)
         try expectEqual(TurnGraphLayout.Metrics.standard(width: 780).maxColumns, 4)
         try expectEqual(TurnGraphLayout.Metrics.standard(width: 1234).maxColumns, 6)
-        // 极窄也不塌到 0（下限 3，再窄靠折叠与降级兜）
+        // Even very narrow doesn't collapse to 0 (floor 3; narrower than that relies on folding and
+        // degradation)
         try expectEqual(TurnGraphLayout.Metrics.standard(width: 200).maxColumns, 3)
     }
 
@@ -149,7 +153,7 @@ func turnGraphLayoutTests(_ t: TestRunner) {
         try checkInvariants(result, metrics, "链式")
         try expectEqual(result.maxLayerWidth, 1, "纯链式每层只有一个节点")
         try expectEqual(result.crossings, 0)
-        // 每层一个节点时中心应对齐（脊线）
+        // With one node per layer the centers should align (the spine)
         let centers = Set(result.nodes.map { (($0.frame.midX) * 10).rounded() })
         try expectEqual(centers.count, 1, "单列脊线应笔直，实得 \(centers.count) 个不同中心")
     }
@@ -188,7 +192,7 @@ func turnGraphLayoutTests(_ t: TestRunner) {
         let nodeMinX = result.nodes.map(\.frame.minX).min() ?? 0
         let nodeMaxX = result.nodes.map(\.frame.maxX).max() ?? 0
         for edge in backs {
-            // 至少有一段竖直走在节点区之外的专用边道里
+            // At least one vertical segment runs in a dedicated edge lane outside the node area
             let inLane = edge.points.contains { $0.x < nodeMinX || $0.x > nodeMaxX }
             try expect(inLane, "\(edge.role.label)回边没有走边道")
             try expect(edge.laneIndex != nil)
@@ -205,9 +209,11 @@ func turnGraphLayoutTests(_ t: TestRunner) {
     }
 
     t.test("层宽超列数时降级，但坐标仍不得溢出画布") {
-        // 5 个文件各读→改→构建（构建命令相同 → 去重成一个节点，于是每次编辑都回指它）。
-        // 折叠是**按阶段**做的，而分层会把不同阶段的节点并到同一层 ⇒ 层宽仍可能超列数。
-        // 这时可以降级，但**绝不能让节点跑到画布外**（横向裁剪就永远看不见了）。
+        // 5 files, each read → edit → build (identical build commands → deduped into one node, so
+        // every edit points back to it). Folding is done **per phase**, while layering merges nodes
+        // from different phases into the same layer ⇒ layer width can still exceed the column
+        // count. Degrading is allowed then, but **nodes must never go off the canvas** (anything
+        // clipped horizontally can never be seen).
         var steps: [TurnInput.Step] = []
         var cursor = 0
         for index in 0..<5 {

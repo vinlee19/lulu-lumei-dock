@@ -1,37 +1,42 @@
+import EurekaKit
 import Foundation
 
-/// 把 lululumei-relay 装进 Codex 的 `~/.codex/hooks.json`（Codex 0.145.0 实勘）。
+/// Installs lululumei-relay into Codex's `~/.codex/hooks.json` (surveyed on Codex 0.145.0).
 ///
-/// 与 `ClaudeHooksInstaller` **结构完全同构**：`{"hooks": {事件: [{"hooks": [{type, command}]}]}}`。
-/// 差别只有三处：
-///  1. 事件集只有 4 个（Codex 目前就这些）：`UserPromptSubmit` / `Stop` / `SessionStart` /
-///     **`PermissionRequest`**。后者是装它的主要理由 —— Codex 的 rollout 不落授权事件，
-///     不装 hooks 就永远看不到「等待授权」。
-///  2. Codex 的载荷**不带事件名**（Claude 有 `hook_event_name`），所以事件名必须写进命令行：
-///     `"<relay>" codex-hook <Event>`，由 relay 补进载荷。
-///  3. Codex 的条目没有 `matcher` 概念（Claude 的 PostToolUse 要 `matcher: "*"`）。
+/// **Structurally identical** to `ClaudeHooksInstaller`: `{"hooks": {Event: [{"hooks": [{type,
+/// command}]}]}}`. Only three differences:
+///  1. Only 4 events (all Codex has today): `UserPromptSubmit` / `Stop` / `SessionStart` /
+///     **`PermissionRequest`**. The last is the main reason to install: Codex rollouts don't record permission events,
+///     so without hooks "waiting for permission" is never visible.
+///  2. Codex payloads **carry no event name** (Claude has `hook_event_name`), so the event name
+///     must go on the command line: `"<relay>" codex-hook <Event>`, and the relay adds it to the
+///     payload.
+///  3. Codex entries have no `matcher` concept (Claude's PostToolUse needs `matcher: "*"`).
 ///
-/// 安全口径逐条照搬 Claude 那份，一条都不能松：
-///  - **绝不整段覆盖 `hooks[event]`**：本机这份文件正被别的 app（Otty）占用，
-///    事件值是条目数组，我们只增删含 relay 名（`RelayIdentity.isOurs`）的那一条，别人的原样留着。
-///  - 认不出的形态（事件值不是条目数组）→ 直接拒绝改写并报错，宁可什么都不做，
-///    也不能把看不懂的内容删掉。
-///  - **`PermissionRequest` 的 stdout 极可能被 Codex 当作放行/拦截决策**（同 Claude 的
-///    PreToolUse）→ relay 必须绝对静默、立即 exit 0。我们只报告，从不参与决策。
+/// The safety rules are copied one by one from the Claude installer, and none may be relaxed:
+///  - **Never overwrite `hooks[event]` wholesale**: on this machine the file is in use by another
+///    app (Otty); event values are arrays of entries, and we only add/remove the one carrying the
+///    relay name (`RelayIdentity.isOurs`), leaving others intact.
+///  - Unrecognized shapes (an event value that isn't an array of entries) → refuse to write and
+///    report an error; better to do nothing than delete content we can't understand.
+///  - **Codex very likely reads `PermissionRequest` stdout as an allow/block decision** (like
+///    Claude's PreToolUse) → the relay must stay absolutely silent and exit 0 immediately. We only
+///    report, never take part in the decision.
 public enum CodexHooksInstaller {
-    /// Codex 支持的 4 个事件（实勘 `~/.codex/hooks.json` 的键集）
+    /// The 4 events Codex supports (key set observed in `~/.codex/hooks.json`)
     public static let managedEvents = [
         "UserPromptSubmit", "Stop", "SessionStart", "PermissionRequest",
     ]
 
-    /// 每个事件一条独立命令（事件名要带在命令行上）
+    /// One standalone command per event (the event name must be on the command line)
     public static func hookCommand(relayPath: String, event: String) -> String {
-        // 路径含空格（Application Support）必须引号包裹
+        // The path contains a space (Application Support) and must be quoted
         "\"\(relayPath)\" codex-hook \(event)"
     }
 
-    /// hooks 里是否有我们**无法安全改写**的形态。返回第一个有问题的事件名。
-    /// 语义与 `ClaudeHooksInstaller.unsupportedShapeEvent` 一致（同一风险、同一处理）。
+    /// Whether hooks contain a shape we **cannot safely rewrite**. Returns the first offending
+    /// event name. Same semantics as `ClaudeHooksInstaller.unsupportedShapeEvent` (same risk, same
+    /// handling).
     static func unsupportedShapeEvent(in hooks: [String: Any]) -> String? {
         for (event, value) in hooks {
             guard let entries = value as? [Any] else { return event }
@@ -43,8 +48,8 @@ public enum CodexHooksInstaller {
     private static func rejectUnsupportedShape(_ hooks: [String: Any]) throws {
         guard let event = unsupportedShapeEvent(in: hooks) else { return }
         throw InstallError.foreignConfig(
-            "hooks.json 的 hooks.\(event) 结构无法识别（不是条目数组）。"
-                + "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。")
+            L10n.format("The hooks.%@ structure in hooks.json is not recognized (expected an array of entries).", zhHans: "hooks.json 的 hooks.%@ 结构无法识别（不是条目数组）。", String(event))
+                + L10n.text(" No changes were made to avoid removing unrecognized content. Please fix this field manually first.", zhHans: "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。"))
     }
 
     public static func install(into json: String, relayPath: String) throws -> String {
@@ -53,7 +58,7 @@ public enum CodexHooksInstaller {
         try rejectUnsupportedShape(hooks)
         for event in managedEvents {
             var entries = entriesOf(hooks, event)
-            entries.removeAll(where: isEurekaEntry)  // 重装时替换旧条目（路径可能变了）
+            entries.removeAll(where: isEurekaEntry)  // Reinstall replaces old entries (the path may have changed)
             entries.append([
                 "hooks": [[
                     "type": "command",
@@ -99,18 +104,19 @@ public enum CodexHooksInstaller {
         return installed == 0 ? .none : .partial
     }
 
-    /// 带异常识别的诊断，判定顺序与 Claude 版一致：
-    /// 先认「根本没法动」，再认「看着装了其实挂了」（路径歪 / relay 没了），最后才是缺事件。
+    /// Diagnosis with anomaly detection, in the same order as the Claude version: first "can't
+    /// touch it at all", then "looks installed but is broken" (drifted path / missing relay), and
+    /// only then missing events.
     public static func diagnose(
         json: String, expectedRelayPath: String,
         relayIsExecutable: (String) -> Bool
     ) -> HookDiagnosis {
         guard let root = try? parse(json) else {
-            return .unparseable(reason: "hooks.json 不是合法 JSON")
+            return .unparseable(reason: L10n.text("hooks.json is not valid JSON", zhHans: "hooks.json 不是合法 JSON"))
         }
         guard let hooks = root["hooks"] as? [String: Any] else { return .notInstalled }
         if let event = unsupportedShapeEvent(in: hooks) {
-            return .unparseable(reason: "hooks.\(event) 的结构无法识别（不是条目数组）")
+            return .unparseable(reason: L10n.format("The hooks.%@ structure is not recognized (expected an array of entries)", zhHans: "hooks.%@ 的结构无法识别（不是条目数组）", String(event)))
         }
 
         let ourCommands = eurekaCommands(in: hooks)
@@ -133,8 +139,9 @@ public enum CodexHooksInstaller {
         return missing.isEmpty ? .installed : .stale(missing: missing)
     }
 
-    /// 同一份 hooks.json 里他人的条目（只为告知；我们只增删含 marker 的条目）。
-    /// 本机实测该文件被 Otty 占用，这里正是用来把「和谁共存」显示给用户的。
+    /// Other parties' entries in the same hooks.json (informational only; we only add/remove
+    /// entries carrying the marker). Locally this file is in use by Otty; this is exactly what
+    /// shows the user who we coexist with.
     public static func foreignHooks(in json: String) -> ForeignHookReport {
         guard let root = try? parse(json),
             let hooks = root["hooks"] as? [String: Any]
@@ -169,7 +176,7 @@ public enum CodexHooksInstaller {
         return result
     }
 
-    // MARK: - 内部
+    // MARK: - Internal
 
     private static func entriesOf(_ hooks: [String: Any], _ event: String) -> [[String: Any]] {
         hooks[event] as? [[String: Any]] ?? []
@@ -187,7 +194,7 @@ public enum CodexHooksInstaller {
             let object = try? JSONSerialization.jsonObject(with: data),
             let root = object as? [String: Any]
         else {
-            throw InstallError.foreignConfig("hooks.json 不是合法 JSON 对象，未做改动")
+            throw InstallError.foreignConfig(L10n.text("hooks.json is not a valid JSON object; no changes were made", zhHans: "hooks.json 不是合法 JSON 对象，未做改动"))
         }
         return root
     }
@@ -196,7 +203,7 @@ public enum CodexHooksInstaller {
         let data = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         guard let text = String(data: data, encoding: .utf8) else {
-            throw InstallError.foreignConfig("序列化 hooks.json 失败")
+            throw InstallError.foreignConfig(L10n.text("Failed to serialize hooks.json", zhHans: "序列化 hooks.json 失败"))
         }
         return text + "\n"
     }

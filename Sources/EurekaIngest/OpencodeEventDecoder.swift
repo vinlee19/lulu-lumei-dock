@@ -1,19 +1,20 @@
 import EurekaKit
 import Foundation
 
-/// 把 opencode.db `event` 表一行解码为领域事件（source `.opencode`）。
-/// 事件族（`data` 均含顶层 `sessionID`）：
+/// Decodes one row of the opencode.db `event` table into domain events (source `.opencode`).
+/// Event families (every `data` has a top-level `sessionID`):
 ///   session.created.1 → {sessionID, info{id,directory,title,parentID?,time{created}}}
 ///   message.updated.1 → {sessionID, info{role,time{created,completed},finish,...}}
 ///   message.part.updated.1 → {sessionID, part{type,tool,...}}
 public enum OpencodeEventDecoder {
-    /// 解码一行事件。子会话（subagent）的 session.created 返回空（不建独立任务）。
+    /// Decodes one event row. A child-session (subagent) session.created returns empty (no separate
+    /// task).
     public static func decode(type: String, data: [String: Any]) -> [TaskEvent] {
         guard let sessionID = data["sessionID"] as? String, !sessionID.isEmpty else { return [] }
         switch type {
         case "session.created.1":
             guard let info = data["info"] as? [String: Any] else { return [] }
-            if let parent = info["parentID"] as? String, !parent.isEmpty { return [] }  // 子 agent
+            if let parent = info["parentID"] as? String, !parent.isEmpty { return [] }  // subagent
             let cwd = info["directory"] as? String
             let started = msDate((info["time"] as? [String: Any])?["created"])
             return [event(sessionID, .sessionStarted, cwd: cwd,
@@ -27,11 +28,12 @@ public enum OpencodeEventDecoder {
                 return [event(sessionID, .taskStarted(title: nil),
                               at: msDate(time?["created"]) ?? Date())]
             case "assistant":
-                guard time?["completed"] != nil else { return [] }  // 进行中，等完成
-                // opencode 一个 turn 会产生多条 assistant 消息：中间的工具轮 finish=="tool-calls"，
-                // 只有最后一轮才是 stop/length。若不看 finish，就会每个工具轮都弹「任务完成」。
+                guard time?["completed"] != nil else { return [] }  // in progress, wait for completion
+                // One opencode turn produces several assistant messages: intermediate tool rounds
+                // have finish=="tool-calls", and only the last round is stop/length. Ignoring
+                // finish would pop a task-complete card on every tool round.
                 let finish = info["finish"] as? String
-                if finish == "tool-calls" || finish == "tool_use" { return [] }  // 中间轮，非完成
+                if finish == "tool-calls" || finish == "tool_use" { return [] }  // intermediate round, not a completion
                 return [event(sessionID, .taskFinished(outcome: .success, title: nil, detail: nil),
                               at: msDate(time?["completed"]) ?? Date())]
             default:
@@ -48,7 +50,8 @@ public enum OpencodeEventDecoder {
         }
     }
 
-    /// 若该行是子会话（subagent）的创建，返回子会话 id（供 tailer 记录后过滤其后续消息事件）
+    /// If the row creates a child session (subagent), returns its id (so the tailer can record it
+    /// and filter its later message events)
     public static func childSession(type: String, data: [String: Any]) -> String? {
         guard type == "session.created.1",
               let info = data["info"] as? [String: Any],

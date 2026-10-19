@@ -1,7 +1,7 @@
 import Foundation
 
-/// Thrift compact protocol 编码器（仅写，覆盖 Parquet 元数据用到的类型）。
-/// 规范：https://github.com/apache/thrift/blob/master/doc/specs/thrift-compact-protocol.md
+/// Thrift compact protocol encoder (write-only, covers the types Parquet metadata uses).
+/// Spec: https://github.com/apache/thrift/blob/master/doc/specs/thrift-compact-protocol.md
 struct ThriftCompactWriter {
     enum FieldType: UInt8 {
         case boolTrue = 1
@@ -19,10 +19,11 @@ struct ThriftCompactWriter {
     }
 
     private(set) var data = Data()
-    /// 每层 struct 的上一个字段号（字段头用差值编码，进入子 struct 时压栈）
+    /// Last field id per struct level (field headers are delta-encoded; pushed when entering a
+    /// nested struct)
     private var lastFieldIds: [Int16] = [0]
 
-    // MARK: - 字段
+    // MARK: - Fields
 
     mutating func fieldI32(_ id: Int16, _ value: Int32) {
         fieldHeader(id, .i32)
@@ -47,13 +48,14 @@ struct ThriftCompactWriter {
         fieldBinary(id, Data(value.utf8))
     }
 
-    /// 子 struct 字段：body 里写该 struct 的字段，结束自动补 STOP
+    /// Nested struct field: body writes the struct's fields, STOP is appended automatically at the
+    /// end
     mutating func fieldStruct(_ id: Int16, _ body: (inout ThriftCompactWriter) -> Void) {
         fieldHeader(id, .struct)
         writeStruct(body)
     }
 
-    /// struct 列表
+    /// List of structs
     mutating func fieldStructList(_ id: Int16, count: Int, _ element: (inout ThriftCompactWriter, Int) -> Void) {
         fieldHeader(id, .list)
         listHeader(count: count, elementType: .struct)
@@ -74,7 +76,7 @@ struct ThriftCompactWriter {
         for value in values { writeBinary(Data(value.utf8)) }
     }
 
-    /// 顶层 struct（FileMetaData / PageHeader）：写字段 + STOP
+    /// Top-level struct (FileMetaData / PageHeader): write fields + STOP
     mutating func writeStruct(_ body: (inout ThriftCompactWriter) -> Void) {
         lastFieldIds.append(0)
         body(&self)
@@ -82,7 +84,7 @@ struct ThriftCompactWriter {
         lastFieldIds.removeLast()
     }
 
-    // MARK: - 底层编码
+    // MARK: - Low-level encoding
 
     private mutating func fieldHeader(_ id: Int16, _ type: FieldType) {
         let delta = Int(id) - Int(lastFieldIds[lastFieldIds.count - 1])

@@ -1,9 +1,10 @@
 import Foundation
 
-/// Codex JSONL 的流式完整行读取器。
+/// Streaming complete-line reader for Codex JSONL.
 ///
-/// rollout 的 session_meta 会携带大段 instructions，不能再假设首行落在固定 16/64KB 窗口内。
-/// 返回值是最后一个完整换行后的字节偏移，调用方可保留未写完的半行供下次继续读取。
+/// A rollout's session_meta carries large instructions, so the first line can no longer be assumed
+/// to fit a fixed 16/64KB window. Returns the byte offset after the last complete newline, so
+/// callers can keep an unfinished half line for the next read.
 enum CodexJSONLReader {
     @discardableResult
     static func forEachCompleteLine(
@@ -64,8 +65,8 @@ enum CodexJSONLReader {
     }
 }
 
-/// Codex 正式线程名索引（`~/.codex/session_index.jsonl`）。
-/// 文件是 append-only，同一 id 后出现的记录覆盖旧记录。
+/// Codex formal thread-name index (`~/.codex/session_index.jsonl`). The file is append-only; a
+/// later record for the same id overrides earlier ones.
 public enum CodexThreadNameIndex {
     public static func defaultURL(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -81,12 +82,14 @@ public enum CodexThreadNameIndex {
             .appendingPathComponent(".codex/session_index.jsonl")
     }
 
-    /// 测试/自定义 sessions 根默认取同级 Codex home 下的 session_index.jsonl。
+    /// For tests / custom sessions roots, defaults to session_index.jsonl in the sibling Codex
+    /// home.
     public static func siblingURL(of sessionsRoot: URL) -> URL {
         sessionsRoot.deletingLastPathComponent().appendingPathComponent("session_index.jsonl")
     }
 
-    /// 默认跟随传入 sessions 根；显式 Codex 环境覆盖仍保持一致。
+    /// Follows the given sessions root by default; an explicit Codex environment override stays
+    /// consistent.
     public static func resolvedURL(
         for sessionsRoot: URL,
         environment: [String: String] = ProcessInfo.processInfo.environment

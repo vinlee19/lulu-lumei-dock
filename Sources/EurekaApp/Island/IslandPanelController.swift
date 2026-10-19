@@ -3,13 +3,14 @@ import EurekaKit
 import SwiftUI
 
 extension Notification.Name {
-    /// 设置页"恢复默认位置"
+    /// Settings' "Restore default position"
     static let eurekaResetIslandPosition = Notification.Name("eureka.resetIslandPosition")
 }
 
-/// 灵动岛 NSPanel 控制器：panel 固定为最大尺寸，默认贴刘海屏顶部居中；
-/// 支持按住拖拽到任意位置（含外接屏），位置持久化，拖回默认位置附近自动吸附回融合形态。
-/// 展开/收起全靠 SwiftUI 动画，透明区域 hitTest 穿透。
+/// Dynamic Island NSPanel controller: the panel is fixed at max size, by default top-centered
+/// against the notched screen; supports press-and-drag to any position (including external
+/// screens), persists the position, and snaps back to the merged form when dragged near the
+/// default. Expand/collapse is all SwiftUI animation; transparent areas pass hitTest through.
 @MainActor
 final class IslandPanelController {
     let viewModel = IslandViewModel()
@@ -18,9 +19,9 @@ final class IslandPanelController {
     private let hostingView: IslandHostingView<IslandRootView>
     private var orderOutWorkItem: DispatchWorkItem?
     private var moveSettleWorkItem: DispatchWorkItem?
-    /// 程序化 setFrame 期间忽略 didMove（只响应用户拖拽）
+    /// Ignore didMove during programmatic setFrame (only respond to user drags)
     private var isProgrammaticMove = false
-    /// 吸附判定半径（pt）
+    /// Snap radius (pt)
     private let snapDistance: CGFloat = 40
 
     init() {
@@ -31,30 +32,32 @@ final class IslandPanelController {
             defer: false
         )
         panel.isFloatingPanel = true
-        // 非激活面板里的控件需要它才能正常响应点击
+        // Controls in a non-activating panel need this to respond to clicks properly
         panel.becomesKeyOnlyIfNeeded = true
-        // 比状态栏高一级：刘海屏上要盖住菜单栏区域才能与刘海融合
+        // One level above the status bar: on notched screens it must cover the menu bar area to
+        // merge with the notch
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.collectionBehavior = [
             .canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle,
         ]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false  // 阴影由 SwiftUI 画，避免黑色矩形残影
+        panel.hasShadow = false  // SwiftUI draws the shadow; avoids a black rectangular ghost
         panel.hidesOnDeactivate = false
-        // isMovable 必须为 true，否则 performDrag 被拒绝；
-        // 背景拖拽关掉（borderless 无标题栏），移动只能由 hostingView 显式发起
+        // isMovable must be true or performDrag is refused; background dragging is off (borderless,
+        // no title bar); moves can only be started explicitly by hostingView
         panel.isMovable = true
         panel.isMovableByWindowBackground = false
         panel.animationBehavior = .none
         panel.isReleasedWhenClosed = false
 
         hostingView = IslandHostingView(rootView: IslandRootView(viewModel: viewModel))
-        hostingView.sizingOptions = []  // panel 尺寸固定，不让 SwiftUI 反向驱动窗口
+        hostingView.sizingOptions = []  // Panel size is fixed; don't let SwiftUI drive the window size back
         panel.contentView = hostingView
     }
 
-    /// init 完成后调用：接线回调与系统通知（避免 init 中捕获未完全初始化的 self）
+    /// Call after init: wire callbacks and system notifications (avoids capturing a partially
+    /// initialized self in init)
     func start() {
         hostingView.interactiveRectProvider = { [weak viewModel] in
             viewModel?.interactiveRect ?? .zero
@@ -83,7 +86,19 @@ final class IslandPanelController {
             name: .eurekaResetIslandPosition,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange),
+            name: .eurekaLanguageDidChange,
+            object: nil
+        )
         reposition()
+    }
+
+    @objc private func languageDidChange() {
+        MainActor.assumeIsolated {
+            viewModel.noteLanguage(L10n.current)
+        }
     }
 
     @objc private func screensChanged() {
@@ -97,7 +112,7 @@ final class IslandPanelController {
         }
     }
 
-    /// 用户拖拽产生的移动：去抖后评估吸附与持久化
+    /// Move caused by a user drag: debounce, then evaluate snapping and persistence
     @objc private func panelDidMove() {
         MainActor.assumeIsolated {
             guard !isProgrammaticMove else { return }
@@ -111,7 +126,7 @@ final class IslandPanelController {
     }
 
     private func moveSettled() {
-        // 还按着鼠标说明拖拽未结束，继续等
+        // Mouse still down means the drag hasn't ended; keep waiting
         guard NSEvent.pressedMouseButtons == 0 else {
             panelDidMove()
             return
@@ -126,13 +141,15 @@ final class IslandPanelController {
         let dy = abs(origin.y - defaultFrame.origin.y)
 
         if dx < snapDistance && dy < snapDistance {
-            // 吸附回该屏默认位置（刘海屏 → 恢复融合形态）
+            // Snap back to this screen's default position (notched screen → restore the merged
+            // form)
             IslandPositionStore.clear()
             setFrameProgrammatically(defaultFrame, animate: true)
             viewModel.isFloating = false
         } else {
             viewModel.isFloating = true
-            // 跨屏后按新屏比例重设尺寸：锚定左上角（内容顶部）不动
+            // After crossing screens, resize to the new screen's scale: keep the top-left corner
+            // (content top) anchored
             let newSize = viewModel.layout.panelSize
             if newSize != panel.frame.size {
                 let anchored = NSPoint(x: panel.frame.minX, y: panel.frame.maxY - newSize.height)
@@ -144,7 +161,8 @@ final class IslandPanelController {
         }
     }
 
-    /// 选屏：带刘海的内建屏优先（灵动岛体验最佳），盒盖后回落主屏
+    /// Screen choice: notched built-in screen first (best Dynamic Island experience), falling back
+    /// to the main screen when the lid is closed
     private func targetScreen() -> NSScreen? {
         NSScreen.screens.first { $0.safeAreaInsets.top > 0 }
             ?? NSScreen.main
@@ -152,10 +170,12 @@ final class IslandPanelController {
     }
 
     func reposition() {
-        // 有自定义位置且仍充分可见 → 沿用（浮动样式）
+        // Custom position exists and is still sufficiently visible → reuse it (floating style)
         if let origin = IslandPositionStore.load() {
-            // 可用性用严判（胶囊带须完整在屏内）：仅擦边相交的残留坐标（外接屏拔掉/重排）
-            // 会把岛放到几乎全在屏外的位置 → 视为不可用，清存档回默认
+            // Strict visibility check (the capsule band must be fully on screen): leftover
+            // coordinates that merely graze the screen (external screen unplugged/rearranged) would
+            // put the island almost entirely off screen → treat as unusable, clear the saved
+            // position and go back to default
             let probeSize = IslandGeometry.Layout.standard.panelSize
             let usable = IslandGeometry.positionUsable(
                 origin: origin, panelSize: probeSize,
@@ -168,7 +188,7 @@ final class IslandPanelController {
                     NSRect(origin: origin, size: viewModel.layout.panelSize), animate: false)
                 return
             }
-            IslandPositionStore.clear()  // 显示器拔了/位置已不可见，回默认
+            IslandPositionStore.clear()  // Display unplugged / position no longer visible: back to default
         }
         guard let screen = targetScreen() else { return }
         let info = Self.screenInfo(of: screen)
@@ -203,7 +223,7 @@ final class IslandPanelController {
         orderOutWorkItem?.cancel()
         orderOutWorkItem = nil
         if display == .hidden {
-            // 等收起动画播完再撤窗口
+            // Wait for the collapse animation to finish before removing the window
             let work = DispatchWorkItem {
                 MainActor.assumeIsolated { [weak self] in
                     guard let self, self.viewModel.display == .hidden else { return }
@@ -214,13 +234,13 @@ final class IslandPanelController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
         } else if !panel.isVisible {
             reposition()
-            // 不抢焦点地置顶展示
+            // Bring to front without stealing focus
             panel.orderFrontRegardless()
         }
     }
 }
 
-/// 自定义位置持久化（UserDefaults，存全局坐标原点）
+/// Custom position persistence (UserDefaults, stores the global-coordinate origin)
 enum IslandPositionStore {
     private static let xKey = "islandCustomOriginX"
     private static let yKey = "islandCustomOriginY"

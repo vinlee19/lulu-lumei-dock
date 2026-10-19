@@ -1,13 +1,14 @@
 import EurekaKit
 import Foundation
 
-/// 增量 tail Qoder 会话（~/.qoder-cn/projects/<slug>/<sessionId>.jsonl）。
-/// Qoder 无 hook/notify 回调，这是实时通道（与 qwen/kimi tailer 同理）。
-/// 生命周期映射：human user 消息 → taskStarted；assistant text → taskFinished(success)；
-/// assistant tool_use → activity(工具名)；custom-title/ai-title → titleUpdate。
-/// 只看 projects/*/*.jsonl 顶层文件；子 agent 现场不逐行跟，由快照扫描（与 Claude 同构，
-/// 复用 ClaudeSubagentScanner）在运行中会话上随轮询以 .subagentsUpdated 发出。
-/// ⚠️ CN 后端 token 用量全是零，不做用量扫描。
+/// Incrementally tails Qoder sessions (~/.qoder-cn/projects/<slug>/<sessionId>.jsonl).
+/// Qoder has no hook/notify callback, so this is the live channel (same as the qwen/kimi tailers).
+/// Lifecycle mapping: human user message → taskStarted; assistant text → taskFinished(success);
+/// assistant tool_use → activity(tool name); custom-title/ai-title → titleUpdate.
+/// Only top-level projects/*/*.jsonl files are watched; subagents are not followed line by line —
+/// a snapshot scan (same layout as Claude, reusing ClaudeSubagentScanner) emits
+/// .subagentsUpdated for running sessions on each poll.
+/// ⚠️ The CN backend reports zero token usage everywhere, so there is no usage scanning.
 public final class QoderChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -24,15 +25,17 @@ public final class QoderChatTailer {
         var cwd: String?
         var sessionStartedAt: Date?
         var title: String?
-        /// custom-title 优先级最高：已见自定义标题后 ai-title 不再覆盖
+        /// custom-title has top priority: once a custom title is seen, ai-title no longer overrides
+        /// it
         var titleIsCustom = false
-        /// 当前是否有未收尾的 turn（子 agent 快照只在运行中扫描）
+        /// Whether a turn is currently open (subagent snapshots are only scanned while running)
         var running = false
-        /// 当前 turn 起点（taskStarted 时间）：子 agent 快照按它裁到本 turn
+        /// Current turn start (taskStarted time): subagent snapshots are trimmed to this turn by it
         var turnStartedAt: Date?
     }
     private var contexts: [String: FileContext] = [:]
-    /// 各会话上次发出的子 agent 快照（变化才重发；TaskStore 还会再去重）
+    /// Last subagent snapshot emitted per session (re-emitted only on change; TaskStore dedups
+    /// again)
     private var lastSubagents: [String: [SubagentInfo]] = [:]
 
     static let healthName = "qoder 事件监视"
@@ -63,7 +66,7 @@ public final class QoderChatTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public so tests and launch can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentChatFiles() {
@@ -72,7 +75,7 @@ public final class QoderChatTailer {
         emitSubagentUpdates()
     }
 
-    /// projects/*/*.jsonl 顶层文件（subagents/ 子目录不递归）
+    /// Top-level projects/*/*.jsonl files (the subagents/ subdirectory is not recursed)
     private func recentChatFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -101,7 +104,7 @@ public final class QoderChatTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 会话恢复可能整写文件
+        if size < offset { offset = 0 }  // session resume may rewrite the whole file
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -141,7 +144,7 @@ public final class QoderChatTailer {
         if ctx.cwd == nil { ctx.cwd = QoderTranscriptDecoder.cwd(root) }
         if ctx.sessionStartedAt == nil { ctx.sessionStartedAt = QoderTranscriptDecoder.timestamp(root) }
         if let (isCustom, title) = QoderTranscriptDecoder.titleLine(root) {
-            // custom-title 优先：已自定义则 ai-title 不覆盖
+            // custom-title wins: once customized, ai-title does not override
             if isCustom || !ctx.titleIsCustom {
                 ctx.title = title
                 ctx.titleIsCustom = isCustom
@@ -157,10 +160,10 @@ public final class QoderChatTailer {
         else { return nil }
         switch event.kind {
         case .taskFinished(let outcome, _, let detail):
-            // 收尾带上当前最佳标题（custom > ai > 首条 prompt）
+            // The finish carries the current best title (custom > ai > first prompt)
             event.kind = .taskFinished(outcome: outcome, title: ctx.title, detail: detail)
         case .titleUpdate(let title):
-            // 已见 custom-title 后，ai-title 的 titleUpdate 是降级，丢弃
+            // After a custom-title has been seen, an ai-title titleUpdate is a downgrade; drop it
             if ctx.titleIsCustom && title != ctx.title { return nil }
         default:
             break
@@ -169,8 +172,9 @@ public final class QoderChatTailer {
         return event
     }
 
-    /// 新发现文件：只读头部 64KB 建上下文（cwd/起始时间/标题多在头部）
-    /// + 尾部 256KB 恢复"最后状态"，不重放历史；小文件（≤320KB）一次读完。
+    /// Newly discovered file: read only the first 64KB to build context (cwd/start time/title are
+    /// mostly at the head) + the last 256KB to restore the "last state", without replaying
+    /// history; small files (≤320KB) are read in one go.
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         offsets[path] = size
@@ -185,12 +189,12 @@ public final class QoderChatTailer {
             guard let data = try? handle.readToEnd() else { return }
             chunks = [data]
         } else {
-            // 头部只用于建上下文，末尾可能的半行直接丢弃
+            // The head only builds context; a possible trailing partial line is simply dropped
             guard let head = try? handle.read(upToCount: Int(headLength)) else { return }
             if let lastNewline = head.lastIndex(of: UInt8(ascii: "\n")) {
                 chunks.append(Data(head[head.startIndex...lastNewline]))
             }
-            // 尾部起点可能落在半行中间，对齐到第一个换行之后
+            // The tail start may land mid-line; align to just after the first newline
             guard (try? handle.seek(toOffset: size - tailLength)) != nil,
                   let tail = try? handle.readToEnd()
             else { return }
@@ -216,7 +220,8 @@ public final class QoderChatTailer {
                 }
             }
         }
-        // 运行状态与 turn 起点：子 agent 快照按 turn 裁剪、只在运行中扫描
+        // Running state and turn start: subagent snapshots are trimmed per turn and only scanned
+        // while running
         ctx.running = lastStarted != nil
             && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
         ctx.turnStartedAt = lastStarted?.timestamp
@@ -244,10 +249,11 @@ public final class QoderChatTailer {
         }
     }
 
-    // MARK: - 子 agent 快照（复用 Claude 扫描器，磁盘布局同构）
+    // MARK: - Subagent snapshots (reuses the Claude scanner; same on-disk layout)
 
-    /// 只对已跟踪且运行中的会话扫描（幻影任务不变式：不为未跟踪会话发事件）；
-    /// 快照变化才发（TaskStore 还会再去重）；转空闲后清缓存，下一 turn 重新发。
+    /// Scans only tracked, running sessions (phantom-task invariant: never emit for an untracked
+    /// session); emits only when the snapshot changes (TaskStore dedups again); clears the cache
+    /// once idle so the next turn emits afresh.
     private func emitSubagentUpdates() {
         for (path, ctx) in contexts {
             guard ctx.running else {

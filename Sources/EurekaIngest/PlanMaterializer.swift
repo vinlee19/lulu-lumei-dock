@@ -2,14 +2,18 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// 把各家 agent 的「计划」物化为可读、可同步的 .md 首类工件。
-/// 物化六源：
-///   - Codex：Plan Mode 最终 `<proposed_plan>` 优先，`update_plan` 工作清单兜底。
-///   - opencode：`opencode.db` 中 `mode='plan'` 的 assistant 消息的 text 分片 → `.md`。
-///   - Grok / Kimi：计划本就是 .md（Grok 每会话 `plan.md`；Kimi 每 agent 的 `plans/` 目录），原样拷入暂存。
-///   - Gemini / Qwen：启发式提取最后一条「像清单」的助手消息。
-/// 直接索引（不物化）：Claude（`~/.claude/plans/*.md`）与 Hermes（`plan` 技能写出的真 .md）。
-/// 写前比对，内容不变则不覆盖（保持 mtime 稳定，避免同步每轮重传）。纯 IO、路径入参、可单测。
+/// Materializes each agent's "plans" into readable, syncable first-class .md artifacts.
+/// Six materialized sources:
+///   - Codex: the final Plan Mode `<proposed_plan>` wins; the `update_plan` work list is the
+///     fallback.
+///   - opencode: text parts of `mode='plan'` assistant messages in `opencode.db` → `.md`.
+///   - Grok / Kimi: plans already are .md (Grok's per-session `plan.md`; Kimi's per-agent `plans/`
+///     directory), copied into staging as-is.
+///   - Gemini / Qwen: heuristically extract the last assistant message that "looks like a
+///     checklist".
+/// Indexed directly (not materialized): Claude (`~/.claude/plans/*.md`) and Hermes (real .md
+/// written by the `plan` skill). Compares before writing and skips unchanged content (keeps mtime
+/// stable so sync does not re-upload every cycle). Pure IO, paths passed in, unit-testable.
 public enum PlanMaterializer {
     public enum PlanKind: String, Equatable, Sendable {
         case finalPlan
@@ -19,33 +23,35 @@ public enum PlanMaterializer {
 
         public var displayName: String {
             switch self {
-            case .finalPlan: return "最终方案"
-            case .workingChecklist: return "工作清单"
-            case .document: return "计划文档"
-            case .projectDocument: return "项目文档"
+            case .finalPlan: return L10n.text("Final plan", zhHans: "最终方案")
+            case .workingChecklist: return L10n.text("Working checklist", zhHans: "工作清单")
+            case .document: return L10n.text("Plan document", zhHans: "计划文档")
+            case .projectDocument: return L10n.text("Project document", zhHans: "项目文档")
             }
         }
     }
 
-    /// 计划状态（列表状态字 / 图标进度环 / 统计分布共用）。由 kind + 清单完成度派生。
+    /// Plan status (shared by the list status label / icon progress ring / stats breakdown).
+    /// Derived from kind + checklist completion.
     public enum PlanStatus: String, Equatable, Sendable {
-        case complete       // 全部完成
-        case inProgress     // 进行中（有清单，部分完成，或无清单的活动方案）
-        case draft          // 草稿（有清单但一项未做）
-        case document       // 文档（计划文档 / 项目文档，无进度概念）
+        case complete       // all done
+        case inProgress     // in progress (has a checklist, partly done; or an active plan without a checklist)
+        case draft          // draft (has a checklist but nothing done yet)
+        case document       // document (plan doc / project doc, no notion of progress)
 
         public var displayName: String {
             switch self {
-            case .complete: return "已完成"
-            case .inProgress: return "进行中"
-            case .draft: return "草稿"
-            case .document: return "文档"
+            case .complete: return L10n.text("Completed", zhHans: "已完成")
+            case .inProgress: return L10n.text("In progress", zhHans: "进行中")
+            case .draft: return L10n.text("Draft", zhHans: "草稿")
+            case .document: return L10n.text("Document", zhHans: "文档")
             }
         }
     }
 
-    /// 由任务清单完成度派生状态：无清单 → 文档；否则 完成 / 草稿 / 进行中。
-    /// （kind 只表示文档类型，不决定状态——带清单的项目文档同样显示进度。）
+    /// Derives status from task-checklist completion: no checklist → document; otherwise complete /
+    /// draft / in progress. (kind only describes the document type and does not decide status: a
+    /// project doc with a checklist shows progress too.)
     public static func deriveStatus(done: Int, total: Int) -> PlanStatus {
         if total == 0 { return .document }
         if done >= total { return .complete }
@@ -53,7 +59,7 @@ public enum PlanMaterializer {
         return .inProgress
     }
 
-    /// 计划条目（Plans 标签浏览用）
+    /// A plan entry (for browsing in the Plans tab)
     public struct PlanEntry: Equatable, Sendable, Identifiable {
         public var id: String { path }
         public var source: AgentSource
@@ -62,21 +68,22 @@ public enum PlanMaterializer {
         public var path: String
         public var sizeBytes: UInt64
         public var modifiedAt: Date
-        /// 项目内 plan 文档 = 所属项目名；agent 计划 = nil
+        /// In-project plan doc = owning project name; agent plan = nil
         public var project: String?
-        // 派生字段（索引时解析正文得到）
-        /// 已完成清单项数
+        // Derived fields (parsed from the body at index time)
+        /// Number of completed checklist items
         public var stepsDone: Int
-        /// 清单项总数（0 = 无任务清单）
+        /// Total checklist items (0 = no task checklist)
         public var stepsTotal: Int
-        /// 派生状态
+        /// Derived status
         public var status: PlanStatus
-        /// 一句话摘要（正文首个有意义行）
+        /// One-line summary (first meaningful line of the body)
         public var summary: String?
-        /// 来源会话 id（物化计划由 sessions.json 边车提供；真实文件计划为 nil）
+        /// Origin session id (materialized plans get it from the sessions.json sidecar; real-file
+        /// plans are nil)
         public var sessionId: String?
 
-        /// 完成占比（无清单 → nil）
+        /// Completion ratio (no checklist → nil)
         public var progress: Double? {
             stepsTotal > 0 ? Double(stepsDone) / Double(stepsTotal) : nil
         }
@@ -106,9 +113,9 @@ public enum PlanMaterializer {
         }
     }
 
-    // MARK: - 默认路径（EUREKA_* 覆盖，便于单测）
+    // MARK: - Default paths (overridable via EUREKA_*, for unit tests)
 
-    /// 计划物化暂存根 `~/Library/Application Support/Eureka/plans`
+    /// Plan materialization staging root `~/Library/Application Support/Eureka/plans`
     public static func defaultStagingRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -119,7 +126,7 @@ public enum PlanMaterializer {
             .appendingPathComponent("Eureka/plans", isDirectory: true)
     }
 
-    /// Claude 计划目录 `~/.claude/plans`
+    /// Claude plans directory `~/.claude/plans`
     public static func defaultClaudePlansDir(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -127,7 +134,7 @@ public enum PlanMaterializer {
             .appendingPathComponent("plans", isDirectory: true)
     }
 
-    // MARK: - Codex：Plan Mode 最终方案优先，update_plan 工作清单兜底
+    // MARK: - Codex: the final Plan Mode plan wins, the update_plan work list is the fallback
 
     private enum CodexPlanContent {
         case finalPlan(String)
@@ -140,14 +147,16 @@ public enum PlanMaterializer {
         var content: CodexPlanContent
     }
 
-    /// Codex 物化增量指纹（staging/codex/.scan-state.json）：
-    /// rollout 路径 → size+mtime + 产物名 + 会话/标题（线程改名时失效重渲）。
-    /// 全量解析 rollouts 是 O(GB) 级成本，指纹跳过是 Plans 页刷新速度的关键。
+    /// Codex incremental materialization fingerprints (staging/codex/.scan-state.json): rollout
+    /// path → size+mtime + output name + session/title (invalidated and re-rendered when the thread
+    /// is renamed). Fully parsing rollouts costs O(GB); skipping by fingerprint is key to how fast
+    /// the Plans page refreshes.
     private struct CodexScanState: Codable {
         struct Entry: Codable {
             var size: Int64
             var mtime: Double
-            /// 该 rollout 的物化产物文件名；nil = 已解析过且不含计划（同样跳过重解析）
+            /// Output file name materialized from this rollout; nil = already parsed and contains
+            /// no plan (also skips re-parsing)
             var output: String?
             var sessionId: String?
             var title: String?
@@ -182,8 +191,9 @@ public enum PlanMaterializer {
             let mtime = ((attrs?[.modificationDate] as? Date) ?? .distantPast)
                 .timeIntervalSince1970
 
-            // 指纹未变且线程名未变 → 跳过全文解析，沿用缓存产物。
-            // mtime 比较带 1ms 容差：Double 经 JSON 往返有精度漂移，精确相等会跨进程全量失配
+            // Fingerprint and thread name unchanged → skip the full parse and reuse the cached
+            // output. mtime is compared with a 1ms tolerance: a Double drifts through a JSON round
+            // trip, so exact equality would mismatch everything across processes
             if let cached = oldState.files[fileURL.path],
                cached.size == size, abs(cached.mtime - mtime) < 0.001,
                !titleChanged(cached, threadNames: threadNames) {
@@ -194,7 +204,8 @@ public enum PlanMaterializer {
 
             guard let artifact = extractCodexPlan(
                 fileURL, stem: stem, threadNames: threadNames) else {
-                // 不含计划也记指纹，避免每轮反复重解析
+                // Record the fingerprint even when there is no plan, so it is not re-parsed every
+                // cycle
                 newState.files[fileURL.path] = .init(
                     size: size, mtime: mtime, output: nil, sessionId: nil, title: nil)
                 continue
@@ -216,7 +227,8 @@ public enum PlanMaterializer {
                 sessionId: artifact.sessionId, title: artifact.title)
         }
 
-        // 来源会话被删除、或最后已不再含计划时，移除陈旧物化副本。
+        // Remove stale materialized copies when the origin session was deleted or no longer ends
+        // with a plan.
         let staged = (try? fm.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)) ?? []
         for file in staged
         where file.pathExtension.lowercased() == "md" && !expected.contains(file.lastPathComponent) {
@@ -228,8 +240,9 @@ public enum PlanMaterializer {
             try? data.write(to: stateURL, options: .atomic)
         }
 
-        // 边车覆盖该轮所有仍存在的物化产物（含指纹跳过、未重写的），两个来源合一：
-        // 新解析的走 artifact.sessionId，跳过的走缓存 state 里同样携带的 sessionId。
+        // The sidecar covers every materialized output still present this cycle (including
+        // fingerprint-skipped, unrewritten ones), merging two sources: freshly parsed ones use
+        // artifact.sessionId; skipped ones use the sessionId carried in the cached state.
         var smap: [String: String] = [:]
         for entry in newState.files.values {
             if let output = entry.output, let sessionId = entry.sessionId {
@@ -240,7 +253,8 @@ public enum PlanMaterializer {
         return changed
     }
 
-    /// 线程被改名 → 缓存标题失效需重渲；索引里查不到名字（用兜底标题）不算变
+    /// Thread renamed → cached title is invalid and must be re-rendered; a name missing from the
+    /// index (fallback title in use) does not count as a change
     private static func titleChanged(
         _ cached: CodexScanState.Entry, threadNames: [String: String]
     ) -> Bool {
@@ -285,7 +299,8 @@ public enum PlanMaterializer {
                 }
             }
 
-            // 兼容未来 rollout 直接持久化 app-server 的 ThreadItem.plan。
+            // Forward-compatible with future rollouts that persist the app-server's ThreadItem.plan
+            // directly.
             if payloadType == "plan", let text = payload["text"] as? String {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty { finalPlan = trimmed }
@@ -334,7 +349,7 @@ public enum PlanMaterializer {
         if let first = lines.firstIndex(where: {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }), lines[first].hasPrefix("# ") {
-            lines.remove(at: first)  // 正式线程名统一作为物化文档标题，避免双 H1。
+            lines.remove(at: first)  // The canonical thread name is always the materialized doc's title, avoiding a double H1.
         }
         let content = lines.joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -361,14 +376,14 @@ public enum PlanMaterializer {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - opencode：opencode.db 中 plan 模式 assistant 文本 → .md
+    // MARK: - opencode: plan-mode assistant text in opencode.db → .md
 
     @discardableResult
     public static func materializeOpencode(dbPath: URL, into stagingRoot: URL) -> Int {
         guard let db = try? SQLiteDB(path: dbPath.path, readOnly: true) else { return 0 }
         let outDir = stagingRoot.appendingPathComponent("opencode", isDirectory: true)
 
-        // plan 模式的 assistant 消息，按会话 + 时间排序
+        // Plan-mode assistant messages, ordered by session + time
         let rows = (try? db.query("""
         SELECT id, session_id, time_created FROM message
         WHERE json_extract(data, '$.mode') = 'plan'
@@ -378,7 +393,7 @@ public enum PlanMaterializer {
             (row.text(0) ?? "", row.text(1) ?? "")
         }) ?? []
 
-        // 按会话分组（保持首次出现顺序）
+        // Group by session (keeping first-seen order)
         var bySession: [String: [String]] = [:]
         var order: [String] = []
         for (messageId, sessionId) in rows where !sessionId.isEmpty {
@@ -433,18 +448,21 @@ public enum PlanMaterializer {
         return title
     }
 
-    // MARK: - grok：每会话 plan.md（本就是 markdown）→ 暂存 grok/<uuid>.md
+    // MARK: - grok: per-session plan.md (already markdown) → staged as grok/<uuid>.md
 
-    /// grok 计划已是完整 .md（`~/.grok/sessions/<enc>/<uuid>/plan.md`，带 `# Plan: …`），
-    /// 无需从工具调用物化：两级遍历会话目录，非空 plan.md 原样拷进暂存（保持管线统一 + 可同步）。
+    /// Grok plans are already complete .md files (`~/.grok/sessions/<enc>/<uuid>/plan.md`, with `#
+    /// Plan: …`), so nothing is materialized from tool calls: walk the session dirs two levels deep
+    /// and copy non-empty plan.md into staging as-is (keeps the pipeline uniform + syncable).
     @discardableResult
     public static func materializeGrok(sessionsRoot: URL, into stagingRoot: URL) -> Int {
         let fm = FileManager.default
         let outDir = stagingRoot.appendingPathComponent("grok", isDirectory: true)
         var written = 0
         var smap: [String: String] = [:]
-        // 源目录读不到（权限抖动/未安装 grok）时早退，保留既有暂存与边车——
-        // 否则空 smap 会删掉 sessions.json，而 .md 仍在，计划会暂时丢会话归属。
+        // Bail out early when the source dir is unreadable (permission flake / grok not installed),
+        // keeping the existing staging and sidecar. Otherwise an empty smap would delete
+        // sessions.json while the .md files remain, and plans would briefly lose their session
+        // attribution.
         guard let cwdDirs = try? fm.contentsOfDirectory(
             at: sessionsRoot, includingPropertiesForKeys: [.isDirectoryKey])
         else { return 0 }
@@ -455,7 +473,7 @@ public enum PlanMaterializer {
                 let planURL = sessionDir.appendingPathComponent("plan.md")
                 guard let content = try? String(contentsOf: planURL, encoding: .utf8),
                       !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                else { continue }  // 无 plan.md / 空文件（未进过 plan 模式）→ 跳过
+                else { continue }  // no plan.md / empty file (never entered plan mode) → skip
                 let uuid = sessionDir.lastPathComponent
                 if writeIfChanged(content, to: outDir.appendingPathComponent(uuid + ".md")) {
                     written += 1
@@ -471,10 +489,12 @@ public enum PlanMaterializer {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
     }
 
-    // MARK: - kimi：会话内 agents/<id>/plans/* → 暂存 kimi/<sessionId>-<名>.md
+    // MARK: - kimi: in-session agents/<id>/plans/* → staged as kimi/<sessionId>-<name>.md
 
-    /// kimi 计划落在每 agent 的 plans/ 目录（`sessions/<ws>/<session>/agents/<id>/plans/*`）。
-    /// 非空文件原样拷进暂存；文件名带会话目录名前缀防跨会话/agent 撞名。
+    /// Kimi plans live in each agent's plans/ directory
+    /// (`sessions/<ws>/<session>/agents/<id>/plans/*`). Non-empty files are copied into staging
+    /// as-is; file names are prefixed with the session dir name so they cannot collide across
+    /// sessions/agents.
     @discardableResult
     public static func materializeKimi(sessionsRoot: URL, into stagingRoot: URL) -> Int {
         let fm = FileManager.default
@@ -509,10 +529,11 @@ public enum PlanMaterializer {
         return written
     }
 
-    // MARK: - qoder：plans/<slug>.md（本就是 markdown）→ 暂存 qoder/<名>.md
+    // MARK: - qoder: plans/<slug>.md (already markdown) → staged as qoder/<name>.md
 
-    /// qoder 计划已是完整 .md（`~/.qoder-cn/plans/<slug>.md`，plan 模式产物），
-    /// 非空文件原样拷进暂存（保持管线统一 + 可同步）。codebuddy 无 plans 目录，无物化。
+    /// Qoder plans are already complete .md files (`~/.qoder-cn/plans/<slug>.md`, produced by plan
+    /// mode); non-empty files are copied into staging as-is (keeps the pipeline uniform +
+    /// syncable). CodeBuddy has no plans directory, so nothing is materialized for it.
     @discardableResult
     public static func materializeQoder(plansRoot: URL, into stagingRoot: URL) -> Int {
         let fm = FileManager.default
@@ -532,15 +553,17 @@ public enum PlanMaterializer {
         return written
     }
 
-    // MARK: - cursor：composerData.todos → 暂存 cursor/<composerId>.md
+    // MARK: - cursor: composerData.todos → staged as cursor/<composerId>.md
 
-    /// Cursor **没有 plans 目录**（`composer.planMigrationToHomeDirCompleted=true`，
-    /// 但迁移目标目录根本不存在），它的计划是会话内的 `todos` 数组，由 `todo_write`
-    /// 工具写进 `composerData`。所以走合成路线，与 codex 的 `update_plan` 同一套路
-    /// （实勘 154 个会话里 22 个带 todos，状态 completed / in_progress / pending / cancelled）。
+    /// Cursor has **no plans directory** (`composer.planMigrationToHomeDirCompleted=true`, yet the
+    /// migration target directory does not exist at all); its plan is the in-session `todos` array
+    /// that the `todo_write` tool writes into `composerData`. So it takes the synthesis route, same
+    /// approach as codex's `update_plan` (a local survey found 22 of 154 sessions with todos,
+    /// statuses completed / in_progress / pending / cancelled).
     ///
-    /// 只物化**有 todos** 的会话；每会话一份 `<composerId>.md`，内容不变就不重写
-    /// （`writeIfChanged` 保持 mtime 稳定，备份才不会每轮都判为变更）。
+    /// Only sessions **with todos** are materialized; one `<composerId>.md` per session, not rewritten when
+    /// the content is unchanged (`writeIfChanged` keeps mtime stable so backup does not flag it as changed
+    /// every cycle).
     @discardableResult
     public static func materializeCursor(
         dbPath: URL = CursorPaths.globalStateDB(),
@@ -552,8 +575,9 @@ public enum PlanMaterializer {
         else { return 0 }
         let outDir = stagingRoot.appendingPathComponent("cursor", isDirectory: true)
 
-        // 键前缀范围扫描走覆盖索引；`json_array_length(...todos) > 0` 让 SQLite 在 C 侧
-        // 筛掉绝大多数会话，不用把 200KB 的 JSON 搬进 Swift（同 CursorSessionIndexer 的取舍）
+        // A key-prefix range scan uses the covering index; `json_array_length(...todos) > 0` lets
+        // SQLite filter out most sessions on the C side instead of hauling 200KB of JSON into Swift
+        // (same trade-off as CursorSessionIndexer)
         let rows = (try? db.query(
             """
             SELECT substr(key, 14),
@@ -587,8 +611,9 @@ public enum PlanMaterializer {
         return written
     }
 
-    /// `todos` → markdown 清单。状态框与 codex 清单一致（`[x]` / `[~]` / `[ ]`），
-    /// 另加 `[-]` 表示 Cursor 特有的 `cancelled`：放弃的步骤不该看起来像还没做。
+    /// `todos` → markdown checklist. Status boxes match the codex checklist (`[x]` / `[~]` / `[
+    /// ]`), plus `[-]` for Cursor's own `cancelled`: an abandoned step should not look like it is
+    /// still pending.
     static func renderCursorTodos(
         composerId: String, name: String?, todos: [[String: Any]]
     ) -> String {
@@ -614,19 +639,20 @@ public enum PlanMaterializer {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - 索引（Plans 标签用）：Claude 目录 + 暂存 codex/opencode/grok/kimi/qoder/cursor
+    // MARK: - Index (for the Plans tab): Claude dir + staged codex/opencode/grok/kimi/qoder/cursor
 
-    /// hermesPlansDirs：Hermes 的计划由 `plan` 技能用 write_file 直接写成 .md
-    /// （项目内 `<repo>/.hermes/plans/`，profile 级 `~/.hermes/plans/` 可选），
-    /// 本就是真文件 → 同 Claude 一样直接索引，**不需要物化**。
+    /// hermesPlansDirs: Hermes plans are written straight to .md by the `plan` skill via write_file
+    /// (in-project `<repo>/.hermes/plans/`, optionally profile-level `~/.hermes/plans/`); they
+    /// already are real files → indexed directly like Claude, **no materialization needed**.
     ///
-    /// traePlansDirs：Trae 的计划是 `<repo>/.trae/documents/plan_<yyyyMMdd>_<HHmmss>.md`，
-    /// 本就是真 markdown → 同 Hermes 一样**直接索引、不物化**（往暂存区抄一份等于把用户
-    /// 仓库里的文件复制进 app 数据目录，没有收益）。同目录还混着别的文档（Trae 的
-    /// `.trae/documents` 不只放计划），所以按 `plan_` 前缀收窄。
+    /// traePlansDirs: Trae plans are `<repo>/.trae/documents/plan_<yyyyMMdd>_<HHmmss>.md`, already real
+    /// markdown → **indexed directly, not materialized**, like Hermes (copying them into staging would just
+    /// duplicate files from the user's repo into the app data dir, for no gain). The same directory also
+    /// holds other documents (Trae's `.trae/documents` is not only for plans), so it is narrowed by the
+    /// `plan_` prefix.
     ///
-    /// zcodePlansDirs：ZCode 的计划是 `<repo>/.zcode/plans/plan-sess_<会话id>.md`，
-    /// 同 Hermes 直接索引；会话 id 内嵌在文件名里，无需边车即可关联。
+    /// zcodePlansDirs: ZCode plans are `<repo>/.zcode/plans/plan-sess_<session id>.md`, indexed directly
+    /// like Hermes; the session id is embedded in the file name, so no sidecar is needed to link it.
     public static func index(
         claudePlansDir: URL, stagingRoot: URL, hermesPlansDirs: [URL] = [],
         traePlansDirs: [URL] = [], zcodePlansDirs: [URL] = []
@@ -648,8 +674,9 @@ public enum PlanMaterializer {
                         return stem.hasPrefix("sess_") ? stem : nil
                     })
         }
-        // 物化暂存源：各自读 sessions.json 边车补 sessionId（kimi/gemini/qwen/qoder 没有边车文件，
-        // sessionMap(dir:) 读不到就返回空表，传了也无害）。
+        // Materialized staging sources: each reads its sessions.json sidecar to fill in sessionId
+        // (kimi/gemini/qwen/qoder have no sidecar file; sessionMap(dir:) returns an empty map when
+        // it finds none, so passing it is harmless).
         let codexDir = stagingRoot.appendingPathComponent("codex", isDirectory: true)
         collect(dir: codexDir, source: .codex, into: &result, sessionMap: sessionMap(dir: codexDir))
         let opencodeDir = stagingRoot.appendingPathComponent("opencode", isDirectory: true)
@@ -670,9 +697,10 @@ public enum PlanMaterializer {
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    // MARK: - Gemini / Qwen：无显式 plan 产物 → 启发式提取（保守：只认任务清单）
+    // MARK: - Gemini / Qwen: no explicit plan artifact → heuristic extraction (conservative: task checklists only)
 
-    /// 助手消息"像一份工作清单"的保守判定：≥3 条任务清单行（- [ ] / - [x] / - [~]）
+    /// Conservative test for an assistant message that "looks like a work list": ≥3 task-checklist
+    /// lines (- [ ] / - [x] / - [~])
     static func looksLikeChecklistPlan(_ text: String) -> Bool {
         var count = 0
         for line in text.components(separatedBy: "\n") {
@@ -686,7 +714,8 @@ public enum PlanMaterializer {
         return false
     }
 
-    /// Gemini：每会话取最后一条"像清单"的助手消息（与 Codex 取最后一次 update_plan 同语义）
+    /// Gemini: per session, take the last assistant message that "looks like a checklist" (same
+    /// semantics as Codex taking the last update_plan)
     @discardableResult
     public static func materializeGemini(
         tmpRoot: URL, projectsFile: URL, into stagingRoot: URL
@@ -711,7 +740,7 @@ public enum PlanMaterializer {
         return changed
     }
 
-    /// Qwen：同 Gemini 的启发式
+    /// Qwen: same heuristic as Gemini
     @discardableResult
     public static func materializeQwen(projectsRoot: URL, into stagingRoot: URL) -> Int {
         let outDir = stagingRoot.appendingPathComponent("qwen", isDirectory: true)
@@ -733,7 +762,7 @@ public enum PlanMaterializer {
         return changed
     }
 
-    /// 清理不再对应任何会话的陈旧物化副本
+    /// Removes stale materialized copies that no longer map to any session
     private static func removeStale(in outDir: URL, keeping expected: Set<String>) -> Int {
         let fm = FileManager.default
         var removed = 0
@@ -745,8 +774,9 @@ public enum PlanMaterializer {
         return removed
     }
 
-    /// 项目仓库内的 plan 文档：`<root>/plans/` + `<root>/docs` 子树内名为 `plans` 的目录（深度 ≤4）。
-    /// 收 *.md（忽略 README.md），每项目上限 200 条防大仓库失控。
+    /// Plan docs inside project repos: `<root>/plans/` + directories named `plans` under the
+    /// `<root>/docs` subtree (depth ≤4). Collects *.md (ignoring README.md), capped at 200 per
+    /// project so large repos cannot run away.
     public static func indexProjectPlans(
         roots: [(root: URL, name: String)]
     ) -> [PlanEntry] {
@@ -761,7 +791,7 @@ public enum PlanMaterializer {
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) {
                 for case let url as URL in enumerator {
-                    // docs 下深度 ≤4 内名为 plans 的目录
+                    // directories named plans within depth ≤4 under docs
                     if enumerator.level > 4 { enumerator.skipDescendants(); continue }
                     guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?
                         .isDirectory == true else { continue }
@@ -786,7 +816,7 @@ public enum PlanMaterializer {
                     let body = readBody(url) ?? ""
                     let check = PlanParsing.checklist(body)
                     result.append(PlanEntry(
-                        source: .claude,  // 占位：项目文档以 kind/project 区分，不按 source 展示
+                        source: .claude,  // placeholder: project docs are distinguished by kind/project, not displayed by source
                         title: planTitle(body: body, url: url),
                         path: url.path,
                         kind: .projectDocument,
@@ -805,11 +835,11 @@ public enum PlanMaterializer {
     private static func collect(
         dir: URL, source: AgentSource, into result: inout [PlanEntry],
         sessionMap: [String: String] = [:],
-        /// 只收文件名满足该判定的 .md。默认全收；Trae 的 `.trae/documents` 里混着别的文档，
-        /// 靠它把范围收到 `plan_*.md`。
+        /// Only collects .md files whose name passes this test. Defaults to all; Trae's
+        /// `.trae/documents` mixes in other documents, and this narrows the scope to `plan_*.md`.
         nameFilter: ((String) -> Bool)? = nil,
-        /// 由文件名直接推导会话 id（zcode 的 `plan-sess_<id>.md` 内嵌会话 id，无需边车）；
-        /// sessionMap 命中时优先。
+        /// Derives the session id directly from the file name (zcode's `plan-sess_<id>.md` embeds
+        /// it, no sidecar needed); a sessionMap hit takes precedence.
         sessionIdFromName: ((String) -> String?)? = nil
     ) {
         let fm = FileManager.default
@@ -837,15 +867,19 @@ public enum PlanMaterializer {
         }
     }
 
-    /// 物化时的占位标题：会话既没有 thread name、也没有可用的首条用户消息时写入。
-    /// 这类标题信息量为零（本机 110 份 Codex 计划里 45 份都叫「Codex 计划」），索引阶段改用正文首步替代。
+    /// Placeholder titles written at materialization time when a session has neither a thread name
+    /// nor a usable first user message. Such titles carry zero information (45 of the 110 local
+    /// Codex plans share the zhHans "Codex plan" title), so the index stage replaces them with the
+    /// body's first step.
     static let placeholderTitles: Set<String> = [
         "Codex 计划", "Codex 工作清单", "Gemini 计划", "Qwen 计划", "opencode 计划",
     ]
 
-    /// 标题 = 首个 `# ` 标题行，否则文件名。两处收紧：
-    ///   1. 占位标题 → 换成正文第一条清单步骤（「这份计划实际要做什么」比「Codex 计划」有用）；
-    ///   2. 整段提示词当标题 → 按句读边界收短，列表里才读得出重点。
+    /// Title = the first `# ` heading line, else the file name. Tightened in two ways:
+    ///   1. Placeholder title → replaced by the body's first checklist step ("what this plan
+    ///      actually does" beats "Codex plan");
+    ///   2. A whole prompt used as the title → shortened at a sentence boundary so the list stays
+    ///      scannable.
     private static func planTitle(body: String, url: URL) -> String {
         var heading: String?
         for line in body.components(separatedBy: "\n") where line.hasPrefix("# ") {
@@ -871,7 +905,8 @@ public enum PlanMaterializer {
         return .document
     }
 
-    /// 读计划正文（较 readHead 更大上限，供清单/摘要解析；仍限最大字节防超大文件）
+    /// Reads the plan body (larger cap than readHead, for checklist/summary parsing; still capped
+    /// to guard against huge files)
     private static func readBody(_ url: URL, maxBytes: Int = 512 * 1024) -> String? {
         guard let handle = FileHandle(forReadingAtPath: url.path),
               let data = try? handle.read(upToCount: maxBytes) else { return nil }
@@ -879,16 +914,18 @@ public enum PlanMaterializer {
         return String(decoding: data, as: UTF8.self)
     }
 
-    // MARK: - 工具
+    // MARK: - Helpers
 
-    /// 物化目录「文件名 → 会话 id」边车（collect 读取；仅物化器知道会话归属）
+    /// "File name → session id" sidecar for a materialized directory (read by collect; only the
+    /// materializer knows session ownership)
     static func writeSessionMap(_ map: [String: String], outDir: URL) {
         let url = outDir.appendingPathComponent("sessions.json")
         guard !map.isEmpty else { try? FileManager.default.removeItem(at: url); return }
         guard let data = try? JSONSerialization.data(withJSONObject: map, options: [.sortedKeys])
         else { return }
-        // 内容不变则不重写：边车不参与云备份（markdownOnly 过滤），mtime 稳定性
-        // 并非硬约束，但与 writeIfChanged 的约定对称，也省掉每轮无谓写盘。
+        // Skip the write when unchanged: the sidecar is excluded from cloud backup (markdownOnly
+        // filter), so mtime stability is not a hard requirement, but it mirrors the writeIfChanged
+        // contract and saves a pointless disk write each cycle.
         if let existing = try? Data(contentsOf: url), existing == data { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -901,7 +938,7 @@ public enum PlanMaterializer {
         return obj
     }
 
-    /// 内容与磁盘相同则不写（保持 mtime 稳定）；否则原子写入。
+    /// Skips the write when content matches disk (keeps mtime stable); otherwise writes atomically.
     @discardableResult
     private static func writeIfChanged(_ content: String, to url: URL) -> Bool {
         if let existing = try? String(contentsOf: url, encoding: .utf8), existing == content {
@@ -917,7 +954,7 @@ public enum PlanMaterializer {
         }
     }
 
-    /// 逐行解析 jsonl（坏行容错跳过）；body 返回 false 提前终止
+    /// Parses jsonl line by line (bad lines are skipped); body returning false stops early
     private static func forEachJSONLine(_ url: URL, _ body: ([String: Any]) -> Bool) {
         CodexJSONLReader.forEachCompleteLine(url, includeTrailingLine: true) { line in
             guard let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]

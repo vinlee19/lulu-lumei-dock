@@ -1,9 +1,11 @@
 import EurekaKit
 import Foundation
 
-/// Prompt 库持久化：提取 upsert（保留用户标注）+ 增量指纹 + 列表/标注读写。
-/// favorite/tags/use_count/hidden_at 是用户写入的事实——重提取只刷新正文列，绝不覆盖标注列。
-/// "移除"是软删除（hidden_at）：行留在表里挡住重提取的 upsert，所有读路径按 hidden_at IS NULL 过滤。
+/// Prompt library persistence: extraction upsert (keeps user annotations) + incremental
+/// fingerprints + list/annotation reads and writes. favorite/tags/use_count/hidden_at are
+/// user-written facts — re-extraction only refreshes body columns and never overwrites annotation
+/// columns. "Remove" is a soft delete (hidden_at): the row stays in the table to block
+/// re-extraction upserts, and every read path filters on hidden_at IS NULL.
 public final class PromptsRepo {
     private let db: SQLiteDB
 
@@ -11,8 +13,9 @@ public final class PromptsRepo {
         self.db = db
     }
 
-    /// 提取入库：新行整条插入；已存在的行只刷新正文列（text/timestamp/cwd/updated_at），
-    /// favorite/tags/use_count/last_used_at/first_seen 保持原值。
+    /// Extraction insert: new rows are inserted whole; existing rows only refresh body columns
+    /// (text/timestamp/cwd/updated_at), while favorite/tags/use_count/last_used_at/first_seen keep
+    /// their values.
     public func upsertExtracted(_ entries: [PromptEntry], at now: Date = Date()) throws {
         guard !entries.isEmpty else { return }
         try db.transaction {
@@ -37,7 +40,8 @@ public final class PromptsRepo {
         }
     }
 
-    /// 评价入库：prompt_eval 全列纯派生 → ON CONFLICT 整行覆盖（无用户列要保）
+    /// Evaluation insert: every prompt_eval column is purely derived → ON CONFLICT overwrites the
+    /// whole row (no user columns to keep)
     public func upsertEval(_ rows: [PromptEval]) throws {
         guard !rows.isEmpty else { return }
         try db.transaction {
@@ -70,7 +74,8 @@ public final class PromptsRepo {
         }
     }
 
-    /// 全量评价（prompt_id → 评价）；服务层随刷新读回缓存
+    /// All evaluations (prompt_id → evaluation); the service layer reads them back into its cache
+    /// on refresh
     public func evalMap() throws -> [String: PromptEval] {
         let rows = try db.query("""
         SELECT prompt_id, severity, rule_ids, step_count, error_steps, duration,
@@ -93,7 +98,7 @@ public final class PromptsRepo {
         return Dictionary(uniqueKeysWithValues: rows.map { ($0.promptId, $0) })
     }
 
-    /// 记录会话提取指纹（lastActiveAt 未变即可跳过）
+    /// Record a session's extraction fingerprint (skip when lastActiveAt is unchanged)
     public func markExtracted(sessionId: String, source: AgentSource, at date: Date) throws {
         try db.run("""
         INSERT INTO prompt_sessions (session_id, source, extracted_at) VALUES (?,?,?)
@@ -101,7 +106,7 @@ public final class PromptsRepo {
         """, [.text(sessionId), .text(source.rawValue), .date(date)])
     }
 
-    /// 已提取会话的指纹：session_id → 上次提取时间
+    /// Fingerprints of extracted sessions: session_id → last extraction time
     public func extractionFingerprints() throws -> [String: Date] {
         let rows = try db.query(
             "SELECT session_id, extracted_at FROM prompt_sessions"
@@ -111,7 +116,8 @@ public final class PromptsRepo {
         return Dictionary(uniqueKeysWithValues: rows)
     }
 
-    /// 全量列表（first_seen 倒序 = 最新提取在前；已移除的不返回）
+    /// Full list (first_seen descending = most recently extracted first; removed rows are not
+    /// returned)
     public func all() throws -> [PromptEntry] {
         try db.query("""
         SELECT id, source, session_id, message_idx, text, timestamp, cwd,
@@ -120,14 +126,14 @@ public final class PromptsRepo {
         """) { Self.mapRow($0) }
     }
 
-    /// 收藏计数（统计卡用；已移除的不计）
+    /// Favorite count (for the stats card; removed rows are not counted)
     public func favoriteCount() throws -> Int {
         try db.query(
             "SELECT COUNT(*) FROM prompts WHERE favorite = 1 AND hidden_at IS NULL"
         ) { Int($0.int(0)) }.first ?? 0
     }
 
-    /// 按 id 取单条（详情直达；已移除的视同不存在）
+    /// Fetch one by id (direct link to detail; a removed row is treated as nonexistent)
     public func entry(id: String) throws -> PromptEntry? {
         try db.query("""
         SELECT id, source, session_id, message_idx, text, timestamp, cwd,
@@ -136,7 +142,7 @@ public final class PromptsRepo {
         """, [.text(id)]) { Self.mapRow($0) }.first
     }
 
-    // MARK: - 用户标注写回（事实数据，独立于提取刷新）
+    // MARK: - User annotation writes (fact data, independent of extraction refreshes)
 
     public func setFavorite(_ id: String, favorite: Bool) throws {
         try db.run(
@@ -150,7 +156,7 @@ public final class PromptsRepo {
             [.text(Self.encodeTags(tags)), .text(id)])
     }
 
-    /// 复用计数：+1 并记录时间
+    /// Reuse count: +1 and record the time
     public func recordUse(_ id: String, at date: Date = Date()) throws {
         try db.run("""
         UPDATE prompts SET use_count = use_count + 1, last_used_at = ?
@@ -158,34 +164,38 @@ public final class PromptsRepo {
         """, [.date(date), .text(id)])
     }
 
-    /// 单条移除 = 软删除（置 hidden_at）。硬删不行：会话还活跃时下一次增量提取会把
-    /// 整批 prompt 重新 upsert，被删的那条会原样复活；留行则 ON CONFLICT 只刷正文列，
-    /// hidden_at 与其它用户标注一样被保住。会话消失也不自动删——收藏可能指向已结束的会话。
+    /// Removing one = soft delete (set hidden_at). A hard delete doesn't work: while the session is
+    /// still active, the next incremental extraction re-upserts the whole batch of prompts and the
+    /// deleted one comes back unchanged; keeping the row means ON CONFLICT only refreshes body
+    /// columns, so hidden_at survives like every other user annotation. Rows aren't auto-deleted
+    /// when a session disappears either — a favorite may point at a finished session.
     public func hide(_ id: String, at date: Date = Date()) throws {
         try db.run(
             "UPDATE prompts SET hidden_at = ? WHERE id = ?",
             [.date(date), .text(id)])
     }
 
-    // MARK: - 周报统计
+    // MARK: - Weekly report stats
 
-    /// 周报用的提问统计（窗口口径见 weeklyStats）
+    /// Prompt stats for the weekly report (see weeklyStats for the window semantics)
     public struct WeeklyPromptStats: Equatable {
-        /// 窗口内新提出的提问数
+        /// Number of new prompts asked within the window
         public var askedCount: Int
         public var bySource: [AgentSource: Int]
-        /// 窗口内复用过的提问（last_used_at 落窗，按累计 use_count 降序）
+        /// Prompts reused within the window (last_used_at in the window, by cumulative use_count
+        /// descending)
         public var topReused: [PromptEntry]
     }
 
-    /// 周报统计：提问时间取 COALESCE(timestamp, first_seen)（个别源无消息时间戳，
-    /// 退化为提取时间）；复用按 last_used_at 落窗判定（use_count 是全期累计值）。
+    /// Weekly stats: the ask time is COALESCE(timestamp, first_seen) (some sources have no message
+    /// timestamp, so it degrades to the extraction time); reuse is decided by last_used_at falling
+    /// in the window (use_count is an all-time total).
     ///
-    /// asked 口径排除存量噪音行：库里遗留的伪用户消息全以 `<`（注入标签）或 `/`
-    /// （裸斜杠命令）开头 —— 与内存分类器 PromptClassifier.isInjectedArtifact 的
-    /// 前缀判据对应（SQL 侧做近似即可；采集端已排噪，新行不会再有这些前缀）。
-    /// 琐碎短语（"继续"）仍计入：口径是"你问了几次"，不是"几次有价值"。
-    /// 用户移除的条目（hidden_at）两边都不计：移除多半是误粘贴/不想再看到的东西。
+    /// The asked metric excludes legacy noise rows: leftover pseudo user messages in the DB all start with `<` (injected tags) or `/`
+    /// (bare slash commands) — matching the prefix test of the in-memory classifier PromptClassifier.isInjectedArtifact
+    /// (an approximation on the SQL side is enough; capture already filters noise, so new rows won't have these prefixes).
+    /// Trivial short phrases (e.g. "continue") still count: the metric is "how many times you asked", not "how many were valuable".
+    /// Entries the user removed (hidden_at) count on neither side: removals are mostly mis-pastes or things the user doesn't want to see again.
     public func weeklyStats(from: Date, to: Date, topLimit: Int = 5) throws -> WeeklyPromptStats {
         let askedRows = try db.query("""
         SELECT source, COUNT(*) FROM prompts
@@ -212,7 +222,7 @@ public final class PromptsRepo {
         return WeeklyPromptStats(askedCount: asked, bySource: bySource, topReused: reused)
     }
 
-    // MARK: - 行映射
+    // MARK: - Row mapping
 
     private static func mapRow(_ row: SQLiteRow) -> PromptEntry {
         PromptEntry(

@@ -1,12 +1,13 @@
 import EurekaKit
 import Foundation
 
-/// 技能 / agent 的归属范围：系统级（用户 home 根）或项目级（某项目 cwd 下）
+/// Ownership scope of a skill / agent: system-level (user home root) or project-level (under a
+/// project's cwd)
 public enum SkillScope: Equatable, Sendable {
     case system
-    case project(String)  // 关联项目名
+    case project(String)  // associated project name
 
-    /// 项目名（系统级为 nil）
+    /// Project name (nil for system-level)
     public var projectName: String? {
         if case .project(let name) = self { return name }
         return nil
@@ -14,7 +15,8 @@ public enum SkillScope: Equatable, Sendable {
     public var isProject: Bool { projectName != nil }
 }
 
-/// 项目级根：某项目 cwd 下的 skills / agents 目录（技能与 agent 复用）
+/// Project-level root: the skills / agents directory under a project's cwd (shared by skills and
+/// agents)
 public struct ProjectScopedRoot: Equatable, Sendable {
     public var root: URL
     public var source: AgentSource
@@ -26,23 +28,24 @@ public struct ProjectScopedRoot: Equatable, Sendable {
     }
 }
 
-/// 技能来源归属：用户自建/安装 or 工具内置携带（插件 / .system / bundled / builtin）
+/// Skill provenance: user-created/installed, or bundled with the tool (plugin / .system / bundled /
+/// builtin)
 public enum SkillOrigin: String, Equatable, Sendable {
-    case user      // 用户自建或安装（可增删改、可启停）
-    case bundled   // 工具内置/携带（只读，仅用于详情矩阵与跨源存在判定）
+    case user      // created or installed by the user (editable, can be enabled/disabled)
+    case bundled   // shipped with the tool (read-only; only for the detail matrix / cross-source checks)
 }
 
-/// 一个技能（Claude/Codex 的 SKILL.md）
+/// A skill (Claude/Codex `SKILL.md`)
 public struct SkillEntry: Equatable, Sendable, Identifiable {
     public var id: String { path }
     public var source: AgentSource
     public var name: String
     public var description: String?
-    public var path: String       // SKILL.md 绝对路径
-    public var directory: String  // 技能目录绝对路径
-    public var enabled: Bool      // 在启用区 = true；在 *.eureka-disabled 区 = false
-    public var scope: SkillScope  // 系统级 or 项目级
-    public var origin: SkillOrigin  // 用户自建 or 工具内置携带
+    public var path: String       // absolute path of SKILL.md
+    public var directory: String  // absolute path of the skill directory
+    public var enabled: Bool      // true in the enabled area; false in the *.eureka-disabled area
+    public var scope: SkillScope  // system-level or project-level
+    public var origin: SkillOrigin  // user-created or bundled with the tool
     public var sizeBytes: UInt64
     public var modifiedAt: Date
 
@@ -66,15 +69,15 @@ public struct SkillEntry: Equatable, Sendable, Identifiable {
     }
 }
 
-/// 一条记忆指向的会话。
+/// A session a memory points at.
 ///
-/// Claude 的记忆一条对一个会话（frontmatter `metadata.originSessionId`）；
-/// Codex 的 `MEMORY.md` 是**一个文件聚合多次会话**（正文 `### rollout_summary_files` 段落里
-/// 每行一个 `thread_id=`，实勘 15 个），所以这里必须是多值。
+/// A Claude memory maps to one session (frontmatter `metadata.originSessionId`); Codex's
+/// `MEMORY.md` is **one file aggregating many sessions** (one `thread_id=` per line in the body's
+/// `### rollout_summary_files` section, 15 observed locally), so this must be multi-valued.
 public struct MemorySessionRef: Equatable, Sendable, Identifiable {
     public var id: String { sessionId }
     public var sessionId: String
-    /// transcript 的实际路径；nil = 记录文件已不在（UI 置灰、不可跳转）
+    /// Actual transcript path; nil = the record file is gone (greyed out in the UI, not navigable)
     public var path: String?
     public var exists: Bool { path != nil }
 
@@ -85,54 +88,63 @@ public struct MemorySessionRef: Equatable, Sendable, Identifiable {
 }
 
 public enum MemoryEntryKind: String, Equatable, Sendable {
-    /// CLAUDE.md / AGENTS.md 等用户维护的持久指令。
+    /// User-maintained persistent instructions such as CLAUDE.md / AGENTS.md.
     case instructions
-    /// 用户自行创建、可正常增删改的记忆文档。
+    /// Memory documents the user created; normal create/edit/delete applies.
     case userManaged
-    /// Codex 后台生成的本地 memory state，只允许查看。
+    /// Local memory state Codex generates in the background; view-only.
     case generated
 }
 
-/// 一份记忆/指令文件（CLAUDE.md / AGENTS.md / memory 目录下的 markdown）
+/// A memory/instruction file (CLAUDE.md / AGENTS.md / markdown under a memory directory)
 public struct MemoryEntry: Equatable, Sendable, Identifiable {
     public var id: String { path }
     public var source: AgentSource
-    /// 分组用的展示范围："全局" / 项目名 / 文件名。**不是标题** —— 同一项目的几十条记忆
-    /// 这里全是同一个项目名，拿它当标题会让整列重名（见 `title`）。
+    /// Display scope used for grouping: the global label / project name / file name. **Not a
+    /// title**: dozens of memories in one project all carry the same project name here, so using it
+    /// as the title would make the whole column identical (see `title`).
     public var scope: String
     public var path: String
     public var kind: MemoryEntryKind
-    /// 归属项目名；nil = 系统级记忆（全局 / 用户自建），非 nil = 该项目的记忆
+    /// Owning project name; nil = system-level memory (global / user-created), non-nil = that
+    /// project's memory
     public var projectName: String?
     public var sizeBytes: UInt64
     public var modifiedAt: Date
-    /// 条目标题：frontmatter `name` 优先，否则文件名（去扩展名）
+    /// Entry title: frontmatter `name` first, otherwise the file name (without extension)
     public var title: String
     /// frontmatter `description`
     public var summary: String?
-    /// frontmatter `metadata.type`；没写就是 `.other`
+    /// frontmatter `metadata.type`; `.other` when absent
     public var memoryType: MemoryType
-    /// frontmatter `metadata.originSessionId`：这条记忆诞生于哪次会话
+    /// frontmatter `metadata.originSessionId`: the session this memory was born in
     public var originSessionId: String?
-    /// 来源会话 transcript 的实际路径；nil = 会话已被删除（图谱里置灰、不可跳转）
+    /// Actual transcript path of the origin session; nil = session deleted (greyed out in the
+    /// graph, not navigable)
     public var originSessionPath: String?
-    /// 这条记忆指向的**全部**会话。Claude 是 0/1 个（等于 originSessionId）；
-    /// Codex 的 MEMORY.md 聚合多次会话，实勘 15 个。UI 据此给单按钮或下拉列表。
+    /// **All** sessions this memory points at. Claude has 0/1 (equal to originSessionId); Codex's
+    /// MEMORY.md aggregates many sessions, 15 observed locally. The UI shows a single button or a
+    /// dropdown accordingly.
     public var relatedSessions: [MemorySessionRef]
-    /// 正文里的 `[[wiki 链接]]` 原文（解析成边在 EurekaKit 做，索引层只采集）
+    /// Raw `[[wiki link]]` text from the body (resolving them into edges happens in EurekaKit; the
+    /// index layer only collects)
     public var links: [String]
-    /// **仅索引文件**（MEMORY.md）有值：正文里以 markdown 链接列出的条目文件名。
-    /// 与目录里的实际文件对账，就能算出「未被收录的死记忆」与「指向空气的条目」。
-    /// 不并进 `links`：那会让索引在图谱里连出几十条 contains 边，把真正要看的引用边盖掉。
+    /// Set **only on the index file** (MEMORY.md): entry file names listed as markdown links in the
+    /// body.
+    /// Reconciling them with the files actually in the directory yields "dead memories nobody
+    /// indexed" and "entries pointing at nothing".
+    /// Not merged into `links`: the index would then draw dozens of contains edges in the graph,
+    /// burying the reference edges that actually matter.
     public var indexedTargets: [String]
-    /// 记忆库的索引文件（`<library>/MEMORY.md`）
+    /// Index file of the memory library (`<library>/MEMORY.md`)
     public var isIndex: Bool
-    /// 所属记忆库：`"<source>:<encoded-project-dir>"`；nil = 不属于任何记忆库
+    /// Owning memory library: `"<source>:<encoded-project-dir>"`; nil = not part of any memory
+    /// library
     public var libraryKey: String?
     public var isEditable: Bool { kind != .generated }
     public var isDeletable: Bool { kind != .generated }
 
-    /// `[[link]]` 的可匹配别名：文件 basename + frontmatter name
+    /// Matchable aliases for `[[link]]`: file basename + frontmatter name
     public var linkAliases: [String] {
         let basename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         return [basename, title]
@@ -167,7 +179,8 @@ public struct MemoryEntry: Equatable, Sendable, Identifiable {
         self.memoryType = memoryType
         self.originSessionId = originSessionId
         self.originSessionPath = originSessionPath
-        // Claude 那条单值来源也并进多值列表，UI 只认一个字段
+        // Fold Claude's single-valued origin into the multi-valued list too; the UI reads only one
+        // field
         self.relatedSessions = relatedSessions.isEmpty
             ? (originSessionId.map { [MemorySessionRef(sessionId: $0, path: originSessionPath)] } ?? [])
             : relatedSessions
@@ -178,13 +191,14 @@ public struct MemoryEntry: Equatable, Sendable, Identifiable {
     }
 }
 
-/// 扫描 Claude / Codex 的技能与记忆文件。纯文件 IO，无状态，便于单测（env 覆盖路径根）。
+/// Scans Claude / Codex skill and memory files. Pure file IO and stateless, so it is easy to
+/// unit-test (env overrides the path roots).
 public enum SkillMemoryIndexer {
     private static func home() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
     }
 
-    // MARK: - 路径根（EUREKA_* 覆盖，沿用其它扫描器约定）
+    // MARK: - Path roots (EUREKA_* overrides, same convention as the other scanners)
 
     public static func claudeSkillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -195,8 +209,10 @@ public enum SkillMemoryIndexer {
         return home().appendingPathComponent(".claude/skills", isDirectory: true)
     }
 
-    /// 项目级技能根：各仓库根下 `<root>/<agentDir>/skills`（技能页与云备份共用同一发现口径）。
-    /// 抽自 SkillMemoryService.refresh 的原内联逻辑，供 SyncSourceCatalog 复用、避免漂移。
+    /// Project-level skill roots: `<root>/<agentDir>/skills` under each repo root (the Skills page
+    /// and cloud backup share the same discovery rule).
+    /// Extracted from the former inline logic in SkillMemoryService.refresh so SyncSourceCatalog
+    /// can reuse it without drift.
     public static func projectSkillRoots(
         repoRoots: [(root: URL, name: String)]
     ) -> [ProjectScopedRoot] {
@@ -270,14 +286,17 @@ public enum SkillMemoryIndexer {
         return home().appendingPathComponent(".codex", isDirectory: true)
     }
 
-    /// 停用区（Eureka 自管的同级目录，非破坏、可逆）：~/.claude/skills → ~/.claude/skills.eureka-disabled
+    /// Disabled area (a sibling directory Eureka manages; non-destructive, reversible):
+    /// ~/.claude/skills → ~/.claude/skills.eureka-disabled
     public static func disabledRoot(for skillsRoot: URL) -> URL {
         skillsRoot.deletingLastPathComponent()
             .appendingPathComponent(skillsRoot.lastPathComponent + ".eureka-disabled", isDirectory: true)
     }
 
-    /// Claude 插件技能根（内置/携带）：`~/.claude/plugins/cache/<marketplace>/<plugin>/[<version>/]skills`。
-    /// 层级可能带或不带 version 段，两级都探；返回所有存在的 skills 目录。
+    /// Claude plugin skill roots (built-in/bundled):
+    /// `~/.claude/plugins/cache/<marketplace>/<plugin>/[<version>/]skills`.
+    /// The hierarchy may or may not include a version segment, so both levels are probed; returns
+    /// every skills directory that exists.
     public static func claudePluginSkillsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
@@ -296,14 +315,15 @@ public enum SkillMemoryIndexer {
         }
         for marketplace in subdirs(cache) {
             for plugin in subdirs(marketplace) {
-                collect(plugin)                       // plugin/skills（无版本）
+                collect(plugin)                       // plugin/skills (no version)
                 for version in subdirs(plugin) { collect(version) }  // plugin/version/skills
             }
         }
         return roots
     }
 
-    /// 归一化技能名用于跨源/统计匹配：小写；`plugin:skill` 取冒号后段。
+    /// Normalizes a skill name for cross-source/stats matching: lowercase; for `plugin:skill` take
+    /// the part after the colon.
     public static func normalizeSkillName(_ name: String) -> String {
         let lower = name.lowercased()
         if let colon = lower.lastIndex(of: ":") {
@@ -312,12 +332,13 @@ public enum SkillMemoryIndexer {
         return lower
     }
 
-    // MARK: - 技能
+    // MARK: - Skills
 
     public static func indexSkills(
         claudeSkillsRoot: URL, codexSkillsRoot: URL,
-        /// `~/.codex/memories/skills`：Codex 把技能也放进了那个 memories git 仓库
-        /// （实勘 `publish-draft-pr`）。不收这里，它就会被记忆扫描当成一条"记忆"。
+        /// `~/.codex/memories/skills`: Codex puts skills into that memories git repo too
+        /// (`publish-draft-pr` observed locally). If it isn't collected here, the memory scan
+        /// treats it as a "memory".
         codexMemorySkillsRoot: URL? = nil,
         opencodeSkillsRoot: URL? = nil,
         grokSkillsRoot: URL? = nil,
@@ -330,16 +351,18 @@ public enum SkillMemoryIndexer {
         cursorSkillsRoot: URL? = nil,
         codeBuddySkillsRoot: URL? = nil,
         qoderSkillsRoot: URL? = nil,
-        /// zcode：技能装在共享的 `~/.agents/skills`（SKILL.md 与 Claude 同构）
+        /// zcode: skills live in the shared `~/.agents/skills` (SKILL.md has the same shape as
+        /// Claude's)
         zcodeSkillsRoot: URL? = nil,
-        /// trae 的**可写**技能根，两个渠道各一个（`~/.trae-cn/skills`、`~/.trae/skills`）。
-        /// 只读的 `builtin_skills` / `builtin/global/skills` 走 `bundledRoots`。
+        /// Trae's **writable** skill roots, one per channel (`~/.trae-cn/skills`,
+        /// `~/.trae/skills`). The read-only `builtin_skills` / `builtin/global/skills` go through
+        /// `bundledRoots`.
         traeSkillsRoots: [URL] = [],
         projectSkillRoots: [ProjectScopedRoot] = [],
         bundledRoots: [(root: URL, source: AgentSource)] = []
     ) -> [SkillEntry] {
         var result: [SkillEntry] = []
-        // 系统级（用户 home 根 + 停用区）
+        // System-level (user home root + disabled area)
         result += scanSkillRoot(claudeSkillsRoot, source: .claude, enabled: true, scope: .system)
         result += scanSkillRoot(
             disabledRoot(for: claudeSkillsRoot), source: .claude, enabled: false, scope: .system)
@@ -371,8 +394,9 @@ public enum SkillMemoryIndexer {
             result += scanSkillRoot(
                 disabledRoot(for: kimiSkillsRoot), source: .kimi, enabled: false, scope: .system)
         }
-        // cursor：~/.cursor/skills（SKILL.md 与 Claude 同构）。
-        // 同级的 ~/.cursor/skills-cursor 是官方内置技能，随客户端分发、用户改不了，不列。
+        // cursor: ~/.cursor/skills (SKILL.md has the same shape as Claude's).
+        // The sibling ~/.cursor/skills-cursor holds official built-in skills shipped with the
+        // client that the user can't modify; not listed.
         if let cursorSkillsRoot {
             result += scanSkillRoot(
                 cursorSkillsRoot, source: .cursor, enabled: true, scope: .system)
@@ -380,29 +404,32 @@ public enum SkillMemoryIndexer {
                 disabledRoot(for: cursorSkillsRoot), source: .cursor, enabled: false,
                 scope: .system)
         }
-        // gemini：~/.gemini/skills（SKILL.md 与 Claude 同构；该目录同时被 Antigravity 共用，
-        // 归 Gemini 一次避免双源重复列出）
+        // gemini: ~/.gemini/skills (SKILL.md has the same shape as Claude's; Antigravity shares
+        // this directory, so it is attributed to Gemini once to avoid listing it under both
+        // sources)
         if let geminiSkillsRoot {
             result += scanSkillRoot(
                 geminiSkillsRoot, source: .gemini, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: geminiSkillsRoot), source: .gemini, enabled: false, scope: .system)
         }
-        // qwen：~/.qwen/skills（SKILL.md 与 Claude 同构）
+        // qwen: ~/.qwen/skills (SKILL.md has the same shape as Claude's)
         if let qwenSkillsRoot {
             result += scanSkillRoot(
                 qwenSkillsRoot, source: .qwen, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: qwenSkillsRoot), source: .qwen, enabled: false, scope: .system)
         }
-        // antigravity 用户级技能 ~/.gemini/antigravity/skills（**不是** ~/.gemini/skills，
-        // 那是 Gemini 的、已归 gemini 一次）；内置 builtin/skills 走 bundledRoots
+        // antigravity user-level skills ~/.gemini/antigravity/skills (**not** ~/.gemini/skills,
+        // which is Gemini's and already attributed to gemini once); built-in builtin/skills go
+        // through bundledRoots
         for root in antigravitySkillsRoots {
             result += scanSkillRoot(root, source: .antigravity, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: root), source: .antigravity, enabled: false, scope: .system)
         }
-        // codebuddy：~/.codebuddy/skills（SKILL.md 与 Claude 同构，实勘 23 个）
+        // codebuddy: ~/.codebuddy/skills (SKILL.md has the same shape as Claude's, 23 observed
+        // locally)
         if let codeBuddySkillsRoot {
             result += scanSkillRoot(
                 codeBuddySkillsRoot, source: .codebuddy, enabled: true, scope: .system)
@@ -410,34 +437,39 @@ public enum SkillMemoryIndexer {
                 disabledRoot(for: codeBuddySkillsRoot), source: .codebuddy, enabled: false,
                 scope: .system)
         }
-        // qoder：~/.qoder-cn/skills（与 codebuddy 同构；⚠️ 本机未装 Qoder，未实勘）
+        // qoder: ~/.qoder-cn/skills (same shape as codebuddy; Qoder is not installed on this
+        // machine, so this is unverified)
         if let qoderSkillsRoot {
             result += scanSkillRoot(
                 qoderSkillsRoot, source: .qoder, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: qoderSkillsRoot), source: .qoder, enabled: false, scope: .system)
         }
-        // zcode：~/.agents/skills（共享技能根，ZCode CLI 桌面版装技能的默认位置）
+        // zcode: ~/.agents/skills (shared skill root; where the ZCode CLI desktop app installs
+        // skills by default)
         if let zcodeSkillsRoot {
             result += scanSkillRoot(
                 zcodeSkillsRoot, source: .zcode, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: zcodeSkillsRoot), source: .zcode, enabled: false, scope: .system)
         }
-        // trae：`<dataFolder>/skills`（SKILL.md 与 Claude 同构：frontmatter 的 name/description）。
-        // 两个渠道（CN / 国际版）可能同时装着，各扫一遍；同名技能在两边是两条，
-        // 因为它们确实是两个应用各自的配置，不该合并计数。
+        // trae: `<dataFolder>/skills` (SKILL.md has the same shape as Claude's: frontmatter
+        // name/description).
+        // Both channels (CN / international) may be installed at once, so scan each; a same-named
+        // skill shows up as two entries because they really are two apps' separate configs and must
+        // not be counted as one.
         for root in traeSkillsRoots {
             result += scanSkillRoot(root, source: .trae, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: root), source: .trae, enabled: false, scope: .system)
         }
-        // hermes：分类目录树，启停看 config.yaml 而非目录位置（详见 scanHermesSkillTree）
+        // hermes: category directory tree; enabled state comes from config.yaml, not directory
+        // location (see scanHermesSkillTree)
         if let hermesSkillsRoot {
             result += scanHermesSkillTree(
                 hermesSkillsRoot, disabledNames: hermesDisabledSkills)
         }
-        // 项目级（各项目 cwd 下的 skills 根 + 停用区）
+        // Project-level (skills root under each project's cwd + disabled area)
         for project in projectSkillRoots {
             let scope = SkillScope.project(project.projectName)
             result += scanSkillRoot(
@@ -445,18 +477,20 @@ public enum SkillMemoryIndexer {
             result += scanSkillRoot(
                 disabledRoot(for: project.root), source: project.source, enabled: false, scope: scope)
         }
-        // 内置/携带根（插件 / .system / bundled / builtin）：只读，标 origin=.bundled，无停用区
+        // Built-in/bundled roots (plugin / .system / bundled / builtin): read-only, tagged
+        // origin=.bundled, no disabled area
         for bundled in bundledRoots {
             result += scanSkillRoot(
                 bundled.root, source: bundled.source, enabled: true,
                 scope: .system, origin: .bundled)
         }
-        // 同一 path 只留一条（系统级先扫 → 优先保留）：项目根与系统根重合时（例如会话在 ~ 里
-        // 跑过，仓库根回退成 home）同一 SKILL.md 会被扫两次，而 SkillEntry.id = path，
-        // 重复 id 会让 SwiftUI 的 ForEach/LazyVGrid 出现空洞格子。
+        // Keep one entry per path (system-level is scanned first, so it wins): when a project root
+        // coincides with a system root (e.g. a session ran in ~ and the repo root fell back to
+        // home), the same SKILL.md is scanned twice, and since SkillEntry.id = path, duplicate ids
+        // leave empty holes in SwiftUI's ForEach/LazyVGrid.
         var seenPaths = Set<String>()
         result = result.filter { seenPaths.insert($0.path).inserted }
-        // 启用在前，再按名字
+        // Enabled first, then by name
         return result.sorted {
             ($0.enabled ? 0 : 1, $0.name.lowercased()) < ($1.enabled ? 0 : 1, $1.name.lowercased())
         }
@@ -472,7 +506,7 @@ public enum SkillMemoryIndexer {
         var result: [SkillEntry] = []
         for dir in dirs {
             let dirName = dir.lastPathComponent
-            if dirName.hasPrefix(".") { continue }  // 跳过 .system 等系统目录
+            if dirName.hasPrefix(".") { continue }  // skip system directories such as .system
             let isDir = (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             guard isDir else { continue }
             let skillFile = dir.appendingPathComponent("SKILL.md")
@@ -495,12 +529,14 @@ public enum SkillMemoryIndexer {
         return result
     }
 
-    /// Hermes 技能树扫描：`skills/<分类>/<名>/SKILL.md`，另有 `<分类>/<子类>/<名>/` 与
-    /// 顶层无分类两种深度 —— 故必须**递归**找 SKILL.md（`scanSkillRoot` 只看直属子级，撑不住）。
+    /// Hermes skill tree scan: `skills/<category>/<name>/SKILL.md`, plus two other depths --
+    /// `<category>/<subcategory>/<name>/` and top-level without a category -- so SKILL.md must be
+    /// found **recursively** (`scanSkillRoot` only looks at direct children and can't cope).
     ///
-    /// 启停不看目录：Hermes 用 `config.yaml` 的 `skills.disabled`（按 frontmatter `name` 匹配），
-    /// 目录一动就会破坏它的 `.bundled_manifest` md5 记账 → `disabledNames` 由调用方
-    /// （app 层，能同时用到 EurekaInstall 的 HermesConfigEditor）读出后传进来。
+    /// Enabled state ignores directories: Hermes uses `skills.disabled` in `config.yaml` (matched
+    /// by frontmatter `name`), and moving a directory would break its `.bundled_manifest` md5
+    /// bookkeeping → `disabledNames` is read by the caller (the app layer, which can also use
+    /// EurekaInstall's HermesConfigEditor) and passed in.
     static func scanHermesSkillTree(
         _ root: URL, disabledNames: Set<String> = []
     ) -> [SkillEntry] {
@@ -512,7 +548,8 @@ public enum SkillMemoryIndexer {
         var result: [SkillEntry] = []
         for case let url as URL in walker {
             let name = url.lastPathComponent
-            // 支持目录（技能自带素材）与工具/缓存目录里不会有独立技能，整棵剪掉
+            // Support directories (a skill's own assets) and tool/cache directories never contain
+            // standalone skills; prune the whole subtree
             if Self.hermesPrunedDirs.contains(name) {
                 walker.skipDescendants()
                 continue
@@ -530,7 +567,7 @@ public enum SkillMemoryIndexer {
                 path: url.path,
                 directory: dir.path,
                 enabled: !disabledNames.contains(skillName),
-                scope: .system,     // Hermes 没有项目级技能（只有 skills.external_dirs）
+                scope: .system,     // Hermes has no project-level skills (only skills.external_dirs)
                 origin: .user,
                 sizeBytes: UInt64(values?.fileSize ?? 0),
                 modifiedAt: values?.contentModificationDate ?? .distantPast))
@@ -540,7 +577,8 @@ public enum SkillMemoryIndexer {
         }
     }
 
-    /// 递归时整棵跳过的目录：技能自带素材目录 + 归档/缓存/依赖目录
+    /// Directories skipped wholesale while recursing: a skill's own asset directories +
+    /// archive/cache/dependency directories
     private static let hermesPrunedDirs: Set<String> = [
         "references", "templates", "assets", "scripts",
         ".hub", ".archive", ".curator_backups", ".git", ".github",
@@ -548,7 +586,7 @@ public enum SkillMemoryIndexer {
         "__pycache__", ".tox", ".nox", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ]
 
-    // MARK: - 记忆
+    // MARK: - Memory
 
     public static func indexMemory(
         claudeHome: URL, codexHome: URL, opencodeHome: URL,
@@ -560,10 +598,12 @@ public enum SkillMemoryIndexer {
         hermesHome: URL? = nil,
         codeBuddyMemoryRoot: URL? = nil,
         qoderMemoriesRoot: URL? = nil,
-        /// `~/.trae-cn/memory`（只有 CN 版有记忆库）
+        /// `~/.trae-cn/memory` (only the CN build has a memory library)
         traeMemoryRoot: URL? = nil,
-        /// trae 各渠道的 dotfile 根（`~/.trae-cn`、`~/.trae`）。用户手写规则有两种形态并存：
-        /// `<root>/user_rules.md` 单文件（Trae 前端叫 legacy）与 `<root>/user_rules/*.md` 目录。
+        /// Trae's dotfile root per channel (`~/.trae-cn`, `~/.trae`). Hand-written user rules come
+        /// in two coexisting forms:
+        /// a single `<root>/user_rules.md` file (Trae's frontend calls it legacy) and a
+        /// `<root>/user_rules/*.md` directory.
         traeRulesHomes: [URL] = [],
         projectRoots: [(root: URL, name: String)] = [],
         codexInstructionScopes: [(directory: URL, projectName: String, scope: String)] = []
@@ -571,8 +611,9 @@ public enum SkillMemoryIndexer {
         let fm = FileManager.default
         var result: [MemoryEntry] = []
 
-        /// `libraryKey` 非 nil = 这条属于某个记忆库；`sessionRoot` = 该库同级的会话目录
-        /// （`~/.claude/projects/<encoded>/`），用来判断来源会话的 transcript 还在不在。
+        /// Non-nil `libraryKey` = this entry belongs to a memory library; `sessionRoot` = the
+        /// session directory next to that library (`~/.claude/projects/<encoded>/`), used to check
+        /// whether the origin session's transcript still exists.
         func add(
             _ url: URL, source: AgentSource, scope: String,
             projectName: String? = nil, kind: MemoryEntryKind = .userManaged,
@@ -605,16 +646,17 @@ public enum SkillMemoryIndexer {
                 originSessionPath: sessionPath,
                 relatedSessions: relatedSessions,
                 links: document.links,
-                // 只有索引文件才解析 markdown 链接（普通记忆正文里的 md 链接是引用外部文档，
-                // 不是"收录"语义）
+                // Only the index file has its markdown links parsed (md links in an ordinary memory
+                // body reference external docs, not "indexed" semantics)
                 indexedTargets: isLibraryIndex ? document.indexedTargets : [],
-                // 只有记忆库里的 MEMORY.md 才是索引。Hermes 的 memories/MEMORY.md 是它
-                // 自己写的记忆正文（不是任何库的目录），所以判据里必须带上 libraryKey。
+                // Only a MEMORY.md inside a memory library is an index. Hermes's memories/MEMORY.md
+                // is memory content it writes itself (not any library's table of contents), so the
+                // check must include libraryKey.
                 isIndex: isLibraryIndex,
                 libraryKey: libraryKey))
         }
 
-        /// Codex 每一级目录只加载 override/AGENTS 中第一个存在的文件。
+        /// Codex loads only the first existing file of override/AGENTS at each directory level.
         func addEffectiveCodexInstruction(
             directory: URL, scope: String, projectName: String? = nil
         ) {
@@ -629,19 +671,21 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // Claude 全局 CLAUDE.md
+        // Claude global CLAUDE.md
         add(claudeHome.appendingPathComponent("CLAUDE.md"), source: .claude,
-            scope: "全局", kind: .instructions)
-        // Claude 用户级规则 ~/.claude/rules/**/*.md（官方：无 paths: 的每次会话都加载，
-        // 有 paths: frontmatter 的按文件匹配按需加载）→ 指令，scope = rules 内相对路径
+            scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
+        // Claude user-level rules ~/.claude/rules/**/*.md (official: rules without paths: load
+        // every session, rules with a paths: frontmatter load on demand when a file matches) →
+        // instructions, scope = path relative to rules
         for rule in enumerateRules(claudeHome.appendingPathComponent("rules", isDirectory: true)) {
             add(rule.url, source: .claude, scope: rule.scope, kind: .instructions)
         }
-        // Claude ~/.claude/memories/**/*.md（用户自建记忆）
+        // Claude ~/.claude/memories/**/*.md (user-created memories)
         for file in enumerateMarkdown(claudeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .claude, scope: file.deletingPathExtension().lastPathComponent)
         }
-        // Claude 项目记忆库：projects/<encoded>/memory/**/*.md（MEMORY.md = 该库的索引）
+        // Claude project memory libraries: projects/<encoded>/memory/**/*.md (MEMORY.md = that
+        // library's index)
         let projectDirs = ((try? fm.contentsOfDirectory(
             at: claudeProjectsRoot, includingPropertiesForKeys: nil)) ?? [])
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -656,53 +700,60 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // Codex 全局持久指令：AGENTS.override.md 优先于 AGENTS.md。
-        addEffectiveCodexInstruction(directory: codexHome, scope: "全局")
-        // Codex 记忆 = `~/.codex/memories/` **顶层**的 md（实勘为三层管道：
-        // raw_memories.md → MEMORY.md → memory_summary.md），后台生成、仅供查看。
+        // Codex global persistent instructions: AGENTS.override.md takes precedence over AGENTS.md.
+        addEffectiveCodexInstruction(directory: codexHome, scope: L10n.text("Global", zhHans: "全局"))
+        // Codex memory = the **top-level** md files of `~/.codex/memories/` (observed as a
+        // three-stage pipeline: raw_memories.md → MEMORY.md → memory_summary.md), generated in the
+        // background, view-only.
         //
-        // ⚠️ **只收顶层，绝不递归**：这个目录是 Codex 自建的 git 仓库，混装着三类非记忆内容 ——
-        // `rollout_summaries/`（每次会话的摘要，是 MEMORY.md 的证据附件）、
-        // `extensions/`（教 Codex 怎么维护记忆的元指令）、
-        // `skills/`（**技能**，见 indexSkills 的 codexMemorySkillsRoot）。
-        // 递归收一遍会把 20 个文件全算成记忆，其中 17 个不是。
+        // **Top level only, never recurse**: this directory is a git repo Codex created, mixing in
+        // three kinds of non-memory content -- `rollout_summaries/` (per-session summaries, the
+        // evidence attachments for MEMORY.md), `extensions/` (meta-instructions teaching Codex how
+        // to maintain memory), `skills/` (**skills**, see codexMemorySkillsRoot in indexSkills).
+        // Recursing would count all 20 files as memories, 17 of which are not.
         for file in enumerateMarkdownShallow(
             codexHome.appendingPathComponent("memories", isDirectory: true)) {
-            // Codex 没有 frontmatter，会话归属写在正文的 rollout_summary_files 段落里
+            // Codex has no frontmatter; session ownership is written in the body's
+            // rollout_summary_files section
             let refs = readHead(file, bytes: 262_144).map(extractCodexSessionRefs) ?? []
             add(file, source: .codex,
                 scope: file.deletingPathExtension().lastPathComponent, kind: .generated,
                 relatedSessions: refs)
         }
 
-        // opencode 全局 AGENTS.md（~/.config/opencode/AGENTS.md，遵循 AGENTS.md 标准）
+        // opencode global AGENTS.md (~/.config/opencode/AGENTS.md, following the AGENTS.md
+        // standard)
         add(opencodeHome.appendingPathComponent("AGENTS.md"), source: .opencode,
-            scope: "全局", kind: .instructions)
-        // opencode memories/**/*.md（createMemory 写这里，索引须对齐避免死路径）
+            scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
+        // opencode memories/**/*.md (createMemory writes here; the index must match to avoid dead
+        // paths)
         for file in enumerateMarkdown(opencodeHome.appendingPathComponent("memories", isDirectory: true)) {
             add(file, source: .opencode, scope: file.deletingPathExtension().lastPathComponent)
         }
 
-        // grok 跨会话记忆 ~/.grok/memory/**/*.md（实验特性，目录可能不存在）
+        // grok cross-session memory ~/.grok/memory/**/*.md (experimental feature; the directory may
+        // not exist)
         if let grokMemoryRoot {
             for file in enumerateMarkdown(grokMemoryRoot) {
                 add(file, source: .grok, scope: file.deletingPathExtension().lastPathComponent)
             }
         }
 
-        // kimi 全局记忆 ~/.kimi-code/AGENTS.md（Kimi 唯一全局记忆文件，AGENTS.md-first）
+        // kimi global memory ~/.kimi-code/AGENTS.md (Kimi's only global memory file,
+        // AGENTS.md-first)
         if let kimiHome {
             add(kimiHome.appendingPathComponent("AGENTS.md"), source: .kimi,
-                scope: "全局", kind: .instructions)
+                scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
         }
 
-        // gemini 全局记忆 ~/.gemini/GEMINI.md（GEMINI.md-first）
+        // gemini global memory ~/.gemini/GEMINI.md (GEMINI.md-first)
         if let geminiHome {
             add(geminiHome.appendingPathComponent("GEMINI.md"), source: .gemini,
-                scope: "全局", kind: .instructions)
+                scope: L10n.text("Global", zhHans: "全局"), kind: .instructions)
         }
 
-        // qwen：全局 memories/*.md + 项目级 projects/<encoded>/memory/**/*.md（Claude 式布局）
+        // qwen: global memories/*.md + project-level projects/<encoded>/memory/**/*.md
+        // (Claude-style layout)
         if let qwenHome {
             for file in enumerateMarkdown(
                 qwenHome.appendingPathComponent("memories", isDirectory: true)) {
@@ -724,14 +775,17 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // hermes：三份 profile 级指令文件，**无项目级记忆概念**。
-        //   memories/MEMORY.md = agent 自记、memories/USER.md = 用户画像、SOUL.md = 人格身份。
-        // ⚠ MEMORY/USER 正文是「条目以 \n§\n 相连」的扁平格式且有字数上限（2200 / 1375），
-        //   外部改坏格式或超限会触发 Hermes 的漂移保护：它存一份 .bak 后**拒绝后续写入**。
+        // hermes: three profile-level instruction files, **no notion of project-level memory**.
+        //   memories/MEMORY.md = agent's own notes, memories/USER.md = user profile,
+        //   SOUL.md = persona identity.
+        // MEMORY/USER bodies use a flat format of "entries joined by \n§\n" with character caps
+        //   (2200 / 1375); an external edit that breaks the format or exceeds the cap trips Hermes's
+        //   drift protection: it saves a .bak and then **refuses further writes**.
         if let hermesHome {
             let memories = hermesHome.appendingPathComponent("memories", isDirectory: true)
-            // MEMORY / USER 是 **agent 自己写的记忆**（不是用户维护的指令）→ 归记忆；
-            // SOUL 是人格身份设定，等价于系统提示 → 归指令。
+            // MEMORY / USER are **memories the agent writes itself** (not user-maintained
+            // instructions) → Memory; SOUL is the persona identity setting, equivalent to a system
+            // prompt → Instructions.
             add(memories.appendingPathComponent("MEMORY.md"), source: .hermes,
                 scope: "MEMORY", kind: .userManaged)
             add(memories.appendingPathComponent("USER.md"), source: .hermes,
@@ -740,7 +794,8 @@ public enum SkillMemoryIndexer {
                 scope: "SOUL", kind: .instructions)
         }
 
-        // codebuddy 全局记忆 ~/.codebuddy/memery/**/*.md（官方拼写就是 memery，勿"修正"）
+        // codebuddy global memory ~/.codebuddy/memery/**/*.md (the official spelling really is
+        // memery; don't "fix" it)
         if let codeBuddyMemoryRoot {
             for file in enumerateMarkdown(codeBuddyMemoryRoot) {
                 add(file, source: .codebuddy,
@@ -748,8 +803,9 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // qoder 全局记忆 memories/<user-hash>/global/<category>/**/*.md：
-        // scope 取相对 global/ 的类别路径（拿不到类别就退回文件名）
+        // qoder global memory memories/<user-hash>/global/<category>/**/*.md:
+        // scope is the category path relative to global/ (falls back to the file name when there is
+        // no category)
         if let qoderMemoriesRoot {
             for file in enumerateMarkdown(qoderMemoriesRoot) {
                 add(file, source: .qoder,
@@ -757,15 +813,16 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // trae 记忆库（**只有 CN 版有**）：
-        //   memory/user_profile.md                        ← 全局用户画像
-        //   memory/projects/<encoded>/project_memory.md   ← 项目记忆
-        //   memory/projects/<encoded>/<YYYYMMDD>/topics.md ← 每日会话话题摘要（只读流水）
-        // 三者都是 Trae 自己写的 → 归**记忆**；用户手写规则在下面单独归**指令**。
-        // 不收 `session_memory_<id>.jsonl`：那是逐回合流水且不是 markdown。
+        // trae memory library (**CN build only**):
+        //   memory/user_profile.md                        ← global user profile
+        //   memory/projects/<encoded>/project_memory.md   ← project memory
+        //   memory/projects/<encoded>/<YYYYMMDD>/topics.md ← daily session topic summary (read-only log)
+        // All three are written by Trae itself → **Memory**; hand-written user rules go to
+        // **Instructions** separately below.
+        // `session_memory_<id>.jsonl` is not collected: it is a per-turn log, and not markdown.
         if let traeMemoryRoot {
             add(traeMemoryRoot.appendingPathComponent("user_profile.md"),
-                source: .trae, scope: "全局", kind: .userManaged)
+                source: .trae, scope: L10n.text("Global", zhHans: "全局"), kind: .userManaged)
             let projectsRoot = traeMemoryRoot
                 .appendingPathComponent("projects", isDirectory: true)
             for projectDir in subdirectories(of: projectsRoot) {
@@ -777,8 +834,9 @@ public enum SkillMemoryIndexer {
                     kind: .userManaged, libraryKey: libraryKey)
                 for dayDir in subdirectories(of: projectDir) {
                     let topics = dayDir.appendingPathComponent("topics.md")
-                    // 这份摘要覆盖了哪些会话。path 一律 nil —— Trae 没有可跳转的转录文件，
-                    // UI 会据此置灰（同 CLAUDE.md 里「originSessionPath == nil 就置灰」那条）。
+                    // Which sessions this summary covers. path is always nil -- Trae has no
+                    // navigable transcript file, so the UI greys them out (same as the CLAUDE.md
+                    // rule "grey out when originSessionPath == nil").
                     let refs = TraeSessionIndexer.parseTopics(fileURL: topics)
                         .map { MemorySessionRef(sessionId: $0.sessionId, path: nil) }
                     add(topics, source: .trae,
@@ -789,7 +847,8 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // trae 用户手写规则 → **指令**（两个渠道各自一套，scope 用 dotfile 目录名区分）
+        // trae hand-written user rules → **Instructions** (each channel has its own set; scope uses
+        // the dotfile directory name to tell them apart)
         for home in traeRulesHomes {
             let scope = home.lastPathComponent
             add(home.appendingPathComponent("user_rules.md"),
@@ -802,7 +861,8 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // trae 项目规则 <repo>/.trae/rules/*.md（含旧的单文件名 project_rules.md）→ 指令
+        // trae project rules <repo>/.trae/rules/*.md (including the old single-file name
+        // project_rules.md) → Instructions
         for (root, name) in projectRoots {
             for file in enumerateMarkdown(TraePaths.projectRulesRoot(repoRoot: root)) {
                 add(file, source: .trae,
@@ -811,9 +871,10 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // cursor 项目规则 <repo>/.cursor/rules/*.mdc（官方 create-rule 技能里的约定）：
-        // 这是 Cursor 唯一的本地"记忆"形态——它没有全局记忆目录，`cursor/memoriesEnabled`
-        // 指的是服务端记忆。.mdc 就是带 YAML frontmatter 的 markdown，按扩展名单独收。
+        // cursor project rules <repo>/.cursor/rules/*.mdc (the convention from the official
+        // create-rule skill): this is Cursor's only local "memory" form -- it has no global memory
+        // directory; `cursor/memoriesEnabled` refers to server-side memory. .mdc is just markdown
+        // with YAML frontmatter, collected separately by extension.
         for (root, name) in projectRoots {
             let rulesDir = root.appendingPathComponent(".cursor/rules", isDirectory: true)
             for file in enumerateFiles(rulesDir, extensions: ["mdc", "md"]) {
@@ -823,14 +884,16 @@ public enum SkillMemoryIndexer {
             }
         }
 
-        // 项目根记忆（各仓库根下的约定文件）：CLAUDE.md→Claude、GEMINI.md→Gemini、
-        // AGENTS.md→Codex/opencode/Kimi 共用（归 Codex 一次避免重复）；
-        // .kimi-code/AGENTS.md 是 Kimi 专属的项目级覆盖，单独归 Kimi
+        // Project-root memory (convention files under each repo root): CLAUDE.md→Claude,
+        // GEMINI.md→Gemini, AGENTS.md shared by Codex/opencode/Kimi (attributed to Codex once to
+        // avoid duplicates); .kimi-code/AGENTS.md is Kimi's own project-level override, attributed
+        // to Kimi separately
         for (root, name) in projectRoots {
             add(root.appendingPathComponent("CLAUDE.md"), source: .claude,
                 scope: name, projectName: name, kind: .instructions)
-            // Claude 项目规则 <repo>/.claude/rules/**/*.md（同用户级；官方支持用符号链接
-            // 把共享规则目录挂进项目，枚举跟随链接并防环）
+            // Claude project rules <repo>/.claude/rules/**/*.md (same as user-level; officially a
+            // shared rules directory can be mounted into a project via symlink, so enumeration
+            // follows links and guards against cycles)
             for rule in enumerateRules(root.appendingPathComponent(".claude/rules", isDirectory: true)) {
                 add(rule.url, source: .claude, scope: rule.scope,
                     projectName: name, kind: .instructions)
@@ -843,7 +906,8 @@ public enum SkillMemoryIndexer {
                 source: .kimi, scope: name, projectName: name, kind: .instructions)
         }
 
-        // Codex 项目指令只沿实际近期 cwd 的 root → cwd 链发现；项目根始终纳入。
+        // Codex project instructions are discovered only along the root → cwd chain of actual
+        // recent cwds; project roots are always included.
         var codexScopes = codexInstructionScopes
         codexScopes.append(contentsOf: projectRoots.map {
             (directory: $0.root, projectName: $0.name, scope: $0.name)
@@ -854,7 +918,8 @@ public enum SkillMemoryIndexer {
                 directory: item.directory, scope: item.scope, projectName: item.projectName)
         }
 
-        // 同一 path 只留一条：MemoryEntry.id = path，重复 id 同样会让 SwiftUI 列表/网格错位。
+        // Keep one entry per path: MemoryEntry.id = path, and duplicate ids likewise misalign
+        // SwiftUI lists/grids.
         var seenPaths = Set<String>()
         result = result.filter { seenPaths.insert($0.path).inserted }
         return result.sorted {
@@ -862,8 +927,8 @@ public enum SkillMemoryIndexer {
         }
     }
 
-    /// 按扩展名枚举（Cursor 规则是 `.mdc`：带 YAML frontmatter 的 markdown 变体，
-    /// `enumerateMarkdown` 只认 `.md` 会整片漏掉）
+    /// Enumerates by extension (Cursor rules are `.mdc`, a markdown variant with YAML frontmatter;
+    /// `enumerateMarkdown` only recognizes `.md` and would miss them entirely)
     static func enumerateFiles(_ dir: URL, extensions: [String]) -> [URL] {
         let fm = FileManager.default
         let wanted = Set(extensions.map { $0.lowercased() })
@@ -878,9 +943,10 @@ public enum SkillMemoryIndexer {
         return files
     }
 
-    /// **只收直属子级**的 markdown（不进子目录）。
-    /// Codex 的 memories 目录用它：那是个混装记忆/会话摘要/扩展/技能的 git 仓库，递归即误收。
-    /// 直属子目录（按名字排序，保证同一次扫描结果稳定）
+    /// Markdown files that are **direct children only** (no descent into subdirectories).
+    /// Used for Codex's memories directory: it is a git repo mixing memories/session
+    /// summaries/extensions/skills, so recursing picks up the wrong files.
+    /// Direct subdirectories (sorted by name so a single scan's result is stable)
     static func subdirectories(of dir: URL) -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
@@ -888,8 +954,9 @@ public enum SkillMemoryIndexer {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// Trae 记忆库的项目名。目录名是 `<正向编码路径>--p<N>-<hash>`，比 Claude 多一个后缀，
-    /// 所以先剥后缀再走同一套「正向编码已知根再比对」的逻辑（`-` 不可反解，见 CLAUDE.md）。
+    /// Project name for a Trae memory library. Directory names are `<forward-encoded
+    /// path>--p<N>-<hash>`, one suffix more than Claude's, so strip the suffix first, then use the
+    /// same "forward-encode known roots and compare" logic (`-` can't be reversed, see CLAUDE.md).
     static func resolveTraeProjectName(
         projectDir: URL, knownRoots: [(root: URL, name: String)]
     ) -> String {
@@ -899,8 +966,9 @@ public enum SkillMemoryIndexer {
             let candidate = encodeProjectDirName(root.standardizedFileURL.path)
             if candidate == stripped || candidate == encoded { return name }
         }
-        // 比不中就退回有损的末段启发式 —— 但要用**剥掉后缀之后**的串，
-        // 否则末段会是那串 hash（`friendlyProject` 只取最后一段）。
+        // No match: fall back to the lossy last-segment heuristic -- but on the string **after the
+        // suffix is stripped**, otherwise the last segment would be the hash (`friendlyProject`
+        // takes only the last segment).
         return friendlyProject(fromEncoded: stripped)
     }
 
@@ -922,12 +990,16 @@ public enum SkillMemoryIndexer {
         return files
     }
 
-    /// Claude 规则目录枚举（官方 `.claude/rules/`：.md 递归发现；目录支持符号链接，用来把一套
-    /// 共享规则挂进多个项目；环要能处理）。`enumerateMarkdown` 的 FileManager.enumerator 不进
-    /// 符号链接目录，所以这里手写递归：跟随链接、用已访问的**真实路径**集合挡环、断链跳过。
-    /// 列目录必须用 path 版 `contentsOfDirectory(atPath:)` 配真实路径 —— URL 版对"指向目录的
-    /// 符号链接"直接返回空（实测），path 版走 opendir 会跟随。子项 URL 仍拼在**逻辑**路径上：
-    /// 条目 path 与 scope 都用用户在项目里看到的名字（`shared/security`），不暴露链接目标。
+    /// Claude rules directory enumeration (official `.claude/rules/`: .md discovered recursively;
+    /// directories may be symlinks, used to mount one shared rule set into several projects; cycles
+    /// must be handled). `enumerateMarkdown`'s FileManager.enumerator doesn't descend into
+    /// symlinked directories, so recursion is hand-written here: follow links, block cycles with a
+    /// set of visited **real paths**, skip broken links.
+    /// Listing must use the path-based `contentsOfDirectory(atPath:)` with the real path -- the URL
+    /// version returns nothing for a "symlink pointing at a directory" (measured), while the path
+    /// version goes through opendir and follows it. Child URLs are still built on the **logical**
+    /// path: entry path and scope both use the name the user sees in the project
+    /// (`shared/security`), never exposing the link target.
     static func enumerateRules(_ dir: URL) -> [(url: URL, scope: String)] {
         let fm = FileManager.default
         var visited = Set<String>()
@@ -942,7 +1014,8 @@ public enum SkillMemoryIndexer {
             for name in names {
                 let child = directory.appendingPathComponent(name)
                 var isDirectory: ObjCBool = false
-                // fileExists 跟随符号链接：链接目录按目录走，断链直接跳过
+                // fileExists follows symlinks: linked directories are walked as directories, broken
+                // links are skipped
                 guard fm.fileExists(atPath: child.path, isDirectory: &isDirectory) else { continue }
                 if isDirectory.boolValue {
                     walk(child, prefix: prefix + name + "/")
@@ -955,8 +1028,9 @@ public enum SkillMemoryIndexer {
         return result
     }
 
-    /// qoder 记忆的展示 scope：相对 memories 根的去扩展名路径；
-    /// 剥掉 <user-hash>/global/ 前缀，留下 <category>/<名>（无此前缀时原样返回）
+    /// Display scope of a qoder memory: path relative to the memories root, without extension;
+    /// strips the <user-hash>/global/ prefix, leaving <category>/<name> (returned as-is without
+    /// that prefix)
     static func qoderMemoryScope(file: URL, root: URL) -> String {
         let rootPath = root.standardizedFileURL.path
         var rel = file.deletingPathExtension().standardizedFileURL.path
@@ -971,16 +1045,19 @@ public enum SkillMemoryIndexer {
         return rel
     }
 
-    /// Claude 把 cwd 的 "/" 编码成 "-"；取末段作为项目名。
-    /// **有损**：`aftership-semantic-layer` 会被切成 `layer` —— 只在反查全失败时兜底用。
+    /// Claude encodes the cwd's "/" as "-"; take the last segment as the project name.
+    /// **Lossy**: `aftership-semantic-layer` gets cut down to `layer` -- only a fallback when
+    /// reverse lookup fails entirely.
     static func friendlyProject(fromEncoded encoded: String) -> String {
         let trimmed = encoded.hasPrefix("-") ? String(encoded.dropFirst()) : encoded
         let parts = trimmed.split(separator: "-")
         return parts.last.map(String.init) ?? encoded
     }
 
-    /// Claude / Qwen 的项目目录名编码规则（实勘 11 个目录全对）：`/`、`.`、`_` **都**变 `-`。
-    /// 多对一、不可反解 —— 所以项目名只能正向编码已知路径来比对，绝不能反着切字符串。
+    /// Claude / Qwen project directory name encoding (verified against all 11 local dirs): `/`,
+    /// `.`, and `_` **all** become `-`.
+    /// Many-to-one and irreversible -- so project names can only be matched by forward-encoding
+    /// known paths, never by splitting the string backwards.
     public static func encodeProjectDirName(_ path: String) -> String {
         var encoded = ""
         for character in path {
@@ -989,12 +1066,15 @@ public enum SkillMemoryIndexer {
         return encoded
     }
 
-    /// 记忆库的项目名：
-    ///  1. 把每个已知仓库根正向编码后与目录名全等比对（命中就用该根的名字）；
-    ///  2. 没命中就读该目录里最新一个 `*.jsonl` 的头部拿真实 cwd，取末段目录名；
-    ///  3. 都不行才退回有损的末段启发式。
-    /// 编码是多对一的，理论上可能多根命中同一目录名 —— 取 `knownRoots` 里第一个（调用方按最近活跃排序），
-    /// 保证同一次扫描结果稳定。
+    /// Project name of a memory library:
+    ///  1. Forward-encode each known repo root and compare it for exact equality with the
+    ///     directory name (on a match, use that root's name);
+    ///  2. otherwise read the head of the newest `*.jsonl` in that directory for the real cwd and
+    ///     take its last path component;
+    ///  3. only if both fail, fall back to the lossy last-segment heuristic.
+    /// The encoding is many-to-one, so in theory several roots could match one directory name --
+    /// take the first in `knownRoots` (the caller sorts by recent activity), keeping a single
+    /// scan's result stable.
     static func resolveProjectName(
         projectDir: URL, knownRoots: [(root: URL, name: String)]
     ) -> String {
@@ -1010,8 +1090,10 @@ public enum SkillMemoryIndexer {
         return friendlyProject(fromEncoded: encoded)
     }
 
-    /// 目录里最近改动的 transcript 头部记录的 cwd（`ClaudeSessionIndexer.headInfo` 同模块可用）。
-    /// 只读一个文件：这是「项目名反查」的兜底，不值得为它再全量扫一遍会话。
+    /// cwd recorded in the head of the most recently modified transcript in the directory
+    /// (`ClaudeSessionIndexer.headInfo` is available in the same module).
+    /// Reads only one file: this is the fallback for project-name lookup and not worth another full
+    /// session scan.
     static func newestSessionCwd(in projectDir: URL) -> String? {
         let files = ((try? FileManager.default.contentsOfDirectory(
             at: projectDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
@@ -1027,11 +1109,11 @@ public enum SkillMemoryIndexer {
         return ClaudeSessionIndexer.headInfo(fileURL: newest).cwd
     }
 
-    // MARK: - 记忆文档解析（frontmatter + 正文 wiki 链接）
+    // MARK: - Memory document parsing (frontmatter + wiki links in the body)
 
-    /// 读一次文件（上限 64KB）拿到 frontmatter 键值与正文里的 `[[链接]]`。
-    /// 上限不能沿用 `readHead` 的 8KB：记忆库索引 MEMORY.md 实测 11.8KB，链接全在正文里，
-    /// 8KB 会把后半截链接整片吞掉。
+    /// Reads the file once (capped at 64KB) to get frontmatter key/values and body `[[links]]`.
+    /// The cap can't reuse `readHead`'s 8KB: the memory library index MEMORY.md measured 11.8KB
+    /// with all links in the body, and 8KB would swallow the entire second half of the links.
     static func parseMemoryDocument(
         _ url: URL, bytes: Int = 65536, markdownLinks: Bool = false
     ) -> (fields: [String: String], links: [String], indexedTargets: [String]) {
@@ -1042,19 +1124,21 @@ public enum SkillMemoryIndexer {
             markdownLinks ? extractMarkdownLinks(text) : [])
     }
 
-    /// Codex `MEMORY.md` 正文里的会话引用。
+    /// Session references in the body of Codex's `MEMORY.md`.
     ///
-    /// 它没有 frontmatter，项目与会话归属写在正文的 `### rollout_summary_files` 段落里，
-    /// 每行形如：
+    /// It has no frontmatter; project and session ownership is written in the body's
+    /// `### rollout_summary_files` section, one line each, shaped like:
     /// ```
     /// - rollout_summaries/2026-07-27T…-xxx.md (cwd=…, rollout_path=/Users/…/rollout-….jsonl,
-    ///   updated_at=…, thread_id=019fa2f0-c124-7c03-a2d1-c6debaf69293, 状态描述)
+    ///   updated_at=…, thread_id=019fa2f0-c124-7c03-a2d1-c6debaf69293, <status description>)
     /// ```
-    /// 取 `thread_id=` 作会话 id、`rollout_path=` 判断记录是否还在（实勘 15 条全部可达，
-    /// 比 Claude 的 `originSessionId` 37/84 可靠得多）。
+    /// `thread_id=` is the session id and `rollout_path=` tells whether the record still exists
+    /// (all 15 observed locally are reachable, far more reliable than Claude's `originSessionId`
+    /// at 37/84).
     ///
-    /// ⚠️ **不要用 `cwd=` 归项目**：实勘有一条指向 `~/.slock/agents/<uuid>`（sandbox 工作目录
-    /// 而非仓库根），按它归会造出一个不存在的项目。
+    /// **Don't attribute projects by `cwd=`**: one observed entry points at
+    /// `~/.slock/agents/<uuid>` (a sandbox working directory rather than a repo root); attributing
+    /// by it would invent a nonexistent project.
     public static func extractCodexSessionRefs(_ text: String) -> [MemorySessionRef] {
         let fm = FileManager.default
         var refs: [MemorySessionRef] = []
@@ -1070,7 +1154,7 @@ public enum SkillMemoryIndexer {
         return refs
     }
 
-    /// 取 `key=value` 的 value，止于逗号 / 右括号 / 空白
+    /// Value of `key=value`, ending at a comma / closing paren / whitespace
     private static func value(of key: String, in line: String) -> String? {
         guard let start = line.range(of: key) else { return nil }
         let rest = line[start.upperBound...]
@@ -1079,18 +1163,19 @@ public enum SkillMemoryIndexer {
         return value.isEmpty ? nil : value
     }
 
-    /// markdown 链接的目标（`[标题](feedback_push.md)` → `feedback_push.md`）。
+    /// Target of a markdown link (`[title](feedback_push.md)` → `feedback_push.md`).
     ///
-    /// 只给**记忆库索引**（MEMORY.md）用：Claude 的索引正文是「一行一条 markdown 链接」，
-    /// 靠它才能算出「哪些记忆文件没被索引收录」—— 那些条目 agent 根本读不到（实勘
-    /// semantic-layer 库 72 条里有 2 条如此）。只收 `.md` 目标，外链与图片一律跳过。
+    /// Only for the **memory library index** (MEMORY.md): Claude's index body is "one markdown link
+    /// per line", which is the only way to find "memory files the index never includes" -- the
+    /// agent can't read those entries at all (observed in 2 of 72 in the semantic-layer library).
+    /// Only `.md` targets are collected; external links and images are skipped.
     public static func extractMarkdownLinks(_ text: String) -> [String] {
         let characters = Array(text)
         var targets: [String] = []
         var seen = Set<String>()
         var index = 0
         while index + 1 < characters.count {
-            // 找 "](" —— 链接文字与目标的交界
+            // Find "](" -- the boundary between link text and target
             guard characters[index] == "]", characters[index + 1] == "(" else {
                 index += 1
                 continue
@@ -1106,7 +1191,7 @@ public enum SkillMemoryIndexer {
             }
             index = closed ? cursor + 1 : index + 1
             guard closed else { continue }
-            // 去掉锚点/查询串；只要 .md
+            // Drop the anchor/query string; .md only
             let target = buffer.trimmingCharacters(in: .whitespaces)
                 .split(separator: "#").first.map(String.init) ?? ""
             guard target.lowercased().hasSuffix(".md"),
@@ -1118,8 +1203,9 @@ public enum SkillMemoryIndexer {
         return targets
     }
 
-    /// 正文里的 `[[目标]]`。跨行、超长（>120 字符）的一律不算 —— 那通常是正文里
-    /// 把 `[[…]]` 当强调号用（实勘 115 条链接里有 2 条如此），当成链接会造出假边。
+    /// `[[target]]` in the body. Anything spanning lines or overlong (>120 chars) doesn't count --
+    /// that's usually the body using `[[…]]` as emphasis (2 of 115 links observed locally), and
+    /// treating it as a link would invent false edges.
     public static func extractWikiLinks(_ text: String) -> [String] {
         let characters = Array(text)
         var links: [String] = []
@@ -1153,9 +1239,9 @@ public enum SkillMemoryIndexer {
         return links
     }
 
-    // MARK: - frontmatter 解析（纯函数，单测目标）
+    // MARK: - frontmatter parsing (pure functions, unit-test targets)
 
-    /// 取文件最前的 `---` … `---` YAML 段中的 name / description（简单 key: value）。
+    /// name / description from the file's leading `---` … `---` YAML block (simple key: value).
     public static func parseFrontmatter(_ text: String) -> (name: String?, description: String?) {
         let lines = text.components(separatedBy: "\n")
         guard let first = lines.first,
@@ -1166,7 +1252,7 @@ public enum SkillMemoryIndexer {
         var description: String?
         for line in lines.dropFirst() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed == "---" { break }  // frontmatter 结束
+            if trimmed == "---" { break }  // end of frontmatter
             guard let colon = trimmed.firstIndex(of: ":") else { continue }
             let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
             var value = String(trimmed[trimmed.index(after: colon)...])
@@ -1185,13 +1271,16 @@ public enum SkillMemoryIndexer {
         return (name, description)
     }
 
-    /// 解析 frontmatter 的全部简单键值（供 agent 定义等复用）。
-    /// 支持：单行 `key: value`（去引号）；block scalar（`key: |` / `key: >`，收编后续更深缩进行）。
-    /// 不解析嵌套 map / 复杂 YAML——超出即忽略。键统一小写。
+    /// Parses all simple key/values in the frontmatter (reused by agent definitions etc.).
+    /// Supports: single-line `key: value` (quotes stripped); block scalars (`key: |` / `key: >`,
+    /// absorbing the following more-indented lines).
+    /// Nested maps / complex YAML are not parsed -- anything beyond is ignored. Keys are
+    /// lowercased.
     ///
-    /// ⚠️ **嵌套 map 的子键会被当顶层键收下**（`metadata:` 下的 `type` / `originSessionId` 直接出现在
-    /// 返回值里）。记忆索引**有意**依赖这个行为拿 `metadata.*`：别把它"修正"成严格 YAML，
-    /// 那会让 MemoryEntry 的类型与来源会话整片变空。
+    /// **Child keys of a nested map are collected as top-level keys** (`type` / `originSessionId`
+    /// under `metadata:` appear directly in the result). Memory indexing **intentionally** relies
+    /// on this to get `metadata.*`: don't "fix" it into strict YAML, or MemoryEntry's type and
+    /// origin session would all go empty.
     public static func parseFrontmatterFields(_ text: String) -> [String: String] {
         let lines = text.components(separatedBy: "\n")
         guard let first = lines.first,
@@ -1200,7 +1289,7 @@ public enum SkillMemoryIndexer {
         var index = 1
         while index < lines.count {
             let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-            if trimmed == "---" { break }  // frontmatter 结束
+            if trimmed == "---" { break }  // end of frontmatter
             index += 1
             if trimmed.isEmpty { continue }
             guard let colon = trimmed.firstIndex(of: ":") else { continue }
@@ -1208,7 +1297,7 @@ public enum SkillMemoryIndexer {
             var value = String(trimmed[trimmed.index(after: colon)...])
                 .trimmingCharacters(in: .whitespaces)
             if value.first == "|" || value.first == ">" {
-                // block scalar：收编后续更深缩进的行，直到回到 0 缩进的 key 或 ---
+                // block scalar: absorb following more-indented lines until a 0-indent key or ---
                 let fold = value.first == ">"
                 var block: [String] = []
                 while index < lines.count {
@@ -1217,7 +1306,7 @@ public enum SkillMemoryIndexer {
                     if lineTrimmed == "---" { break }
                     if lineTrimmed.isEmpty { block.append(""); index += 1; continue }
                     let leading = line.prefix { $0 == " " || $0 == "\t" }.count
-                    if leading == 0 { break }  // 回到顶层 key，块结束
+                    if leading == 0 { break }  // back to a top-level key; block ends
                     block.append(lineTrimmed)
                     index += 1
                 }

@@ -1,8 +1,9 @@
 import Foundation
 
-/// 轻量 Markdown 块级解析（会话对话渲染用）：只切块级结构，
-/// 行内样式（粗体/行内代码/链接）交给视图层的 AttributedString(markdown:)。
-/// 容错优先：解析失败/不认识的行绝不吞内容，一律落到 paragraph。
+/// Lightweight block-level Markdown parsing (for rendering session conversations): splits only
+/// block structure; inline styles (bold / inline code / links) are left to the view layer's
+/// AttributedString(markdown:). Fault-tolerant first: a parse failure or unknown line never
+/// swallows content -- it always falls through to paragraph.
 public enum MarkdownBlock: Equatable, Sendable {
     case paragraph(String)
     case heading(level: Int, text: String)
@@ -12,7 +13,8 @@ public enum MarkdownBlock: Equatable, Sendable {
     case divider
     case table(header: [String], rows: [[String]])
 
-    /// GFM 任务清单状态：`- [ ]` / `- [~]` / `- [x]`（[~] 为进行中，Codex 工作清单约定）
+    /// GFM task list state: `- [ ]` / `- [~]` / `- [x]` ([~] = in progress, a Codex work-list
+    /// convention)
     public enum TaskCheck: Equatable, Sendable {
         case todo
         case inProgress
@@ -47,7 +49,7 @@ public enum MarkdownBlockParser {
             let line = lines[index]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-            // 围栏代码块（``` / ~~~，捕获语言；未闭合容错到文末）
+            // Fenced code block (``` / ~~~, captures the language; unclosed tolerated to EOF)
             if let fence = fenceMarker(trimmed) {
                 flushAll()
                 let language = String(trimmed.dropFirst(3))
@@ -69,14 +71,14 @@ public enum MarkdownBlockParser {
                 continue
             }
 
-            // 空行：段落/引用分界
+            // Blank line: paragraph/quote boundary
             if trimmed.isEmpty {
                 flushAll()
                 index += 1
                 continue
             }
 
-            // 引用（连续行合并）
+            // Quote (consecutive lines merged)
             if trimmed.hasPrefix(">") {
                 flushParagraph()
                 var content = trimmed.dropFirst()
@@ -87,7 +89,7 @@ public enum MarkdownBlockParser {
             }
             flushQuote()
 
-            // 分隔线
+            // Divider
             if isDivider(trimmed) {
                 flushParagraph()
                 blocks.append(.divider)
@@ -95,7 +97,7 @@ public enum MarkdownBlockParser {
                 continue
             }
 
-            // 标题
+            // Heading
             if let heading = parseHeading(trimmed) {
                 flushParagraph()
                 blocks.append(heading)
@@ -103,13 +105,13 @@ public enum MarkdownBlockParser {
                 continue
             }
 
-            // GFM 表格：当前行含 `|` 且下一行是分隔行（|---|---|）
+            // GFM table: current line contains `|` and the next is a separator row (|---|---|)
             if trimmed.contains("|"), index + 1 < lines.count,
                isTableSeparator(lines[index + 1].trimmingCharacters(in: .whitespaces)) {
                 flushParagraph()
                 let header = tableCells(trimmed)
                 var rows: [[String]] = []
-                index += 2  // 跳过表头行 + 分隔行
+                index += 2  // skip the header row + separator row
                 while index < lines.count {
                     let rowTrimmed = lines[index].trimmingCharacters(in: .whitespaces)
                     guard rowTrimmed.contains("|"), !rowTrimmed.isEmpty else { break }
@@ -120,7 +122,7 @@ public enum MarkdownBlockParser {
                 continue
             }
 
-            // 列表项（前导空格 2 格一级，封顶 3 级）
+            // List item (2 leading spaces per level, capped at 3 levels)
             if let item = parseListItem(line) {
                 flushParagraph()
                 blocks.append(item)
@@ -135,15 +137,17 @@ public enum MarkdownBlockParser {
         return blocks
     }
 
-    // MARK: - 行判定
+    // MARK: - Line classification
 
-    /// GFM 表格分隔行：含 `-`，且去掉 `|`/`:`/`-`/空格后为空（如 `|---|:--:|`）
+    /// GFM table separator row: contains `-` and is empty after removing `|`/`:`/`-`/spaces
+    /// (e.g. `|---|:--:|`)
     static func isTableSeparator(_ trimmed: String) -> Bool {
         guard trimmed.contains("-"), trimmed.contains("|") else { return false }
         return trimmed.allSatisfy { $0 == "|" || $0 == "-" || $0 == ":" || $0 == " " }
     }
 
-    /// 拆表格行单元格：按 `|` 分割，去首尾竖线产生的空段，trim
+    /// Splits a table row into cells: split on `|`, drop empty segments from the outer pipes,
+    /// trim
     static func tableCells(_ line: String) -> [String] {
         var cells = line.components(separatedBy: "|").map {
             $0.trimmingCharacters(in: .whitespaces)
@@ -153,7 +157,7 @@ public enum MarkdownBlockParser {
         return cells
     }
 
-    /// 围栏起始行 → 围栏标记（"```" / "~~~"），否则 nil
+    /// Fence opening line → fence marker ("```" / "~~~"), otherwise nil
     private static func fenceMarker(_ trimmed: String) -> String? {
         if trimmed.hasPrefix("```") { return "```" }
         if trimmed.hasPrefix("~~~") { return "~~~" }
@@ -184,7 +188,7 @@ public enum MarkdownBlockParser {
         let indent = min(3, leadingSpaces / 2)
         let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-        // 无序：- / * / + 后接空格
+        // Unordered: - / * / + followed by a space
         for marker in ["- ", "* ", "+ "] {
             if trimmed.hasPrefix(marker) {
                 let raw = String(trimmed.dropFirst(2))
@@ -196,7 +200,7 @@ public enum MarkdownBlockParser {
                     ordered: false, index: 0, text: text, indent: indent, check: check)
             }
         }
-        // 有序：N. 或 N) 后接空格
+        // Ordered: N. or N) followed by a space
         let digits = trimmed.prefix(while: \.isNumber)
         if !digits.isEmpty, digits.count <= 3,
            let number = Int(digits) {
@@ -214,7 +218,8 @@ public enum MarkdownBlockParser {
         return nil
     }
 
-    /// 任务清单标记：`[ ] xxx` / `[x] xxx` / `[X] xxx` / `[~] xxx` → (正文, 状态)；无标记 → (原文, nil)
+    /// Task list marker: `[ ] xxx` / `[x] xxx` / `[X] xxx` / `[~] xxx` → (text, state);
+    /// no marker → (original, nil)
     private static func splitTaskCheck(_ raw: String) -> (String, MarkdownBlock.TaskCheck?) {
         let markers: [(String, MarkdownBlock.TaskCheck)] = [
             ("[ ]", .todo), ("[x]", .done), ("[X]", .done), ("[~]", .inProgress),

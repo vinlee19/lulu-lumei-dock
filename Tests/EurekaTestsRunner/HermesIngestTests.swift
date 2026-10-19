@@ -8,7 +8,8 @@ import Foundation
 func hermesIngestTests(_ t: TestRunner) {
     t.suite("Hermes · 会话/对话/用量/技能/配置")
 
-    /// 造一个最小 state.db（表结构取真实 schema v23 的相关列），并塞入一个会话 + 消息 + 用量行
+    /// Builds a minimal state.db (relevant columns from the real schema v23) holding one session +
+    /// messages + a usage row
     func makeStateDB(
         endedAt: Double? = nil,
         input: Int = 1000, output: Int = 200, cacheRead: Int = 5000, cacheWrite: Int = 0,
@@ -104,7 +105,7 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(session.id, "20260101_120000_abc123")
         try expectEqual(session.name, "演示会话")
         try expectEqual(session.cwd, "/tmp/demo-project")
-        // ended_at 为空 → 取最后一条消息的时间（start + 2），不是 started_at
+        // ended_at is empty → use the last message's time (start + 2), not started_at
         try expectEqual(session.lastActiveAt.timeIntervalSince1970, 1_700_000_002)
         try expectEqual(session.transcriptPath, db.path)
     }
@@ -167,7 +168,7 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(try scanner.scanOnce(), 1)
         try expectEqual(try scanner.scanOnce(), 0, "第二轮不应再记")
 
-        // 会话继续增长：只应记录增量部分
+        // The session keeps growing: only the delta should be recorded
         let handle = try SQLiteDB(path: db.path)
         try handle.run("""
         UPDATE session_model_usage SET output_tokens = output_tokens + 70, last_seen = last_seen + 60
@@ -190,7 +191,8 @@ func hermesIngestTests(_ t: TestRunner) {
             from: Date(timeIntervalSince1970: 0), to: Date(timeIntervalSince1970: 4_000_000_000))
         let models = Set(totals.map(\.model))
         try expect(models.contains("gpt-5-mini"), "title_generation 的辅助模型应单独入账")
-        // sessions 聚合只含主循环 → 残差为 0，总量 = 主循环 + 辅助，不多不少
+        // The sessions aggregate covers only the main loop → residual is 0; total = main loop +
+        // auxiliary, exactly
         let total = totals.reduce(0) {
             $0 + $1.inputTokens + $1.outputTokens + $1.cacheReadTokens + $1.cacheCreationTokens
         }
@@ -212,10 +214,11 @@ func hermesIngestTests(_ t: TestRunner) {
         var events: [TaskEvent] = []
         let tailer = HermesStateTailer(stateDBs: { [db] }) { event, _ in events.append(event) }
         let base: Double = 1_700_000_100
-        tailer.scanOnce(now: Date(timeIntervalSince1970: base))  // 建水位
+        tailer.scanOnce(now: Date(timeIntervalSince1970: base))  // Establish the watermark
         try expectEqual(events.count, 0)
 
-        // 水位之后新出现的会话（started_at 就在当下）才算真·新任务
+        // Only a session that appears after the watermark (started_at is right now) is a genuinely
+        // new task
         let handle = try SQLiteDB(path: db.path)
         try handle.run("""
         INSERT INTO sessions (id, source, model, started_at, message_count, cwd, title)
@@ -233,8 +236,9 @@ func hermesIngestTests(_ t: TestRunner) {
     }
 
     t.test("实时监视：启动前就在跑的会话首扫只记水位，随后收尾也不补卡") {
-        // Hermes 只在干净退出时写 ended_at → 时间窗内每个被 kill 的会话都永远是 ended_at IS NULL。
-        // 若首扫把它们当活跃，启动瞬间就会因空闲收尾刷出一堆完成卡，故首扫一律记为已收尾。
+        // Hermes writes ended_at only on a clean exit → every killed session in the window stays
+        // ended_at IS NULL forever. Treating them as active on the first scan would flood finished
+        // cards via idle wrap-up at launch, so the first scan marks them all finished.
         let db = try makeStateDB()
         defer { try? FileManager.default.removeItem(at: db.deletingLastPathComponent()) }
         var events: [TaskEvent] = []
@@ -248,8 +252,9 @@ func hermesIngestTests(_ t: TestRunner) {
     }
 
     t.test("实时监视：启动前就在跑的会话一旦有推进就出卡（真在干活的不能被水位埋掉）") {
-        // 上一条测的是「不推进则静默」。这条钉住反面：水位记为已收尾的行若计数器往前走，
-        // 说明它真在跑，必须补出开始卡 —— 否则启动前开的会话在 app 里永远是隐身的。
+        // The previous test covers "no progress → silent". This one pins the converse: if a row the
+        // watermark marked finished has its counter advance, it is really running and must get a
+        // start card — otherwise sessions opened before launch stay invisible in the app forever.
         let db = try makeStateDB()
         defer { try? FileManager.default.removeItem(at: db.deletingLastPathComponent()) }
         var events: [TaskEvent] = []
@@ -265,7 +270,7 @@ func hermesIngestTests(_ t: TestRunner) {
         guard case .taskStarted = events[0].kind else {
             throw ExpectationError(description: "水位态推进应出 taskStarted，实际 \(events[0].kind)")
         }
-        // 第二次推进是心跳而非重复开始卡
+        // The second advance is a heartbeat, not a duplicate start card
         try handle.run("UPDATE sessions SET tool_call_count = tool_call_count + 1")
         tailer.scanOnce(now: Date(timeIntervalSince1970: base + 4))
         try expectEqual(events.count, 2)
@@ -275,8 +280,8 @@ func hermesIngestTests(_ t: TestRunner) {
     }
 
     t.test("未装 Hermes：四条读取路径全部安静返回空，不抛不炸") {
-        // 绝大多数用户没有 ~/.hermes。这几条断言把「静默降级」钉死，
-        // 免得后续重构掉一个 try? 就变成启动报错 / 红灯。
+        // Most users have no ~/.hermes. These assertions pin down "degrade silently",
+        // so a refactor that drops a single try? doesn't turn into a launch error / red light.
         let nowhere = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-no-hermes-\(UUID())", isDirectory: true)
         let env = ["EUREKA_HERMES_HOME": nowhere.path]
@@ -299,13 +304,15 @@ func hermesIngestTests(_ t: TestRunner) {
                 codexSkillsRoot: nowhere.appendingPathComponent("nx"),
                 hermesSkillsRoot: nowhere.appendingPathComponent("skills")).count,
             0, "技能根不存在应返回空")
-        // config.yaml 不存在 → 读成空串，禁用名单为空，且不该凭空建块
+        // config.yaml missing → reads as an empty string, the disabled list is empty, and no block
+        // should be created out of thin air
         try expectEqual(HermesConfigEditor.disabledSkills(from: ""), Set<String>())
         try expectEqual(HermesConfigEditor.setSkillDisabled("plan", disabled: false, in: ""), "")
     }
 
     t.test("state.db 存在但 schema 不认识：查询失败也只是空结果") {
-        // 用户可能装了老版 / 新版 Hermes，表名或列不一样；此时必须静默跳过而不是崩。
+        // Users may run an older / newer Hermes with different tables or columns; that must be
+        // skipped silently, not crash.
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-hermes-badschema-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -336,10 +343,10 @@ func hermesIngestTests(_ t: TestRunner) {
             try "---\nname: \(name)\ndescription: 演示\n---\n正文\n".write(
                 to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
         }
-        try writeSkill("creative/ascii-art", name: "ascii-art")           // 分类
-        try writeSkill("mlops/inference/vllm", name: "vllm")              // 子分类
-        try writeSkill("computer-use", name: "computer-use")              // 顶层
-        // 支持目录里的 SKILL.md 不算技能
+        try writeSkill("creative/ascii-art", name: "ascii-art")           // category
+        try writeSkill("mlops/inference/vllm", name: "vllm")              // subcategory
+        try writeSkill("computer-use", name: "computer-use")              // top level
+        // A SKILL.md inside a support directory is not a skill
         try writeSkill("creative/ascii-art/references", name: "should-be-ignored")
         try writeSkill("creative/ascii-art/templates", name: "also-ignored")
 
@@ -351,7 +358,7 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(Set(skills.map(\.name)), Set(["ascii-art", "vllm", "computer-use"]))
         try expect(skills.allSatisfy { $0.source == .hermes })
         try expectEqual(skills.first { $0.name == "ascii-art" }?.description, "演示")
-        // 启停由 config.yaml 名单决定，与目录位置无关
+        // Enabled state comes from the config.yaml list, not from the directory location
         try expectEqual(skills.first { $0.name == "vllm" }?.enabled, false)
         try expectEqual(skills.first { $0.name == "ascii-art" }?.enabled, true)
     }
@@ -410,7 +417,8 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(HermesConfigEditor.disabledSkills(from: flow), Set(["a", "b c"]))
         let block = "skills:\n  disabled:\n    - one   # 注释\n    - two\n"
         try expectEqual(HermesConfigEditor.disabledSkills(from: block), Set(["one", "two"]))
-        // 只有 platform_disabled，没有 disabled → 空集（不能把 telegram 名单当成全局名单）
+        // Only platform_disabled, no disabled → empty set (the telegram list must not be taken as
+        // the global list)
         let onlyPlatform = "skills:\n  platform_disabled:\n    telegram: [x]\n"
         try expectEqual(HermesConfigEditor.disabledSkills(from: onlyPlatform), [])
     }
@@ -436,7 +444,7 @@ func hermesIngestTests(_ t: TestRunner) {
         let added = HermesConfigEditor.setSkillDisabled("plan", disabled: true, in: doc)
         try expect(added.hasPrefix("model:\n  default: gpt-5"), "既有块必须原样保留")
         try expectEqual(HermesConfigEditor.disabledSkills(from: added), Set(["plan"]))
-        // 启用态下缺块 → 什么都不做（不该为了删而先建一个块）
+        // Enabled with the block missing → do nothing (don't create a block just to delete from it)
         try expectEqual(
             HermesConfigEditor.setSkillDisabled("plan", disabled: false, in: doc), doc)
     }
@@ -449,7 +457,7 @@ func hermesIngestTests(_ t: TestRunner) {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent(".usage.json")
-        // 实勘 2026-08 的字段与时间戳格式（6 位微秒）
+        // Field and timestamp format as observed in 2026-08 (6-digit microseconds)
         try """
         {
           "codebase-inspection": {
@@ -465,7 +473,7 @@ func hermesIngestTests(_ t: TestRunner) {
         try expectEqual(stats.first?.slug, "codebase-inspection")
         try expectEqual(stats.first?.useCount, 3)
         let last = try require(stats.first?.lastUsedAt)
-        // 6 位微秒截到毫秒解析：秒级必须准确
+        // 6-digit microseconds parsed truncated to milliseconds: seconds must be exact
         try expect(abs(last.timeIntervalSince1970 - 1_784_948_453.141) < 1,
             "时间戳解析偏差过大：\(last.timeIntervalSince1970)")
 
@@ -477,7 +485,7 @@ func hermesIngestTests(_ t: TestRunner) {
     }
 }
 
-/// 小工具：Optional 解包失败即报错（避免测试里散落 force unwrap）
+/// Helper: fail when an Optional can't be unwrapped (avoids scattering force unwraps through tests)
 private func require<T>(
     _ value: T?, file: StaticString = #filePath, line: UInt = #line
 ) throws -> T {

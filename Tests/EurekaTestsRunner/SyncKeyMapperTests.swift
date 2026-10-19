@@ -17,7 +17,8 @@ func syncKeyMapperTests(_ t: TestRunner) {
         defer { defaults.removePersistentDomain(forName: suite) }
         let first = SyncKeyMapper.deviceNamespace(defaults: defaults)
         try expect(!first.isEmpty)
-        // 固化后再次调用返回存档值（即使 hostname 变了也不重算）
+        // Once persisted, later calls return the stored value (not recomputed even if the hostname
+        // changes)
         defaults.set("frozen-host", forKey: "cosDeviceNamespace")
         try expectEqual(SyncKeyMapper.deviceNamespace(defaults: defaults), "frozen-host")
     }

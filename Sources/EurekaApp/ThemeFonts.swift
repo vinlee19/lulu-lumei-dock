@@ -1,11 +1,13 @@
 import CoreText
 import SwiftUI
 
-/// brutal 主题字体：Space Grotesk（正文）/ Space Mono（数字与等宽）。
-/// 字体文件随资源包分发（Resources/Fonts/，OFL 协议），启动时注册进进程字体表。
-/// 注册失败一律回退系统字体 —— 开发态字体缺失只降观感、不崩。
+/// brutal theme fonts: Space Grotesk (body) / Space Mono (numbers and monospace). Font files ship
+/// in the resource bundle (Resources/Fonts/, OFL license) and are registered into the process font
+/// table at launch. Any registration failure falls back to the system font -- missing fonts in dev
+/// only degrade the look, never crash.
 enum ThemeFonts {
-    /// 全部字体注册成功才为 true；false 时 grotesk/mono 回退系统字体
+    /// true only if every font registered successfully; when false, grotesk/mono fall back to the
+    /// system font
     static private(set) var available = false
 
     private static let fileNames = [
@@ -16,8 +18,9 @@ enum ThemeFonts {
         "SpaceMono-Bold.ttf",
     ]
 
-    /// 注册随包字体。须在首帧 UI 渲染前调用（AppDelegate 启动 / PreviewRenderer 入口）。
-    /// 幂等：重复调用直接返回（.process 作用域注册一次即可）。
+    /// Registers the bundled fonts. Must be called before the first UI frame renders (AppDelegate
+    /// launch / PreviewRenderer entry). Idempotent: repeated calls return immediately (registering
+    /// once in .process scope is enough).
     static func register() {
         guard !available else { return }
         guard let fontsDir = AppResources.bundle.resourceURL?
@@ -33,7 +36,7 @@ enum ThemeFonts {
         available = allOK
     }
 
-    /// Space Grotesk。weight 映射：medium → Medium；semibold 及以上 → Bold；其余 → Regular。
+    /// Space Grotesk. Weight mapping: medium → Medium; semibold and above → Bold; others → Regular.
     static func grotesk(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         guard available else { return .system(size: size, weight: weight) }
         if weight == .medium {
@@ -45,7 +48,7 @@ enum ThemeFonts {
         return .custom("SpaceGrotesk-Regular", size: size)
     }
 
-    /// Space Mono。weight 映射：semibold 及以上 → Bold；其余 → Regular。
+    /// Space Mono. Weight mapping: semibold and above → Bold; others → Regular.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         guard available else { return .system(size: size, weight: weight, design: .monospaced) }
         if weight == .semibold || weight == .bold || weight == .heavy || weight == .black {

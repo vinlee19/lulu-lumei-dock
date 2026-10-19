@@ -1,26 +1,28 @@
 import Foundation
 
-/// Prompt 库条目：从会话 transcript 提取的一条用户提问。
+/// Prompt library entry: one user prompt extracted from a session transcript.
 ///
-/// `id = "source:sessionId:msgIdx"` —— 确定性、跨扫描稳定（消息序号在文件内单调递增，
-/// resume 追加只产生新 id，不重排旧 id）。收藏/标签/使用计数是用户写入的事实，
-/// 提取刷新只更新正文与时间戳、绝不触碰用户标注列。
+/// `id = "source:sessionId:msgIdx"`: deterministic and stable across scans (message indexes
+/// increase monotonically within a file; resume appends only create new ids and never renumber old
+/// ones). Favorites/tags/use counts are facts the user wrote; an extraction refresh only updates
+/// the body and timestamps and never touches the user-annotation columns.
 public struct PromptEntry: Equatable, Sendable, Identifiable {
     public let id: String
     public let source: AgentSource
     public let sessionId: String
-    /// transcript 内消息序号（跳回会话定位用，喂 revealMessage(sessionId:messageIdx:)）
+    /// Message index within the transcript (for jumping back to the session; fed to
+    /// revealMessage(sessionId:messageIdx:))
     public let messageIdx: Int
     public let text: String
     public let timestamp: Date?
     public let cwd: String?
-    // MARK: 用户标注（提取不覆盖）
+    // MARK: User annotations (never overwritten by extraction)
     public var favorite: Bool
-    /// JSON 编码的标签数组（存库用）；内存中直接读写数组
+    /// JSON-encoded tag array (for storage); in memory read/write the array directly
     public var tags: [String]
     public var useCount: Int
     public var lastUsedAt: Date?
-    /// 首次提取时间（列表默认排序键）
+    /// First extraction time (default sort key for the list)
     public let firstSeen: Date
 
     public init(
@@ -43,7 +45,8 @@ public struct PromptEntry: Equatable, Sendable, Identifiable {
         self.firstSeen = firstSeen
     }
 
-    /// 列表标题：首行压平空白、截断（中文按字符，60 字足够列表辨认）
+    /// List title: first line with whitespace collapsed, truncated (counted in characters for CJK;
+    /// 60 is enough to tell entries apart)
     public var title: String {
         let firstLine = text.split(
             separator: "\n", maxSplits: 1, omittingEmptySubsequences: true
@@ -54,7 +57,7 @@ public struct PromptEntry: Equatable, Sendable, Identifiable {
         return flattened.count <= 60 ? flattened : String(flattened.prefix(60)) + "…"
     }
 
-    /// 项目名（cwd 尾段）
+    /// Project name (last path component of cwd)
     public var projectName: String? {
         cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
     }

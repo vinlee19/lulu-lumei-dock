@@ -4,10 +4,12 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-// MARK: - fixture：opencode 2.x 形状的临时库（OpenChamber 自带的 opencode serve 写的就是这一代）
+// MARK: - fixture: temp opencode 2.x-shaped DB (what OpenChamber's bundled opencode serve writes)
 
-/// 列取真实库（opencode 2.0.27）`session_v2` / `session_message` 里本项目读到的那几列；
-/// `withV1` 时再建 1.x 的 session/message/part/event 表（真实库两代表并存）
+/// Columns mirror the ones this project reads from `session_v2` / `session_message` in a real
+/// database (opencode 2.0.27);
+/// with `withV1`, also creates the 1.x session/message/part/event tables (real databases carry
+/// both generations)
 private func makeV2DB(at url: URL, withV1: Bool = true, _ build: (SQLiteDB) throws -> Void) throws {
     let db = try SQLiteDB(path: url.path)
     try db.execute("""
@@ -31,7 +33,7 @@ private func makeV2DB(at url: URL, withV1: Bool = true, _ build: (SQLiteDB) thro
         """)
     }
     try build(db)
-    try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)")  // 落盘，读连接可见
+    try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)")  // Flush so the read connection sees it
 }
 
 private func v2TempDir(_ tag: String) -> URL {
@@ -139,7 +141,7 @@ func opencodeV2Tests(_ t: TestRunner) {
             try insertSession(db, "ses_top", createdMs: base - 60_000, updatedMs: base)
             try insertSession(db, "ses_child", parent: "ses_top", createdMs: base, updatedMs: base)
             try insertSession(db, "ses_old", version: "1.18.31", createdMs: base, updatedMs: base)
-            // 历史 turn：首扫不得重放
+            // Historical turn: the first scan must not replay it
             try insertMessage(db, "m0", session: "ses_top", type: "user", seq: 0,
                               createdMs: base - 50_000, data: userData("旧问题", ms: base - 50_000))
             try insertMessage(db, "m1", session: "ses_top", type: "idle", seq: 1,
@@ -158,14 +160,15 @@ func opencodeV2Tests(_ t: TestRunner) {
                           createdMs: t0 + 10, data: assistantData(ms: t0 + 10, tools: ["grep"]))
         try insertMessage(writer, "c1", session: "ses_child", type: "idle", seq: 0,
                           createdMs: t0 + 20, data: idleData(ms: t0 + 20))
-        // app 运行期间发生升级迁移：1.x 消息按原 id 复制进来 → 不发事件
+        // Upgrade migration while the app is running: 1.x messages copied in under their original
+        // ids → no events
         try writer.run("INSERT INTO message VALUES (?,?,?,?,?)",
                        [.text("o1"), .text("ses_old"), .int(Int64(t0)), .int(Int64(t0)), .text("{}")])
         try insertMessage(writer, "o1", session: "ses_old", type: "user", seq: 0,
                           createdMs: t0 + 20, data: userData("迁移来的", ms: t0 + 20))
         try insertMessage(writer, "m4", session: "ses_top", type: "idle", seq: 4,
                           createdMs: t0 + 30, data: idleData(ms: t0 + 30))
-        // 迁移会话里续聊的新消息只在 2.x 表里 → 照常发
+        // Messages continued in a migrated session exist only in the 2.x table → emitted as usual
         try insertMessage(writer, "o2", session: "ses_old", type: "user", seq: 1,
                           createdMs: t0 + 40, data: userData("接着聊", ms: t0 + 40))
         try? writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -181,7 +184,7 @@ func opencodeV2Tests(_ t: TestRunner) {
         try expect(received.allSatisfy { $0.0.cwd == "/Users/me/proj" }, "cwd 取 session_v2.directory")
         try expect(received.allSatisfy { !$0.1 }, "新事件不 stale")
 
-        // 端到端：TaskStore 出恰好一张完成卡
+        // End to end: TaskStore produces exactly one finished card
         let store = TaskStore()
         let effects = received.flatMap { store.apply($0.0) }
         try expectEqual(effects.filter {
@@ -229,16 +232,17 @@ func opencodeV2Tests(_ t: TestRunner) {
                               createdMs: base + 10,
                               data: assistantData(ms: base + 10, finish: "tool-calls",
                                                   tools: ["read", "read", "bash"]))
-            // 迁移复制的消息：同 id 也在 1.x message 表里，用量已由那条路径计过
+            // Message copied by the migration: the same id is also in the 1.x message table,
+            // already counted via that path
             try db.run("INSERT INTO message VALUES (?,?,?,?,?)",
                        [.text("a_old"), .text("ses_old"), .int(Int64(base)), .int(Int64(base)),
                         .text(#"{"role":"assistant"}"#)])
             try insertMessage(db, "a_old", session: "ses_old", type: "assistant", seq: 0,
                               createdMs: base, data: assistantData(ms: base, input: 9999))
-            // 迁移会话里续聊的新消息：只在 2.x 表里 → 要计
+            // Message continued in a migrated session: only in the 2.x table → must be counted
             try insertMessage(db, "a_resumed", session: "ses_old", type: "assistant", seq: 1,
                               createdMs: base + 5, data: assistantData(ms: base + 5, input: 40))
-            // 进行中（未 completed、刚更新）：停在水位前
+            // In progress (not completed, just updated): stays behind the watermark
             try insertMessage(db, "a2", session: "ses_new", type: "assistant", seq: 2,
                               createdMs: base + 20,
                               data: assistantData(ms: base + 20, completed: false, input: 7))
@@ -267,7 +271,8 @@ func opencodeV2Tests(_ t: TestRunner) {
         try expectEqual(try toolCount("read"), 2)
         try expectEqual(try toolCount("bash"), 1)
 
-        // 进行中那行完成后：只补这一行，已计的不翻倍
+        // Once the in-progress row completes: only that row is added, already-counted rows aren't
+        // doubled
         let writer = try SQLiteDB(path: ocURL.path)
         try writer.run("UPDATE session_message SET data = ?, time_updated = ? WHERE id = 'a2'",
                        [.text(assistantData(ms: base + 20, input: 7)), .int(Int64(base + 600))])

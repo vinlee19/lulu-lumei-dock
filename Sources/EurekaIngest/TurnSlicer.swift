@@ -1,19 +1,24 @@
 import EurekaKit
 import Foundation
 
-/// 把扁平的 `[TranscriptMessage]` 切成一轮一轮的 `TurnInput`（血缘图与逐轮诊断的输入）。
+/// Slices a flat `[TranscriptMessage]` into per-turn `TurnInput`s (input to the lineage graph and
+/// per-turn diagnostics).
 ///
-/// 之所以是「切」而不是「再解析一遍」：`TranscriptReader` 已经把 13 个源归一成同一个
-/// 消息模型，轮边界的信息（用户消息位置、trail 容器、思考消息）全都在里面了。
-/// 再开一条并行解析链意味着 2000 条消息解析两遍，且两条链的口径会慢慢漂。
+/// Why "slice" instead of "parse again": `TranscriptReader` already normalizes 13 sources into one
+/// message model, and all the turn-boundary information (user message positions, trail
+/// containers, thinking messages) is already in it. A second, parallel parse chain would mean
+/// parsing 2000 messages twice, and the two chains' semantics would slowly drift apart.
 ///
-/// **轮边界 = 真实用户消息**。这是所有源都成立的唯一判据：
-///  - Claude/Codex/Qoder：`TranscriptReader` 在用户消息处重置 `trailIndex`，与这里同源；
-///  - Codex 另有真 `turn_id`，但它已经在读取期用于重置 trail 了，这里不必重复消费；
-///  - 其余源没有轮概念，用户消息就是唯一分界。
+/// **Turn boundary = a real user message**. It is the only criterion that holds for every source:
+///  - Claude/Codex/Qoder: `TranscriptReader` resets `trailIndex` at user messages, the same
+///    origin as here;
+///  - Codex also has a real `turn_id`, but it is already used at read time to reset the trail,
+///    so there is no need to consume it again here;
+///  - the other sources have no turn concept; user messages are the only divider.
 ///
-/// 首条用户消息之前的内容（会话恢复、系统注入）归入「第 0 轮」且 `promptMessageId == nil`，
-/// 不丢弃 —— 那里常有 resume 摘要，丢了会让第一轮看起来凭空开始。
+/// Content before the first user message (session resume, system injection) goes into "turn 0"
+/// with `promptMessageId == nil` rather than being dropped: it often holds a resume summary, and
+/// dropping it would make the first turn appear to start out of nowhere.
 public enum TurnSlicer {
     public static func slice(_ messages: [TranscriptMessage]) -> [TurnInput] {
         var turns: [TurnInput] = []
@@ -22,7 +27,7 @@ public enum TurnSlicer {
         var hasContent = false
 
         func flush() {
-            // 空壳不产出（比如文件以用户消息结尾时的尾轮）
+            // Don't emit empty shells (e.g. the trailing turn when a file ends on a user message)
             guard hasContent || current.promptMessageId != nil else { return }
             turns.append(current)
         }
@@ -30,9 +35,10 @@ public enum TurnSlicer {
         for message in messages {
             switch message.role {
             case .user:
-                // 斜杠命令回显 / 后台任务通知**不是真实提问**，不能开新轮。
-                // 实勘本机 483 条字符串型 user 消息里有 240 条是这类注入（整整一半），
-                // 不剥掉的话轮次列表会被一堆「0 步空轮」淹掉。
+                // Slash-command echoes / background task notifications **are not real prompts**
+                // and must not open a new turn. Locally, 240 of 483 string-typed user messages
+                // were such injections (a full half); without stripping them the turn list
+                // drowns in "0-step empty turns".
                 guard let prompt = Self.realPrompt(message.text) else { continue }
                 flush()
                 current = TurnInput(
@@ -66,8 +72,8 @@ public enum TurnSlicer {
                 touch(&current, message.timestamp)
 
             case .toolNote:
-                // 无 trail 的源（opencode/grok/kimi/qwen/hermes/cursor/codebuddy…）：
-                // 每条 🔧 小注就是一步。名字带 emoji 前缀，这里剥掉。
+                // Sources without a trail (opencode/grok/kimi/qwen/hermes/cursor/codebuddy…):
+                // each 🔧 note is one step. The name carries an emoji prefix; strip it here.
                 let name = message.text.hasPrefix("🔧 ")
                     ? String(message.text.dropFirst(2)).trimmingCharacters(in: .whitespaces)
                     : message.text
@@ -95,16 +101,19 @@ public enum TurnSlicer {
         return turns
     }
 
-    /// CLI 注入进对话流、但**不是用户打字**的包裹标签（实勘 Claude；其它源没有这套）
+    /// Wrapper tags the CLI injects into the conversation stream that **the user did not type**
+    /// (verified on Claude; other sources have no such set)
     private static let injectedTags = [
         "local-command-caveat", "command-name", "command-message", "command-args",
         "local-command-stdout", "task-notification", "system-reminder",
     ]
 
-    /// 剥掉注入块后剩下的真实提问；剩空则返回 nil（= 这条不是提问）。
+    /// The real prompt left after stripping injected blocks; nil if nothing remains (= this is not
+    /// a prompt).
     ///
-    /// 不能见到 `<local-command-caveat>` 就整条丢：caveat 之后往往**还跟着真实提问**
-    /// （斜杠命令的输出被前置注入，用户的话在后面）。所以按块剥再看剩什么。
+    /// Can't drop the whole message on seeing `<local-command-caveat>`: the caveat is often
+    /// **followed by a real prompt** (the slash command's output is injected first, the user's
+    /// words come after). So strip block by block, then see what's left.
     static func realPrompt(_ text: String) -> String? {
         var stripped = text
         for tag in injectedTags {
@@ -114,8 +123,10 @@ public enum TurnSlicer {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// 去掉所有 `<tag>…</tag>` 块（含未闭合的尾块：注入内容被截断时也不该当成提问）。
-    /// 手写扫描而不是正则：内容里可能有换行与尖括号，也不把外部输入拼进正则。
+    /// Removes every `<tag>…</tag>` block (including an unclosed trailing block: truncated
+    /// injected content shouldn't count as a prompt either). A hand-written scan rather than a
+    /// regex: content may contain newlines and angle brackets, and external input never gets
+    /// spliced into a regex.
     private static func removeBlocks(tag: String, in text: String) -> String {
         let open = "<\(tag)>"
         let close = "</\(tag)>"
@@ -130,7 +141,8 @@ public enum TurnSlicer {
         return result
     }
 
-    /// 轮结束时间取本轮见过的最后一个时间戳（多数源逐条带时间；grok 是轮级粒度）
+    /// A turn's end time is the last timestamp seen in it (most sources timestamp every message;
+    /// grok is turn-level granularity)
     private static func touch(_ turn: inout TurnInput, _ timestamp: Date?) {
         guard let timestamp else { return }
         if turn.startedAt == nil { turn.startedAt = timestamp }

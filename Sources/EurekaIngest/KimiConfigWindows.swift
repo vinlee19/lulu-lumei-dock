@@ -1,11 +1,14 @@
 import Foundation
 
-/// Kimi `config.toml` 的 per-model `max_context_size` 解析（ctx% 分母的权威来源：
-/// 用户实际配置的窗口，随订阅档位/手动配置而变，比内建表的模型上限更准）。
-/// 朴素行扫描，不解全量 TOML；文件缺失/格式异常返回仅剩默认值的表，不抛错。
+/// Parses per-model `max_context_size` from Kimi's `config.toml` (the authoritative ctx%
+/// denominator: the window the user actually configured, which varies with subscription tier /
+/// manual config and is more accurate than the model limits in the built-in table).
+/// Naive line scan, no full TOML parse; a missing/malformed file returns a table with only the
+/// default, never throws.
 public enum KimiConfigWindows {
-    /// 段头形如 `[models."kimi-code/k3"]`，段内 `max_context_size = 1048576`。
-    /// 返回表带 `"*default*"`: 262144 兜底（Kimi Code 默认窗口）。
+    /// Section headers look like `[models."kimi-code/k3"]` with `max_context_size = 1048576`
+    /// inside. The returned table carries a `"*default*"`: 262144 fallback (Kimi Code's default
+    /// window).
     public static func parse(configURL: URL) -> [String: Int] {
         var map: [String: Int] = ["*default*": 262_144]
         guard let text = try? String(contentsOf: configURL, encoding: .utf8) else {
@@ -33,7 +36,8 @@ public enum KimiConfigWindows {
         return map
     }
 
-    /// 会话详情卡片用：按模型别名查用户配置的窗口（无记录回退 Kimi Code 默认 256K）。
+    /// For the session detail card: looks up the user-configured window by model alias (falls back
+    /// to Kimi Code's default 256K).
     public static func window(
         forModel model: String?,
         configURL: URL = KimiPaths.configToml()

@@ -1,11 +1,12 @@
 import Foundation
 
-/// opencode 的本地数据路径（XDG 约定，非 ~/Library）。env `EUREKA_OPENCODE_*` 覆盖，便于单测。
-/// opencode 把会话/消息/事件全存在单个 SQLite 库里；技能/agent 是磁盘上的目录。
+/// opencode local data paths (XDG convention, not ~/Library). Overridable via env
+/// `EUREKA_OPENCODE_*` for unit tests. opencode stores sessions/messages/events all in a single
+/// SQLite db; skills/agents are on-disk directories.
 public enum OpencodePaths {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
-    /// 主数据库 `~/.local/share/opencode/opencode.db`（env `EUREKA_OPENCODE_DB`）
+    /// Main database `~/.local/share/opencode/opencode.db` (env `EUREKA_OPENCODE_DB`)
     public static func db(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -15,7 +16,7 @@ public enum OpencodePaths {
         return home().appendingPathComponent(".local/share/opencode/opencode.db")
     }
 
-    /// 系统级技能根 `~/.config/opencode/skills`（env `EUREKA_OPENCODE_SKILLS`）
+    /// System-level skill root `~/.config/opencode/skills` (env `EUREKA_OPENCODE_SKILLS`)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -25,8 +26,8 @@ public enum OpencodePaths {
         return configHome(environment: environment).appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 系统级 agent 根：`agents`（文档复数）+ `agent`（历史单数），两者都扫。
-    /// env `EUREKA_OPENCODE_AGENTS` 覆盖时只用该单一根。
+    /// System-level agent roots: `agents` (plural, per the docs) + `agent` (legacy singular); both
+    /// are scanned. When env `EUREKA_OPENCODE_AGENTS` overrides, only that single root is used.
     public static func agentsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
@@ -40,7 +41,7 @@ public enum OpencodePaths {
         ]
     }
 
-    /// 配置主目录 `~/.config/opencode`（env `EUREKA_OPENCODE_HOME`）
+    /// Config home `~/.config/opencode` (env `EUREKA_OPENCODE_HOME`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

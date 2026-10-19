@@ -1,11 +1,12 @@
 import Foundation
 import EurekaKit
 
-/// 增量 tail grok 会话事件（~/.grok/sessions/<enc-cwd>/<uuid>/events.jsonl）。
-/// grok 无 hook/notify 回调，这是实时通道（与 opencode/Codex tailer 同理）：
-/// 轮询近期有写入的 events.jsonl，按 offset 续读、半行不消费；新发现文件只做尾部
-/// 状态恢复，不重放历史。会话 id/cwd/标题从同目录 summary.json 带入，上下文占用从
-/// 同目录 updates.jsonl 的 totalTokens ÷ 模型 context_window 估算。
+/// Incrementally tails grok session events (~/.grok/sessions/<enc-cwd>/<uuid>/events.jsonl).
+/// grok has no hook/notify callback, so this is the live channel (same as the opencode/Codex
+/// tailers): poll recently written events.jsonl files, resume at the saved offset, never consume
+/// a partial line; newly discovered files only restore their tail state without replaying
+/// history. Session id/cwd/title come from the sibling summary.json; context usage is estimated
+/// from the sibling updates.jsonl totalTokens ÷ the model's context_window.
 public final class GrokRolloutTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
@@ -27,7 +28,7 @@ public final class GrokRolloutTailer {
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
-    private var contextWindows: [String: Int]?  // models_cache.json，懒加载
+    private var contextWindows: [String: Int]?  // models_cache.json, lazily loaded
 
     static let healthName = "grok 事件监视"
 
@@ -48,7 +49,8 @@ public final class GrokRolloutTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must stay below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -62,7 +64,7 @@ public final class GrokRolloutTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public so tests and launch can call it synchronously
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         for url in recentEventFiles() {
@@ -70,10 +72,11 @@ public final class GrokRolloutTailer {
         }
     }
 
-    // MARK: - 文件发现
+    // MARK: - File discovery
 
-    /// sessions/<enc-cwd>/<uuid>/events.jsonl 中近期（recentWindow 内）有写入的。
-    /// 顶层的 session_search.sqlite、cwd 层的 prompt_history.jsonl 都不是目录，天然跳过。
+    /// sessions/<enc-cwd>/<uuid>/events.jsonl files written recently (within recentWindow).
+    /// The top-level session_search.sqlite and the cwd-level prompt_history.jsonl are not
+    /// directories, so they are skipped naturally.
     private func recentEventFiles(now: Date = Date()) -> [URL] {
         let fm = FileManager.default
         var results: [URL] = []
@@ -99,7 +102,7 @@ public final class GrokRolloutTailer {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
     }
 
-    // MARK: - 增量读取
+    // MARK: - Incremental reading
 
     private func tail(_ url: URL) {
         let path = url.path
@@ -109,7 +112,7 @@ public final class GrokRolloutTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 文件被截断/重写
+        if size < offset { offset = 0 }  // file was truncated/rewritten
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -124,7 +127,7 @@ public final class GrokRolloutTailer {
         if consumed > 0 { emitContext(for: url, context: ctx) }
     }
 
-    /// 处理完整行（最后的半行不消费），返回消费字节数
+    /// Processes complete lines (the trailing partial line is not consumed); returns bytes consumed
     private func processLines(_ data: Data, context: FileContext) -> Int {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
         let complete = data[data.startIndex...lastNewline]
@@ -152,10 +155,10 @@ public final class GrokRolloutTailer {
         }
     }
 
-    /// 新发现文件：从尾部恢复"最后状态"——
-    /// - 仍在进行中（最后 turn_started 晚于最后 turn_ended）：补发 running
-    /// - 已结束（或无 turn 记录）：以 sessionStarted 注册为空闲
-    /// 两种情况都补发 summary.json 的标题，让会话卡带名字。
+    /// Newly discovered file: restore the "last state" from the tail —
+    /// - still in progress (last turn_started later than last turn_ended): emit running
+    /// - finished (or no turn records): register as idle via sessionStarted
+    /// Both cases also emit the summary.json title so the session card has a name.
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         let ctx = context(for: url)
@@ -190,13 +193,14 @@ public final class GrokRolloutTailer {
 
         if let started = lastStarted,
            lastFinished.map({ $0.timestamp < started.timestamp }) ?? true {
-            // 仍在进行中：补发 running（真实开始时间，不按 stale 抑制）
+            // Still in progress: emit running (real start time, not suppressed as stale)
             var event = started
             event.sessionStartedAt = ctx.sessionStartedAt
             handler(event, false)
             titleEvent(from: event)
         } else {
-            // 已结束 / 无 turn 记录：注册为空闲会话（避免直接发 finished 造成竞态）
+            // Finished / no turn records: register as an idle session (emitting finished directly
+            // would race)
             let base = lastFinished ?? lastStarted ?? TaskEvent(
                 source: .grok, sessionId: ctx.sessionId, kind: .sessionStarted,
                 timestamp: Date(), cwd: ctx.cwd)
@@ -209,14 +213,14 @@ public final class GrokRolloutTailer {
         emitContext(for: url, context: ctx)
     }
 
-    // MARK: - 上下文占用（updates.jsonl 的 totalTokens ÷ 模型窗口）
+    // MARK: - Context usage (updates.jsonl totalTokens ÷ model window)
 
     private func emitContext(for eventsURL: URL, context ctx: FileContext) {
         guard let window = contextWindow(for: ctx.modelId), window > 0,
               let tokens = latestTotalTokens(sessionDir: eventsURL.deletingLastPathComponent())
         else { return }
         let percent = min(100, Double(tokens) / Double(window) * 100)
-        // 只在变化时补发，避免刷屏
+        // Only re-emit on change, to avoid flooding
         if let last = lastContextPercent[eventsURL.path], abs(last - percent) < 0.5 { return }
         lastContextPercent[eventsURL.path] = percent
         handler(TaskEvent(
@@ -226,7 +230,7 @@ public final class GrokRolloutTailer {
             sessionStartedAt: ctx.sessionStartedAt), false)
     }
 
-    /// 读 updates.jsonl 尾部，取最近一次 `_meta.totalTokens`
+    /// Reads the tail of updates.jsonl and takes the latest `_meta.totalTokens`
     private func latestTotalTokens(sessionDir: URL) -> Int? {
         let updates = sessionDir.appendingPathComponent("updates.jsonl")
         guard let size = fileSize(updates.path), size > 0,
@@ -256,7 +260,7 @@ public final class GrokRolloutTailer {
         return contextWindows?[modelId] ?? contextWindows?["*default*"]
     }
 
-    /// models_cache.json → { modelId: context_window }（懒加载一次）
+    /// models_cache.json → { modelId: context_window } (lazily loaded once)
     private func loadContextWindows() -> [String: Int] {
         var map: [String: Int] = ["*default*": 256000]
         guard let data = try? Data(contentsOf: modelsCacheURL),
@@ -274,14 +278,15 @@ public final class GrokRolloutTailer {
         return map
     }
 
-    // MARK: - 上下文（同目录 summary.json）
+    // MARK: - Context (sibling summary.json)
 
     private func context(for eventsURL: URL) -> FileContext {
         let path = eventsURL.path
         if let cached = contexts[path] { return cached }
 
         let sessionDir = eventsURL.deletingLastPathComponent()
-        // 目录名（uuid）作 session id 兜底，与 active_sessions.json 的 session_id 一致
+        // Directory name (uuid) is the fallback session id, matching session_id in
+        // active_sessions.json
         var ctx = FileContext(
             sessionId: sessionDir.lastPathComponent, cwd: nil,
             sessionStartedAt: nil, title: nil, modelId: nil)

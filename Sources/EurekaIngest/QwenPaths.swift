@@ -1,11 +1,12 @@
 import Foundation
 
-/// Qwen Code CLI 的本地数据路径（默认 `~/.qwen`，v0.20 实勘）。
-/// 布局为混血格式：`projects/<Claude式编码cwd>/chats/<uuid>.jsonl`（Claude 式信封 +
-/// Gemini 式 parts payload）+ 伴随 `<uuid>.runtime.json`；全局记忆 `memories/*.md`；
-/// 技能 `skills/<name>/SKILL.md`。⚠️ `settings.json` 含 API key，任何备份/上传都不得纳入。
+/// Local data paths of the Qwen Code CLI (default `~/.qwen`, surveyed on v0.20). Hybrid layout:
+/// `projects/<Claude-style encoded cwd>/chats/<uuid>.jsonl` (Claude-style envelope + Gemini-style
+/// parts payload) + a companion `<uuid>.runtime.json`; global memory `memories/*.md`; skills
+/// `skills/<name>/SKILL.md`. `settings.json` holds API keys and must never be included in any
+/// backup/upload.
 public enum QwenPaths {
-    /// 配置主目录（env `EUREKA_QWEN_HOME` > `~/.qwen`）
+    /// Config home (env `EUREKA_QWEN_HOME` > `~/.qwen`)
     public static func configHome(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -16,7 +17,7 @@ public enum QwenPaths {
             .appendingPathComponent(".qwen", isDirectory: true)
     }
 
-    /// 会话根 `<home>/projects`（每项目一个 Claude 式编码目录）
+    /// Sessions root `<home>/projects` (one Claude-style encoded directory per project)
     public static func projectsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -24,7 +25,7 @@ public enum QwenPaths {
             .appendingPathComponent("projects", isDirectory: true)
     }
 
-    /// 技能根 `<home>/skills`（SKILL.md 格式与 Claude 同构）
+    /// Skills root `<home>/skills` (SKILL.md format identical to Claude's)
     public static func skillsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -32,7 +33,7 @@ public enum QwenPaths {
             .appendingPathComponent("skills", isDirectory: true)
     }
 
-    /// 全局记忆目录 `<home>/memories`（*.md）
+    /// Global memory directory `<home>/memories` (*.md)
     public static func memoriesRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {

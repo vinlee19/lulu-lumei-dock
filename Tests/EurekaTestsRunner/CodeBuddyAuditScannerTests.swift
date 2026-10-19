@@ -3,9 +3,11 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// CodeBuddy 审计扫描测试：fixture 按本机真实会话（~/.codebuddy，2026-07 实勘）的
-/// function_call 行格式伪造（Claude 式工具名 + arguments JSON 字符串 + epoch 毫秒时间戳），
-/// 路径/会话 id 全部换成假值；全程临时目录，不碰真实 ~/。
+/// CodeBuddy audit scanner tests: fixtures mimic the function_call line format of real local
+/// sessions (~/.codebuddy, observed 2026-07)
+/// (Claude-style tool names + arguments as a JSON string + epoch-millisecond timestamps),
+/// with every path/session id replaced by fake values; everything runs in a temp dir and never
+/// touches the real ~/.
 func codeBuddyAuditScannerTests(_ t: TestRunner) {
     t.suite("CodeBuddyAuditScanner · CodeBuddy 审计采集")
 
@@ -15,7 +17,7 @@ func codeBuddyAuditScannerTests(_ t: TestRunner) {
         return try EurekaStore(path: url)
     }
 
-    /// 临时 projects 树：<root>/<slug>/<sessionId>.jsonl
+    /// Temp projects tree: <root>/<slug>/<sessionId>.jsonl
     func makeProjects(
         slug: String = "Users-me-work-demo", sessionId: String = "cb-parent-0001"
     ) throws -> (root: URL, file: URL) {
@@ -86,7 +88,7 @@ func codeBuddyAuditScannerTests(_ t: TestRunner) {
         try expectEqual(try scanner.scanOnce(), 1)
         try expectEqual(try scanner.scanOnce(), 0, "重扫不应重复插入")
 
-        // 新实例复用 scan_state 里的 "audit://" 水位
+        // A new instance reuses the "audit://" watermark in scan_state
         let scanner2 = CodeBuddyAuditScanner(
             projectsRoot: root, store: store, pipeline: AuditPipeline(store: store))
         try expectEqual(try scanner2.scanOnce(), 0, "水位应跨实例保留")

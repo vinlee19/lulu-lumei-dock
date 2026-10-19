@@ -1,10 +1,10 @@
 import EurekaKit
 import Foundation
 
-/// CodeBuddy 会话索引：扫 `projects/<cwd-slug>/*.jsonl` → AgentSessionInfo。
-/// id = 文件名 stem；标题 = 最新 ai-title > 最新 summary > 首条真实 user 文本摘要；
-/// cwd 取行内 cwd 字段；created/updated 取首/末行 timestamp（epoch ms）。
-/// schema 已对真实会话核验（2026-07，~/.codebuddy）。
+/// CodeBuddy session index: scans `projects/<cwd-slug>/*.jsonl` → AgentSessionInfo. id = file name
+/// stem; title = latest ai-title > latest summary > summary of the first real user text; cwd from
+/// the per-line cwd field; created/updated from the first/last line timestamp (epoch ms). Schema
+/// verified against real sessions (2026-07, ~/.codebuddy).
 public enum CodeBuddySessionIndexer {
     private static let headBytes = 256 * 1024
     private static let tailBytes = 64 * 1024
@@ -42,11 +42,12 @@ public enum CodeBuddySessionIndexer {
         var cwd: String?
         var startedAt: Date?
         var firstUserText: String?
-        // 标题优先级：ai-title(2) > summary(1) > 首条 user 文本(0)，取各自最后出现
+        // Title priority: ai-title(2) > summary(1) > first user text(0), each taking its last
+        // occurrence
         var title: String?
         var titleRank = -1
 
-        // 头部：cwd / 首行时间 / 首条 user 文本 / 早段标题
+        // Head: cwd / first-line time / first user text / early titles
         if let handle = try? FileHandle(forReadingFrom: file) {
             defer { try? handle.close() }
             let head = (try? handle.read(upToCount: headBytes)) ?? Data()
@@ -78,7 +79,8 @@ public enum CodeBuddySessionIndexer {
                 }
             }
 
-            // 尾部：末行时间（会话最后活跃）+ 后段才生成的 ai-title/summary
+            // Tail: last-line time (session last active) + ai-title/summary generated only later in
+            // the session
             if size > headBytes,
                (try? handle.seek(toOffset: size - UInt64(tailBytes))) != nil,
                let tail = try? handle.readToEnd(),
@@ -104,10 +106,11 @@ public enum CodeBuddySessionIndexer {
         if titleRank < 0, let firstUserText {
             title = summarizeTitle(firstUserText)
         }
-        // 无真实用户输入也无标题的空会话不进列表
+        // Empty sessions with neither real user input nor a title stay out of the list
         guard title != nil else { return nil }
 
-        // 末行时间戳 → lastActiveAt（文件可能整写，mtime 不可靠；缺失回退 mtime）
+        // Last-line timestamp → lastActiveAt (the file may be rewritten whole, so mtime is
+        // unreliable; fall back to mtime if missing)
         var lastActiveAt = values.contentModificationDate
             ?? Date(timeIntervalSince1970: 0)
         if let lastLineDate = lastLineTimestamp(file: file) {
@@ -125,7 +128,7 @@ public enum CodeBuddySessionIndexer {
             transcriptPath: file.path)
     }
 
-    /// 末个完整行的 timestamp（尾部 64KB 内找）
+    /// Timestamp of the last complete line (searched within the trailing 64KB)
     private static func lastLineTimestamp(file: URL) -> Date? {
         guard let handle = try? FileHandle(forReadingFrom: file),
               let size = try? handle.seekToEnd(), size > 0

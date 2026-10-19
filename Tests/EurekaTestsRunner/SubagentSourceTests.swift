@@ -2,17 +2,19 @@ import EurekaIngest
 import EurekaKit
 import Foundation
 
-/// 三源子 agent 快照测试：qoder（复用 ClaudeSubagentScanner）/ codebuddy / kimi。
-/// fixture 按本机真实会话（2026-07 实勘）的行格式伪造，路径/会话 id 全部换成假值；
-/// 全程临时目录，不碰真实 ~/。每源覆盖：快照字段、两次扫描的 running→completed、
-/// 快照不变不重发、未跟踪会话不发事件（幻影任务不变式）。
+/// Subagent snapshot tests for three sources: qoder (reuses ClaudeSubagentScanner) / codebuddy /
+/// kimi. Fixtures mimic the line format of real local sessions (observed 2026-07), with all
+/// paths/session ids replaced by fake values; everything runs in a temp dir, real ~/ is never
+/// touched. Each source covers: snapshot fields, running→completed across two scans, no re-emit
+/// when the snapshot is unchanged, and no events for untracked sessions (the phantom-task
+/// invariant).
 func subagentSourceTests(_ t: TestRunner) {
     qoderSubagentTests(t)
     codeBuddySubagentTests(t)
     kimiSubagentTests(t)
 }
 
-// MARK: - 共用小工具
+// MARK: - shared helpers
 
 private func makeTempRoot(_ prefix: String) -> URL {
     FileManager.default.temporaryDirectory
@@ -48,7 +50,7 @@ private func subagentEvents(_ events: [(TaskEvent, Bool)]) -> [[SubagentInfo]] {
     }
 }
 
-// MARK: - Qoder（复用 ClaudeSubagentScanner + QoderChatTailer）
+// MARK: - Qoder (reuses ClaudeSubagentScanner + QoderChatTailer)
 
 private func qoderSubagentTests(_ t: TestRunner) {
     t.suite("QoderSubagents")
@@ -87,13 +89,13 @@ private func qoderSubagentTests(_ t: TestRunner) {
         let first = ClaudeSubagentScanner.scan(sessionDir: sessionDir, parentTranscript: transcript)
         try expectEqual(first.count, 1)
         let run = first[0]
-        try expectEqual(run.agentId, agentId)  // agent-<type>-<hex>.meta.json 的推导
+        try expectEqual(run.agentId, agentId)  // Derivation from agent-<type>-<hex>.meta.json
         try expectEqual(run.agentType, "Explore")
         try expectEqual(run.description, "探索仓库结构")
         try expectEqual(run.status, .running)
         try expectEqual(run.currentActivity, "WebFetch")
 
-        // Qoder 兜底完成信号：subagents/task-<agentId>.json 的 status
+        // Qoder's fallback completion signal: the status in subagents/task-<agentId>.json
         try appendLines(
             [#"{"taskId":"\#(agentId)","status":"completed","summary":"done"}"#],
             to: sessionDir.appendingPathComponent("subagents/task-\(agentId).json"))
@@ -115,7 +117,7 @@ private func qoderSubagentTests(_ t: TestRunner) {
     t.test("tailer：运行中发出快照；不变不重发；task 落定后补发 completed；未跟踪会话不发") {
         let (root, _) = try makeSession()
         defer { try? FileManager.default.removeItem(at: root) }
-        // 未跟踪会话：只有 subagents/ 没有父 transcript，不应产生任何事件
+        // Untracked session: only subagents/, no parent transcript → must produce no events
         let ghostDir = root.appendingPathComponent(
             "projects/-work-demo/\("ff000000-0000-0000-0000-00000000gh0")/subagents", isDirectory: true)
         try appendLines([metaJson], to: ghostDir.appendingPathComponent("agent-\(agentId).meta.json"))
@@ -130,12 +132,12 @@ private func qoderSubagentTests(_ t: TestRunner) {
         try expectEqual(first.first?.count, 1)
         try expectEqual(first.first?.first?.status, .running)
 
-        // 快照不变：不再发
+        // Snapshot unchanged: no re-emit
         events.removeAll()
         tailer.scanOnce()
         try expect(subagentEvents(events).isEmpty, "快照不变不应重发: \(events.map(\.0.kind))")
 
-        // task-*.json 落定 → completed
+        // task-*.json settles → completed
         let sessionDir = root.appendingPathComponent("projects/-work-demo/\(sid)")
         try appendLines(
             [#"{"taskId":"\#(agentId)","status":"completed"}"#],
@@ -150,7 +152,7 @@ private func qoderSubagentTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - CodeBuddy（CodeBuddySubagentScanner + CodeBuddyChatTailer）
+// MARK: - CodeBuddy (CodeBuddySubagentScanner + CodeBuddyChatTailer)
 
 private func codeBuddySubagentTests(_ t: TestRunner) {
     t.suite("CodeBuddySubagents")
@@ -188,7 +190,7 @@ private func codeBuddySubagentTests(_ t: TestRunner) {
         let subs = CodeBuddySubagentScanner.scan(
             sessionDir: transcript.deletingPathExtension(), parentTranscript: transcript)
         try expectEqual(subs.count, 2)
-        let agent = subs[0]  // 按 call 时间排序：agentCall 在前
+        let agent = subs[0]  // Sorted by call time: agentCall comes first
         try expectEqual(agent.agentId, "call_agent1")
         try expectEqual(agent.agentType, "Explore")
         try expectEqual(agent.description, "分析 FE 源码")
@@ -196,10 +198,10 @@ private func codeBuddySubagentTests(_ t: TestRunner) {
         try expectEqual(agent.currentActivity, "Grep")
         let task = subs[1]
         try expectEqual(task.agentId, "call_task1")
-        try expectEqual(task.agentType, "task")  // TaskCreate 无 subagent_type，按工具名兜底
+        try expectEqual(task.agentType, "task")  // TaskCreate has no subagent_type; fall back to the tool name
         try expectEqual(task.description, "整理分析报告")
         try expectEqual(task.status, .running)
-        try expectEqual(task.currentActivity, nil)  // 无 prompt，不定位 transcript
+        try expectEqual(task.currentActivity, nil)  // No prompt, so no transcript lookup
     }
 
     t.test("两次扫描：function_call_result 落定 completed / 非 completed 记 failed") {
@@ -214,14 +216,14 @@ private func codeBuddySubagentTests(_ t: TestRunner) {
             sessionDir: transcript.deletingPathExtension(), parentTranscript: transcript)
         try expectEqual(subs.count, 2)
         try expectEqual(subs[0].status, .completed)
-        try expectEqual(subs[0].currentActivity, nil)  // 完成后不再读 transcript
+        try expectEqual(subs[0].currentActivity, nil)  // No more transcript reads after completion
         try expectEqual(subs[1].status, .failed)
     }
 
     t.test("tailer：运行中发出快照；不变不重发；result 落定后补发；未跟踪会话不发") {
         let (root, transcript) = try makeSession()
         defer { try? FileManager.default.removeItem(at: root) }
-        // 未跟踪会话：只有 subagents/ 没有父 transcript
+        // Untracked session: only subagents/, no parent transcript
         let ghostDir = root.appendingPathComponent(
             "projects/-work-demo/\("ee000000-0000-0000-0000-00000000gh2")/subagents", isDirectory: true)
         try appendLines(
@@ -256,7 +258,7 @@ private func codeBuddySubagentTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - Kimi（KimiSubagentScanner + KimiWireTailer）
+// MARK: - Kimi (KimiSubagentScanner + KimiWireTailer)
 
 private func kimiSubagentTests(_ t: TestRunner) {
     t.suite("KimiSubagents")
@@ -307,7 +309,7 @@ private func kimiSubagentTests(_ t: TestRunner) {
         try expectEqual(run.status, .running)
         try expectEqual(run.currentActivity, "Read")
 
-        // 终轮 step.end + usage.record（usage 不应复活状态）
+        // Final step.end + usage.record (usage must not revive the state)
         try appendLines(
             [
                 subStepEnd.replacingOccurrences(of: "TS", with: "\(nowMs() - 1000)"),
@@ -336,7 +338,8 @@ private func kimiSubagentTests(_ t: TestRunner) {
     t.test("tailer：运行中发出快照；不变不重发；子 wire 收尾后补发 completed；未跟踪会话不发") {
         let (root, _, _, subWire) = try makeSession()
         defer { try? FileManager.default.removeItem(at: root) }
-        // 未跟踪会话：agents/ 齐全但没有 main wire（tailer 不跟踪它）
+        // Untracked session: agents/ is complete but there is no main wire (the tailer doesn't
+        // track it)
         let ghostDir = root
             .appendingPathComponent("wd_demo_ea973e2e828f", isDirectory: true)
             .appendingPathComponent("session_ghost", isDirectory: true)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 将本机钥匙串中的 Sparkle 私钥安全写入 GitHub Actions Secret；私钥只短暂落在 0600 临时文件。
+# Writes the Sparkle private key from the local Keychain into a GitHub Actions secret; the key only briefly touches a 0600 temp file.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 umask 077

@@ -1,9 +1,11 @@
+import EurekaKit
 import Foundation
 
-/// MCP server 的**完整定义**（含 env / headers 的值）。
+/// The **full definition** of an MCP server (including env / header values).
 ///
-/// ⚠️ 完整保真只允许存在于内存：值只在"读源配置 → 写目标配置"之间中转，
-/// 不落库、不进日志、不上云、不进 UI —— 展示层一律走 MCPConfigIndexer 的键名版。
+/// ⚠️ Full fidelity may only exist in memory: values only pass through between "read source config
+/// → write target config"; they are never persisted, logged, uploaded or shown in the UI - display
+/// always goes through MCPConfigIndexer's key-names-only version.
 public struct MCPServerDefinition: Equatable {
     public enum Transport: Equatable {
         case stdio
@@ -36,47 +38,53 @@ public struct MCPServerDefinition: Equatable {
 }
 
 public enum MCPEditError: Error, LocalizedError, Equatable {
-    /// 目标配置里已有同名 server（一律不覆盖，与技能传播同一规矩）
+    /// The target config already has a server with this name (never overwritten, same rule as skill
+    /// propagation)
     case alreadyExists(String)
-    /// remove / read 时目标里没有这个 server
+    /// The target has no such server on remove / read
     case notFound(String)
-    /// 定义不完整（stdio 缺 command / remote 缺 url），或含无法安全写入的字符
+    /// Incomplete definition (stdio without command / remote without url), or contains characters
+    /// that can't be written safely
     case invalidDefinition(String)
-    /// 目标格式未实勘，拒绝写入（如远程 server → TOML 目标）
+    /// Target format not verified, writes refused (e.g. remote server → TOML target)
     case unsupportedTarget(String)
 
     public var errorDescription: String? {
         switch self {
-        case .alreadyExists(let name): return "已存在同名 server「\(name)」，不覆盖"
-        case .notFound(let name): return "没有找到 server「\(name)」"
-        case .invalidDefinition(let detail): return "定义不完整：\(detail)"
+        case .alreadyExists(let name): return L10n.format("A server named “%@” already exists; it will not be overwritten", zhHans: "已存在同名 server「%@」，不覆盖", String(name))
+        case .notFound(let name): return L10n.format("No server named “%@” was found", zhHans: "没有找到 server「%@」", String(name))
+        case .invalidDefinition(let detail): return L10n.format("Incomplete definition: %@", zhHans: "定义不完整：%@", String(detail))
         case .unsupportedTarget(let detail): return detail
         }
     }
 }
 
-/// JSON 方言：同一 mcpServers 语义在各家的字段差异（本机实勘）。
+/// JSON dialects: how each vendor's fields differ for the same mcpServers semantics (verified
+/// locally).
 public enum MCPJSONStyle {
-    /// claude / qwen：显式 `type`（stdio / http）
+    /// claude / qwen: explicit `type` (stdio / http)
     case typed
-    /// gemini / cursor / kimi：无 `type`，靠字段推断；remote 支持 `timeout`
+    /// gemini / cursor / kimi: no `type`, inferred from fields; remote supports `timeout`
     case plain
-    /// opencode：`type` local/remote、command 是数组（含可执行）、env 叫 `environment`、带 `enabled`
+    /// opencode: `type` local/remote, command is an array (including the executable), env is named
+    /// `environment`, carries `enabled`
     case opencode
 }
 
-/// MCP server 配置的读写引擎（纯文本进出，零依赖，可单测）。
+/// Read/write engine for MCP server configs (plain text in/out, zero dependencies, unit-testable).
 ///
-/// JSON 侧的 parse/serialize 契约与 `ClaudeHooksInstaller` 逐字节一致
-/// （空文件 → 空对象；`.prettyPrinted + .sortedKeys + .withoutEscapingSlashes` + 尾换行；
-/// 整文件重排是既有契约）。TOML 侧照 `CodexProfileEditor` 的段落手术：
-/// 行级读写、绝不重排整个文件、EOF 追加规范化、段名引号规则一致。
-/// 所有守卫先于任何改动 —— 抛错即表示"原文件未动"。
+/// The JSON side's parse/serialize contract matches `ClaudeHooksInstaller` byte for byte (empty
+/// file → empty object; `.prettyPrinted + .sortedKeys + .withoutEscapingSlashes` + trailing
+/// newline; reordering the whole file is the existing contract). The TOML side follows
+/// `CodexProfileEditor`'s section surgery: line-level reads/writes, never reorders the whole file,
+/// normalised EOF appends, same section-name quoting rules. Every guard runs before any change - a
+/// throw means "the original file was not touched".
 public enum MCPServerEditor {
-    // MARK: - JSON（claude / gemini / cursor / kimi / qwen / opencode）
+    // MARK: - JSON (claude / gemini / cursor / kimi / qwen / opencode)
 
-    /// 把 server 写入 `container`（"mcpServers" 或 opencode 的 "mcp"）。
-    /// 容器缺失则创建；容器存在但不是对象 → foreignConfig（绝不覆盖看不懂的形态）。
+    /// Writes the server into `container` ("mcpServers", or opencode's "mcp"). Creates the
+    /// container if missing; container present but not an object → foreignConfig (never overwrite a
+    /// form we don't understand).
     public static func upsertJSON(
         into json: String, definition: MCPServerDefinition,
         container: String, style: MCPJSONStyle
@@ -99,13 +107,15 @@ public enum MCPServerEditor {
         var servers = try serversDict(in: root, container: container)
         guard servers[name] != nil else { throw MCPEditError.notFound(name) }
         servers.removeValue(forKey: name)
-        // 容器保留（空对象是各家配置的常态，如 kimi 的 mcp.json），比删键更少惊喜
+        // Keep the container (an empty object is normal in every vendor's config, e.g. kimi's
+        // mcp.json); less surprising than deleting the key
         root[container] = servers
         return try serialize(root)
     }
 
-    /// 读出完整定义（含 env/headers 值）。对三种 JSON 方言做宽容解码：
-    /// command 既可能是字符串也可能是数组（opencode），env 也接受 `environment`。
+    /// Reads the full definition (including env/headers values). Decodes all three JSON dialects
+    /// leniently: command may be a string or an array (opencode), and env also accepts
+    /// `environment`.
     public static func readDefinitionJSON(
         _ json: String, name: String, container: String
     ) throws -> MCPServerDefinition {
@@ -117,9 +127,10 @@ public enum MCPServerEditor {
         return decodeEntry(name: name, dict: entry)
     }
 
-    /// 编辑既有 server（**合并而非重编码**）：条目必须已存在；写入建模字段、
-    /// 已置空的建模字段删除，**未建模键原样保留** —— 尤其 opencode 的 `enabled`
-    /// 绝不在编辑时被翻转/覆盖（只有该键原本不存在且方言要求时才补写）。
+    /// Edits an existing server (**merge, not re-encode**): the entry must already exist; modeled
+    /// fields are written, modeled fields that were cleared are deleted, and **unmodeled keys are
+    /// kept as-is** - in particular opencode's `enabled` is never flipped/overwritten on edit (only
+    /// added when the key was absent and the dialect requires it).
     public static func updateJSON(
         in json: String, definition: MCPServerDefinition,
         container: String, style: MCPJSONStyle
@@ -130,12 +141,13 @@ public enum MCPServerEditor {
         guard var entry = servers[definition.name] as? [String: Any] else {
             throw MCPEditError.notFound(definition.name)
         }
-        // 建模字段全集先清后写（stdio ↔ remote 的切换也随之处理干净）；enabled 不在清单里
+        // Clear the full set of modeled fields, then write (this also cleans up stdio ↔ remote
+        // switches); enabled is not in the list
         let modeled = ["type", "command", "args", "env", "environment",
                        "headers", "url", "httpUrl", "serverUrl", "timeout"]
         for key in modeled { entry.removeValue(forKey: key) }
         for (key, value) in encode(definition, style: style) {
-            if key == "enabled", entry["enabled"] != nil { continue }  // 保留原启停状态
+            if key == "enabled", entry["enabled"] != nil { continue }  // Keep original enabled state
             entry[key] = value
         }
         servers[definition.name] = entry
@@ -143,9 +155,10 @@ public enum MCPServerEditor {
         return try serialize(root)
     }
 
-    /// 解析用户粘贴的 JSON 片段（README 常见的 `{"mcpServers": {…}}`；也接受
-    /// opencode 的 `{"mcp": {…}}` 或顶层直接就是 server 映射的裁剪片段）。
-    /// 解析失败/无内容返回空数组，绝不抛错 —— 表单实时反馈用。
+    /// Parses a JSON snippet pasted by the user (README's usual `{"mcpServers": {…}}`; also accepts
+    /// opencode's `{"mcp": {…}}` or a trimmed snippet whose top level is the server map itself).
+    /// Returns an empty array on parse failure / no content, never throws - used for live form
+    /// feedback.
     public static func parsePasted(_ text: String) -> [MCPServerDefinition] {
         guard let root = try? parse(text), !root.isEmpty else { return [] }
         let container = (root["mcpServers"] as? [String: Any])
@@ -154,18 +167,22 @@ public enum MCPServerEditor {
         return container.sorted { $0.key < $1.key }.compactMap { name, value in
             guard let dict = value as? [String: Any] else { return nil }
             let definition = decodeEntry(name: name, dict: dict)
-            // 空壳（既无命令也无地址）不算 server —— 顶层裁剪片段里常混着别的键
+            // An empty shell (neither command nor URL) is not a server - trimmed top-level snippets
+            // often mix in other keys
             guard definition.command != nil || definition.url != nil else { return nil }
             return definition
         }
     }
 
-    /// 「快速安装」解析：一个输入框通吃命令 / URL / JSON（对照 ZCode 的快速安装页签）。
-    /// - `{…}` 开头 → 按 JSON 片段解析（可多个 server）；
-    /// - `http(s)://…` → 远程 server，名称从域名派生（`mcp.notion.com` → notion）；
-    /// - 其余 → 本地命令行，名称从包名派生（`npx -y chrome-devtools-mcp@latest` →
-    ///   chrome-devtools-mcp；`@upstash/context7-mcp` → context7-mcp）。
-    /// 解析失败/空输入返回空数组，绝不抛错 —— 表单实时预览用。
+    /// "Quick install" parsing: one input box takes a command / URL / JSON (modelled on ZCode's
+    /// quick-install tab).
+    /// - Starts with `{…}` → parsed as a JSON snippet (may contain several servers);
+    /// - `http(s)://…` → remote server, name derived from the domain (`mcp.notion.com` → notion);
+    /// - Anything else → local command line, name derived from the package name
+    ///   (`npx -y chrome-devtools-mcp@latest` → chrome-devtools-mcp;
+    ///   `@upstash/context7-mcp` → context7-mcp).
+    /// Returns an empty array on parse failure / empty input, never throws - used for the live form
+    /// preview.
     public static func parseQuickInput(_ text: String) -> [MCPServerDefinition] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -181,7 +198,8 @@ public enum MCPServerEditor {
                 transport: .remote,
                 url: first)]
         }
-        // 命令行：首 token 是可执行，其余是参数；多行输入只取第一行的语义（换行当空白拆）
+        // Command line: the first token is the executable, the rest are args; multi-line input is
+        // split on whitespace like newlines
         return [MCPServerDefinition(
             name: deriveName(fromCommand: first, args: Array(tokens.dropFirst())),
             transport: .stdio,
@@ -189,8 +207,8 @@ public enum MCPServerEditor {
             args: Array(tokens.dropFirst()))]
     }
 
-    /// 域名 → server 名：去掉 `mcp.` 前缀后取第一段（`mcp.notion.com` → notion，
-    /// `example.com` → example）；解析不出就退回 "remote-mcp"
+    /// Domain → server name: strip the `mcp.` prefix, then take the first label (`mcp.notion.com` →
+    /// notion, `example.com` → example); falls back to "remote-mcp" when nothing can be derived
     static func deriveName(fromURL url: URL) -> String {
         guard var host = url.host, !host.isEmpty else { return "remote-mcp" }
         if host.hasPrefix("mcp.") { host = String(host.dropFirst(4)) }
@@ -199,8 +217,9 @@ public enum MCPServerEditor {
         return slug.isEmpty ? "remote-mcp" : slug
     }
 
-    /// 命令行 → server 名：优先取含 "mcp" 的非 flag 参数（多为包名），
-    /// 否则第一个非 flag 参数，否则命令本身；再剥 npm 版本后缀与 scope/路径前缀。
+    /// Command line → server name: prefer a non-flag arg containing "mcp" (usually the package
+    /// name), else the first non-flag arg, else the command itself; then strip the npm version
+    /// suffix and scope/path prefix.
     static func deriveName(fromCommand command: String, args: [String]) -> String {
         let candidates = args.filter { !$0.hasPrefix("-") }
         let picked = candidates.first { $0.lowercased().contains("mcp") }
@@ -210,22 +229,23 @@ public enum MCPServerEditor {
         return slug.isEmpty ? "mcp-server" : slug
     }
 
-    /// `@scope/name@1.2` → name；`some/path/binary` → binary；`pkg@latest` → pkg
+    /// `@scope/name@1.2` → name; `some/path/binary` → binary; `pkg@latest` → pkg
     private static func stripPackageDecorations(_ token: String) -> String {
         var name = token
         if name.hasPrefix("@"), let slash = name.firstIndex(of: "/") {
-            name = String(name[name.index(after: slash)...])  // 去 npm scope
+            name = String(name[name.index(after: slash)...])  // Drop the npm scope
         }
         if let at = name.lastIndex(of: "@"), at != name.startIndex {
-            name = String(name[..<at])  // 去版本后缀
+            name = String(name[..<at])  // Drop the version suffix
         }
         if let slash = name.lastIndex(of: "/") {
-            name = String(name[name.index(after: slash)...])  // 取路径末段
+            name = String(name[name.index(after: slash)...])  // Take the last path component
         }
         return name
     }
 
-    /// 名称清洗成各家都认的 slug：字母/数字/-/_ 之外一律折成 -
+    /// Sanitises a name into a slug every vendor accepts: anything other than letters/digits/-/_
+    /// folds into -
     private static func sanitizeName(_ text: String) -> String {
         var slug = String(text.map {
             $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "-"
@@ -234,7 +254,7 @@ public enum MCPServerEditor {
         return slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
-    /// 三方言通吃的条目解码（readDefinitionJSON / parsePasted 共用）
+    /// Entry decoder covering all three dialects (shared by readDefinitionJSON / parsePasted)
     private static func decodeEntry(name: String, dict entry: [String: Any]) -> MCPServerDefinition {
         var command: String?
         var args: [String] = []
@@ -267,8 +287,8 @@ public enum MCPServerEditor {
             timeout: entry["timeout"] as? Int)
     }
 
-    /// 启停（JSON 方言，实证仅 opencode 有 enabled 语义）：只改 enabled 一个键，
-    /// 其余字段原样保留。
+    /// Enable/disable (JSON dialect; in practice only opencode has enabled semantics): only the
+    /// enabled key changes, every other field is kept as-is.
     public static func setEnabledJSON(
         in json: String, name: String, container: String, enabled: Bool
     ) throws -> String {
@@ -283,8 +303,9 @@ public enum MCPServerEditor {
         return try serialize(root)
     }
 
-    /// 启停（TOML 方言，实证 codex / grok 有 enabled 键）：主段内原位改写
-    /// `enabled = …` 行（没有就补在段末），其余行原样保留。
+    /// Enable/disable (TOML dialect; codex / grok verified to have an enabled key): rewrites the
+    /// `enabled = …` line in place within the main section (appended at the section end if absent);
+    /// other lines are kept as-is.
     public static func setEnabledTOML(
         in toml: String, name: String, enabled: Bool
     ) throws -> String {
@@ -305,7 +326,8 @@ public enum MCPServerEditor {
             }
         }
         if !replaced {
-            // 补在段末（跳过段尾空行，与 updateTOML 的补写位置一致）
+            // Append at the section end (skipping trailing blank lines, same insertion point as
+            // updateTOML)
             var insertAt = main.upperBound
             while insertAt > main.lowerBound + 1,
                   lines[insertAt - 1].trimmingCharacters(in: .whitespaces).isEmpty {
@@ -316,35 +338,38 @@ public enum MCPServerEditor {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - TOML（codex / grok 的 [mcp_servers.<name>]）
+    // MARK: - TOML (codex / grok `[mcp_servers.<name>]`)
 
-    /// 追加 `[mcp_servers.<name>]` 段（+ 可选 `.env` 子段 / 远程鉴权键）。
-    /// 远程形态已实勘（本机 codex config.toml）：`url` 键即启用远程 server；
-    /// `Authorization` 请求头 → `bearer_token`（官方字段，运行时以 Bearer 方案发送）。
-    /// 其它请求头需要 `http_headers`，形态未实勘 → 拒写防造废配置（grok 无远程证据，由
-    /// MCPService.installBlockReason 在矩阵层继续拒绝）。
+    /// Appends a `[mcp_servers.<name>]` section (+ optional `.env` subsection / remote auth key).
+    /// The remote form is verified (local codex config.toml): a `url` key enables a remote server;
+    /// the `Authorization` header → `bearer_token` (official field, sent with the Bearer scheme at
+    /// runtime). Other headers need `http_headers`, whose form is unverified → writes refused to
+    /// avoid producing a broken config (grok has no remote evidence; MCPService.installBlockReason
+    /// keeps refusing it at the matrix layer).
     public static func upsertTOML(
         into toml: String, definition: MCPServerDefinition
     ) throws -> String {
         try validate(definition)
         try guardRemoteHeadersForTOML(definition)
         if definition.transport == .stdio, definition.command == nil {
-            throw MCPEditError.invalidDefinition("stdio server 缺少 command")
+            throw MCPEditError.invalidDefinition(L10n.text("The stdio server is missing a command", zhHans: "stdio server 缺少 command"))
         }
         let existing = sectionRanges(in: toml.components(separatedBy: "\n"))
         if existing.keys.contains(definition.name) {
             throw MCPEditError.alreadyExists(definition.name)
         }
-        // 值不能带换行/控制字符：行级 TOML 写不了多行字符串，宁可拒绝也不写坏文件
+        // Values must not contain newlines/control characters: line-level TOML can't write
+        // multi-line strings, so refuse rather than corrupt the file
         for value in [definition.command ?? "", definition.url ?? ""] + definition.args
             + definition.env.keys + definition.env.values + definition.headers.values {
             if value.contains("\n") || value.contains("\r") {
-                throw MCPEditError.invalidDefinition("值包含换行，无法安全写入 TOML")
+                throw MCPEditError.invalidDefinition(L10n.text("The value contains a newline and cannot be safely written to TOML", zhHans: "值包含换行，无法安全写入 TOML"))
             }
         }
 
         var lines = toml.isEmpty ? [] : toml.components(separatedBy: "\n")
-        // EOF 追加规范化（照 CodexProfileEditor）：去尾部空行 → 一个空行分隔 → 段落
+        // Normalised EOF append (as in CodexProfileEditor): strip trailing blank lines → one blank
+        // separator line → section
         while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
             lines.removeLast()
         }
@@ -374,8 +399,9 @@ public enum MCPServerEditor {
         return result
     }
 
-    /// 远程定义装进 TOML 目标的鉴权边界：只认 `Authorization`（→ bearer_token）；
-    /// 其它请求头需要 `http_headers`，形态未实勘 → 拒绝（新建与编辑共用）。
+    /// Auth boundary for installing a remote definition into a TOML target: only `Authorization` is
+    /// accepted (→ bearer_token); other headers need `http_headers`, whose form is unverified →
+    /// refused (shared by create and edit).
     private static func guardRemoteHeadersForTOML(
         _ definition: MCPServerDefinition
     ) throws {
@@ -383,12 +409,13 @@ public enum MCPServerEditor {
         if let extra = definition.headers.keys
             .first(where: { $0.lowercased() != "authorization" }) {
             throw MCPEditError.unsupportedTarget(
-                "该目标对自定义请求头（\(extra)）的写法未验证，暂只支持 Authorization（bearer_token）")
+                L10n.format("Custom headers (%@) have not been verified for this target; only Authorization (bearer_token) is supported for now", zhHans: "该目标对自定义请求头（%@）的写法未验证，暂只支持 Authorization（bearer_token）", String(extra)))
         }
     }
 
-    /// `Authorization` 头值 → bearer_token 值：JSON 侧常带 "Bearer " 前缀，
-    /// codex 的 bearer_token 运行时自带 Bearer 方案，去前缀防双重拼接
+    /// `Authorization` header value → bearer_token value: the JSON side often carries a "Bearer "
+    /// prefix, while codex's bearer_token adds the Bearer scheme itself at runtime, so strip the
+    /// prefix to avoid doubling it
     private static func authorizationBearerToken(
         of definition: MCPServerDefinition
     ) -> String? {
@@ -398,11 +425,14 @@ public enum MCPServerEditor {
         return value
     }
 
-    /// 编辑既有 TOML server（**原位改写**，段落位置不动）：主段内重写 command/args/url/
-    /// bearer_token（未识别键如 `enabled`、注释原样保留——照 CodexProfileEditor.upsert 的
-    /// 段内手法）；env 三形态：已有 `.env` 子段 → 整体重写子段体（置空则删子段）；只有内联
-    /// `env = {…}` → 重写该行；两者皆无且 env 非空 → 主段末补内联行。`.tools.*` 等其它子段
-    /// 原样不动。与 upsert 不同：已是 remote 的条目允许改 url（stdio-only 限制只针对新建）。
+    /// Edits an existing TOML server (**rewritten in place**, the section doesn't move): rewrites
+    /// command/args/url/bearer_token inside the main section (unrecognised keys like `enabled` and
+    /// comments are kept as-is - same in-section approach as CodexProfileEditor.upsert); env has
+    /// three forms: an existing `.env` subsection → rewrite the whole subsection body (delete the
+    /// subsection when cleared); only an inline `env = {…}` → rewrite that line; neither and env
+    /// non-empty → append an inline line at the end of the main section. Other subsections such as
+    /// `.tools.*` are left untouched. Unlike upsert: an entry that is already remote may change its
+    /// url (the stdio-only restriction applies to creation only).
     public static func updateTOML(
         in toml: String, definition: MCPServerDefinition
     ) throws -> String {
@@ -411,7 +441,7 @@ public enum MCPServerEditor {
         for value in [definition.command ?? "", definition.url ?? ""] + definition.args
             + definition.env.keys + definition.env.values {
             if value.contains("\n") || value.contains("\r") {
-                throw MCPEditError.invalidDefinition("值包含换行，无法安全写入 TOML")
+                throw MCPEditError.invalidDefinition(L10n.text("The value contains a newline and cannot be safely written to TOML", zhHans: "值包含换行，无法安全写入 TOML"))
             }
         }
         var lines = toml.components(separatedBy: "\n")
@@ -419,7 +449,8 @@ public enum MCPServerEditor {
             throw MCPEditError.notFound(definition.name)
         }
 
-        // Pass A：.env 子段（先做——它在主段之后，改主段体不影响它的定位反之则影响）
+        // Pass A: the .env subsection (done first - it sits after the main section, so editing the
+        // main body doesn't affect locating it, but the reverse would)
         var hasEnvSubsection = false
         if let envRange = sectionRange(in: lines, name: definition.name, subsection: "env") {
             if definition.env.isEmpty {
@@ -437,7 +468,8 @@ public enum MCPServerEditor {
             }
         }
 
-        // Pass B：主段体重写（Pass A 可能移动过行号，重新定位）
+        // Pass B: rewrite the main section body (Pass A may have shifted line numbers, so locate
+        // again)
         guard let main = sectionRange(in: lines, name: definition.name, subsection: nil) else {
             throw MCPEditError.notFound(definition.name)
         }
@@ -457,7 +489,8 @@ public enum MCPServerEditor {
                 return authorizationBearerToken(of: definition)
                     .map { "bearer_token = \"\(escape($0))\"" }
             case "env":
-                // 子段是权威时不写内联；env 置空也不写
+                // Don't write inline when the subsection is authoritative; don't write when env is
+                // cleared either
                 guard !hasEnvSubsection, !definition.env.isEmpty else { return nil }
                 let pairs = definition.env.keys.sorted().map {
                     "\($0) = \"\(escape(definition.env[$0] ?? ""))\""
@@ -475,7 +508,8 @@ public enum MCPServerEditor {
             if !trimmed.hasPrefix("#"), let eq = trimmed.firstIndex(of: "=") {
                 let key = unquote(String(trimmed[..<eq]).trimmingCharacters(in: .whitespaces))
                 if managedKeys.contains(key) {
-                    // 改：写新值；置空/被子段接管：删行
+                    // Changed: write the new value; cleared / taken over by the subsection: delete
+                    // the line
                     if !written.contains(key), let rendered = managedLine(key) {
                         newBody.append(rendered)
                     }
@@ -483,9 +517,10 @@ public enum MCPServerEditor {
                     continue
                 }
             }
-            newBody.append(line)  // 未建模键（enabled 等）/ 注释 / 空行原样保留
+            newBody.append(line)  // Unmodeled keys (enabled etc.) / comments / blanks kept
         }
-        // 段内原来没有的建模键补写在段末（跳过末尾空行之前）
+        // Modeled keys the section didn't have before are appended at the section end (before
+        // trailing blank lines)
         var insertAt = newBody.count
         while insertAt > 0,
               newBody[insertAt - 1].trimmingCharacters(in: .whitespaces).isEmpty {
@@ -501,8 +536,9 @@ public enum MCPServerEditor {
         return lines.joined(separator: "\n")
     }
 
-    /// 删除 `[mcp_servers.<name>]` 及其**全部子段**（`.env` / `.tools.*`，实勘 codex 有后者），
-    /// 每段顺带吃掉前导空行（照 CodexProfileEditor.remove 的空行规矩）。
+    /// Deletes `[mcp_servers.<name>]` and **all its subsections** (`.env` / `.tools.*`; codex
+    /// verified to have the latter), each also swallowing its leading blank line (same blank-line
+    /// rule as CodexProfileEditor.remove).
     public static func removeTOML(from toml: String, name: String) throws -> String {
         var lines = toml.components(separatedBy: "\n")
         var removedAny = false
@@ -518,7 +554,8 @@ public enum MCPServerEditor {
         return lines.joined(separator: "\n")
     }
 
-    /// 读出完整定义（含 env 值）：command / args / url + inline `env = {…}` 与 `.env` 子段。
+    /// Reads the full definition (including env values): command / args / url + inline `env = {…}`
+    /// and the `.env` subsection.
     public static func readDefinitionTOML(
         _ toml: String, name: String
     ) throws -> MCPServerDefinition {
@@ -530,7 +567,8 @@ public enum MCPServerEditor {
         var found = false
         var inMain = false
         var inEnvSub = false
-        /// 多行数组收集态（与 MCPConfigIndexer 同手法）：`args = [` 未闭合时吃行到 `]`
+        /// Multi-line array collection state (same technique as MCPConfigIndexer): while `args = [`
+        /// is unclosed, consume lines up to `]`
         var pendingArgs: String?
 
         for rawLine in toml.components(separatedBy: "\n") {
@@ -538,7 +576,7 @@ public enum MCPServerEditor {
             if let buffer = pendingArgs {
                 if line.hasPrefix("#") { continue }
                 if line.hasPrefix("[") {
-                    pendingArgs = nil  // 畸形未闭合：放弃，落回段头处理
+                    pendingArgs = nil  // Malformed, unclosed: give up, fall to header handling
                 } else {
                     let merged = buffer.isEmpty ? line : buffer + " " + line
                     if arrayLiteralClosed(merged) {
@@ -582,8 +620,9 @@ public enum MCPServerEditor {
                     pendingArgs = value
                 }
             case "bearer_token":
-                // 运行时以 Bearer 方案发送 → 读回时补全 Authorization 头值，
-                // 探测与编辑表单即可按 HTTP 语义直接使用（round-trip 稳定）
+                // Sent with the Bearer scheme at runtime → reconstruct the Authorization header
+                // value on read, so the probe and the edit form can use it directly with HTTP
+                // semantics (stable round-trip)
                 headers["Authorization"] = "Bearer \(unquote(value))"
             case "env":
                 for (envKey, envValue) in inlineTablePairs(value) { env[envKey] = envValue }
@@ -597,9 +636,10 @@ public enum MCPServerEditor {
             command: command, args: args, env: env, url: url, headers: headers)
     }
 
-    // MARK: - JSON 私有（parse/serialize 契约照 ClaudeHooksInstaller）
+    // MARK: - JSON private (parse/serialize contract follows ClaudeHooksInstaller)
 
-    /// 公开供测试与表单预览复用（契约与 ClaudeHooksInstaller.parse 一致）
+    /// Public so tests and the form preview can reuse it (contract matches
+    /// ClaudeHooksInstaller.parse)
     public static func parse(_ json: String) throws -> [String: Any] {
         let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return [:] }
@@ -624,29 +664,29 @@ public enum MCPServerEditor {
         guard let value = root[container] else { return [:] }
         guard let servers = value as? [String: Any] else {
             throw InstallError.foreignConfig(
-                "配置里的 \(container) 字段不是对象，无法识别。为避免覆盖看不懂的内容，不做任何改动。")
+                L10n.format("The %@ field in the configuration is not an object and cannot be recognized. No changes were made to avoid overwriting unrecognized content.", zhHans: "配置里的 %@ 字段不是对象，无法识别。为避免覆盖看不懂的内容，不做任何改动。", String(container)))
         }
         return servers
     }
 
     private static func validate(_ definition: MCPServerDefinition) throws {
         let name = definition.name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { throw MCPEditError.invalidDefinition("名称不能为空") }
+        guard !name.isEmpty else { throw MCPEditError.invalidDefinition(L10n.text("The name cannot be empty", zhHans: "名称不能为空")) }
         switch definition.transport {
         case .stdio:
             guard let command = definition.command,
                   !command.trimmingCharacters(in: .whitespaces).isEmpty else {
-                throw MCPEditError.invalidDefinition("stdio server 缺少 command")
+                throw MCPEditError.invalidDefinition(L10n.text("The stdio server is missing a command", zhHans: "stdio server 缺少 command"))
             }
         case .remote:
             guard let url = definition.url,
                   !url.trimmingCharacters(in: .whitespaces).isEmpty else {
-                throw MCPEditError.invalidDefinition("远程 server 缺少 URL")
+                throw MCPEditError.invalidDefinition(L10n.text("The remote server is missing a URL", zhHans: "远程 server 缺少 URL"))
             }
         }
     }
 
-    /// 各方言的字段投影（空集合不写，保持配置干净）
+    /// Per-dialect field projection (empty collections are not written, keeping the config clean)
     public static func encode(_ definition: MCPServerDefinition, style: MCPJSONStyle) -> [String: Any] {
         var entry: [String: Any] = [:]
         switch (style, definition.transport) {
@@ -686,10 +726,12 @@ public enum MCPServerEditor {
         return "\(value)"
     }
 
-    // MARK: - TOML 私有（段落手术规则照 CodexProfileEditor）
+    // MARK: - TOML private (section surgery rules follow CodexProfileEditor)
 
-    /// 段头 → 路径分量（`[mcp_servers."my name".env]` → ["mcp_servers","my name","env"]）。
-    /// 与索引器同款限制：引号段名内含 `.` 会被误拆（实勘无此形态，best-effort）。
+    /// Section header → path components
+    /// (`[mcp_servers."my name".env]` → ["mcp_servers","my name","env"]).
+    /// Same limitation as the indexer: a `.` inside a quoted section name gets split wrongly
+    /// (no such form observed; best-effort).
     private static func headerPath(_ line: String) -> [String]? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else { return nil }
@@ -700,7 +742,7 @@ public enum MCPServerEditor {
         }
     }
 
-    /// 全部 `[mcp_servers.<name>]` 主段（不含子段）的名字 → 行号
+    /// Name → line number for every `[mcp_servers.<name>]` main section (subsections excluded)
     private static func sectionRanges(in lines: [String]) -> [String: Int] {
         var result: [String: Int] = [:]
         for (index, line) in lines.enumerated() {
@@ -711,7 +753,8 @@ public enum MCPServerEditor {
         return result
     }
 
-    /// 定位主段（subsection = nil）或指定子段（如 "env"）的 [段头, 下一段头) 行区间
+    /// Locates the [header, next header) line range of the main section (subsection = nil) or a
+    /// given subsection (e.g. "env")
     private static func sectionRange(
         in lines: [String], name: String, subsection: String?
     ) -> Range<Int>? {
@@ -732,7 +775,8 @@ public enum MCPServerEditor {
         return nil
     }
 
-    /// 第一个属于该 server 的段（主段或任意子段）的 [段头, 下一段头) 行区间
+    /// The [header, next header) line range of the first section belonging to this server (main or
+    /// any subsection)
     private static func firstSectionRange(
         in lines: [String], matching name: String
     ) -> Range<Int>? {
@@ -770,7 +814,8 @@ public enum MCPServerEditor {
         return value
     }
 
-    /// 单行数组 `["-y", "pkg"]` → 元素（多行形态由调用方拼接后再进来）
+    /// Single-line array `["-y", "pkg"]` → elements (multi-line forms are joined by the caller
+    /// first)
     private static func inlineArrayStrings(_ value: String) -> [String] {
         var inner = value.trimmingCharacters(in: .whitespaces)
         guard inner.hasPrefix("[") else { return [] }
@@ -781,8 +826,9 @@ public enum MCPServerEditor {
         }.filter { !$0.isEmpty }
     }
 
-    /// 数组字面量是否已闭合：引号外的 `]` 才算（引号内是元素内容）；
-    /// 引号内 `\"` 转义不翻转引号态。与 MCPConfigIndexer 的同款手法（模块不互相依赖）
+    /// Whether the array literal is closed: only a `]` outside quotes counts (inside quotes it's
+    /// element content); a `\"` escape inside quotes doesn't flip the quote state. Same technique
+    /// as MCPConfigIndexer (the modules don't depend on each other)
     private static func arrayLiteralClosed(_ value: String) -> Bool {
         var inString = false
         var escaped = false
@@ -798,7 +844,8 @@ public enum MCPServerEditor {
         return false
     }
 
-    /// 单行内联表 `{ A = "x", B = "y" }` → 键值对（这里**要**值：传播需要完整定义）
+    /// Single-line inline table `{ A = "x", B = "y" }` → key/value pairs (values **are** needed
+    /// here: propagation needs the full definition)
     private static func inlineTablePairs(_ value: String) -> [(String, String)] {
         var inner = value.trimmingCharacters(in: .whitespaces)
         guard inner.hasPrefix("{") else { return [] }

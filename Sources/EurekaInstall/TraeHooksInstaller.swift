@@ -1,82 +1,97 @@
+import EurekaKit
 import Foundation
 
-/// 把 lululumei-relay 装进 Trae CN 的 `~/.trae-cn/hooks.json`。
+/// Installs lululumei-relay into Trae CN's `~/.trae-cn/hooks.json`.
 ///
-/// **只有 CN 版有 hooks**：国际版（实勘 3.5.35）的 `libai_agent.dylib` 里没有
-/// `src/domain/hooks/…` 那一整套，也没有 `hooks.json` 这个资产类型。
+/// **Only the CN build has hooks**: the international build's `libai_agent.dylib` (inspected at
+/// 3.5.35) lacks the whole `src/domain/hooks/…` tree and has no `hooks.json` asset type either.
 ///
-/// Trae 的 hooks 是**刻意做的 Claude Code 兼容实现**（二进制里带着
-/// `import_claude_folders` / `global_import_claude_enabled` / `CLAUDE_PROJECT_DIR`，
-/// 还有一个 `tool_compatible/` 模块把自家工具名映射成 Claude 的）：
-///  - stdin 键：`hook_event_name` / `session_id` / `cwd` / `tool_input` / `tool_response`
-///    （**没有** `transcript_path` —— 会话库加密，没有明文转录）；
-///  - 输出契约：`hookSpecificOutput` / `permissionDecision` / `additionalContext` / `stopReason`。
-/// 所以载荷解码直接复用 `ClaudeHookDecoder`（只换 source），relay 也只需一个
-/// 与 `claude-hook` 同构的 `trae-hook` 子命令。
+/// Trae's hooks are a **deliberately Claude Code-compatible implementation** (the binary carries
+/// `import_claude_folders` / `global_import_claude_enabled` / `CLAUDE_PROJECT_DIR`, plus a
+/// `tool_compatible/` module that maps its own tool names onto Claude's):
+///  - stdin keys: `hook_event_name` / `session_id` / `cwd` / `tool_input` / `tool_response` (**no**
+///    `transcript_path` - the session DB is encrypted and there is no plaintext transcript);
+///  - output contract: `hookSpecificOutput` / `permissionDecision` / `additionalContext` /
+///    `stopReason`.
+/// So payload decoding reuses `ClaudeHookDecoder` directly (only the source changes), and the relay
+/// only needs a `trae-hook` subcommand isomorphic to `claude-hook`.
 ///
-/// 与 `ClaudeHooksInstaller` 的差别只有三处：
-///  1. 目标是**独立文件** `~/.trae-cn/hooks.json`（不是 settings.json 里的一个键），
-///     这点与 `CodexHooksInstaller` 相同；
-///  2. 事件集不同：Trae 有 `PostCompact`（Claude 没有），但**没有** `SessionEnd` /
-///     `Notification`（→ 「等待授权」这个状态对 Trae 永远不可见）；
-///  3. 载荷自带事件名，所以命令行不用像 Codex 那样把事件名带上。
+/// It differs from `ClaudeHooksInstaller` in only three ways:
+///  1. The target is a **standalone file** `~/.trae-cn/hooks.json` (not a key inside
+///     settings.json), the same as `CodexHooksInstaller`;
+///  2. A different event set: Trae has `PostCompact` (Claude doesn't) but **no** `SessionEnd` /
+///     `Notification` (→ the "waiting for permission" state is never visible for Trae);
+///  3. The payload carries its own event name, so the command line needn't include it as Codex's
+///     does.
 ///
-/// ⚠️⚠️ **Trae 的 hooks 是按账号灰度的服务端功能，而且本机账号没放开 —— 所以下面这份
-/// 结构是「按 Trae 的 Claude 兼容取向推的」，尚未实机验证过。**
+/// ⚠️⚠️ **Trae's hooks are a server-side feature rolled out per account, and the local account
+/// doesn't have it - so the structure below is "inferred from Trae's Claude-compatible design" and
+/// has not been verified on a real install.**
 ///
-/// 实勘经过（2026-08-08，Trae CN 3.3.84）：往 `~/.trae-cn/hooks.json` 放了一份本结构的探针，
-/// 跑了两个真实回合，`ai-agent` 日志里 `[Hooks] resolve_hooks_config result: is_ok=true`、
-/// `[Hooks] UserPromptSubmit hook completed` 都有，但**既没有 `[Hooks] Triggering hook: id=`，
-/// 也没有 `[parse_hooks_config] skipping config file '…'`，日志里连我们的文件路径都没出现过**
-/// —— 说明它压根没去读全局配置，不是读了嫌形状不对。
+/// How it was inspected (2026-08-08, Trae CN 3.3.84): put a probe with this structure into
+/// `~/.trae-cn/hooks.json` and ran two real turns. The `ai-agent` log had both
+/// `[Hooks] resolve_hooks_config result: is_ok=true` and `[Hooks] UserPromptSubmit hook completed`,
+/// but **neither `[Hooks] Triggering hook: id=` nor
+/// `[parse_hooks_config] skipping config file '…'`; our file path never even appeared in the log**.
+/// So it never read the global config at all, rather than reading it and rejecting the shape.
 ///
-/// 原因在前端的可见性判定（`workbench.desktop.main.js`，Hooks 设置页 `AIHooksSettings`）：
+/// The cause is the frontend's visibility check (`workbench.desktop.main.js`, the Hooks settings
+/// page `AIHooksSettings`):
 /// ```js
 /// return jv(i) ? !1 : t.getConfigData()?.iCubeApp?.hooks?.enable === !0 ? !0
 ///                  : e?.account?.scope === Ol.BYTEDANCE
 /// ```
-/// 即：服务端动态配置 `iCubeApp.hooks.enable === true`，或账号 scope 是 `BYTEDANCE`，
-/// 二者之一才开放。本机拉到的动态配置里没有 `hooks` 键、`user_scope=marscode` → 功能关着。
+/// i.e. it is enabled only when the server-side dynamic config has `iCubeApp.hooks.enable === true`
+/// or the account scope is `BYTEDANCE`. The dynamic config fetched locally has no `hooks` key and
+/// `user_scope=marscode` → the feature is off.
 ///
-/// **两条路径是确定的**（取自 Trae 自己的代码，不是猜）：全局 `<dataFolder>/hooks.json`
-/// 来自前端资产表 `globalRelPath:"hooks.json"` + `productService.dataFolderName`，
-/// 项目级来自 `projectRelPath:".trae/hooks.json"`。**不确定的只有文件内部的 schema。**
-/// 二进制里另有 `id`（`Triggering hook: id=`）、`if_expr`（`[HooksConfig] failed to compile
-/// regex if_expr`）、`exec_env`、`version`（`unsupported_version`）、`matcher`
-/// （`invalid_matcher`）这些字段名 —— 真实结构可能是带 `id` 的扁平数组而非这里的事件映射表。
+/// **Both paths are certain** (taken from Trae's own code, not guessed): the global
+/// `<dataFolder>/hooks.json` comes from the frontend asset table `globalRelPath:"hooks.json"` +
+/// `productService.dataFolderName`, and the project-level one from
+/// `projectRelPath:".trae/hooks.json"`. **Only the schema inside the file is uncertain.** The
+/// binary also has the field names `id` (`Triggering hook: id=`), `if_expr`
+/// (`[HooksConfig] failed to compile regex if_expr`), `exec_env`, `version` (`unsupported_version`)
+/// and `matcher` (`invalid_matcher`) - the real structure may be a flat array with `id`s rather
+/// than the event map used here.
 ///
-/// 放开后要做的验证（照 CHANGELOG 里记的步骤）：装上 → 跑一个回合 →
-/// `grep -E "Triggering hook: id=|Hook execution finished: id=|parse_hooks_config" <ai-agent 日志>`。
-/// 如果出现 `skipping config file`，就按它报的原因改本文件的结构；改动只集中在 `install`。
+/// Verification once it's enabled (per the steps recorded in CHANGELOG): install → run a turn →
+/// `grep -E "Triggering hook: id=|Hook execution finished: id=|parse_hooks_config" <ai-agent log>`.
+/// If `skipping config file` shows up, change this file's structure per the reason it reports; the
+/// change is confined to `install`.
 ///
-/// 之所以仍然把它做完并留在设置里：它 opt-in、只增删带 marker 的条目、形状认不出就 abort、
-/// 写前备份 —— 形状猜错的最坏后果只是 Trae 忽略这份配置，不会弄坏任何东西。
+/// Why it's still finished and kept in Settings: it's opt-in, only adds/removes marker-carrying
+/// entries, aborts on an unrecognised shape, and backs up before writing - the worst case of a
+/// wrong guess is that Trae ignores this config; nothing gets broken.
 ///
-/// 安全口径逐条照搬，一条都不能松：
-///  - **绝不整段覆盖 `hooks[event]`**，只增删含 relay 名（`RelayIdentity.isOurs`）的条目；
-///  - 认不出的形态（事件值不是条目数组）→ 拒绝改写并报错，宁可什么都不做；
-///  - **`PreToolUse` 的 stdout 会被 Trae 当作放行/拦截决策**（它认
-///    `permissionDecision`）→ relay 必须绝对静默、立即 exit 0。我们只报告，从不参与决策。
+/// The safety rules are copied one for one, and none may be loosened:
+///  - **Never overwrite `hooks[event]` wholesale**; only add/remove entries containing the relay
+///    name (`RelayIdentity.isOurs`);
+///  - Unrecognised shapes (an event value that isn't an entry array) → refuse to rewrite and report
+///    an error; better to do nothing;
+///  - **Trae reads `PreToolUse` stdout as an allow/block decision** (it honours
+///    `permissionDecision`) → the relay must stay absolutely silent and exit 0 immediately. We only
+///    report, never take part in decisions.
 public enum TraeHooksInstaller {
-    /// 受管事件。取自 `libai_agent.dylib` 里 `[Hooks]` 日志与 `src/domain/hooks/instance/trigger.rs`
-    /// 实际出现的事件名：`UserPromptSubmit`（实机日志见过 "hook completed"）、
-    /// `PreToolUse` / `PostToolUse`（均有 "stop requested" 与
-    /// `[Hooks][PreToolUse] applied updatedInput for tool=`）、`Stop`（`stop_hook.rs`）、
-    /// `PreCompact` / `PostCompact`（`PostCompact skipped duplicat…`）。
+    /// Managed events. Taken from the event names that actually appear in the `[Hooks]` logs and
+    /// `src/domain/hooks/instance/trigger.rs` in `libai_agent.dylib`: `UserPromptSubmit` (seen as
+    /// "hook completed" in a real log), `PreToolUse` / `PostToolUse` (both have "stop requested"
+    /// and `[Hooks][PreToolUse] applied updatedInput for tool=`), `Stop` (`stop_hook.rs`),
+    /// `PreCompact` / `PostCompact` (`PostCompact skipped duplicat…`).
     ///
-    /// `SessionStart` 在二进制里只出现一次且无配套日志 → 不纳管（宁可少一个事件，
-    /// 也不要往用户配置里写一个 Trae 根本不认的键）。
+    /// `SessionStart` appears only once in the binary with no accompanying log → not managed
+    /// (better one event fewer than writing a key Trae doesn't recognise at all into the user's
+    /// config).
     public static let managedEvents = [
         "UserPromptSubmit", "Stop", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact",
     ]
 
     public static func hookCommand(relayPath: String) -> String {
-        // 路径含空格（Application Support）必须引号包裹
+        // The path contains a space (Application Support), so it must be quoted
         "\"\(relayPath)\" trae-hook"
     }
 
-    /// hooks 里是否有我们**无法安全改写**的形态。返回第一个有问题的事件名。
-    /// 语义与 Claude / Codex 两份一致（同一风险、同一处理）。
+    /// Whether hooks contains a shape we **cannot safely rewrite**. Returns the first offending
+    /// event name. Same semantics as the Claude / Codex versions (same risk, same handling).
     static func unsupportedShapeEvent(in hooks: [String: Any]) -> String? {
         for (event, value) in hooks {
             guard let entries = value as? [Any] else { return event }
@@ -88,8 +103,8 @@ public enum TraeHooksInstaller {
     private static func rejectUnsupportedShape(_ hooks: [String: Any]) throws {
         guard let event = unsupportedShapeEvent(in: hooks) else { return }
         throw InstallError.foreignConfig(
-            "hooks.json 的 hooks.\(event) 结构无法识别（不是条目数组）。"
-                + "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。")
+            L10n.format("The hooks.%@ structure in hooks.json is not recognized (expected an array of entries).", zhHans: "hooks.json 的 hooks.%@ 结构无法识别（不是条目数组）。", String(event))
+                + L10n.text(" No changes were made to avoid removing unrecognized content. Please fix this field manually first.", zhHans: "为避免删掉看不懂的内容，不做任何改动 —— 请先手动整理该字段。"))
     }
 
     public static func install(into json: String, relayPath: String) throws -> String {
@@ -103,10 +118,11 @@ public enum TraeHooksInstaller {
         ]
         for event in managedEvents {
             var entries = entriesOf(hooks, event)
-            entries.removeAll(where: isEurekaEntry)  // 重装时替换旧条目（路径可能变了）
+            entries.removeAll(where: isEurekaEntry)  // Reinstall replaces old entries (path may differ)
             var entry: [String: Any] = ["hooks": [command]]
-            // 工具类事件带 matcher（Trae 的错误码里有 `invalid_matcher`，说明它认这个字段）；
-            // 非工具事件不写，免得写进一个它不认的键。
+            // Tool events carry a matcher (Trae's error codes include `invalid_matcher`, so it
+            // recognises the field); non-tool events don't, to avoid writing a key it doesn't
+            // recognise.
             if event == "PreToolUse" || event == "PostToolUse" { entry["matcher"] = "*" }
             entries.append(entry)
             hooks[event] = entries
@@ -148,18 +164,19 @@ public enum TraeHooksInstaller {
         return installed == 0 ? .none : .partial
     }
 
-    /// 判定顺序与 Claude / Codex 版一致：
-    /// 先认「根本没法动」，再认「看着装了其实挂了」（路径歪 / relay 没了），最后才是缺事件。
+    /// Same check order as the Claude / Codex versions: first "can't be touched at all", then
+    /// "looks installed but is actually broken" (drifted path / relay gone), and missing events
+    /// last.
     public static func diagnose(
         json: String, expectedRelayPath: String,
         relayIsExecutable: (String) -> Bool
     ) -> HookDiagnosis {
         guard let root = try? parse(json) else {
-            return .unparseable(reason: "hooks.json 不是合法 JSON")
+            return .unparseable(reason: L10n.text("hooks.json is not valid JSON", zhHans: "hooks.json 不是合法 JSON"))
         }
         guard let hooks = root["hooks"] as? [String: Any] else { return .notInstalled }
         if let event = unsupportedShapeEvent(in: hooks) {
-            return .unparseable(reason: "hooks.\(event) 的结构无法识别（不是条目数组）")
+            return .unparseable(reason: L10n.format("The hooks.%@ structure is not recognized (expected an array of entries)", zhHans: "hooks.%@ 的结构无法识别（不是条目数组）", String(event)))
         }
 
         let ourCommands = eurekaCommands(in: hooks)
@@ -182,7 +199,8 @@ public enum TraeHooksInstaller {
         return missing.isEmpty ? .installed : .stale(missing: missing)
     }
 
-    /// 同一份 hooks.json 里他人的条目（只为告知；我们只增删含 marker 的条目）
+    /// Others' entries in the same hooks.json (informational only; we only add/remove
+    /// marker-carrying entries)
     public static func foreignHooks(in json: String) -> ForeignHookReport {
         guard let root = try? parse(json),
             let hooks = root["hooks"] as? [String: Any]
@@ -217,7 +235,7 @@ public enum TraeHooksInstaller {
         return result
     }
 
-    // MARK: - 内部
+    // MARK: - Internals
 
     private static func entriesOf(_ hooks: [String: Any], _ event: String) -> [[String: Any]] {
         hooks[event] as? [[String: Any]] ?? []
@@ -235,7 +253,7 @@ public enum TraeHooksInstaller {
             let object = try? JSONSerialization.jsonObject(with: data),
             let root = object as? [String: Any]
         else {
-            throw InstallError.foreignConfig("hooks.json 不是合法 JSON 对象，未做改动")
+            throw InstallError.foreignConfig(L10n.text("hooks.json is not a valid JSON object; no changes were made", zhHans: "hooks.json 不是合法 JSON 对象，未做改动"))
         }
         return root
     }
@@ -244,7 +262,7 @@ public enum TraeHooksInstaller {
         let data = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         guard let text = String(data: data, encoding: .utf8) else {
-            throw InstallError.foreignConfig("序列化 hooks.json 失败")
+            throw InstallError.foreignConfig(L10n.text("Failed to serialize hooks.json", zhHans: "序列化 hooks.json 失败"))
         }
         return text + "\n"
     }

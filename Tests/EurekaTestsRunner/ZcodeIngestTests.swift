@@ -4,7 +4,7 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-// MARK: - 路径
+// MARK: - paths
 
 func zcodePathsTests(_ t: TestRunner) {
     t.suite("ZcodePaths")
@@ -33,7 +33,7 @@ func zcodePathsTests(_ t: TestRunner) {
             ZcodePaths.agentsRoot(environment: [
                 "EUREKA_ZCODE_HOME": "/tmp/zc-home", "EUREKA_ZCODE_ROLLOUT": "/tmp/zc-ro",
             ]).path,
-            "/tmp/zc-home/cli/agents")  // agentsRoot 不受 ROLLOUT 覆盖影响
+            "/tmp/zc-home/cli/agents")  // agentsRoot is unaffected by the ROLLOUT override
         try expectEqual(
             ZcodePaths.skillsRoot(environment: ["EUREKA_ZCODE_SKILLS": "/tmp/zc-skills"]).path,
             "/tmp/zc-skills")
@@ -42,7 +42,7 @@ func zcodePathsTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - rollout 解码
+// MARK: - rollout decoding
 
 func zcodeRolloutDecoderTests(_ t: TestRunner) {
     t.suite("ZcodeRolloutDecoder")
@@ -56,7 +56,8 @@ func zcodeRolloutDecoderTests(_ t: TestRunner) {
     }
 
     t.test("usageRecord：response.usage 四段 token + 模型小写化；空对象返回 nil") {
-        // OpenAI 口径：inputTokens 100 已含 cacheRead 10；totalTokens = input + output
+        // OpenAI convention: inputTokens 100 already includes cacheRead 10; totalTokens = input +
+        // output
         let root = try JSONDict(#"""
         {"type":"model_io","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","modelId":"glm-5.3","usage":{"inputTokens":100,"outputTokens":50,"totalTokens":150,"cacheReadTokens":10,"cacheWriteTokens":0}}}
         """#)
@@ -125,7 +126,7 @@ private func JSONDict(_ json: String) throws -> [String: Any] {
     return dict
 }
 
-// MARK: - 模型目录（v2/config.json 的 per-model limit.context）
+// MARK: - model catalog (per-model limit.context in v2/config.json)
 
 func zcodeConfigWindowsTests(_ t: TestRunner) {
     t.suite("ZcodeConfigWindows")
@@ -166,7 +167,8 @@ func zcodeConfigWindowsTests(_ t: TestRunner) {
 
 // MARK: - tailer
 
-/// 建 rollout 目录 + 一个主会话 db（session 表只含 directory 列查询所需的行）
+/// Builds the rollout directory + a main session db (the session table holds only the rows the
+/// directory-column query needs)
 private func makeZcodeRolloutDir(
     sessionId: String = "sess_abc", cwd: String? = "/Users/me/work/demo"
 ) throws -> (root: URL, dbPath: URL, file: URL, configURL: URL) {
@@ -209,8 +211,9 @@ private func appendZcodeLines(_ lines: [String], to url: URL) throws {
     }
 }
 
-/// fixture 时间戳相对当前时间生成：写死日历日会随时间滑出 usage 断言的
-/// 「最近 24h」查询窗口，几天后必然变红（2026-08-20 实际发生）。
+/// Fixture timestamps are generated relative to now: hardcoded calendar dates drift out of the
+/// usage assertions' "last 24h" query window and are guaranteed to go red a few days later (this
+/// actually happened on 2026-08-20).
 private func zcodeFixtureISO(_ secondsAgo: TimeInterval) -> String {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -263,7 +266,7 @@ func zcodeTailerTests(_ t: TestRunner) {
         let dir = try makeZcodeRolloutDir()
         defer { try? FileManager.default.removeItem(at: dir.root) }
         try appendZcodeLines([zcodeMidStep], to: dir.file)
-        // 子代理流水：不应进事件流
+        // Subagent stream: must not enter the event stream
         try appendZcodeLines(
             [zcodeFinalStep],
             to: dir.root.appendingPathComponent("rollout/model-io-sess_subagent_agent_x.jsonl"))
@@ -272,11 +275,12 @@ func zcodeTailerTests(_ t: TestRunner) {
         let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
             events.append(($0, $1))
         }
-        tailer.scanOnce()  // 初见
+        tailer.scanOnce()  // first sight
         events.removeAll()
 
-        // 大用量行（input 96k[含 cacheRead 32k] + output 1k = 97,000 ÷ config 的 1M 窗口
-        // = 9.7%，超过抑制阈值 0.5%；cacheRead 是 input 子集，不参与相加）
+        // Large usage line (input 96k [incl. cacheRead 32k] + output 1k = 97,000 ÷ the config's 1M
+        // window = 9.7%, above the 0.5% suppression threshold; cacheRead is a subset of input and
+        // isn't added)
         let bigUsage = #"{"type":"model_io","querySource":"main_turn","startedAt":"2026-08-15T03:59:05.000Z","completedAt":"2026-08-15T03:59:10.000Z","model":{"modelId":"GLM-5.3"},"response":{"finishReason":"stop","usage":{"inputTokens":96000,"outputTokens":1000,"cacheReadTokens":32000,"cacheWriteTokens":0}}}"#
         try appendZcodeLines([bigUsage], to: dir.file)
         tailer.scanOnce()
@@ -296,7 +300,7 @@ func zcodeTailerTests(_ t: TestRunner) {
     t.test("config 缺该模型的窗口 → 不发 contextUpdate（不猜分母）") {
         let dir = try makeZcodeRolloutDir()
         defer { try? FileManager.default.removeItem(at: dir.root) }
-        // 空 provider 表：任何模型都查不到窗口
+        // Empty provider table: no model can find a window
         try Data(#"{"provider":{}}"#.utf8).write(to: dir.configURL)
         try appendZcodeLines([zcodeMidStep], to: dir.file)
         var events: [(TaskEvent, Bool)] = []
@@ -316,7 +320,7 @@ func zcodeTailerTests(_ t: TestRunner) {
         let tailer = ZcodeRolloutTailer(rolloutRoot: dir.root.appendingPathComponent("rollout"), dbPath: dir.dbPath, modelConfigURL: dir.configURL) {
             events.append(($0, $1))
         }
-        tailer.scanOnce()  // 初见定基线
+        tailer.scanOnce()  // First sight sets the baseline
         events.removeAll()
 
         let handle = try FileHandle(forWritingTo: dir.file)
@@ -339,7 +343,7 @@ func zcodeTailerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 会话索引
+// MARK: - session index
 
 func zcodeSessionIndexerTests(_ t: TestRunner) {
     t.suite("ZcodeSessionIndexer")
@@ -387,7 +391,7 @@ func zcodeSessionIndexerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 子代理扫描
+// MARK: - subagent scan
 
 func zcodeSubagentScannerTests(_ t: TestRunner) {
     t.suite("ZcodeSubagentScanner")
@@ -399,7 +403,8 @@ func zcodeSubagentScannerTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let nowISO = ISO8601DateFormatter().string(from: Date())
-        // 本 turn 的 running 子代理 + 旧 turn 的已完成子代理（应被 turnStartedAt 过滤）
+        // A running subagent of this turn + a completed subagent of an old turn (should be filtered
+        // by turnStartedAt)
         for (agent, status, offset) in [
             ("agent_run", "running", -60.0),
             ("agent_old", "completed", -7200.0),
@@ -411,7 +416,8 @@ func zcodeSubagentScannerTests(_ t: TestRunner) {
             """#
             try Data(meta.utf8).write(to: sub.appendingPathComponent("metadata.json"))
         }
-        // running 子代理的 transcript 尾部带一个工具调用（raw string 内引号无需转义）
+        // The running subagent's transcript tail carries one tool call (quotes inside a raw string
+        // need no escaping)
         try appendZcodeLines(
             [#"{ "id":"u1", "type":"tool_call_scheduled", "timestamp":"\#(nowISO)", "payload":{ "toolName":"Bash", "toolCallId":"c1" } }"#],
             to: dir.appendingPathComponent("agent_run/transcript.jsonl"))
@@ -428,7 +434,7 @@ func zcodeSubagentScannerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 用量扫描
+// MARK: - usage scan
 
 func zcodeUsageScannerTests(_ t: TestRunner) {
     t.suite("ZcodeUsageScanner")
@@ -436,7 +442,7 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
     t.test("扫描 model_io 行：usage 入账 + 工具计数 + 水位幂等") {
         let dir = try makeZcodeRolloutDir()
         defer { try? FileManager.default.removeItem(at: dir.root) }
-        // prompt 计数用的 message 表（recordPromptCounts 用）
+        // message table used for prompt counting (by recordPromptCounts)
         let db = try SQLiteDB(path: dir.dbPath.path)
         try db.run("""
         CREATE TABLE message (
@@ -461,7 +467,8 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
         let zcodeRows = totals.filter { $0.source == .zcode }
         try expectEqual(zcodeRows.count, 1)
         try expectEqual(zcodeRows[0].model, "glm-5.3")
-        // inputTokens 含缓存读（OpenAI 口径）→ 入库前减掉：10 + (20-2) = 28
+        // inputTokens includes cache reads (OpenAI convention) → subtracted before storing: 10 +
+        // (20-2) = 28
         try expectEqual(zcodeRows[0].inputTokens, 28)
         try expectEqual(zcodeRows[0].outputTokens, 13)
         try expectEqual(zcodeRows[0].cacheReadTokens, 2)
@@ -481,8 +488,9 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
     }
 
     t.test("lastZcodeContext：末行 30 万字节且无 usage → 块回退跨行找到上一条") {
-        // 实测 zcode 每行内嵌完整 request.body.messages（25万~47万字节）；
-        // 末行常是进行中的大请求（无 usage），必须回退越过它才够到上一条的 usage
+        // Observed: every zcode line embeds the full request.body.messages (250k–470k bytes); the
+        // last line is often an in-flight large request (no usage), so we must back up past it to
+        // reach the previous usage
         let dir = try makeZcodeRolloutDir()
         defer { try? FileManager.default.removeItem(at: dir.root) }
         let padding = String(repeating: "x", count: 300_000)
@@ -493,7 +501,7 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
         }
         try expectEqual(last.tokens, 28)
         try expectEqual(last.model, "glm-5.3", "进行中行的 model.modelId 小写化后同值")
-        // 正文里出现转义的 usage 字样不该被误认成结构片段
+        // Escaped "usage" text inside a message body must not be mistaken for a structural fragment
         let poison = #"{"type":"model_io","startedAt":"2026-08-15T04:01:00.000Z","completedAt":null,"model":{"modelId":"GLM-5.3"},"request":{"body":{"messages":[{"role":"user","content":"讨论 \"usage\":{\"inputTokens\":999999} 的含义"}]}},"response":{}}"#
         try appendZcodeLines([poison], to: dir.file)
         try expectEqual(LastTurnUsageReader.lastZcodeContext(rolloutPath: dir.file.path)?.tokens,
@@ -512,7 +520,7 @@ func zcodeUsageScannerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 计划索引
+// MARK: - plan index
 
 func zcodePlanIndexTests(_ t: TestRunner) {
     t.suite("ZcodePlanIndex")
@@ -526,11 +534,11 @@ func zcodePlanIndexTests(_ t: TestRunner) {
         try "# 适配 ZCode\n\n- [x] 步骤一\n- [ ] 步骤二\n".write(
             to: plansDir.appendingPathComponent("plan-sess_abc.md"),
             atomically: true, encoding: .utf8)
-        // 无 sess_ 段的 plan- 文件：仍收，但不关联会话
+        // A plan- file without a sess_ segment: still collected, but not linked to a session
         try "# 附录\n".write(
             to: plansDir.appendingPathComponent("plan-notes.md"),
             atomically: true, encoding: .utf8)
-        // 非 plan- 前缀：不收
+        // Not prefixed with plan-: not collected
         try "# 杂记\n".write(
             to: plansDir.appendingPathComponent("readme.md"),
             atomically: true, encoding: .utf8)
@@ -565,7 +573,7 @@ func zcodePlanIndexTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - 子代理 profile 聚合（Agents 标签用）
+// MARK: - subagent profile aggregation (for the Agents tab)
 
 func zcodeAgentDefinitionTests(_ t: TestRunner) {
     t.suite("ZcodeAgentDefinitions")

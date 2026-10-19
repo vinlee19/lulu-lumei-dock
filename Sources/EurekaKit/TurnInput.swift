@@ -1,35 +1,39 @@
 import Foundation
 
-/// 一个 agent「轮次」的原始素材：一次提问 → 若干思考/工具 → 一次回答。
+/// Raw material of one agent "turn": one question → some thinking/tool steps → one answer.
 ///
-/// 这是**血缘图引擎的唯一输入**。放 EurekaKit 而不是 EurekaIngest，是因为
-/// 依赖方向只能是 `EurekaIngest → EurekaKit`：引擎（`TurnGraphBuilder`/`TurnGraphLayout`）
-/// 是纯函数、要能脱离任何 IO 单测，所以输入类型必须落在叶子模块里。
-/// 由 `EurekaIngest.TurnSlicer` 从 `[TranscriptMessage]` 切出来填充。
+/// This is the **sole input of the lineage-graph engine**. It lives in EurekaKit rather than EurekaIngest because
+/// the dependency direction can only be `EurekaIngest → EurekaKit`: the engine (`TurnGraphBuilder`/`TurnGraphLayout`)
+/// is pure and must be unit-testable without any IO, so its input type has to live in the leaf module.
+/// Filled in by `EurekaIngest.TurnSlicer`, which slices it out of `[TranscriptMessage]`.
 ///
-/// **思考正文按源分级**（本机实勘）：Codex（`agent_reasoning`）/ Kimi（`think`）/
-/// Qwen（`thought`）有明文；Claude 落盘时被剥离（只剩加密签名）→ `thinkingTexts` 恒空，
-/// 引擎那侧改用「并行批次」推断分叉，**绝不伪造思考节点**。
+/// **Thinking text varies by source** (surveyed locally): Codex (`agent_reasoning`) / Kimi
+/// (`think`) / Qwen (`thought`) have plaintext; Claude strips it when writing to disk (only an
+/// encrypted signature remains) → `thinkingTexts` is always empty, and the engine instead infers
+/// forks from "parallel batches"; it **never fabricates thinking nodes**.
 public struct TurnInput: Equatable, Sendable {
-    /// 轮内一步操作。字段刻意只保留「画图与诊断需要的」，不驻留输出正文。
+    /// One step within a turn. Fields deliberately keep only what drawing and diagnostics need;
+    /// output bodies are not retained.
     public struct Step: Equatable, Sendable {
         public var kind: ToolKind
-        /// 展示用工具名（Read / exec_command / server.tool / 子代理类型…）
+        /// Display tool name (Read / exec_command / server.tool / subagent type…)
         public var name: String
-        /// 关键参数摘要（解析期已截断）
+        /// Summary of key arguments (already truncated at parse time)
         public var detail: String
         public var isError: Bool
-        /// 同一次模型输出里的批次号。**同批 = 真并行**（Claude 是同一 assistant 消息的
-        /// content 数组，Codex 是同一 turn 内相邻的一组）；跨批 = 串行。
+        /// Batch number within one model output. **Same batch = truly parallel** (for Claude, the
+        /// content array of one assistant message; for Codex, an adjacent group within one turn);
+        /// different batches = sequential.
         public var batch: Int
-        /// 工具调用 id（Claude `tool_use.id` / Codex `call_id`）
+        /// Tool call id (Claude `tool_use.id` / Codex `call_id`)
         public var callId: String?
-        /// 承载这一步的消息 id（= `TranscriptMessage.id` 文件内序号），点节点跳消息用
+        /// Id of the message carrying this step (= `TranscriptMessage.id`, the in-file ordinal);
+        /// used to jump to the message from a node
         public var messageId: Int
-        /// 在本轮步骤序列里的下标（0 起）
+        /// Index within this turn's step sequence (0-based)
         public var stepIndex: Int
-        /// 子代理内部的步骤（仅 `.agent` 步非空）。父子边由
-        /// `agent-<id>.meta.json` 的 `toolUseId` 精确给出，不是靠时间窗猜的。
+        /// Steps inside a subagent (non-empty only for `.agent` steps). The parent-child edge comes
+        /// exactly from `toolUseId` in `agent-<id>.meta.json`, not guessed from a time window.
         public var subSteps: [Step]
 
         public init(
@@ -49,18 +53,18 @@ public struct TurnInput: Equatable, Sendable {
         }
     }
 
-    /// 轮序号（0 起，按会话内出现顺序）
+    /// Turn ordinal (0-based, in order of appearance within the session)
     public var turnIndex: Int
-    /// 提问消息 id（跳转锚点）；无提问的首轮（会话恢复）为 nil
+    /// Question message id (jump anchor); nil for a first turn with no question (session resume)
     public var promptMessageId: Int?
     public var promptText: String
-    /// 明文思考（Codex/Kimi/Qwen 有，Claude 恒空）
+    /// Plaintext thinking (present for Codex/Kimi/Qwen, always empty for Claude)
     public var thinkingTexts: [String]
     public var steps: [Step]
-    /// 回答消息 id 列表（一轮可能分多段输出）
+    /// Answer message ids (one turn may produce output in several segments)
     public var answerMessageIds: [Int]
     public var answerText: String
-    /// 本轮的错误消息（API 错误等，与 step.isError 不是一回事）
+    /// This turn's error messages (API errors etc., not the same thing as step.isError)
     public var errorTexts: [String]
     public var startedAt: Date?
     public var endedAt: Date?
@@ -83,7 +87,7 @@ public struct TurnInput: Equatable, Sendable {
         self.endedAt = endedAt
     }
 
-    /// 轮耗时（无时间戳的源返回 nil，不要拿 0 冒充）
+    /// Turn duration (nil for sources without timestamps; never pass 0 off as a value)
     public var duration: TimeInterval? {
         guard let startedAt, let endedAt, endedAt >= startedAt else { return nil }
         return endedAt.timeIntervalSince(startedAt)

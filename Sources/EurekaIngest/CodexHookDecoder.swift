@@ -1,20 +1,22 @@
 import EurekaKit
 import Foundation
 
-/// 把 Codex hook stdin payload 解码为领域事件（Codex 0.145.0 实勘）。
+/// Decodes a Codex hook stdin payload into a domain event (surveyed on Codex 0.145.0).
 ///
-/// Codex 的 hooks 配置在 `~/.codex/hooks.json`，支持 4 个事件：
-/// `UserPromptSubmit` / `Stop` / `SessionStart` / **`PermissionRequest`**。
-/// 载荷与 Claude 一样走 stdin JSON，但**不带事件名** —— 事件名由 relay 按安装时写进
-/// 命令行的参数补进 `hook_event_name`（见 eureka-relay 的 `codex-hook` 分支）。
+/// Codex's hooks config lives in `~/.codex/hooks.json` and supports 4 events:
+/// `UserPromptSubmit` / `Stop` / `SessionStart` / **`PermissionRequest`**. The payload arrives as
+/// stdin JSON like Claude's, but **without the event name** -- the relay fills `hook_event_name`
+/// from the command-line argument written at install time (see eureka-relay's `codex-hook` branch).
 ///
-/// 会话 id 有两种落法（实勘旁证：同机 Otty 的 codex 钩子脚本同时兼容两者）：
-/// 顶层 `session_id`，或嵌在 `payload.id` 下。`cwd` 在顶层。
+/// The session id comes in two placements (corroborated locally: Otty's codex hook script on the
+/// same machine handles both):
+/// top-level `session_id`, or nested under `payload.id`. `cwd` is top-level.
 ///
-/// **`PermissionRequest` 是这条通道存在的主要理由**：Codex 的 rollout 不落授权事件，
-/// 所以在装 hooks 之前，「等待授权」对 Codex 完全不可见（README 的已知限制里写着这条）。
-/// 顺带收益：relay 的信封带 `terminal`，Codex 因此也能拿到**精确**终端归属，
-/// 不再只靠 notify + 进程 cwd 近似匹配。
+/// **`PermissionRequest` is the main reason this channel exists**: Codex's rollout records no
+/// permission events, so before hooks are installed, waiting-for-permission is completely invisible
+/// for Codex (listed in the README's known limitations). Side benefit: the relay envelope carries
+/// `terminal`, so Codex also gets **exact** terminal attribution instead of relying only on notify
+/// + an approximate process-cwd match.
 public enum CodexHookDecoder {
     public static func decode(payload: [String: Any], receivedAt: Date) -> TaskEvent? {
         guard let name = payload["hook_event_name"] as? String,
@@ -30,8 +32,10 @@ public enum CodexHookDecoder {
         case "Stop":
             kind = .taskFinished(outcome: .success, title: nil, detail: nil)
         case "PermissionRequest":
-            // 工具名字段名未实勘穷尽（Codex 未公开 schema）→ 多键探测，取不到也照样出等待卡：
-            // 「在等你点确认」本身就是要传达的信息，工具名只是锦上添花。
+            // The tool-name field hasn't been exhaustively surveyed (Codex publishes no schema) →
+            // probe several keys; still show the waiting card if none match:
+            // "waiting for you to confirm" is itself the message to convey; the tool name is just a
+            // bonus.
             let tool = firstString(payload, keys: ["tool_name", "tool", "name", "command"])
             kind = .waiting(reason: .permission, message: tool)
         case "SessionStart":
@@ -48,7 +52,7 @@ public enum CodexHookDecoder {
             cwd: payload["cwd"] as? String)
     }
 
-    /// 顶层 `session_id`，或 `payload.id`（两种都实勘存在）
+    /// Top-level `session_id`, or `payload.id` (both observed in the wild)
     static func sessionId(_ payload: [String: Any]) -> String? {
         if let id = payload["session_id"] as? String, !id.isEmpty { return id }
         if let nested = payload["payload"] as? [String: Any],

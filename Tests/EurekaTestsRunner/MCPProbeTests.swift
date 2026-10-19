@@ -26,7 +26,8 @@ func mcpProbeTests(_ t: TestRunner) {
     }
 
     t.test("版本协商：initialize 报最新定稿版本，server 回落旧版照常连通") {
-        // 我们声明 2026-07-28（已定稿）；只支持旧版的 server 应回它自己的版本
+        // We declare 2026-07-28 (finalized); a server that supports only an older version should
+        // answer with its own
         try expectEqual(MCPProbe.latestProtocolVersion, "2026-07-28")
         let body = MCPProbe.initializeRequestBody()
         let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]
@@ -34,7 +35,8 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(
             params?["protocolVersion"] as? String, "2026-07-28",
             "initialize 必须声明我们支持的最高版本")
-        // server 回 2025-03-26 → 协商回落照记，仍算已连接（后续请求按回落版本带头）
+        // Server answers 2025-03-26 → record the negotiated fallback; still counts as connected
+        // (later requests send the fallback version header)
         let status = MCPProbe.classify(
             statusCode: 200, body: Data(validInit.utf8), contentType: "application/json")
         guard case .connected(let info) = status else {
@@ -79,7 +81,8 @@ func mcpProbeTests(_ t: TestRunner) {
             authServer, "https://mcp.notion.com/.well-known/oauth-protected-resource")
         try expect(status.hint?.contains("OAuth") == true, "有元数据时提示应点名 OAuth")
 
-        // 无 header → 判定为 API key/请求头鉴权，引导编辑请求头（v2.7 分流）
+        // No header → classified as API key / request-header auth, guide the user to edit request
+        // headers (v2.7 routing)
         let plain = MCPProbe.classify(statusCode: 403)
         guard case .unauthorized(403, nil) = plain else {
             try expect(false, "应为 unauthorized(403, nil)")
@@ -129,7 +132,7 @@ func mcpProbeTests(_ t: TestRunner) {
 
         try expect(MCPProbe.parseToolsList(
             Data("{}".utf8), contentType: "application/json") == nil)
-        // 末页无 nextCursor
+        // Last page has no nextCursor
         let lastPage = MCPProbe.parseToolsList(
             Data(#"{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}"#.utf8),
             contentType: "application/json")
@@ -170,7 +173,7 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(
             challenge.resourceMetadata, "https://s/.well-known/oauth-protected-resource")
         try expectEqual(challenge.scopes, ["files:read", "files:write"])
-        // 无 scope / 无 header 的空形态
+        // Empty shape with no scope / no header
         try expectEqual(MCPProbe.parseChallenge(#"Bearer realm="x""#).scopes, [])
         try expect(MCPProbe.parseChallenge(nil).resourceMetadata == nil)
     }
@@ -201,14 +204,16 @@ func mcpProbeTests(_ t: TestRunner) {
             try expect(false, "缺失命令应报 commandMissing")
             return
         }
-        // /bin/cat 把 initialize 请求原样回显（有 id 但没有 result）→ 非法握手
+        // /bin/cat echoes the initialize request back verbatim (has an id but no result) → invalid
+        // handshake
         guard case .failure(.handshakeFailed) = MCPStdioProbe.inspect(
             command: "/bin/cat", args: [], env: [:], timeout: 5)
         else {
             try expect(false, "非 MCP 输出应报 handshakeFailed")
             return
         }
-        // /bin/sleep 不读不答 → 在 deadline 内放弃（顺带验证进程被收尸，不留孤儿）
+        // /bin/sleep neither reads nor answers → give up within the deadline (also verifies the
+        // process is reaped, no orphans)
         guard case .failure(.handshakeFailed) = MCPStdioProbe.inspect(
             command: "/bin/sleep", args: ["30"], env: [:], timeout: 1)
         else {
@@ -277,7 +282,8 @@ func mcpProbeTests(_ t: TestRunner) {
         let unreachable = MCPProbeSnapshot(status: .unreachable("超时"), checkedAt: when)
         try expectEqual(unreachable.detail, "超时")
 
-        // 落盘 round-trip（无密钥、无响应体——只有展示字段；authScheme 一并保真）
+        // Persisted round-trip (no secrets, no response body — display fields only; authScheme
+        // preserved too)
         let withScheme = MCPProbeSnapshot(
             status: .unauthorized(code: 401, authServer: "https://as.example"),
             authScheme: "oauth", checkedAt: when)
@@ -296,7 +302,7 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(MCPProbeCache.load(from: FileManager.default.temporaryDirectory
             .appendingPathComponent("missing-\(UUID().uuidString).json")).count, 0)
 
-        // v2.6 旧缓存（无 authScheme 键）必须照常解码
+        // A v2.6 cache (no authScheme key) must still decode
         let legacy = #"{"old": {"label":"已连接","tone":"ok","checkedAt":1700000000}}"#
         let legacyURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-probe-legacy-\(UUID().uuidString).json")
@@ -332,11 +338,11 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(loaded["notion"]?.resourceCount, 7)
         try expectEqual(loaded["notion"]?.prompts?.first?.name, "review")
         try expectEqual(loaded["notion"]?.resources?.first?.name, "readme")
-        // upsert 不影响其它键
+        // upsert leaves other keys alone
         MCPToolCache.upsert(name: "other", entry: entry, at: url)
         try expectEqual(MCPToolCache.load(from: url).count, 2)
 
-        // v2.4 旧缓存（无 tools/计数键）必须照常解码
+        // A v2.4 cache (no tools/count keys) must still decode
         let legacy = """
         {"legacy": {"toolCount":1,"toolNames":["a"],"schemaTokens":10,
          "capabilities":[],"measuredAt":1700000000}}

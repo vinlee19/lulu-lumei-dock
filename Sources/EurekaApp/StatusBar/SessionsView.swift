@@ -2,31 +2,34 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 会话管理两栏：左 = 会话列表（搜索/来源 chips/排序：扁平三档 + 项目分组视图/多选/刷新），
-/// 右 = 会话详情（对话记录 + 对话目录，见 SessionDetailView）。
+/// Two-pane session manager: left = session list (search/source chips/sort: three flat modes +
+/// project-grouped view/multi-select/refresh), right = session detail (transcript + outline, see
+/// SessionDetailView).
 struct SessionsView: View {
     @ObservedObject var service: SessionBrowserService
     @ObservedObject var settings: AppSettings
-    /// 会话「本会话产出」区依赖：全仓只有 PopoverRootView 一处构造点，非 optional 让扫描完成后能正常刷新
+    /// Dependency of the session "produced in this session" section: only PopoverRootView
+    /// constructs this; non-optional so the view refreshes once scanning finishes
     @ObservedObject var skillMemory: SkillMemoryService
     @ObservedObject var plans: PlansService
-    /// 项目视图中手动收起的分组（默认全展开）
+    /// Groups manually collapsed in the project view (all expanded by default)
     @State private var collapsed: Set<String> = []
-    /// 多选模式与选中集合（存 session id）
+    /// Multi-select mode and the selected set (session ids)
     @State private var multiSelect = false
     @State private var checkedIds: Set<String> = []
     @State private var confirmingBatchDelete = false
-    /// 来源选择 popover 开关
+    /// Source picker popover toggle
     @State private var showSourcePicker = false
 
-    /// 血缘下钻的目标
+    /// Lineage drill-down target
     enum LineageRoute: Equatable {
         case list
         case graph(turn: Int)
     }
 
-    /// 血缘下钻（nil = 两栏原状）。**替换整个内容区**而不是嵌进右栏：
-    /// 右栏最坏只有 ~423pt，图铺不开。样板照 `PlansView` 的 detail 下钻。
+    /// Lineage drill-down (nil = the original two panes). It **replaces the whole content area**
+    /// instead of nesting in the right pane: the right pane can be as narrow as ~423pt, too small
+    /// for the graph. Modeled on `PlansView`'s detail drill-down.
     @State private var lineage: LineageRoute?
 
     var body: some View {
@@ -38,10 +41,11 @@ struct SessionsView: View {
                 twoPane
             }
         }
-        // 切会话时退出下钻：新会话的轮次和旧的对不上
+        // Leave the drill-down on session switch: the new session's turns don't match the old ones
         .onChange(of: service.selected?.id) { _, _ in lineage = nil }
         .onChange(of: service.transcriptLoading) { _, loading in
-            // 跨页跳「某会话第 N 轮」：transcript 加载完才有轮次可切
+            // Cross-page jump to "turn N of a session": turns only exist once the transcript has
+            // loaded
             guard !loading, let turn = service.consumePendingTurn() else { return }
             withAnimation(.easeOut(duration: 0.15)) { lineage = .graph(turn: turn) }
         }
@@ -55,12 +59,13 @@ struct SessionsView: View {
         case .graph(let index): (pane, turn) = (.graph, index)
         }
         return TurnLineageView(
-            sessionName: service.selected?.displayName ?? "会话",
+            sessionName: service.selected?.displayName ?? L10n.text("Session", zhHans: "会话"),
             turns: TurnSlicer.slice(service.transcript),
             onBack: { withAnimation(.easeOut(duration: 0.15)) { lineage = nil } },
             onJumpToMessage: { messageId in
-                // 先收起下钻页让消息流的 LazyVStack 重新挂载，再延迟一拍发通知 ——
-                // 沿用 SessionDetailView 已经验证过的 0.15，不发明新数值
+                // Dismiss the drill-down first so the message stream's LazyVStack remounts, then
+                // post the notification a beat later -- reuse the 0.15 already proven in
+                // SessionDetailView rather than inventing a new value
                 withAnimation(.easeOut(duration: 0.15)) { lineage = nil }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     NotificationCenter.default.post(
@@ -72,8 +77,9 @@ struct SessionsView: View {
 
     private var twoPane: some View {
         HSplitView {
-            // maxWidth 决定分隔线的可拖行程：420 时只有 170pt，宽窗下拖起来
-            // 几乎无感（被反馈"不能调"）；620 在保住详情区 380 底线的前提下放开
+            // maxWidth sets how far the divider can be dragged: at 420 there was only 170pt, barely
+            // noticeable in a wide window (reported as "can't resize"); 620 opens it up while
+            // keeping the detail pane's 380 floor
             listPane
                 // The list is navigation; the transcript is what people read. With the detail
                 // pane holding layoutPriority the split opens the list at its minimum, so that
@@ -107,19 +113,23 @@ struct SessionsView: View {
             settings.sessionSortMode = newValue.rawValue
         }
         .confirmationDialog(
-            "删除选中的 \(deletableChecked.count) 个会话？transcript 文件会移入废纸篓，可恢复。",
+            L10n.format(
+                "Delete the %@ selected sessions? Transcript files move to the Trash and can be restored.",
+                zhHans: "删除选中的 %@ 个会话？transcript 文件会移入废纸篓，可恢复。",
+                String(deletableChecked.count)),
             isPresented: $confirmingBatchDelete, titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                 service.deleteSessions(deletableChecked)
                 checkedIds = []
                 multiSelect = false
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
-    /// 选中且可删（共享库的 opencode / hermes 不可删）的会话
+    /// Sessions that are selected and deletable (shared-database opencode / hermes can't be
+    /// deleted)
     private var deletableChecked: [AgentSessionInfo] {
         allVisibleSessions.filter {
             checkedIds.contains($0.id) && $0.source.supportsSessionDeletion
@@ -130,13 +140,14 @@ struct SessionsView: View {
         service.flatSessions + service.groups.flatMap(\.sessions)
     }
 
-    // MARK: - 左栏
+    // MARK: - Left pane
 
     private var listPane: some View {
         VStack(spacing: 0) {
-            // 账本总览（右端常驻索引状态：扫描中可见，重扫不再"无反应"）
+            // Ledger overview (index status pinned at the right: visible while scanning, so a
+            // rescan no longer looks "unresponsive")
             HStack(spacing: 6) {
-                Text("共 \(service.summary.sessionCount.formatted()) 个会话")
+                Text(L10n.format("%@ sessions", zhHans: "共 %@ 个会话", "\(service.summary.sessionCount.formatted())"))
                     .font(Theme.font.themed(11.5, .semibold))
                     .lineLimit(1)
                     .fixedSize()
@@ -158,7 +169,7 @@ struct SessionsView: View {
                 if service.scanning {
                     HStack(spacing: 4) {
                         ProgressView().controlSize(.mini)
-                        Text("索引中")
+                        Text(L10n.text("Indexing", zhHans: "索引中"))
                             .font(Theme.font.themed(10.5))
                             .foregroundStyle(.secondary)
                             .fixedSize()
@@ -175,27 +186,28 @@ struct SessionsView: View {
             // row to itself (one row squeezed it to ~100pt and cut the placeholder); the source
             // picker and the two round tool buttons share the row below.
             VStack(spacing: 6) {
-                SearchField(placeholder: "搜索会话 / 项目 / id", text: $service.searchText, maxWidth: nil)
+                SearchField(placeholder: L10n.text("Search sessions / projects / id", zhHans: "搜索会话 / 项目 / id"), text: $service.searchText, maxWidth: nil)
                 HStack(spacing: 6) {
                     sourcePickerButton
                     Spacer(minLength: 6)
                     RoundGlyphButton(
                         icon: "checkmark", active: multiSelect,
-                        help: multiSelect ? "退出多选" : "多选模式（批量删除）"
+                        help: multiSelect ? L10n.text("Exit multi-select", zhHans: "退出多选") : L10n.text("Multi-select (batch delete)", zhHans: "多选模式（批量删除）")
                     ) {
                         multiSelect.toggle()
                         if !multiSelect { checkedIds = [] }
                     }
-                    RefreshButton(help: "重新索引会话") { service.refresh() }
+                    RefreshButton(help: L10n.text("Reindex sessions", zhHans: "重新索引会话")) { service.refresh() }
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
 
-            // 时间范围（近 30 天 / 全部时间）；胶囊页签，与下方排序档同风格，选中紫底白字
+            // Time range (last 30 days / all time); capsule tabs in the same style as the sort
+            // modes below, selected = purple fill + white text
             CapsuleTabTray {
                 CapsuleTabButton(
-                    title: "近 30 天", icon: "clock",
+                    title: L10n.text("Last 30 days", zhHans: "近 30 天"), icon: "clock",
                     isSelected: !settings.sessionRangeAll
                 ) {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -203,7 +215,7 @@ struct SessionsView: View {
                     }
                 }
                 CapsuleTabButton(
-                    title: "全部时间", icon: "infinity",
+                    title: L10n.text("All time", zhHans: "全部时间"), icon: "infinity",
                     isSelected: settings.sessionRangeAll
                 ) {
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -213,9 +225,10 @@ struct SessionsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
-            .accessibilityLabel("会话时间范围")
+            .accessibilityLabel(L10n.text("Session time range", zhHans: "会话时间范围"))
 
-            // 排序 / 视图（前三档扁平列表，「项目」按项目分组）；胶囊页签，选中紫底白字
+            // Sort / view (first three modes are flat lists, "Project" groups by project); capsule
+            // tabs, selected = purple fill + white text
             CapsuleTabTray {
                 ForEach(SessionBrowserService.SortMode.allCases, id: \.self) { mode in
                     CapsuleTabButton(
@@ -238,8 +251,8 @@ struct SessionsView: View {
                 && service.fullTextHits.isEmpty {
                 VStack(spacing: 8) {
                     if service.scanning {
-                        ProgressView("正在索引会话…")
-                        Text("14 个来源逐个扫描，稍等片刻")
+                        ProgressView(L10n.text("Indexing sessions…", zhHans: "正在索引会话…"))
+                        Text(L10n.text("Scanning 14 sources one by one. This takes a moment.", zhHans: "14 个来源逐个扫描，稍等片刻"))
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     } else {
@@ -247,12 +260,14 @@ struct SessionsView: View {
                             .font(.system(size: 26))
                             .foregroundStyle(Theme.brandFg.opacity(0.4))
                         Text(service.isSearching
-                            ? "没有匹配的会话"
-                            : (settings.sessionRangeAll ? "没有会话" : "近 30 天没有会话"))
+                            ? L10n.text("No matching sessions", zhHans: "没有匹配的会话")
+                            : (settings.sessionRangeAll
+                                ? L10n.text("No sessions", zhHans: "没有会话")
+                                : L10n.text("No sessions in the last 30 days", zhHans: "近 30 天没有会话")))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                         if !service.isSearching && !settings.sessionRangeAll {
-                            Text("更早的记录在「全部时间」里")
+                            Text(L10n.text("Older records are under All time", zhHans: "更早的记录在「全部时间」里"))
                                 .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                         }
@@ -262,7 +277,7 @@ struct SessionsView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        // 扁平列表（最近活跃 / 大小 / 时长）：无项目属性
+                        // Flat list (recently active / size / duration): no project attribute
                         let flat = sessionLines(service.flatSessions)
                         ForEach(flat.users) { session in
                             sessionRow(session)
@@ -272,8 +287,9 @@ struct SessionsView: View {
                             HarnessUtilityRow(count: flat.utilityCount, subtitle: Self.utilitySubtitle)
                             Divider().padding(.leading, 12).opacity(0.4)
                         }
-                        // 项目视图：分组头 + 组内会话（默认全展开；折叠不做结构动画，
-                        // LazyVStack 内结构性 withAnimation 会残留幽灵空白）
+                        // Project view: group header + sessions in the group (all expanded by
+                        // default; collapsing isn't animated, structural withAnimation inside
+                        // LazyVStack leaves ghost blank space)
                         ForEach(service.groups) { group in
                             let isOpen = service.isSearching || !collapsed.contains(group.id)
                             ProjectHeaderRow(group: group, isExpanded: isOpen) {
@@ -304,11 +320,11 @@ struct SessionsView: View {
                 if multiSelect {
                     Divider()
                     HStack {
-                        Text("已选 \(checkedIds.count) 个")
-                            .font(.system(size: 10.5))
+                        Text(L10n.format("%@ selected", zhHans: "已选 %@ 个", String(checkedIds.count)))
+                            .font(Theme.font.themed(10.5))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("批量删除") { confirmingBatchDelete = true }
+                        Button(L10n.text("Delete Selected", zhHans: "批量删除")) { confirmingBatchDelete = true }
                             .controlSize(.small)
                             .tint(.red)
                             .disabled(deletableChecked.isEmpty)
@@ -347,7 +363,7 @@ struct SessionsView: View {
                 } else {
                     Image(systemName: "line.3.horizontal.decrease")
                         .font(.system(size: 10, weight: .semibold))
-                    Text("全部来源")
+                    Text(L10n.text("All sources", zhHans: "全部来源"))
                         .font(Theme.font.themed(11, .medium))
                         .fixedSize()
                 }
@@ -364,7 +380,7 @@ struct SessionsView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help("按 CLI 来源筛选会话")
+        .help(L10n.text("Filter sessions by CLI source", zhHans: "按 CLI 来源筛选会话"))
         .popover(isPresented: $showSourcePicker, arrowEdge: .bottom) {
             sourcePickerPopover
         }
@@ -373,7 +389,7 @@ struct SessionsView: View {
     /// Source popover: logo + name + count per row, brand fill and a check on the chosen one
     private var sourcePickerPopover: some View {
         VStack(alignment: .leading, spacing: 2) {
-            sourcePickerRow(nil, name: "全部来源", count: service.summary.sessionCount)
+            sourcePickerRow(nil, name: L10n.text("All sources", zhHans: "全部来源"), count: service.summary.sessionCount)
             Divider().padding(.vertical, 2)
             ForEach(AgentSource.allCases, id: \.self) { source in
                 if let count = service.sourceCounts[source], count > 0 {
@@ -431,7 +447,7 @@ struct SessionsView: View {
         .buttonStyle(.plain)
     }
 
-    private static let utilitySubtitle = "记忆压缩等内部提示，已从列表收起"
+    private static let utilitySubtitle = L10n.text("Internal prompts such as memory compaction, folded out of the list", zhHans: "记忆压缩等内部提示，已从列表收起")
 
     /// Splits harness background calls out of a session list. Nothing folds while searching,
     /// otherwise searching for that prompt text itself would come back empty.
@@ -471,7 +487,7 @@ struct SessionsView: View {
         }
     }
 
-    // MARK: - 全文命中区（对话内容级搜索结果，点击直达消息）
+    // MARK: - Full-text hits (transcript-level search results, click to jump to the message)
 
     private var fullTextSection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -479,8 +495,8 @@ struct SessionsView: View {
                 Image(systemName: "text.magnifyingglass")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.goldFg)
-                Text("对话内容命中")
-                    .font(.system(size: 11, weight: .semibold))
+                Text(L10n.text("Matches in conversations", zhHans: "对话内容命中"))
+                    .font(Theme.font.themed(11, .semibold))
                 Text("\(service.fullTextHits.count)")
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -496,11 +512,11 @@ struct SessionsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
                             SourceBadge(source: hit.source, size: 10)
-                            Text(hit.sessionName ?? "会话 \(hit.sessionId.prefix(8))")
-                                .font(.system(size: 11, weight: .medium))
+                            Text(hit.sessionName ?? L10n.format("Session %@", zhHans: "会话 %@", String(hit.sessionId.prefix(8))))
+                                .font(Theme.font.themed(11, .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 4)
-                            Text(hit.role == "user" ? "用户" : "助手")
+                            Text(hit.role == "user" ? L10n.text("User", zhHans: "用户") : L10n.text("Assistant", zhHans: "助手"))
                                 .font(.system(size: 9))
                                 .foregroundStyle(.tertiary)
                             if let ts = hit.ts {
@@ -510,7 +526,7 @@ struct SessionsView: View {
                             }
                         }
                         Text(hit.snippet)
-                            .font(.system(size: 10.5))
+                            .font(Theme.font.themed(10.5))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -527,7 +543,7 @@ struct SessionsView: View {
     }
 }
 
-/// 项目行：点击展开/收起该项目下的会话
+/// Project row: click to expand/collapse the sessions under this project
 private struct ProjectHeaderRow: View {
     let group: SessionBrowserService.ProjectGroup
     let isExpanded: Bool
@@ -552,7 +568,7 @@ private struct ProjectHeaderRow: View {
                         .font(.system(size: 10, weight: .medium).monospacedDigit())
                         .foregroundStyle(Theme.cost)
                 }
-                Text("\(group.sessions.count) 个")
+                Text(L10n.format("%@ sessions", zhHans: "%@ 个", String(group.sessions.count)))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Text(formatBytes(group.totalBytes))
@@ -568,7 +584,8 @@ private struct ProjectHeaderRow: View {
     }
 }
 
-/// 会话行：点击选中（详情栏加载 transcript）；多选模式带复选框
+/// Session row: click to select (the detail pane loads the transcript); has a checkbox in
+/// multi-select mode
 private struct SessionRow: View {
     let session: AgentSessionInfo
     let cost: SessionBrowserService.SessionCost?
@@ -595,7 +612,7 @@ private struct SessionRow: View {
                 .buttonStyle(.borderless)
                 .disabled(!session.source.supportsSessionDeletion)
                 .help(session.source.supportsSessionDeletion
-                    ? "" : "\(session.source.displayName) 会话不支持删除")
+                    ? "" : L10n.format("%@ sessions can't be deleted", zhHans: "%@ 会话不支持删除", session.source.displayName))
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -612,7 +629,7 @@ private struct SessionRow: View {
                     Text(formatBytes(session.sizeBytes))
                     if let promptCount, promptCount > 0 {
                         Text("·")
-                        Text("\(promptCount) 段")
+                        Text(L10n.format("%@ prompts", zhHans: "%@ 段", String(promptCount)))
                     }
                     if let cost, let usd = cost.costUSD {
                         Text("·")
@@ -627,7 +644,7 @@ private struct SessionRow: View {
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-                // Truncate rather than wrap: a squeezed row used to break "1分钟前" across lines
+                // Truncate rather than wrap: a squeezed row used to break a relative time like "1 min ago" across lines
                 .lineLimit(1)
             }
             Spacer(minLength: 4)
@@ -640,7 +657,7 @@ private struct SessionRow: View {
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("拷贝恢复命令")
+            .help(L10n.text("Copy resume command", zhHans: "拷贝恢复命令"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -648,7 +665,7 @@ private struct SessionRow: View {
             ZStack(alignment: .leading) {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 6).fill(Theme.brandFill(0.08))
-                    // 左侧品牌色指示条（Activity Monitor 式选中态）
+                    // Brand-colored indicator bar on the left (Activity Monitor-style selection)
                     RoundedRectangle(cornerRadius: 1.5)
                         .fill(Theme.brand)
                         .frame(width: 3)

@@ -1,16 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// 桌面吉祥物 NSPanel 控制器:透明浮窗、背景拖拽移动、位置持久化、右键菜单。
-/// 显隐由 AppSettings.mascotEnabled 驱动(镜像灵动岛的轻量版)。
+/// Desktop mascot NSPanel controller: transparent floating window, background drag to move,
+/// position persistence, context menu. Visibility is driven by AppSettings.mascotEnabled (a
+/// lightweight mirror of the Dynamic Island).
 @MainActor
 final class MascotPanelController {
     let viewModel: MascotViewModel
     let animationRuntime = MascotAnimationRuntime()
 
-    /// 右键「隐藏吉祥物」→ 交给 AppDelegate 关掉设置开关(再由观察者隐藏)
+    /// Context menu "Hide mascot" → hands off to AppDelegate to turn off the setting (the observer
+    /// then hides it)
     var onRequestHide: () -> Void = {}
-    /// 右键「打开设置」
+    /// Context menu "Open Settings"
     var onOpenSettings: () -> Void = {}
 
     private let panel: NSPanel
@@ -31,10 +33,10 @@ final class MascotPanelController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false  // 阴影由 SwiftUI 画
+        panel.hasShadow = false  // SwiftUI draws the shadow
         panel.hidesOnDeactivate = false
         panel.isMovable = true
-        panel.isMovableByWindowBackground = true  // 拖卡片即可移动
+        panel.isMovableByWindowBackground = true  // Drag the card to move it
         panel.animationBehavior = .none
         panel.isReleasedWhenClosed = false
     }
@@ -74,7 +76,8 @@ final class MascotPanelController {
         viewModel.setPack(MascotPackLoader.load(packID: id))
     }
 
-    /// 低频采样鼠标位置：idle 时让双角色自然看向鼠标，睡眠时移动可唤醒。
+    /// Low-frequency mouse position sampling: when idle both characters naturally look at the
+    /// mouse; movement wakes them from sleep.
     private func updatePointerBehavior() {
         guard panel.isVisible else {
             lastPointerLocation = nil
@@ -102,13 +105,14 @@ final class MascotPanelController {
             viewModel.setLookDirection(nil)
             return
         }
-        // 000°=上、090°=屏幕右，和 v2 精灵图的顺时针方向契约一致。
+        // 000° = up, 090° = screen right, matching the v2 sprite sheet's clockwise direction
+        // contract.
         var degrees = atan2(dx, dy) * 180 / .pi
         if degrees < 0 { degrees += 360 }
         viewModel.setLookDirection(Int((degrees / 22.5).rounded()) % 16)
     }
 
-    // MARK: - 位置
+    // MARK: - Position
 
     private func reposition() {
         if let origin = MascotPositionStore.load() {
@@ -119,7 +123,7 @@ final class MascotPanelController {
             }
             MascotPositionStore.clear()
         }
-        // 默认:主屏右下角
+        // Default: bottom-right corner of the main screen
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
         let size = panel.frame.size
@@ -151,7 +155,7 @@ final class MascotPanelController {
     }
 }
 
-/// 吉祥物自定义位置持久化(独立于灵动岛)
+/// Mascot custom position persistence (independent of the Dynamic Island)
 enum MascotPositionStore {
     private static let xKey = "mascotOriginX"
     private static let yKey = "mascotOriginY"

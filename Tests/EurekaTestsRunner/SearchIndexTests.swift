@@ -11,7 +11,8 @@ func searchIndexTests(_ t: TestRunner) {
             .appendingPathComponent("eureka-search-\(UUID()).sqlite")
     }
 
-    /// 把 fixture 复制到临时路径（测试要改写文件触发指纹变更，不能动 bundle 原件）
+    /// Copies the fixture to a temp path (tests rewrite the file to trigger a fingerprint change
+    /// and must not touch the bundled original)
     func copyFixture(_ name: String) throws -> URL {
         let dest = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-search-\(UUID())-\(name)")
@@ -38,7 +39,7 @@ func searchIndexTests(_ t: TestRunner) {
 
         let rebuilt = indexer.indexOnce(sessions: [session(file)])
         try expectEqual(rebuilt, 1)
-        // fixture: user + assistant + turnTrail → 只索引前两条
+        // fixture: user + assistant + turnTrail → only the first two are indexed
         try expectEqual(try store.search.docCount(), 2)
 
         let hits = try store.search.search("增量加载")
@@ -96,7 +97,8 @@ func searchIndexTests(_ t: TestRunner) {
         indexer.indexOnce(sessions: [session(file)])
         try expectEqual(try store.search.docCount(), 2)
 
-        // 追加一条新 uuid 的 user 行（同 uuid 会被解析器去重；size 变化触发重建）
+        // Append a user line with a new uuid (the parser dedups identical uuids; the size change
+        // triggers a rebuild)
         let content = try String(contentsOf: file, encoding: .utf8)
         let extra = #"{"parentUuid":"u-2005","isSidechain":false,"promptId":"p-3009","#
             + #""type":"user","message":{"role":"user","content":"再补充一个边界用例"},"#

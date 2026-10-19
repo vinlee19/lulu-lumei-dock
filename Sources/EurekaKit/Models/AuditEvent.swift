@@ -1,37 +1,39 @@
 import Foundation
 
-/// 工具/操作分类。原为 EurekaIngest 的 `ToolStep.Kind`，上移到域层供审计与轨迹共用
-/// （`ToolStep.Kind` 保留为本类型的 typealias，源码兼容）。
+/// Tool/operation category. Formerly EurekaIngest's `ToolStep.Kind`, moved up to the domain layer
+/// so audit and trails can share it (`ToolStep.Kind` stays as a typealias for source
+/// compatibility).
 public enum ToolKind: String, Equatable, Sendable, CaseIterable, Codable {
-    case read      // 读文件（Read / view_image）
-    case search    // 本地检索（Grep / Glob）
-    case command   // 命令（Bash / exec_command / shell / shell_command / write_stdin）
-    case edit      // 编辑（Edit / Write / MultiEdit / NotebookEdit / apply_patch）
-    case web       // 联网（WebSearch / WebFetch / web_search_call）
-    case mcp       // MCP 工具
-    case agent     // 子代理（Task / Agent）
-    case skill     // 技能（Skill）
-    case other     // 其余（TodoWrite / update_plan / …）
+    case read      // read files (Read / view_image)
+    case search    // local search (Grep / Glob)
+    case command   // commands (Bash / exec_command / shell / shell_command / write_stdin)
+    case edit      // edits (Edit / Write / MultiEdit / NotebookEdit / apply_patch)
+    case web       // network (WebSearch / WebFetch / web_search_call)
+    case mcp       // MCP tools
+    case agent     // subagents (Task / Agent)
+    case skill     // skills (Skill)
+    case other     // everything else (TodoWrite / update_plan / ...)
 
-    /// 中文标签（分类速览 / Markdown 导出 / 审计筛选共用）
+    /// Display label (shared by the category overview / Markdown export / audit filters)
     public var label: String {
         switch self {
-        case .read: return "读取"
-        case .search: return "检索"
-        case .command: return "命令"
-        case .edit: return "编辑"
-        case .web: return "联网"
-        case .mcp: return "MCP"
-        case .agent: return "子代理"
-        case .skill: return "技能"
-        case .other: return "工具"
+        case .read: return L10n.text("Read", zhHans: "读取")
+        case .search: return L10n.text("Search", zhHans: "检索")
+        case .command: return L10n.text("Command", zhHans: "命令")
+        case .edit: return L10n.text("Edit", zhHans: "编辑")
+        case .web: return L10n.text("Web", zhHans: "联网")
+        case .mcp: return L10n.text("MCP", zhHans: "MCP")
+        case .agent: return L10n.text("Subagent", zhHans: "子代理")
+        case .skill: return L10n.text("Skill", zhHans: "技能")
+        case .other: return L10n.text("Tool", zhHans: "工具")
         }
     }
 }
 
 extension ToolKind {
-    /// 列表/轨迹的类型图标（SF Symbol）。与 `.label` 一样是纯展示数据，
-    /// 放模型层供审计页与会话轨迹共用（原先只挂在 EurekaApp 的 TurnTrailView 里）。
+    /// Type icon (SF Symbol) for lists/trails. Pure display data like `.label`; it lives in the
+    /// model layer so the audit page and session trail share it (it used to hang only off
+    /// EurekaApp's TurnTrailView).
     public var icon: String {
         switch self {
         case .read: return "doc.text"
@@ -47,10 +49,10 @@ extension ToolKind {
     }
 }
 
-/// 风险等级。0（无风险）不建模，只用 notice / high 两档。
+/// Risk level. 0 (no risk) is not modeled; only the notice / high tiers exist.
 public enum RiskLevel: Int, Codable, Sendable, Comparable {
-    case notice = 1   // 提醒：只标记入库，不弹卡/通知
-    case high = 2     // 高危：弹岛卡 + 系统通知
+    case notice = 1   // notice: only flagged in the DB, no card/notification
+    case high = 2     // high: island card + system notification
 
     public static func < (lhs: RiskLevel, rhs: RiskLevel) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -58,28 +60,30 @@ public enum RiskLevel: Int, Codable, Sendable, Comparable {
 
     public var label: String {
         switch self {
-        case .notice: return "提醒"
-        case .high: return "高危"
+        case .notice: return L10n.text("Notice", zhHans: "提醒")
+        case .high: return L10n.text("High risk", zhHans: "高危")
         }
     }
 }
 
-/// 一条审计事件：agent 执行的一次操作（命令/读写文件/联网/MCP…）。
-/// detail 存操作参数全文（命令全文 / 文件路径 / URL / pattern），**不含任何执行输出正文**。
+/// One audit event: a single operation an agent performed (command / file read-write / network /
+/// MCP...). detail stores the full operation arguments (full command / file path / URL / pattern),
+/// **never any execution output body**.
 public struct AuditEvent: Equatable, Sendable {
-    /// 幂等键：Claude 的 tool_use_id / Codex 的 call_id / 合成 hash。跨重放稳定。
+    /// Idempotency key: Claude's tool_use_id / Codex's call_id / a synthesized hash. Stable across
+    /// replays.
     public var opId: String
     public var source: AgentSource
     public var sessionId: String
     public var timestamp: Date
     public var kind: ToolKind
-    public var tool: String       // 展示用工具名（Bash / Edit / server.tool / 子代理类型…）
-    public var detail: String     // 操作参数全文（不截断）
+    public var tool: String       // display tool name (Bash / Edit / server.tool / subagent type...)
+    public var detail: String     // full operation arguments (not truncated)
     public var cwd: String?
-    public var exitCode: Int?     // Codex function_call_output.metadata.exit_code；无则 nil
+    public var exitCode: Int?     // Codex function_call_output.metadata.exit_code; nil if absent
     public var isError: Bool
     public var riskLevel: RiskLevel?
-    public var riskRule: String?  // 命中规则 id（如 "sudo" / "rm-rf"）
+    public var riskRule: String?  // matched rule id (e.g. "sudo" / "rm-rf")
 
     public init(
         opId: String, source: AgentSource, sessionId: String, timestamp: Date,
@@ -102,10 +106,10 @@ public struct AuditEvent: Equatable, Sendable {
     }
 }
 
-/// 风险命中结果（规则引擎的输出）。
+/// Risk match result (output of the rule engine).
 public struct RiskHit: Equatable, Sendable {
     public var ruleId: String
-    public var title: String    // 中文规则标题（「sudo 提权执行」）
+    public var title: String    // localized rule title (e.g. "sudo privilege escalation")
     public var level: RiskLevel
 
     public init(ruleId: String, title: String, level: RiskLevel) {
@@ -115,8 +119,8 @@ public struct RiskHit: Equatable, Sendable {
     }
 }
 
-/// 高危告警：命中 high 规则、需在岛上/系统通知呈现的一次事件。
-/// id 用 opId，供岛卡队列去重。
+/// High-risk alert: one event that matched a high rule and must surface on the island / as a system
+/// notification. id is the opId, used by the island card queue for dedup.
 public struct RiskAlert: Equatable, Sendable, Identifiable {
     public var id: String { opId }
     public var opId: String
@@ -125,7 +129,7 @@ public struct RiskAlert: Equatable, Sendable, Identifiable {
     public var ruleId: String
     public var ruleTitle: String
     public var tool: String
-    public var detail: String     // 命令/路径摘要（岛卡展示，视图侧再截断）
+    public var detail: String     // command/path summary (island card; the view truncates further)
     public var timestamp: Date
 
     public init(

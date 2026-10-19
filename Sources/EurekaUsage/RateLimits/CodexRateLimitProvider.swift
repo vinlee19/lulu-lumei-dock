@@ -1,12 +1,13 @@
 import Foundation
 import EurekaKit
 
-/// Codex 限额：零网络请求——最新 rollout 文件（整树枚举，按 mtime 取新）
-/// 尾部的最后一条 token_count.rate_limits 快照（带"截至"时间）。
+/// Codex rate limits: zero network requests - the last token_count.rate_limits snapshot at the
+/// tail of the newest rollout file (whole-tree enumeration, newest by mtime)
+/// (with an "as of" time).
 public struct CodexRateLimitProvider: RateLimitProvider {
     public let source = AgentSource.codex
     private let sessionsRoot: URL
-    /// 快照多旧仍可用（默认 7 天；再旧视为无数据）
+    /// How old a snapshot may be and still be used (default 7 days; older counts as no data)
     private let maxAge: TimeInterval
 
     public init(sessionsRoot: URL, maxAge: TimeInterval = 7 * 86400) {
@@ -19,14 +20,16 @@ public struct CodexRateLimitProvider: RateLimitProvider {
         guard let snapshot = Self.lastRateLimits(in: file) else { return nil }
         guard Date().timeIntervalSince(snapshot.asOf) < maxAge else { return nil }
         var result = snapshot
-        // 超过 10 分钟的快照标 stale（UI 显示"截至 HH:mm"）
+        // Snapshots older than 10 minutes are marked stale (UI shows "as of HH:mm")
         result.isStale = Date().timeIntervalSince(snapshot.asOf) > 600
         return result
     }
 
-    /// 整树枚举全部日期目录（YYYY/MM/DD），返回 mtime 最新的 rollout。
-    /// resume 的旧会话在创建日目录原地追加（mtime 刷新），只数最近日期目录会漏；
-    /// 不按回看天数过滤——"最新 mtime"本身已界定新鲜度，快照新旧再由 maxAge 把关。
+    /// Enumerates every date directory (YYYY/MM/DD) in the tree and returns the newest-mtime
+    /// rollout. A resumed old session appends in place under its creation-day directory (mtime
+    /// refreshes), so counting only recent date directories misses it; there is no lookback-days
+    /// filter - "newest mtime" already bounds freshness, and maxAge then gates how old the snapshot
+    /// is.
     public func newestRollout() -> URL? {
         var newest: (url: URL, mtime: Date)?
         for entry in CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot) {
@@ -38,7 +41,7 @@ public struct CodexRateLimitProvider: RateLimitProvider {
         return newest?.url
     }
 
-    /// 文件尾部 64KB 中最后一条 rate_limits
+    /// Last rate_limits entry in the file's trailing 64KB
     public static func lastRateLimits(in url: URL) -> RateLimitSnapshot? {
         guard
             let handle = FileHandle(forReadingAtPath: url.path),
@@ -60,7 +63,8 @@ public struct CodexRateLimitProvider: RateLimitProvider {
     }
 }
 
-/// EurekaUsage 不依赖 EurekaIngest，自带一个只解 rate_limits 的精简解码
+/// EurekaUsage doesn't depend on EurekaIngest, so it carries a slim decoder that only parses
+/// rate_limits
 enum CodexRolloutDecoderProxy {
     enum Decoded {
         case rateLimits(RateLimitSnapshot)

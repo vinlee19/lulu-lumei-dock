@@ -35,7 +35,7 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         let codexSkills = base.appendingPathComponent("codex-skills", isDirectory: true)
         try writeSkill(claudeSkills, dir: "alpha", body: "---\nname: Alpha\ndescription: 甲\n---\n")
         try writeSkill(claudeDisabled, dir: "beta", body: "---\nname: Beta\n---\n")
-        try writeSkill(codexSkills, dir: "gamma", body: "# 无 yaml\n")  // 退目录名
+        try writeSkill(codexSkills, dir: "gamma", body: "# 无 yaml\n")  // falls back to the directory name
 
         let skills = SkillMemoryIndexer.indexSkills(
             claudeSkillsRoot: claudeSkills, codexSkillsRoot: codexSkills)
@@ -51,8 +51,9 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
     }
 
     t.test("项目根与系统根重合 → 按 path 去重，只留系统级一条") {
-        // 复现真实 bug：会话在 ~ 里跑过时仓库根回退成 home，~/.claude/skills 会作为
-        // 「项目级」再扫一遍，同一 SKILL.md 出两条同 path 条目（id 重复 → 网格空洞）。
+        // Reproduces a real bug: when a session ran in ~, the repo root fell back to home and
+        // ~/.claude/skills was scanned again as "project level", yielding two entries with the same
+        // path for one SKILL.md (duplicate ids → grid holes).
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent(
             "eureka-dedupe-\(UUID().uuidString)", isDirectory: true)
@@ -64,7 +65,7 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
 
         let skills = SkillMemoryIndexer.indexSkills(
             claudeSkillsRoot: claudeSkills, codexSkillsRoot: codexSkills,
-            // 项目根故意指向同一个系统根
+            // The project root deliberately points at the same system root
             projectSkillRoots: [
                 ProjectScopedRoot(root: claudeSkills, source: .claude, projectName: "wl.xiao")
             ])
@@ -103,9 +104,10 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expect(memories.contains { $0.source == .codex && $0.scope == "全局" }, "缺 Codex AGENTS.md")
     }
 
-    // 官方口径（code.claude.com/docs/en/memory「Organize rules with .claude/rules/」）：
-    // 用户级 ~/.claude/rules/ 与项目级 <repo>/.claude/rules/ 都是持久指令，.md 递归发现，
-    // 目录支持符号链接（共享一套规则到多个项目）且要能处理环。
+    // Official definition (code.claude.com/docs/en/memory, "Organize rules with .claude/rules/"):
+    // both user-level ~/.claude/rules/ and project-level <repo>/.claude/rules/ are persistent
+    // instructions, .md files are discovered recursively, and directories support symlinks (sharing
+    // one rule set across projects) and must handle cycles.
     t.test("Claude 规则目录：~/.claude/rules 与 <repo>/.claude/rules 递归收 .md 为指令，跟随符号链接且防环") {
         let fm = FileManager.default
         let base = fm.temporaryDirectory
@@ -118,15 +120,16 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         }
         let claudeHome = base.appendingPathComponent("claude", isDirectory: true)
         let repo = base.appendingPathComponent("repo", isDirectory: true)
-        // 用户级：平铺 + 子目录；非 .md 不收
+        // User level: flat + subdirectory; non-.md files are not collected
         try write("- 2 空格缩进\n", to: claudeHome.appendingPathComponent("rules/preferences.md"))
         try write("- 先 rebase 再 push\n", to: claudeHome.appendingPathComponent("rules/workflows/git.md"))
         try write("scratch", to: claudeHome.appendingPathComponent("rules/notes.txt"))
-        // 项目级：带 paths: frontmatter 的路径规则 + 子目录
+        // Project level: a path rule with paths: frontmatter + subdirectory
         try write("---\npaths:\n  - \"src/api/**/*.ts\"\n---\n\n# API 规则\n",
                   to: repo.appendingPathComponent(".claude/rules/testing.md"))
         try write("# 样式\n", to: repo.appendingPathComponent(".claude/rules/frontend/style.md"))
-        // 共享规则目录经符号链接挂进项目；目录里再放一个指回自己的环
+        // A shared rules directory is symlinked into the project; inside it, a cycle pointing back
+        // at itself
         let shared = base.appendingPathComponent("shared-rules", isDirectory: true)
         try write("# 安全\n", to: shared.appendingPathComponent("security.md"))
         try fm.createSymbolicLink(
@@ -414,10 +417,11 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expectEqual(SkillMemoryIndexer.normalizeSkillName("Code-Review"), "code-review")
     }
 
-    // MARK: - 记忆库（Claude projects/<encoded>/memory）
+    // MARK: - memory library (Claude projects/<encoded>/memory)
 
     t.test("目录名编码：/ 与 . 与 _ 全变 -（实勘 11 个目录的规则）") {
-        // 实勘用例：metric_flow / test_parameter 里的下划线在目录名里也是 -
+        // Observed case: the underscores in metric_flow / test_parameter are also - in the
+        // directory name
         try expectEqual(
             SkillMemoryIndexer.encodeProjectDirName(
                 "/Users/x/w/metricflow-ci/metric_flow/models/test_parameter"),
@@ -443,7 +447,8 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
             "eureka-memlib-\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: base) }
 
-        // 仓库根故意带连字符：旧的 friendlyProject 会把它切成 "layer"
+        // The repo root deliberately contains hyphens: the old friendlyProject would cut it down to
+        // "layer"
         let repo = base.appendingPathComponent("w/aftership-semantic-layer", isDirectory: true)
         let encoded = SkillMemoryIndexer.encodeProjectDirName(repo.standardizedFileURL.path)
         let projects = base.appendingPathComponent("projects", isDirectory: true)
@@ -454,7 +459,8 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try "# Memory Index\n- [feedback_push.md](feedback_push.md) — 钩子\n"
             .write(to: memory.appendingPathComponent("MEMORY.md"),
                    atomically: true, encoding: .utf8)
-        // 引用同库另一条（下划线文件名 ↔ 连字符 name 也要能对上）+ 一条解析不到的
+        // References another entry in the same library (underscore file name ↔ hyphenated name must
+        // match) + one unresolvable link
         try """
         ---
         name: feedback-push-to-origin
@@ -480,7 +486,8 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         回指 [[feedback_push]]。
         """.write(to: memory.appendingPathComponent("project_alpha.md"),
                   atomically: true, encoding: .utf8)
-        // 只给第一条记忆留下会话记录文件：另一条的来源会话视作已删除
+        // Leave a session transcript only for the first memory: the other one's origin session
+        // counts as deleted
         try "{\"type\":\"user\",\"cwd\":\"\(repo.path)\"}\n".write(
             to: projectDir.appendingPathComponent(
                 "11111111-2222-3333-4444-555555555555.jsonl"),
@@ -516,7 +523,7 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
             alpha.originSessionPath == nil,
             "会话记录文件不在时 originSessionPath 必须是 nil（UI 据此置灰）")
 
-        // 分组：2 条条目 + 1 份索引，可跳会话 1 个
+        // Grouping: 2 entries + 1 index, 1 navigable session
         let libraries = MemoryLibrary.group(entries)
         try expectEqual(libraries.count, 1)
         let library = libraries[0]
@@ -530,9 +537,10 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
     }
 
     t.test("Codex 记忆只收 memories/ 顶层：会话摘要/扩展/技能都不是记忆") {
-        // 复现真实形态：~/.codex/memories 是个 git 仓库，混装
-        //   顶层三份记忆 + rollout_summaries/（会话摘要）+ extensions/（元指令）+ skills/（技能）
-        // 递归扫会把 20 个文件全算成记忆，其中 17 个不是。
+        // Reproduces the real shape: ~/.codex/memories is a git repo mixing
+        //   three top-level memories + rollout_summaries/ (session summaries) + extensions/
+        //   (meta-instructions) + skills/ (skills)
+        // A recursive scan would count all 20 files as memories, 17 of which are not.
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent(
             "eureka-codexmem-\(UUID().uuidString)", isDirectory: true)
@@ -572,7 +580,8 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
             codexMemories.allSatisfy { $0.kind == .generated },
             "Codex memories 由后台维护 → 只读")
 
-        // 那份 SKILL.md 该被技能扫描收走（否则它既不是记忆、也没人管）
+        // That SKILL.md should be picked up by the skill scan (otherwise it is neither a memory nor
+        // managed by anything)
         let skills = SkillMemoryIndexer.indexSkills(
             claudeSkillsRoot: base.appendingPathComponent("claude/skills", isDirectory: true),
             codexSkillsRoot: codexHome.appendingPathComponent("skills", isDirectory: true),
@@ -620,7 +629,8 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
             .appendingPathComponent("memory", isDirectory: true)
         try fm.createDirectory(at: memory, withIntermediateDirectories: true)
 
-        // 索引收录 a（下划线文件名）与 b（frontmatter name 形式），外加一条早已删掉的 gone
+        // The index includes a (underscore file name) and b (frontmatter-name form), plus a
+        // long-deleted gone
         try """
         # Memory Index
 
@@ -633,7 +643,7 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
             to: memory.appendingPathComponent("feedback_a.md"), atomically: true, encoding: .utf8)
         try "---\nname: project-b\n---\nB".write(
             to: memory.appendingPathComponent("project_b.md"), atomically: true, encoding: .utf8)
-        // 文件在、索引没列 → 死记忆
+        // File exists but the index doesn't list it → dead memory
         try "---\nname: orphan-note\n---\nC".write(
             to: memory.appendingPathComponent("orphan_note.md"), atomically: true, encoding: .utf8)
 
@@ -647,12 +657,13 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         let library = libraries[0]
         try expectEqual(library.count, 3)
         try expectEqual(library.index?.indexedTargets.count, 3)
-        // 下划线 ↔ 连字符归一后 a/b 都算收录，只有 orphan_note 未收录
+        // After underscore ↔ hyphen normalization both a and b count as included; only orphan_note
+        // is not
         try expectEqual(library.unindexedEntries.map(\.title), ["orphan-note"])
         try expectEqual(library.danglingIndexRefs, ["feedback_gone.md"])
         try expect(library.hasDrift)
 
-        // 图谱要把未收录的条目标出来（UI 据此画虚线 + 提示）
+        // The graph must mark unincluded entries (the UI draws a dashed line + hint from this)
         let graph = MemoryGraphBuilder.build(library.graphInput())
         let flagged = graph.nodes.filter(\.isUnindexed).map(\.title)
         try expectEqual(flagged, ["orphan-note"])
@@ -666,7 +677,7 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         let codexHome = base.appendingPathComponent("codex", isDirectory: true)
         let memories = codexHome.appendingPathComponent("memories", isDirectory: true)
         try fm.createDirectory(at: memories, withIntermediateDirectories: true)
-        // 一个真实存在的 rollout + 一个已删除的
+        // One rollout that exists + one that was deleted
         let live = base.appendingPathComponent("rollout-live.jsonl")
         try "{}".write(to: live, atomically: true, encoding: .utf8)
         let gone = base.appendingPathComponent("rollout-gone.jsonl")

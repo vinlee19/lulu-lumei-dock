@@ -1,5 +1,5 @@
 #!/bin/bash
-# 生成两个可发布资产：版本 ZIP 与内含 archive EdDSA 签名的 appcast.xml。不会创建 GitHub Release。
+# Produces the two publishable assets: the versioned ZIP and an appcast.xml carrying the archive's EdDSA signature. Does not create a GitHub Release.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -49,7 +49,7 @@ generate_appcast() {
 }
 
 if [[ -n "${SPARKLE_EDDSA_PRIVATE_KEY:-}" ]]; then
-  # CI 私钥只通过 stdin 交给 Sparkle，绝不落盘或输出。
+  # The CI private key reaches Sparkle only via stdin; it is never written to disk or printed.
   printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" \
     | "$SPARKLE_TOOLS/generate_appcast" \
         --ed-key-file - \

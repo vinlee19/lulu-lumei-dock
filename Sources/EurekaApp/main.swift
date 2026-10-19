@@ -1,13 +1,18 @@
 import AppKit
+import EurekaKit
 
-// CLI 模式（hooks 装卸/状态查询）直接处理后退出，不起 GUI
+// CLI modes (hook install/uninstall/status queries) are handled directly and exit without starting
+// the GUI. The language preference must be applied before the CLI prints any text; with no stored
+// preference it's English.
+L10n.applyStoredPreference()
 if EurekaCLI.runIfNeeded() {
     exit(0)
 }
 
-// 常规应用入口：有 Dock 图标 + 应用菜单 + 主窗口（生命周期交给 AppDelegate）。
-// swift run 直跑时这里是激活策略的唯一来源，运行期也压过 Info.plist。
-// 顶层代码不是静态 MainActor 上下文，但主线程事实成立 → assumeIsolated。
+// Regular app entry: Dock icon + app menu + main window (lifecycle handed to AppDelegate). When run
+// directly via swift run this is the only source of the activation policy, and at runtime it also
+// overrides Info.plist. Top-level code isn't a static MainActor context, but it does run on the
+// main thread → assumeIsolated.
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

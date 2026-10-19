@@ -1,14 +1,15 @@
 import Foundation
 
-/// 桌面吉祥物的状态(= 动画包要支持的状态套件)
+/// Desktop mascot state (= the set of states an animation pack must support)
 public enum MascotState: String, Sendable, CaseIterable {
-    /// 基础态(随当前快照推导,循环播放)
+    /// Base states (derived from the current snapshot, loop playback)
     case idle, working, waiting, sleeping, night
-    /// 瞬时态(由事件叠加,播一会儿回落到基础态)
+    /// Transient states (layered on by events; play for a while, then fall back to the base
+    /// state)
     case success, error, relax
-    case poke, wake  // 二期互动态
+    case poke, wake  // phase-two interaction states
 
-    /// 缺图时的回退链(最终回到 idle)
+    /// Fallback chain when artwork is missing (ends at idle)
     public var fallback: MascotState {
         switch self {
         case .idle: return .idle
@@ -20,12 +21,14 @@ public enum MascotState: String, Sendable, CaseIterable {
     }
 }
 
-/// 吉祥物序列的播放方式。基础态循环，完成/点击/唤醒等瞬时态可只播一次并停在末帧。
+/// How a mascot sequence plays. Base states loop; transient states such as finish/click/wake
+/// may play once and hold the last frame.
 public enum MascotPlaybackMode: String, Sendable, Equatable {
     case loop
     case onceHoldLast
 
-    /// 根据本地播放时长返回帧下标。纯函数供渲染层和单测共用。
+    /// Returns the frame index for the local playback time. Pure function shared by the
+    /// renderer and unit tests.
     public func frameIndex(elapsed: TimeInterval, fps: Double, frameCount: Int) -> Int {
         guard frameCount > 1 else { return 0 }
         let safeElapsed = max(0, elapsed)
@@ -40,7 +43,8 @@ public enum MascotPlaybackMode: String, Sendable, Equatable {
     }
 }
 
-/// 精灵图的逻辑网格。图片尺寸由 App 层读取，这里只负责安全的格子边界。
+/// Logical grid of a sprite sheet. The app layer reads the image size; this only handles safe
+/// cell bounds.
 public struct MascotSpriteGrid: Sendable, Equatable {
     public var columns: Int
     public var rows: Int
@@ -55,19 +59,20 @@ public struct MascotSpriteGrid: Sendable, Equatable {
     }
 }
 
-/// 逐帧刷新只应在面板可见且系统清醒时运行。
+/// Frame-by-frame refresh should only run while the panel is visible and the system is awake.
 public enum MascotAnimationPolicy {
     public static func shouldAnimate(isVisible: Bool, isAwake: Bool) -> Bool {
         isVisible && isAwake
     }
 }
 
-/// 基础态推导(纯函数,便于单测)。瞬时态(success/error/relax/poke/wake)由 ViewModel 按事件叠加。
+/// Base state derivation (pure function, easy to unit-test). Transient states
+/// (success/error/relax/poke/wake) are layered on by the ViewModel per event.
 public enum MascotBaseResolver {
     public struct Input {
         public var hasWaitingTask: Bool
         public var hasRunningTask: Bool
-        /// 距最近活跃的秒数(有活跃任务时为 0)
+        /// Seconds since last activity (0 when there are active tasks)
         public var idleSeconds: TimeInterval
         public var sleepThreshold: TimeInterval
         public var now: Date
@@ -84,7 +89,8 @@ public enum MascotBaseResolver {
         }
     }
 
-    /// 优先级:等你确认 > (深夜跑→困倦 / 否则专注) > 久空闲或深夜无任务→睡 > 平静
+    /// Priority: waiting on you > (running late at night → sleepy / otherwise focused) > long
+    /// idle or late night with no tasks → asleep > calm
     public static func base(_ input: Input, calendar: Calendar = .current) -> MascotState {
         if input.hasWaitingTask { return .waiting }
         let hour = calendar.component(.hour, from: input.now)
@@ -92,7 +98,7 @@ public enum MascotBaseResolver {
         if input.hasRunningTask {
             return deepNight ? .night : .working
         }
-        // 无活跃任务
+        // No active tasks
         if input.idleSeconds >= input.sleepThreshold || deepNight {
             return .sleeping
         }

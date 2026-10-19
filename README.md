@@ -50,6 +50,12 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 
 > The installed bundle is `lulu-lumei-dock.app` and data lives in `~/Library/Application Support/Eureka/` (the internal name stays `Eureka` for compatibility). Building from source? See [Development](#development).
 
+## Language
+
+The interface is **English by default**. Switch to 简体中文 in **Settings → General → Language**.
+The choice is saved on this Mac and applies immediately, including the menu bar menus and the island.
+Nothing is sent off the machine.
+
 ## What is this?
 
 `lulu-lumei-dock` is a native macOS menu‑bar app that watches the local logs of your AI coding
@@ -402,12 +408,17 @@ make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
 make package-release # verified ZIP + appcast containing its EdDSA signature
 make install    # app + install to /Applications/lulu-lumei-dock.app
+make lint-comments # fail on CJK text in code comments
 make clean      # rm -rf .build dist
 Scripts/check-usage-against-ccusage.sh   # diff usage totals vs. ccusage (expect 0.00%)
 ```
 
 There is no test filter — the runner (`Tests/EurekaTestsRunner/main.swift`) calls each suite
 sequentially. To run a subset, comment out suite calls in `main.swift`.
+
+Contributing: read [CONTRIBUTING.md](CONTRIBUTING.md) (issues, proposals, draft and ready PRs,
+the PR template) and [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) (branching,
+verification gates, definition of done) before opening a pull request.
 
 ## Architecture
 

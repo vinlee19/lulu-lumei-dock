@@ -2,12 +2,14 @@ import AppKit
 import EurekaKit
 import SwiftUI
 
-/// 承载灵动岛 SwiftUI 内容的 NSHostingView：
-/// - 透明区域点击穿透（panel 固定为最大尺寸，岛外区域不能挡鼠标）
-/// - 不激活 app 也响应首次点击
-/// - 用 NSTrackingArea 自管 hover（onHover 在 nonactivating panel 上不可靠）
+/// NSHostingView hosting the Dynamic Island SwiftUI content:
+/// - clicks pass through transparent areas (the panel is fixed at max size; areas outside the
+///   island must not block the mouse)
+/// - responds to the first click without activating the app
+/// - manages hover itself via NSTrackingArea (onHover is unreliable on a nonactivating panel)
 final class IslandHostingView<Content: View>: NSHostingView<Content> {
-    /// 当前可交互区域（panel 坐标系，原点左下），由控制器注入
+    /// Current interactive region (panel coordinates, origin bottom-left), injected by the
+    /// controller
     var interactiveRectProvider: @MainActor () -> NSRect = { .zero }
     var onHoverChange: @MainActor (Bool) -> Void = { _ in }
 
@@ -15,8 +17,9 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     private var mouseDownLocation: NSPoint?
     private var didDrag = false
 
-    /// 注入的矩形是原点左下；NSHostingView 是 flipped（原点左上），
-    /// 视图内判断必须翻转，否则命中区落到 panel 底部空白区（点击全部穿透）
+    /// The injected rect has a bottom-left origin; NSHostingView is flipped (top-left origin), so
+    /// in-view checks must flip it, or the hit area lands in the empty bottom of the panel (every
+    /// click passes through)
     private var interactiveRectInView: NSRect {
         let rect = interactiveRectProvider()
         return isFlipped
@@ -25,7 +28,7 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // 点不在岛的可视范围内 → 穿透给下层窗口
+        // Point is outside the island's visible area → pass through to the window below
         guard interactiveRectInView.contains(convert(point, from: superview)) else {
             return nil
         }
@@ -34,7 +37,7 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    // MARK: - 拖拽检测（点按交给 SwiftUI：岛内按钮与背景 tap 自然共存）
+    // MARK: - Drag detection (taps go to SwiftUI: in-island buttons and background taps coexist naturally)
 
     override func mouseDown(with event: NSEvent) {
         mouseDownLocation = event.locationInWindow
@@ -49,10 +52,12 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
         let dy = event.locationInWindow.y - start.y
         if dx * dx + dy * dy > 16 {
             didDrag = true
-            // 交给窗口服务器拖动整个 panel（位置持久化在控制器的 didMove 观察里）。
-            // performDrag 会吞掉后续 mouseUp/mouseExited——必须手动复位 hover，
-            // 否则自动收起被永久暂停，岛停在旧内容上（曾导致整夜不更新）。
-            // 它同时吞掉 mouseUp → SwiftUI 的 tap 手势不会在拖拽后误触发。
+            // Hand off to the window server to drag the whole panel (position persistence is in the
+            // controller's didMove observer). performDrag swallows the following
+            // mouseUp/mouseExited -- hover must be reset manually, or auto-dismiss stays paused
+            // forever and the island sticks on stale content (once caused a whole night without
+            // updates). It also swallows mouseUp → SwiftUI's tap gesture won't misfire after a
+            // drag.
             if insideInteractive {
                 insideInteractive = false
                 onHoverChange(false)

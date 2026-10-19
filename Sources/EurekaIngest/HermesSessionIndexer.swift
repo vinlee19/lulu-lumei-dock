@@ -2,20 +2,21 @@ import EurekaKit
 import EurekaStore
 import Foundation
 
-/// Hermes 会话索引：只读 `state.db` 的 `sessions` 表 → `AgentSessionInfo`。
+/// Hermes session index: reads only the `sessions` table of `state.db` → `AgentSessionInfo`.
 ///
-/// 与其它源的差异：
-///   - 时间是 epoch **秒**（opencode 那张表是毫秒）；
-///   - 没有 transcript 文件，`transcriptPath` 记 state.db 路径、`sizeBytes` 记 0
-///     （`TranscriptReader.loadHermes` 再用它 + session id 回查 `messages`）；
-///   - 会话可能仍在跑（`ended_at IS NULL`），最近活跃时间取
-///     `ended_at` → 该会话最后一条消息 → `started_at` 的第一个非空值；
-///   - 多 profile 各有独立 state.db，故对外入口是 `indexAll`。
+/// Differences from other sources:
+///   - times are epoch **seconds** (opencode's table uses milliseconds);
+///   - there is no transcript file: `transcriptPath` records the state.db path and `sizeBytes` is 0
+///     (`TranscriptReader.loadHermes` uses it + the session id to look up `messages`);
+///   - a session may still be running (`ended_at IS NULL`); last-active time is the first non-null
+///     of `ended_at` → the session's last message → `started_at`;
+///   - each profile has its own state.db, so the public entry point is `indexAll`.
 ///
-/// 只取顶层会话（`parent_session_id` 空）：子会话是 delegate_task 的子代理与压缩分裂产物，
-/// 不进浏览列表。归档会话（`archived = 1`）同样跳过。
+/// Only top-level sessions (`parent_session_id` empty): child sessions are delegate_task subagents
+/// and compaction splits and stay out of the browse list. Archived sessions (`archived = 1`) are
+/// skipped too.
 public enum HermesSessionIndexer {
-    /// 单库索引
+    /// Single-db index
     public static func index(
         dbPath: URL,
         window: TimeInterval = 30 * 86400,
@@ -50,7 +51,8 @@ public enum HermesSessionIndexer {
         return rows.filter { !$0.id.isEmpty }
     }
 
-    /// 默认 home + 各 profile 的 state.db 合并索引（按最近活跃倒序、整体限量）
+    /// Merged index over the default home + each profile's state.db (most recently active first,
+    /// capped overall)
     public static func indexAll(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         window: TimeInterval = 30 * 86400,
@@ -64,7 +66,8 @@ public enum HermesSessionIndexer {
         return Array(all.sorted { $0.lastActiveAt > $1.lastActiveAt }.prefix(maxSessions))
     }
 
-    /// 近期会话 cwd 集合（供项目级发现并入；Hermes 无项目级技能/记忆，仅计划目录用得上）
+    /// Recent session cwds (merged into project-level discovery; Hermes has no project-level
+    /// skills/memory, only the plan directory uses them)
     public static func recentDirectories(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         maxSessions: Int = 300

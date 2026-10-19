@@ -19,7 +19,7 @@ func usageRecordPagingTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: path) }
         let store = try EurekaStore(path: path)
 
-        // 5 条：claude ts=100,200,300；codex ts=150,250
+        // 5 rows: claude ts=100,200,300; codex ts=150,250
         try store.usage.insert([
             makeRecord(source: .claude, model: "m1", ts: 100),
             makeRecord(source: .claude, model: "m2", ts: 200),
@@ -28,18 +28,18 @@ func usageRecordPagingTests(_ t: TestRunner) {
             makeRecord(source: .codex, model: "g2", ts: 250),
         ])
 
-        // 全量计数 + 倒序首页
+        // Full count + descending first page
         try expectEqual(try store.usage.recordCount(), 5)
         let page1 = try store.usage.recentRecords(limit: 2)
         try expectEqual(page1.map(\.model), ["m3", "g2"])
-        // 第二页（offset）
+        // Second page (offset)
         let page2 = try store.usage.recentRecords(limit: 2, offset: 2)
         try expectEqual(page2.map(\.model), ["m2", "g1"])
-        // 来源过滤
+        // filter by source
         try expectEqual(try store.usage.recordCount(source: .codex), 2)
         let codexRows = try store.usage.recentRecords(source: .codex, limit: 10)
         try expectEqual(codexRows.map(\.model), ["g2", "g1"])
-        // 时间窗 [150, 300)
+        // time window [150, 300)
         let windowed = try store.usage.recentRecords(
             from: Date(timeIntervalSince1970: 150),
             to: Date(timeIntervalSince1970: 300), limit: 10)
@@ -48,7 +48,7 @@ func usageRecordPagingTests(_ t: TestRunner) {
             try store.usage.recordCount(
                 from: Date(timeIntervalSince1970: 150),
                 to: Date(timeIntervalSince1970: 300)), 3)
-        // 行字段完整
+        // row fields complete
         let first = page1[0]
         try expectEqual(first.inputTokens, 10)
         try expectEqual(first.cacheReadTokens, 100)

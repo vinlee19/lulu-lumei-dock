@@ -1,32 +1,36 @@
 import Foundation
 
-/// ⌘K 全局搜索的纯数据模型 + 聚合逻辑（合并去重、snippet 就近裁剪）。
+/// Pure data model + aggregation logic for ⌘K global search (merge/dedup, snippet cropping
+/// around the match).
 ///
-/// 放 EurekaKit 而不是与之配套的 `CommandPaletteService`（Sources/EurekaApp）同层，
-/// 是吃过 `KnowledgeSearchIndexer` 的教训：`eureka-tests` 只能链接库目标
-/// （EurekaKit/EurekaStore/EurekaIngest/…），链不到 app 壳 `eureka`
-/// （`.executableTarget`）的目标码——类型检查能过，`swift run eureka-tests` 链接期必炸
-/// `Undefined symbols`。这里的两个函数无 IO、无 AppKit，纯值类型 + 纯函数，天然该落在
-/// 这一层；真正持有 `EurekaStore`/防抖队列/`@Published` 状态的服务留在 app 壳，
-/// 用 typealias 转发这里的类型（同 `TurnGraph` 的先例）。
+/// It lives in EurekaKit rather than alongside its companion `CommandPaletteService`
+/// (Sources/EurekaApp) because of a lesson from `KnowledgeSearchIndexer`: `eureka-tests` can
+/// only link library targets (EurekaKit/EurekaStore/EurekaIngest/…), not the object code of
+/// the app shell `eureka` (an `.executableTarget`) -- type checking passes, but
+/// `swift run eureka-tests` is guaranteed to blow up at link time with `Undefined symbols`.
+/// The two functions here have no IO and no AppKit -- pure value types + pure functions --
+/// so they naturally belong in this layer; the service that actually holds `EurekaStore` /
+/// the debounce queue / `@Published` state stays in the app shell and re-exports these types
+/// via typealias (following `TurnGraph`).
 public enum CommandPalette {
     public enum Kind: Int, CaseIterable, Sendable {
         case session, skill, memory, instruction, plan, prompt
 
         public var label: String {
             switch self {
-            case .session: return "会话"
-            case .skill: return "技能"
-            case .memory: return "记忆"
-            case .instruction: return "指令"
-            case .plan: return "计划"
-            case .prompt: return "Prompt"
+            case .session: return L10n.text("Session", zhHans: "会话")
+            case .skill: return L10n.text("Skill", zhHans: "技能")
+            case .memory: return L10n.text("Memory", zhHans: "记忆")
+            case .instruction: return L10n.text("Instruction", zhHans: "指令")
+            case .plan: return L10n.text("Plan", zhHans: "计划")
+            case .prompt: return L10n.text("Prompt", zhHans: "Prompt")
             }
         }
 
-        /// reveal 通知里 userInfo["kind"] 用的字符串（PopoverRootView 路由消费，
-        /// CommandPaletteView 发送端复用，避免两端手写字面量拼写漂移）。
-        /// 会话/计划/Prompt 的 reveal 通知不带 kind，故为 nil。
+        /// String used for userInfo["kind"] in the reveal notification (consumed by
+        /// PopoverRootView routing, reused by the CommandPaletteView sender, so the two ends
+        /// don't hand-write literals that drift apart). Session/plan/prompt reveal
+        /// notifications carry no kind, hence nil.
         public var revealKind: String? {
             switch self {
             case .session, .plan, .prompt: return nil
@@ -39,14 +43,14 @@ public enum CommandPalette {
 
     public struct Hit: Identifiable, Equatable, Sendable {
         public var kind: Kind
-        /// 去重键：知识面/计划 = 文件路径；会话 = session id
+        /// Dedup key: knowledge surfaces / plans = file path; sessions = session id
         public var key: String
         public var title: String
         public var subtitle: String?
-        /// 正文命中的上下文片段（元数据命中为 nil）
+        /// Context snippet for a body match (nil for metadata matches)
         public var snippet: String?
         public var sessionId: String?
-        /// 会话正文命中时的消息定位
+        /// Message position for a session body match
         public var messageIdx: Int?
         public var id: String { "\(kind.rawValue):\(key)" }
 
@@ -64,7 +68,8 @@ public enum CommandPalette {
         }
     }
 
-    /// 合并去重：同 (kind, key) 取先出现者（元数据在前 → 标题命中优先），每组截断
+    /// Merge/dedup: for the same (kind, key) keep the first occurrence (metadata first →
+    /// title matches win); each group is capped
     public static func merge(_ hits: [Hit], perKindCap: Int) -> [Hit] {
         var seen = Set<String>()
         var byKind: [Kind: [Hit]] = [:]
@@ -77,8 +82,10 @@ public enum CommandPalette {
         return Kind.allCases.flatMap { byKind[$0] ?? [] }
     }
 
-    /// 就近裁剪：命中词前后各 radius 字符。先在原文定位命中区间、切出窗口，只对窗口内容
-    /// 压平换行/制表符——正文最长可到 256KB，对整份原文先 `replacingOccurrences` 再定位纯属浪费。
+    /// Crops around the match: radius characters on each side of the hit. Locate the hit in
+    /// the original text and cut a window first, then flatten newlines/tabs only inside the
+    /// window -- bodies can reach 256KB, so running `replacingOccurrences` over the whole text
+    /// before locating would be pure waste.
     public static func snippet(_ text: String, query: String, radius: Int = 40) -> String {
         guard let range = text.range(of: query, options: .caseInsensitive) else {
             let end = text.index(
@@ -92,7 +99,8 @@ public enum CommandPalette {
         return flatten(text[start..<end])
     }
 
-    /// 窗口内压平换行/回车/制表符为空格（正文里三种都可能出现）
+    /// Flattens newlines/carriage returns/tabs in the window to spaces (bodies may contain
+    /// all three)
     private static func flatten(_ window: Substring) -> String {
         String(window)
             .replacingOccurrences(of: "\n", with: " ")

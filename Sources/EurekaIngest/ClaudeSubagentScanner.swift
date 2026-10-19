@@ -1,21 +1,27 @@
 import Foundation
 import EurekaKit
 
-/// 扫描一个 Claude 会话的子 agent 现场（纯函数，便于单测）。Qoder 复用本扫描器
-///（`~/.qoder-cn/projects/<slug>/<sessionId>/` 与 Claude 同构，实勘 v1.1.5）。
+/// Scans the live subagent state of one Claude session (pure function, easy to unit test). Qoder
+/// reuses this scanner (`~/.qoder-cn/projects/<slug>/<sessionId>/` has the same layout as Claude,
+/// verified on v1.1.5).
 ///
-/// 磁盘约定（当前版 Claude Code 实地核实）：
-/// - `<sessionDir>/subagents/agent-<id>.meta.json` = `{agentType, description, toolUseId}`，派生即建。
-///   Qoder 的 meta 文件名是 `agent-<type>-<hex>.meta.json`，同一推导同样得到 `<type>-<hex>` id。
-/// - `<sessionDir>/subagents/agent-<id>.jsonl` = 子 agent transcript，尾部最后一个 tool_use 名 = 当前工具。
-/// - 完成信号：父 transcript 出现 `tool_result`（`tool_use_id == toolUseId`），`is_error` → 失败。
-///   大结果会被卸载到 `<sessionDir>/tool-results/<toolUseId>.txt`（兜底完成判据）。
-///   Qoder 另有 `subagents/task-<id>.json` 记录终态（`status`/"completed" 等），作第二兜底。
+/// On-disk conventions (verified against the current Claude Code release):
+/// - `<sessionDir>/subagents/agent-<id>.meta.json` = `{agentType, description, toolUseId}`, created
+///   as soon as the subagent is spawned. Qoder names the meta file `agent-<type>-<hex>.meta.json`;
+///   the same derivation yields the id `<type>-<hex>`.
+/// - `<sessionDir>/subagents/agent-<id>.jsonl` = the subagent transcript; the name of the last
+///   tool_use in its tail = the current tool.
+/// - Completion signal: a `tool_result` appears in the parent transcript
+///   (`tool_use_id == toolUseId`); `is_error` → failed. Large results get offloaded to
+///   `<sessionDir>/tool-results/<toolUseId>.txt` (fallback completion criterion). Qoder also has
+///   `subagents/task-<id>.json` recording the terminal state (`status`/"completed" etc.), used as a
+///   second fallback.
 public enum ClaudeSubagentScanner {
-    /// `sessionDir` = `<项目>/<sessionId>/`（与 `<sessionId>.jsonl` 同级的目录）。
-    /// `parentTranscript` = `<sessionId>.jsonl`（读尾窗找 tool_result）。
-    /// `turnStartedAt` = 当前 turn 起点（prompt 时间）：subagents/ 目录跨 turn 累积，
-    /// 只保留本 turn 创建的子 agent（meta 创建时间 ≥ 它），nil 则不过滤。
+    /// `sessionDir` = `<project>/<sessionId>/` (the directory next to `<sessionId>.jsonl`).
+    /// `parentTranscript` = `<sessionId>.jsonl` (its tail window is read for tool_result).
+    /// `turnStartedAt` = start of the current turn (prompt time): the subagents/ directory
+    /// accumulates across turns, so only subagents created in this turn are kept (meta creation
+    /// time ≥ it); nil disables the filter.
     public static func scan(
         sessionDir: URL,
         parentTranscript: URL?,
@@ -27,16 +33,16 @@ public enum ClaudeSubagentScanner {
         let metas = (try? fm.contentsOfDirectory(
             at: subagentsDir, includingPropertiesForKeys: [.creationDateKey]))?
             .filter { $0.lastPathComponent.hasSuffix(".meta.json") } ?? []
-        guard !metas.isEmpty else { return [] }  // Codex / 无子 agent
+        guard !metas.isEmpty else { return [] }  // Codex / no subagents
 
-        // 父 transcript 尾窗里的 tool_result：tool_use_id → is_error
+        // tool_result entries in the parent transcript's tail window: tool_use_id → is_error
         let completion = parentTranscript.map { toolResults(in: $0, tailBytes: tailBytes) } ?? [:]
         let resultsDir = sessionDir.appendingPathComponent("tool-results", isDirectory: true)
 
         var infos: [SubagentInfo] = []
         for meta in metas {
             let createdAt = (try? meta.resourceValues(forKeys: [.creationDateKey]))?.creationDate
-            // 只保留本 turn 派生的子 agent（meta 创建于 prompt 之后）
+            // Keep only subagents spawned in this turn (meta created after the prompt)
             if let turnStartedAt, let createdAt, createdAt < turnStartedAt { continue }
             guard
                 let data = try? Data(contentsOf: meta),
@@ -54,14 +60,14 @@ public enum ClaudeSubagentScanner {
                 status = isError ? .failed : .completed
             } else if fm.fileExists(
                 atPath: resultsDir.appendingPathComponent("\(toolUseId).txt").path) {
-                status = .completed  // 内联结果滚出尾窗，但卸载文件还在
+                status = .completed  // inline result left the tail window; the offloaded file remains
             } else if let taskStatus = taskFileStatus(agentId: agentId, in: subagentsDir) {
-                status = taskStatus  // Qoder 兜底：task-<id>.json 的终态记录
+                status = taskStatus  // Qoder fallback: the terminal-state record in task-<id>.json
             } else {
                 status = .running
             }
 
-            // 只为运行中的子 agent 读其 transcript 尾部取当前工具（省 IO）
+            // Read the transcript tail for the current tool only for running subagents (saves IO)
             var currentActivity: String?
             if status == .running {
                 let jsonl = subagentsDir.appendingPathComponent("agent-\(agentId).jsonl")
@@ -75,10 +81,10 @@ public enum ClaudeSubagentScanner {
                 status: status,
                 currentActivity: currentActivity,
                 startedAt: createdAt,
-                finishedAt: nil))  // UI 不展示完成时刻；留 nil 保证扫描结果可去重
+                finishedAt: nil))  // UI doesn't show it; nil keeps scan results dedupable
         }
 
-        // 稳定排序：开始时间在前，缺时间者按 agentId 兜底
+        // Stable sort: earlier start time first; entries without a time fall back to agentId
         return infos.sorted {
             switch ($0.startedAt, $1.startedAt) {
             case let (l?, r?) where l != r: return l < r
@@ -87,9 +93,9 @@ public enum ClaudeSubagentScanner {
         }
     }
 
-    // MARK: - 解析
+    // MARK: - Parsing
 
-    /// 父 transcript 尾窗里所有 tool_result 的 tool_use_id → is_error
+    /// tool_use_id → is_error for every tool_result in the parent transcript's tail window
     private static func toolResults(in url: URL, tailBytes: Int) -> [String: Bool] {
         guard let data = tail(of: url, bytes: tailBytes) else { return [:] }
         var map: [String: Bool] = [:]
@@ -109,8 +115,8 @@ public enum ClaudeSubagentScanner {
         return map
     }
 
-    /// Qoder 的 `subagents/task-<agentId>.json` 终态（"completed"/"failed" 等）；
-    /// 文件不存在或仍在运行（"running" 等）返回 nil
+    /// Terminal state from Qoder's `subagents/task-<agentId>.json` ("completed"/"failed" etc.); nil
+    /// if the file doesn't exist or is still running ("running" etc.)
     private static func taskFileStatus(agentId: String, in subagentsDir: URL) -> SubagentInfo.Status? {
         let url = subagentsDir.appendingPathComponent("task-\(agentId).json")
         guard
@@ -125,7 +131,7 @@ public enum ClaudeSubagentScanner {
         }
     }
 
-    /// 子 agent transcript 尾窗里最后一个 assistant tool_use 的工具名
+    /// Tool name of the last assistant tool_use in the subagent transcript's tail window
     private static func lastToolUse(in url: URL, tailBytes: Int) -> String? {
         guard let data = tail(of: url, bytes: tailBytes) else { return nil }
         var last: String?
@@ -143,7 +149,8 @@ public enum ClaudeSubagentScanner {
         return last
     }
 
-    /// 读文件尾部 bytes（不足则全读），与 ClaudeSessionBootstrap 一致的尾窗读法
+    /// Reads the trailing bytes of a file (the whole file if shorter), the same tail-window read as
+    /// ClaudeSessionBootstrap
     private static func tail(of url: URL, bytes: Int) -> Data? {
         guard
             let handle = FileHandle(forReadingAtPath: url.path),

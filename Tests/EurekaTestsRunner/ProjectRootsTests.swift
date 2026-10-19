@@ -1,8 +1,9 @@
 import EurekaIngest
 import Foundation
 
-/// ProjectRoots.recentCwds 聚合测试：全部 agent 根用临时目录里的空子目录顶替，
-/// 证明 kimi/codebuddy/qoder/cursor 等新源的会话 cwd 也能进入项目级发现；全程不碰真实 ~/。
+/// ProjectRoots.recentCwds aggregation tests: every agent root is replaced by an empty subdirectory
+/// of a temp dir, proving session cwds from newer sources like kimi/codebuddy/qoder/cursor reach
+/// project-level discovery; real ~/ is never touched.
 func projectRootsTests(_ t: TestRunner) {
     t.suite("ProjectRoots")
 
@@ -49,7 +50,8 @@ func projectRootsTests(_ t: TestRunner) {
     t.test("多源同 cwd 去重；全空根集返回空（不碰真实 ~/）") {
         let base = try makeProjectRootsBase()
         defer { try? FileManager.default.removeItem(at: base) }
-        // 空根集：任何源都扫不到 → 空（若误用真实 ~/ 默认根，这里会非空）
+        // Empty root set: no source finds anything → empty (if the real ~/ default roots leaked in,
+        // this would be non-empty)
         try expectEqual(recentCwdsFrom(base: base), [])
 
         try plantKimiSession(base: base, cwd: "/Users/me/work/shared-proj")
@@ -60,7 +62,7 @@ func projectRootsTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - fixture 搭建
+// MARK: - fixture setup
 
 private func makeProjectRootsBase() throws -> URL {
     let base = FileManager.default.temporaryDirectory
@@ -69,11 +71,13 @@ private func makeProjectRootsBase() throws -> URL {
     return base
 }
 
-/// 以 base 下各（可能不存在的）空子目录顶替全部 13 源的根调 recentCwds。
-/// 索引器对缺失目录返回空，故未放 fixture 的源自然无产出；opencode/hermes 保持默认关闭。
-/// ⚠️ cursor 与 trae 的根也必须显式传：漏传就会去读真实的
-/// ~/Library/Application Support/Cursor/…/state.vscdb 与 ~/.trae-cn/memory，测试不再自洽
-/// （加 trae 时就是这几条用例先挂，把真实 ~/ 里的 cwd 带了进来）。
+/// Calls recentCwds with all 13 source roots replaced by (possibly nonexistent) empty
+/// subdirectories under base. Indexers return nothing for missing directories, so sources without
+/// fixtures yield nothing; opencode/hermes stay off by default. ⚠️ The cursor and trae roots must
+/// be passed explicitly too: omit them and the real ~/Library/Application
+/// Support/Cursor/…/state.vscdb and ~/.trae-cn/memory get read, and the tests are no longer
+/// self-contained (when trae was added, these cases were the first to fail, pulling in cwds from
+/// the real ~/).
 private func recentCwdsFrom(base: URL) -> [String] {
     CursorWorkspaceIndex.resetCacheForTesting()
     defer { CursorWorkspaceIndex.resetCacheForTesting() }
@@ -99,8 +103,9 @@ private func recentCwdsFrom(base: URL) -> [String] {
         ])
 }
 
-/// trae 会话：会话库加密读不了 → 只能从明文记忆库反推。
-/// 目录名是 `<正向编码 cwd>--p<N>-<hash>`，cwd 靠 workspace.json 的 folder 正向匹配得出。
+/// trae session: the session DB is encrypted and unreadable → can only be inferred from the
+/// plaintext memory library. The directory name is `<forward-encoded cwd>--p<N>-<hash>`; the cwd
+/// comes from forward-matching the folder in workspace.json.
 private func plantTraeSession(base: URL, cwd: String) throws {
     let fm = FileManager.default
     let encoded = SkillMemoryIndexer.encodeProjectDirName(cwd)
@@ -121,7 +126,8 @@ private func plantTraeSession(base: URL, cwd: String) throws {
         .write(to: workspace.appendingPathComponent("workspace.json"))
 }
 
-/// cursor 会话：会话在 state.vscdb 里，cwd 要经 workspaceStorage/<id>/workspace.json 反查
+/// cursor session: sessions live in state.vscdb; the cwd is looked up via
+/// workspaceStorage/<id>/workspace.json
 private func plantCursorSession(base: URL, cwd: String) throws {
     let cursor = base.appendingPathComponent("cursor", isDirectory: true)
     let fixture = try CursorFixture(root: cursor)
@@ -131,7 +137,7 @@ private func plantCursorSession(base: URL, cwd: String) throws {
         bubbles: [.user("你好")])
 }
 
-/// kimi 会话：<base>/kimi/wd_demo_ea973e2e828f/session_abc/state.json（workDir 带 cwd）
+/// kimi session: <base>/kimi/wd_demo_ea973e2e828f/session_abc/state.json (workDir carries the cwd)
 private func plantKimiSession(base: URL, cwd: String) throws {
     let sessionDir = base.appendingPathComponent(
         "kimi/wd_demo_ea973e2e828f/session_abc", isDirectory: true)
@@ -144,7 +150,7 @@ private func plantKimiSession(base: URL, cwd: String) throws {
     try Data(state.utf8).write(to: sessionDir.appendingPathComponent("state.json"))
 }
 
-/// codebuddy 会话：<base>/codebuddy/<slug>/<sessionId>.jsonl（行内 cwd 字段）
+/// codebuddy session: <base>/codebuddy/<slug>/<sessionId>.jsonl (inline cwd field)
 private func plantCodeBuddySession(base: URL, cwd: String) throws {
     let projectDir = base.appendingPathComponent("codebuddy/-work-demo", isDirectory: true)
     try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
@@ -157,7 +163,8 @@ private func plantCodeBuddySession(base: URL, cwd: String) throws {
         to: projectDir.appendingPathComponent("s-cb.jsonl"))
 }
 
-/// qoder 会话：<base>/qoder/<slug>/<sessionId>.jsonl（workspace-directories 行带 cwd）
+/// qoder session: <base>/qoder/<slug>/<sessionId>.jsonl (the workspace-directories line carries the
+/// cwd)
 private func plantQoderSession(base: URL, cwd: String) throws {
     let projectDir = base.appendingPathComponent("qoder/-work-demo", isDirectory: true)
     try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)

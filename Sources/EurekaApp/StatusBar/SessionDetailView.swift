@@ -3,13 +3,16 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// 会话详情：头部信息 + resume 命令条 + 恢复/删除动作 + 对话记录流 + 对话目录（可折叠右栏）
+/// Session detail: header + resume command bar + restore/delete actions + transcript stream +
+/// transcript outline (collapsible right pane)
 struct SessionDetailView: View {
     @ObservedObject var service: SessionBrowserService
-    /// 「本会话产出」区依赖：全仓只有两处构造点且都传实值，非 optional 让扫描完成后能正常刷新
+    /// Dependency of the "produced in this session" section: the repo constructs this in only two
+    /// places, both passing a real value; non-optional so the view refreshes once scanning finishes
     @ObservedObject var skillMemory: SkillMemoryService
     @ObservedObject var plans: PlansService
-    /// 打开血缘下钻（由 SessionsView 提供 —— 下钻要替换整个内容区才有足够宽度）
+    /// Opens the lineage drill-down (provided by SessionsView -- the drill-down must replace the
+    /// whole content area to get enough width)
     var onOpenLineage: ((TurnLineageView.Pane) -> Void)?
 
     @State private var showTOC = true
@@ -18,17 +21,21 @@ struct SessionDetailView: View {
     @State private var roleFilter: RoleFilter = .all
     @State private var searchQuery = ""
     @State private var matchIndex = 0
-    /// 搜索命中（顺序数组供上下条导航，Set 供行渲染 O(1) 查询）。
-    /// 在后台算而不是 computed property：加载全部后的超长会话逐键全文扫描会卡主线程，
-    /// 且 computed 版本在每个可见行的 contains 里被反复重算过
+    /// Search hits (ordered array for prev/next navigation, Set for O(1) lookup while rendering
+    /// rows). Computed in the background instead of as a computed property: a full-text scan per
+    /// keystroke of a very long session after "load all" would block the main thread, and the
+    /// computed version was recomputed in every visible row's contains
     @State private var matches: [Int] = []
     @State private var matchSet: Set<Int> = []
-    /// 命中重算代际：慢结果回来时已被更新的输入超越则丢弃
+    /// Hit-recompute generation: a slow result is discarded if newer input has superseded it by the
+    /// time it returns
     @State private var matchGeneration = 0
     @State private var exportNote: String?
-    /// 已展开的轨迹消息 id（切会话时清空，避免新会话同 id 意外展开）
+    /// Ids of expanded trail messages (cleared on session switch so a new session with the same id
+    /// doesn't expand by accident)
     @State private var expandedTrails: Set<Int> = []
-    /// 「本会话产出」是否展开全部（默认只显示前 5 条，避免几十条产出把对话区压没）
+    /// Whether "produced in this session" shows everything (only the first 5 by default, so dozens
+    /// of artifacts don't squeeze out the transcript)
     @State private var artifactsExpanded = false
 
     enum RoleFilter: String, CaseIterable {
@@ -36,13 +43,13 @@ struct SessionDetailView: View {
         case user = "用户"
         case assistant = "助手"
 
-        /// Tray label: the user side stays "用户"; the other side is the agent's own product
-        /// name (Claude Code, Codex, …) instead of a generic "助手".
+        /// Tray label: the user side stays "User"; the other side is the agent's own product
+        /// name (Claude Code, Codex, …) instead of a generic "Assistant".
         func label(for source: AgentSource?) -> String {
             switch self {
-            case .all: return "全部"
-            case .user: return "用户"
-            case .assistant: return source?.displayName ?? "助手"
+            case .all: return L10n.text("All", zhHans: "全部")
+            case .user: return L10n.text("User", zhHans: "用户")
+            case .assistant: return source?.displayName ?? L10n.text("Assistant", zhHans: "助手")
             }
         }
     }
@@ -53,16 +60,18 @@ struct SessionDetailView: View {
                 VStack(spacing: 0) {
                     header(session)
                     overviewCard(session)
-                    // 上下文用量卡片：nil（trae/antigravity/未算完）时不渲染；
-                    // .id 让切会话时折叠态归零（同 artifactsExpanded 的防护思路）
+                    // Context usage card: not rendered when nil (trae/antigravity/not computed
+                    // yet); .id resets the collapsed state on session switch (same guard idea as
+                    // artifactsExpanded)
                     if let breakdown = service.contextBreakdown {
                         ContextUsageCard(breakdown: breakdown)
                             .id(session.id)
                     }
                     searchBar
                     Divider()
-                    // 目录栏用 HSplitView：分隔线可拖拽调宽（与左栏会话列表同款交互），
-                    // minWidth 保证拖到最窄也不挤坏时间戳，maxWidth 防止吞掉对话区
+                    // The outline pane uses HSplitView: the divider is draggable to resize (same
+                    // interaction as the left session list), minWidth keeps timestamps intact at
+                    // the narrowest, maxWidth stops it from swallowing the transcript
                     HSplitView {
                         transcriptPane(session)
                             .frame(maxWidth: .infinity)
@@ -73,35 +82,41 @@ struct SessionDetailView: View {
                     }
                 }
                 .confirmationDialog(
-                    "删除会话「\(session.name ?? String(session.id.prefix(8)))」？transcript 文件会移入废纸篓，可恢复。",
+                    L10n.format(
+                        "Delete session “%@”? The transcript file moves to the Trash and can be restored.",
+                        zhHans: "删除会话「%@」？transcript 文件会移入废纸篓，可恢复。",
+                        session.name ?? String(session.id.prefix(8))),
                     isPresented: $confirmingDelete, titleVisibility: .visible
                 ) {
-                    Button("删除", role: .destructive) {
+                    Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
                         service.deleteSessions([session])
                     }
-                    Button("取消", role: .cancel) {}
+                    Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
                 }
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
                         .font(.system(size: 32))
                         .foregroundStyle(Theme.brandFg.opacity(0.4))
-                    Text("选择左侧会话查看对话记录")
+                    Text(L10n.text("Select a session on the left to read the conversation", zhHans: "选择左侧会话查看对话记录"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // 挂在 Group 上：经由"清空选择"中转的切换也能清空轨迹展开态（新会话同 id 不误展开）
+        // Attached to the Group: switches routed via "clear selection" also clear trail expansion
+        // (same id in a new session doesn't expand)
         .onChange(of: service.selected?.id) { _, _ in
             expandedTrails = []
             artifactsExpanded = false
         }
-        // 全文命中跳转：transcript 加载完成后滚到目标消息（延迟一拍等 LazyVStack 布局）
+        // Full-text hit jump: once the transcript finishes loading, scroll to the target message
+        // (delayed a beat for LazyVStack layout)
         .onChange(of: service.transcriptLoading) { _, loading in
             guard !loading else { return }
-            // 首次加载 / 切会话 / 「加载全部」都从这里对新正文重算搜索命中
+            // First load / session switch / "load all" all recompute search hits against the new
+            // body here
             recomputeMatches(debounce: false)
             guard let pending = service.consumePendingJump() else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -114,7 +129,7 @@ struct SessionDetailView: View {
         service.transcript.filter { $0.role == .user }
     }
 
-    /// 按角色筛选后的消息流（搜索不过滤、只高亮+跳转）
+    /// Message stream filtered by role (search doesn't filter, it only highlights + jumps)
     private var displayMessages: [TranscriptMessage] {
         switch roleFilter {
         case .all: return service.transcript
@@ -123,8 +138,9 @@ struct SessionDetailView: View {
         }
     }
 
-    /// 重算搜索命中：250ms 防抖（打字路径）+ 后台全文扫描 + 代际防串。
-    /// 算完自动跳到第一处命中（保持原 computed 版本的交互语义）。
+    /// Recomputes search hits: 250ms debounce (typing path) + background full-text scan +
+    /// generation guard against stale results. Jumps to the first hit when done (keeps the
+    /// interaction semantics of the old computed version).
     private func recomputeMatches(debounce: Bool) {
         matchGeneration += 1
         let generation = matchGeneration
@@ -153,7 +169,7 @@ struct SessionDetailView: View {
         }
     }
 
-    // MARK: - 头部
+    // MARK: - Header
 
     private func header(_ session: AgentSessionInfo) -> some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -166,40 +182,40 @@ struct SessionDetailView: View {
                 Spacer(minLength: 8)
                 // One primary, the rest secondary, all from the shared kit so brutal gets its
                 // ink capsules here instead of five system bezels
-                PrimaryButton(title: "恢复会话", icon: "play.fill", help: "在 Terminal 中执行恢复命令") {
+                PrimaryButton(title: L10n.text("Resume Session", zhHans: "恢复会话"), icon: "play.fill", help: L10n.text("Run the resume command in Terminal", zhHans: "在 Terminal 中执行恢复命令")) {
                     service.resumeInTerminal(session)
                 }
                 SecondaryButton(
-                    title: "删除会话", icon: "trash", destructive: true,
+                    title: L10n.text("Delete Session", zhHans: "删除会话"), icon: "trash", destructive: true,
                     help: session.source.supportsSessionDeletion
-                        ? "移入废纸篓，可恢复"
-                        : "\(session.source.displayName) 会话存于共享数据库，暂不支持删除"
+                        ? L10n.text("Moves to the Trash and can be restored", zhHans: "移入废纸篓，可恢复")
+                        : L10n.format("%@ sessions live in a shared database and can't be deleted yet", zhHans: "%@ 会话存于共享数据库，暂不支持删除", "\(session.source.displayName)")
                 ) {
                     confirmingDelete = true
                 }
                 .disabled(!session.source.supportsSessionDeletion)
-                MenuButton(title: "导出", icon: "square.and.arrow.up", help: "导出对话记录") {
-                    Button("复制为 Markdown") { copyMarkdown(session) }
-                    Button("导出为 .md 文件…") { exportMarkdown(session) }
+                MenuButton(title: L10n.text("Export", zhHans: "导出"), icon: "square.and.arrow.up", help: L10n.text("Export the conversation", zhHans: "导出对话记录")) {
+                    Button(L10n.text("Copy as Markdown", zhHans: "复制为 Markdown")) { copyMarkdown(session) }
+                    Button(L10n.text("Export as .md File…", zhHans: "导出为 .md 文件…")) { exportMarkdown(session) }
                 }
                 if let onOpenLineage {
                     SecondaryButton(
-                        title: "轮次血缘", icon: "point.3.filled.connected.trianglepath.dotted",
-                        help: "按轮次看它做了什么、哪一轮的提示词该改"
+                        title: L10n.text("Turn lineage", zhHans: "轮次血缘"), icon: "point.3.filled.connected.trianglepath.dotted",
+                        help: L10n.text("See what it did each turn, and which prompt to change", zhHans: "按轮次看它做了什么、哪一轮的提示词该改")
                     ) {
                         onOpenLineage(.list)
                     }
                 }
                 CardActionButton(
                     icon: "list.bullet.rectangle", size: 26,
-                    help: showTOC ? "隐藏对话目录" : "显示对话目录"
+                    help: showTOC ? L10n.text("Hide the conversation outline", zhHans: "隐藏对话目录") : L10n.text("Show the conversation outline", zhHans: "显示对话目录")
                 ) {
                     withAnimation(.easeInOut(duration: 0.15)) { showTOC.toggle() }
                 }
             }
             if let note = exportNote {
                 Text(note)
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
@@ -209,7 +225,8 @@ struct SessionDetailView: View {
                 if let cwd = session.cwd {
                     metaItem("folder", URL(fileURLWithPath: cwd).lastPathComponent)
                 }
-                // 共享库的源（opencode / hermes）没有「本会话的转录文件」，展示库名反而误导
+                // Shared-database sources (opencode / hermes) have no per-session transcript file;
+                // showing the DB name would mislead
                 if !session.source.usesSharedSessionDatabase {
                     metaItem("doc.text",
                              URL(fileURLWithPath: session.transcriptPath).lastPathComponent)
@@ -224,7 +241,7 @@ struct SessionDetailView: View {
                 Image(systemName: "terminal")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.brandFg)
-                Text("恢复命令")
+                Text(L10n.text("Resume command", zhHans: "恢复命令"))
                     .font(Theme.font.themed(10.5, .medium))
                     .foregroundStyle(.secondary)
                     .fixedSize()
@@ -238,7 +255,7 @@ struct SessionDetailView: View {
                 CardActionButton(
                     icon: copiedCommand ? "checkmark" : "doc.on.doc",
                     color: copiedCommand ? Theme.enabledGreen : .secondary,
-                    size: 22, help: copiedCommand ? "已复制" : "复制恢复命令"
+                    size: 22, help: copiedCommand ? L10n.text("Copied", zhHans: "已复制") : L10n.text("Copy resume command", zhHans: "复制恢复命令")
                 ) {
                     service.copyResumeCommand(session)
                     copiedCommand = true
@@ -261,16 +278,17 @@ struct SessionDetailView: View {
         .padding(.vertical, 9)
     }
 
-    /// 终端归属：这个会话在哪些终端里跑过。换终端 resume 过就会有多条，
-    /// 逐条给跳转按钮（该终端已退出则置灰）。一条都没有时整行不出现。
+    /// Terminal ownership: which terminals this session has run in. Resuming in another terminal
+    /// adds an entry, each with a jump button (greyed out if that terminal has exited). With no
+    /// entries the row is omitted.
     @ViewBuilder
     private func terminalHistoryRow(_ session: AgentSessionInfo) -> some View {
         let history = service.terminalHistory(for: session)
         if !history.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 if history.count > 1 {
-                    Text("曾在 \(history.count) 个终端运行")
-                        .font(.system(size: 9.5))
+                    Text(L10n.format("Ran in %@ terminals", zhHans: "曾在 %@ 个终端运行", String(history.count)))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
                 ForEach(Array(history.enumerated()), id: \.offset) { _, entry in
@@ -280,7 +298,7 @@ struct SessionDetailView: View {
                             isRunning: TerminalActivator.isRunning(entry.binding))
                         Text(relativeFormatter.localizedString(
                             for: entry.lastSeen, relativeTo: Date()))
-                            .font(.system(size: 9.5))
+                            .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
                         Spacer(minLength: 0)
                         jumpButton(entry.binding)
@@ -290,7 +308,8 @@ struct SessionDetailView: View {
         }
     }
 
-    /// 「本会话产出」的一条：记忆或计划，合并排序/分页用同一列表
+    /// One "produced in this session" item: a memory or a plan, merged into one list for
+    /// sorting/paging
     private enum Artifact: Identifiable {
         case memory(MemoryEntry)
         case plan(PlanMaterializer.PlanEntry)
@@ -303,7 +322,8 @@ struct SessionDetailView: View {
         }
     }
 
-    /// 每次最多展示的产出条数；header 在 ScrollView 外，几十条产出会把对话区压没
+    /// Max artifacts shown at once; the header sits outside the ScrollView, so dozens of artifacts
+    /// would squeeze out the transcript
     private static let artifactsPageSize = 6
 
     /// Artifacts of this session — memories whose origin / related sessions match, plans whose
@@ -320,7 +340,7 @@ struct SessionDetailView: View {
             let hiddenCount = items.count - visible.count
             HStack(alignment: .top, spacing: 8) {
                 HStack(spacing: 4) {
-                    Text("本会话产出")
+                    Text(L10n.text("Produced by this session", zhHans: "本会话产出"))
                         .font(Theme.font.themed(10.5, .medium))
                     Text("\(items.count)")
                         .font(Theme.font.themedMono(10.5, .medium))
@@ -333,7 +353,7 @@ struct SessionDetailView: View {
                         artifactChip(item)
                     }
                     if hiddenCount > 0 {
-                        ArtifactChip(icon: nil, title: "+\(hiddenCount)", help: "展开全部本会话产出") {
+                        ArtifactChip(icon: nil, title: "+\(hiddenCount)", help: L10n.text("Show everything this session produced", zhHans: "展开全部本会话产出")) {
                             artifactsExpanded = true
                         }
                     }
@@ -349,7 +369,10 @@ struct SessionDetailView: View {
             let isInstruction = memory.kind == .instructions
             ArtifactChip(
                 icon: isInstruction ? "doc.plaintext" : "brain", title: memory.title,
-                help: (isInstruction ? "指令 · " : "记忆 · ") + "在对应页面打开"
+                help: (isInstruction
+                    ? L10n.text("Instruction", zhHans: "指令")
+                    : L10n.text("Memory", zhHans: "记忆"))
+                    + " · " + L10n.text("Open on the matching page", zhHans: "在对应页面打开")
             ) {
                 NotificationCenter.default.post(
                     name: .eurekaRevealKnowledge, object: memory.path,
@@ -357,14 +380,16 @@ struct SessionDetailView: View {
             }
         case .plan(let plan):
             ArtifactChip(
-                icon: "list.bullet.clipboard", title: plan.title, help: "计划 · 在对应页面打开"
+                icon: "list.bullet.clipboard", title: plan.title, help: L10n.text("Plan", zhHans: "计划") + " · "
+                    + L10n.text("Open on the matching page", zhHans: "在对应页面打开")
             ) {
                 NotificationCenter.default.post(name: .eurekaRevealPlan, object: plan.path)
             }
         }
     }
 
-    /// 跳转按钮：只把终端**应用**带到前台（不选标签页，因此不需要自动化/辅助功能权限）
+    /// Jump button: only brings the terminal **app** to the front (doesn't select a tab, so no
+    /// Automation/Accessibility permission needed)
     private func jumpButton(_ binding: TerminalBinding) -> some View {
         let running = TerminalActivator.isRunning(binding)
         return Button {
@@ -376,8 +401,11 @@ struct SessionDetailView: View {
         .buttonStyle(.borderless)
         .disabled(!running)
         .help(running
-            ? "切到 \(binding.terminalName)（只激活应用，多标签时需自行找到该标签）"
-            : "\(binding.terminalName) 当前未在运行")
+            ? L10n.format(
+                "Switch to %@ (only the app is activated; with several tabs, find the right one yourself)",
+                zhHans: "切到 %@（只激活应用，多标签时需自行找到该标签）",
+                binding.terminalName)
+            : L10n.format("%@ is not running", zhHans: "%@ 当前未在运行", binding.terminalName))
     }
 
     private func metaItem(_ icon: String, _ text: String) -> some View {
@@ -392,22 +420,22 @@ struct SessionDetailView: View {
         .foregroundStyle(.tertiary)
     }
 
-    // MARK: - 概览卡
+    // MARK: - Overview card
 
     @ViewBuilder
     private func overviewCard(_ session: AgentSessionInfo) -> some View {
         let cost = service.costs[session.id]
         HStack(spacing: 24) {
-            overviewStat("消息", "\(service.transcript.count)")
-            overviewStat("提问", "\(userMessages.count)")
+            overviewStat(L10n.text("Messages", zhHans: "消息"), "\(service.transcript.count)")
+            overviewStat(L10n.text("prompts", zhHans: "提问"), "\(userMessages.count)")
             if let cost {
                 overviewStat("Tokens", formatTokens(cost.totalTokens))
                 if let usd = cost.costUSD {
-                    overviewStat("费用", formatCost(usd), color: Theme.cost)
+                    overviewStat(L10n.text("Cost", zhHans: "费用"), formatCost(usd), color: Theme.cost)
                 }
             }
             if let span = session.duration, span >= 60 {
-                overviewStat("时长", formatDuration(span))
+                overviewStat(L10n.text("Duration", zhHans: "时长"), formatDuration(span))
             }
             Spacer(minLength: 0)
         }
@@ -431,7 +459,7 @@ struct SessionDetailView: View {
         }
     }
 
-    // MARK: - 搜索栏
+    // MARK: - Search bar
 
     /// Role filter + in-transcript search. Same capsule tray and SearchField as the rest of the
     /// window: the mini segmented control and bare text field used here looked like a different
@@ -450,7 +478,7 @@ struct SessionDetailView: View {
                     }
                 }
             }
-            SearchField(placeholder: "在对话中搜索", text: $searchQuery, maxWidth: nil)
+            SearchField(placeholder: L10n.text("Search the conversation", zhHans: "在对话中搜索"), text: $searchQuery, maxWidth: nil)
                 .onChange(of: searchQuery) { _, _ in
                     recomputeMatches(debounce: true)
                 }
@@ -459,16 +487,16 @@ struct SessionDetailView: View {
                     .font(Theme.font.themedMono(11, .medium))
                     .foregroundStyle(.secondary)
                     .fixedSize()
-                CardActionButton(icon: "chevron.up", size: 22, help: "上一处命中") {
+                CardActionButton(icon: "chevron.up", size: 22, help: L10n.text("Previous match", zhHans: "上一处命中")) {
                     matchIndex = (matchIndex - 1 + matches.count) % matches.count
                     jumpToCurrentMatch()
                 }
-                CardActionButton(icon: "chevron.down", size: 22, help: "下一处命中") {
+                CardActionButton(icon: "chevron.down", size: 22, help: L10n.text("Next match", zhHans: "下一处命中")) {
                     matchIndex = (matchIndex + 1) % matches.count
                     jumpToCurrentMatch()
                 }
             } else if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text("无匹配")
+                Text(L10n.text("No matches", zhHans: "无匹配"))
                     .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
             }
@@ -483,13 +511,13 @@ struct SessionDetailView: View {
         NotificationCenter.default.post(name: .eurekaJumpToMessage, object: matches[matchIndex])
     }
 
-    // MARK: - 导出
+    // MARK: - Export
 
     private func copyMarkdown(_ session: AgentSessionInfo) {
         let md = TranscriptMarkdown.render(session: session, messages: service.transcript)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(md, forType: .string)
-        exportNote = "已复制 Markdown 到剪贴板"
+        exportNote = L10n.text("Copied Markdown to the clipboard", zhHans: "已复制 Markdown 到剪贴板")
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exportNote = nil }
     }
 
@@ -502,32 +530,32 @@ struct SessionDetailView: View {
         panel.allowedContentTypes = [.plainText]
         if panel.runModal() == .OK, let url = panel.url {
             try? Data(md.utf8).write(to: url)
-            exportNote = "已导出 \(url.lastPathComponent)"
+            exportNote = L10n.format("Exported %@", zhHans: "已导出 %@", url.lastPathComponent)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exportNote = nil }
         }
     }
 
-    // MARK: - 对话记录流
+    // MARK: - Transcript stream
 
     private func transcriptPane(_ session: AgentSessionInfo) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Pane header in the same type as every other section header (Theme.font so brutal
             // gets Space Grotesk / Space Mono here too)
             HStack(spacing: 7) {
-                PaneHeader(icon: "text.bubble", title: "对话记录") {
+                PaneHeader(icon: "text.bubble", title: L10n.text("Conversation", zhHans: "对话记录")) {
                     CountChip(service.transcript.count)
                 }
                 if service.transcriptTruncated {
-                    Text("仅显示前 \(service.transcript.count) 条")
+                    Text(L10n.format("Showing the first %@ only", zhHans: "仅显示前 %@ 条", "\(service.transcript.count)"))
                         .font(Theme.font.themed(10.5))
                         .foregroundStyle(Theme.goldFg)
-                    Button("加载全部") {
+                    Button(L10n.text("Load All", zhHans: "加载全部")) {
                         service.loadFullTranscript()
                     }
                     .buttonStyle(.borderless)
                     .font(Theme.font.themed(10.5, .medium))
                     .foregroundStyle(Theme.brandFg)
-                    .help("超长会话默认按预算截断，点击完整加载（大文件会稍慢）")
+                    .help(L10n.text("Very long sessions are truncated by default. Click to load the rest (large files are slower).", zhHans: "超长会话默认按预算截断，点击完整加载（大文件会稍慢）"))
                 }
                 Spacer()
             }
@@ -536,11 +564,11 @@ struct SessionDetailView: View {
             Divider()
 
             if service.transcriptLoading {
-                ProgressView("正在解析对话记录…")
+                ProgressView(L10n.text("Reading the conversation…", zhHans: "正在解析对话记录…"))
                     .font(Theme.font.themed(11))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if service.transcript.isEmpty {
-                Text("没有可显示的消息")
+                Text(L10n.text("No messages to show", zhHans: "没有可显示的消息"))
                     .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -575,14 +603,14 @@ struct SessionDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 对话目录
+    // MARK: - Transcript outline
 
     private var tocPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
-                PaneHeader(icon: "list.number", title: "对话目录")
+                PaneHeader(icon: "list.number", title: L10n.text("Outline", zhHans: "对话目录"))
                 Spacer(minLength: 4)
-                CountChip("\(userMessages.count) 条")
+                CountChip(L10n.format("%@ messages", zhHans: "%@ 条", "\(userMessages.count)"))
                     .fixedSize()
             }
             .padding(.horizontal, 10)
@@ -602,8 +630,8 @@ struct SessionDetailView: View {
     }
 }
 
-/// 目录行：序号圆徽 + 时间 + 提问摘录。宽度由外层 HSplitView 拖拽决定，
-/// 文字随宽自适应换行（最多 3 行，尾部省略），hover 有轻高亮。
+/// Outline row: index badge + time + prompt excerpt. Width is set by dragging the outer HSplitView;
+/// text wraps to fit (at most 3 lines, tail-truncated), with a light hover highlight.
 private struct TOCRow: View {
     let index: Int
     let message: TranscriptMessage
@@ -616,7 +644,8 @@ private struct TOCRow: View {
                 name: .eurekaJumpToMessage, object: message.id)
         } label: {
             HStack(alignment: .top, spacing: 6) {
-                // 胶囊而非定宽圆：三位数以上的序号（长会话到 400+）不能被截成「4…」
+                // Capsule rather than a fixed-width circle: indexes of three digits or more (long
+                // sessions reach 400+) must not truncate to "4..."
                 Text("\(index + 1)")
                     .font(Theme.font.themedMono(9.5, .semibold))
                     .foregroundStyle(hovering ? Theme.onBrand : Theme.brandFg)
@@ -656,7 +685,7 @@ private struct TOCRow: View {
 }
 
 extension Notification.Name {
-    /// 对话目录 → 消息流跳转（携带消息 id）
+    /// Outline → message stream jump (carries the message id)
     static let eurekaJumpToMessage = Notification.Name("eurekaJumpToMessage")
 }
 
@@ -701,14 +730,13 @@ private struct ArtifactChip: View {
     }
 }
 
-// MARK: - 消息行
+// MARK: - Message row
 
-/// One transcript message: a 22pt avatar on the left, then name + time and the body in a card.
-/// The user side is "用户" (person tile on the brand colour); the other side is the agent itself —
-/// its product name and official logo tile — rather than a generic "助手". User bodies sit on a
-/// brand tint, agent bodies on the surface colour with a hairline edge, so two agent replies in
-/// a row read as two blocks instead of one run of text. Timestamps stay in the header; the
-/// copy button appears on hover without covering the body.
+// MARK: - Message row
+
+/// Streamed message row: user and assistant both left-aligned in a document-style layout, told
+/// apart by a role label + subtle background tint (no more chat bubbles). The timestamp lives
+/// permanently on the role-label row and the copy button appears on hover, never covering the body.
 private struct MessageRowView: View {
     let message: TranscriptMessage
     /// Which agent produced this transcript; names and draws the assistant side
@@ -757,7 +785,7 @@ private struct MessageRowView: View {
                 .padding(.leading, Self.avatarSize + Self.avatarGap - 8)
         case .user:
             messageBlock(
-                name: "用户", avatar: .person, tint: Theme.brandFg,
+                name: L10n.text("User", zhHans: "用户"), avatar: .person, tint: Theme.brandFg,
                 fill: Theme.brandFill(0.07), edge: Theme.brand.opacity(0.22)
             ) {
                 MarkdownRichText(text: message.text)
@@ -771,7 +799,7 @@ private struct MessageRowView: View {
             }
         case .error:
             messageBlock(
-                name: "出错", avatar: .symbol("exclamationmark.triangle.fill", Theme.failureRed),
+                name: L10n.text("Error", zhHans: "出错"), avatar: .symbol("exclamationmark.triangle.fill", Theme.failureRed),
                 tint: Theme.failureRed,
                 fill: Theme.failureRed.opacity(0.06), edge: Theme.failureRed.opacity(0.35)
             ) {
@@ -873,12 +901,12 @@ private struct MessageRowView: View {
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
                 } label: {
-                    Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label(copied ? L10n.text("Copied", zhHans: "已复制") : L10n.text("Copy", zhHans: "复制"), systemImage: copied ? "checkmark" : "doc.on.doc")
                         .font(Theme.font.themed(10, .medium))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .help("复制消息原文")
+                .help(L10n.text("Copy the message text", zhHans: "复制消息原文"))
                 .transition(.opacity)
             }
         }
@@ -887,4 +915,5 @@ private struct MessageRowView: View {
     }
 }
 
-// 富文本正文渲染已抽到共享组件 MarkdownRichText.swift（会话/记忆/技能/计划共用）
+// Rich-text body rendering has moved to the shared MarkdownRichText.swift component (shared by
+// sessions/memories/skills/plans)

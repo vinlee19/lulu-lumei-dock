@@ -20,12 +20,13 @@ func promptClassifierTests(_ t: TestRunner) {
     }
 
     t.test("长粘贴 vs 手写长指令：markdown 结构是分界") {
-        // 无结构的 2000+ 字符 = 粘贴
+        // 2000+ unstructured characters = paste
         let paste = (0..<80).map { "2026-08-24 10:00:\($0) INFO worker heartbeat ok padding" }
             .joined(separator: "\n")
         try expect(paste.count >= 2000, "样例长度不足")
         try expectEqual(PromptClassifier.classify(paste), .paste)
-        // 带标题与列表的 2000+ 字符 = 指令（用户手写的长需求）
+        // 2000+ characters with headings and lists = instruction (a long requirement written by
+        // hand)
         let spec = "# 目标\n" + (0..<60).map {
             "- 需求点 \($0)：把分页逻辑改成游标式并保持兼容，注意越界回退与空页语义不能变"
         }.joined(separator: "\n")
@@ -47,9 +48,10 @@ func promptClassifierTests(_ t: TestRunner) {
             .noise)
         try expect(PromptClassifier.classify("You are a helpful assistant，请帮我看这段 SQL") != .noise)
         try expectEqual(PromptClassifier.classify("/effort high"), .noise)
-        // 第二个 / = 路径，不是斜杠命令
+        // A second / = path, not a slash command
         try expect(PromptClassifier.classify("/usr/bin/env 有什么用，请展开讲讲细节") != .noise)
-        // 不以 / 开头的正常提问（26 字符落在追问档，但绝不是噪音）
+        // A normal question not starting with / (26 characters falls in the follow-up bucket, but
+        // is never noise)
         try expectEqual(
             PromptClassifier.classify("看下 /tmp/x.log 里的报错并深入分析根因给出修复"), .followup)
     }
@@ -133,7 +135,7 @@ func promptClassifierTests(_ t: TestRunner) {
         let groups = PromptGrouping.groups(from: entries, minCount: 3) { _ in true }
         try expectEqual(groups.map(\.count), [4, 3])
 
-        // 摘掉 a 组的代表 a2（最新的一条，也是唯一落在 p2 项目的一条）
+        // Remove group a's representative a2 (the newest one, and the only one in project p2)
         let afterOne = PromptGrouping.removing(
             memberId: "a2", from: groups, minCount: 3) { byId[$0] }
         try expectEqual(afterOne.map(\.count), [3, 3])
@@ -141,10 +143,12 @@ func promptClassifierTests(_ t: TestRunner) {
         try expectEqual(a?.representative.id, "a3", "代表换成剩余成员里最新的一条")
         try expectEqual(a?.projectCount, 1, "项目数按剩余成员重算")
         try expectEqual(a?.memberIds, ["a3", "a1", "a4"])
-        // 同为 3 次：代表更新的排前 → b 组（代表 b3 @300）超到 a 组（代表 a3 @200）前面
+        // Both at 3 occurrences: the newer representative ranks first → group b (rep b3 @300) moves
+        // ahead of group a (rep a3 @200)
         try expectEqual(afterOne.map { $0.representative.id }, ["b3", "a3"], "与 groups(from:) 同序")
 
-        // 再摘一条 → a 组只剩 2 条，跌破 minCount 整组消失；不在任何组里的 id 是 no-op
+        // Remove one more → group a has only 2 left, drops below minCount and disappears; an id in
+        // no group is a no-op
         let afterTwo = PromptGrouping.removing(
             memberId: "a1", from: afterOne, minCount: 3) { byId[$0] }
         try expectEqual(afterTwo.map(\.fingerprint), [groups[1].fingerprint])
@@ -170,15 +174,17 @@ func promptClassifierTests(_ t: TestRunner) {
     }
 
     t.test("shellSingleQuote 注入安全：引号/命令替换/分号/反引号全部字面量") {
-        // 单引号：'…' 中断重接
+        // Single quote: '…' closes and reopens
         try expectEqual(
             PromptLaunchCommand.shellSingleQuote("it's"), "'it'\\''s'")
-        // $() 反引号 分号 —— 单引号内全是字面量，不需要额外转义，但必须完整包裹
+        // $(), backticks, semicolons — everything inside single quotes is literal, so no extra
+        // escaping is needed, but it must be fully wrapped
         let hostile = "x; rm -rf ~; $(whoami) `id`"
         let quoted = PromptLaunchCommand.shellSingleQuote(hostile)
         try expect(quoted.hasPrefix("'") && quoted.hasSuffix("'"))
         try expect(quoted.contains("$(whoami)"), "单引号内保持字面量即安全")
-        // 换行 → $'\n' 拼接（AppleScript 字面量放不下裸换行）；\r 丢弃
+        // Newline → concatenated as $'\n' (an AppleScript literal can't hold a bare newline); \r is
+        // dropped
         try expectEqual(
             PromptLaunchCommand.shellSingleQuote("a\r\nb"), "'a'$'\\n''b'")
         try expect(!PromptLaunchCommand.shellSingleQuote("a\nb").contains("\n"),

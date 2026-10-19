@@ -4,9 +4,10 @@ import EurekaStore
 import EurekaUsage
 import Foundation
 
-/// Cursor ingest 测试：fixture 按本机真实库（Cursor 3.13.10 的
-/// `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`）的表结构与
-/// JSON 形状现造，路径/会话 id 全部换成假值；全程临时目录，不碰真实 ~/。
+/// Cursor ingest tests: fixtures are built from the table structure and JSON shapes of the real
+/// local DB (Cursor 3.13.10's `~/Library/Application
+/// Support/Cursor/User/globalStorage/state.vscdb`), with every path / session id replaced by fake
+/// values; everything runs in a temp dir and never touches the real ~/.
 func cursorIngestTests(_ t: TestRunner) {
     cursorPathsTests(t)
     cursorToolNamesTests(t)
@@ -20,15 +21,15 @@ func cursorIngestTests(_ t: TestRunner) {
     cursorTranscriptTests(t)
 }
 
-// MARK: - agent-transcripts（第二条实时通道）
+// MARK: - agent-transcripts (the second live channel)
 
-/// fixture 按实勘的真实行照抄：
+/// Fixture lines copied verbatim from real observed rows:
 ///   `{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>…</timestamp>\n<user_query>\n…\n</user_query>"}]}}`
 ///   `{"role":"assistant","message":{"content":[{"type":"text",…},{"type":"tool_use","name":"Read",…}]}}`
 ///   `{"type":"turn_ended","status":"success"}`
 private func cursorTranscriptTests(_ t: TestRunner) {
     let cwd = "/Users/me/work/alpha"
-    // Cursor 的项目目录名：去掉开头 /，其余 / 与 . 都换成 -
+    // Cursor's project directory name: drop the leading /, replace every other / and . with -
     let slug = "Users-me-work-alpha"
 
     func makeHome() throws -> (cli: URL, wsRoot: URL) {
@@ -88,7 +89,8 @@ private func cursorTranscriptTests(_ t: TestRunner) {
             throw ExpectationError(description: "turn_ended 应出 taskFinished")
         }
         try expectEqual(outcome, .success)
-        // 工具名是 Claude 词表，不该被库侧的 CursorToolNames 归一化动过
+        // Tool names use Claude's vocabulary and must not be touched by the DB side's
+        // CursorToolNames normalization
         try expectEqual(CursorTranscriptDecoder.lastToolName(
             (try? JSONSerialization.jsonObject(with: Data(toolLine.utf8))) as? [String: Any] ?? [:]),
             "Grep")
@@ -133,11 +135,11 @@ private func cursorTranscriptTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expectEqual(events.count, 0, "已收尾的历史回合不得重放，实得 \(events.map(\.0.kind))")
 
-        // 新回合：逐行追加（模拟边跑边写）
+        // New turn: append line by line (simulating writes while running)
         let live = transcriptURL(cli: cli, composerId: "c-live")
         try append([userLine], to: live)
         CursorTranscriptIndex.resetCacheForTesting()
-        tailer.scanOnce()  // 首见 c-live：未收尾 → 补运行卡
+        tailer.scanOnce()  // first sight of c-live: not closed → backfill a running card
         try expect(
             events.contains { if case .taskStarted = $0.0.kind { return true } else { return false } },
             "回合中途首见应补开始卡，实得 \(events.map(\.0.kind))")
@@ -164,17 +166,19 @@ private func cursorTranscriptTests(_ t: TestRunner) {
     }
 
     t.test("empty-window（cwd 为 nil）也能反复尾随——曾在这条路径上崩过") {
-        // 回归：`contexts[path]?.cwd = entry.cwd ?? contexts[path]?.cwd` 里左边是独占的
-        // 修改访问、右边又读同一个键，重叠访问会让 Swift 直接 abort（Fatal access conflict）。
-        // `??` 在 cwd 非 nil 时短路，所以只有无 cwd 的会话会踩到 —— 上一版测试全都带 cwd，
-        // 于是漏了，真机一开就崩。这里专门用 empty-window（Cursor 没打开工程时的窗口）。
+        // Regression: in `contexts[path]?.cwd = entry.cwd ?? contexts[path]?.cwd` the left side is
+        // an exclusive modifying access while the right side reads the same key; the overlapping
+        // access makes Swift abort outright (Fatal access conflict). `??` short-circuits when cwd
+        // is non-nil, so only sessions without a cwd hit it — every test in the previous version
+        // had a cwd, so it slipped through and crashed on a real machine at launch. This test
+        // deliberately uses empty-window (the window Cursor shows when no project is open).
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-cursor-ew-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: base) }
         let cli = base.appendingPathComponent("cli", isDirectory: true)
         let wsRoot = base.appendingPathComponent("wsStorage", isDirectory: true)
         try FileManager.default.createDirectory(at: wsRoot, withIntermediateDirectories: true)
-        // 转录落在 empty-window 目录下 → 没有任何 workspace 能匹配上这个 slug
+        // The transcript lands under the empty-window directory → no workspace can match this slug
         let url = cli.appendingPathComponent(
             "projects/empty-window/agent-transcripts/c-ew/c-ew.jsonl")
         try append([userLine], to: url)
@@ -189,12 +193,12 @@ private func cursorTranscriptTests(_ t: TestRunner) {
         let tailer = CursorTranscriptTailer(
             cliHome: cli, workspaceStorageRoot: wsRoot, staleThreshold: 3600
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()                       // 首见
+        tailer.scanOnce()                       // first sight
         try append([toolLine], to: url)
-        tailer.scanOnce()                       // 增量（崩溃就发生在这一轮）
+        tailer.scanOnce()                       // incremental (the crash happened on this round)
         try append([endLine], to: url)
         tailer.scanOnce()
-        tailer.scanOnce()                       // 再空跑一轮，确认反复进 tail 也不炸
+        tailer.scanOnce()                       // one more idle round: re-entering tail repeatedly must not blow up
         try expect(
             events.contains { if case .taskFinished = $0.0.kind { return true } else { return false } },
             "无 cwd 也该正常走完整轮，实得 \(events.map(\.0.kind))")
@@ -213,9 +217,9 @@ private func cursorTranscriptTests(_ t: TestRunner) {
         let tailer = CursorTranscriptTailer(
             cliHome: cli, workspaceStorageRoot: wsRoot, staleThreshold: 3600
         ) { events.append(($0, $1)) }
-        tailer.scanOnce()  // 建水位（已收尾 → 静默）
+        tailer.scanOnce()  // establish the watermark (already closed → silent)
 
-        // 写半行（无换行）
+        // Write half a line (no newline)
         let handle = try expectSome(FileHandle(forWritingAtPath: url.path))
         try handle.seekToEnd()
         try handle.write(contentsOf: Data(#"{"role":"assistant","message":{"content":[{"type"#.utf8))
@@ -224,7 +228,7 @@ private func cursorTranscriptTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expectEqual(events.count, 0, "半行不该被消费")
 
-        // 补齐
+        // Complete it
         try append([#"":"text","text":"好"}]}}"#], to: url)
         tailer.scanOnce()
         try expect(!events.isEmpty, "补齐后应发出事件")
@@ -233,7 +237,7 @@ private func cursorTranscriptTests(_ t: TestRunner) {
     t.suite("Cursor 两通道归属 · 不重复出卡")
 
     t.test("回合开始时已有转录 → 库侧让出生命周期；中途才出现 → 库侧保留收尾") {
-        // 让出：owned 从一开始就为真
+        // Yield: owned is true from the start
         let a = try CursorFixture()
         defer { a.cleanUp() }
         try a.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
@@ -268,7 +272,8 @@ private func cursorTranscriptTests(_ t: TestRunner) {
                 else { return false } },
             "收尾该由转录侧的 turn_ended 负责，实得 \(yielded.map(\.0.kind))")
 
-        // 保留：回合开始时没有转录，中途才出现（转录只在收尾落盘的情形）
+        // Keep: no transcript at turn start, it appears mid-turn (the case where the transcript is
+        // only written to disk at turn end)
         let b = try CursorFixture()
         defer { b.cleanUp() }
         try b.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
@@ -285,8 +290,8 @@ private func cursorTranscriptTests(_ t: TestRunner) {
         try b.addComposer(
             id: "c2", workspaceId: "ws1", name: "会话", status: "none",
             bubbles: [.user("走")])
-        keeping.scanOnce()  // 开始：此刻还没有转录 → 库侧接管整轮
-        appeared = true     // 回合末尾转录文件才出现
+        keeping.scanOnce()  // start: no transcript yet → the DB side owns the whole turn
+        appeared = true     // the transcript file appears only at the end of the turn
         try b.addComposer(
             id: "c2", workspaceId: "ws1", name: "会话", status: "completed",
             bubbles: [.user("走"), .assistant("好")])
@@ -297,20 +302,20 @@ private func cursorTranscriptTests(_ t: TestRunner) {
     }
 }
 
-/// 断言可选值非空并解包（比 `x!` 有可读报错）
+/// Asserts an optional is non-nil and unwraps it (gives a more readable error than `x!`)
 func expectSome<T>(_ value: T?, _ message: String = "期望非 nil") throws -> T {
     guard let value else { throw ExpectationError(description: message) }
     return value
 }
 
-// MARK: - 技能 / 规则（记忆）/ 子代理定义
+// MARK: - Skills / rules (memory) / subagent definitions
 
-/// 这三面的目录约定取自 Cursor 自带的内置技能（`~/.cursor/skills-cursor/create-skill`
-/// `create-rule` `create-subagent`），是官方口径：
-///   技能   ~/.cursor/skills/<名>/SKILL.md      与 <repo>/.cursor/skills/<名>/SKILL.md
-///   内置   ~/.cursor/skills-cursor/            （官方分发，create-skill 明写不许往里写）
-///   规则   <repo>/.cursor/rules/*.mdc          （带 YAML frontmatter，Cursor 的本地"记忆"）
-///   子代理 ~/.cursor/agents/*.md               与 <repo>/.cursor/agents/*.md
+/// The directory conventions for these three surfaces come from Cursor's own built-in skills
+/// (`~/.cursor/skills-cursor/create-skill` `create-rule` `create-subagent`), so they are official:
+///   skills    ~/.cursor/skills/<name>/SKILL.md    and <repo>/.cursor/skills/<name>/SKILL.md
+///   built-in  ~/.cursor/skills-cursor/            (shipped by Cursor; create-skill explicitly forbids writing here)
+///   rules     <repo>/.cursor/rules/*.mdc          (with YAML frontmatter; Cursor's local "memory")
+///   subagents ~/.cursor/agents/*.md               and <repo>/.cursor/agents/*.md
 private func cursorKnowledgeTests(_ t: TestRunner) {
     t.suite("Cursor 知识面 · 技能/规则/子代理")
 
@@ -399,7 +404,7 @@ private func cursorKnowledgeTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - PlanMaterializer（cursor：todos → markdown）
+// MARK: - PlanMaterializer (cursor: todos → markdown)
 
 private func cursorPlanMaterializerTests(_ t: TestRunner) {
     t.suite("PlanMaterializer · Cursor 计划")
@@ -438,7 +443,7 @@ private func cursorPlanMaterializerTests(_ t: TestRunner) {
                 atPath: staging.appendingPathComponent("cursor/c-none.md").path),
             "没有 todos 的会话不该产文件")
 
-        // 内容没变就不重写（备份靠 mtime 判增量）
+        // Unchanged content is not rewritten (backup relies on mtime to detect changes)
         try expectEqual(
             PlanMaterializer.materializeCursor(dbPath: fixture.stateDB, into: staging), 0,
             "内容不变时不该重写")
@@ -488,7 +493,7 @@ private func cursorPathsTests(_ t: TestRunner) {
             CursorPaths.skillsRoot(environment: ["EUREKA_CURSOR_CLI_HOME": "/tmp/dotcursor"]).path,
             "/tmp/dotcursor/skills")
         try expect(CursorPaths.skillsRoot(environment: [:]).path.hasSuffix("/.cursor/skills"))
-        // IDE 状态目录换掉不应影响技能目录
+        // Swapping the IDE state directory must not affect the skills directory
         try expect(
             CursorPaths.skillsRoot(environment: ["EUREKA_CURSOR_HOME": "/tmp/cur"]).path
                 .hasSuffix("/.cursor/skills"))
@@ -506,7 +511,7 @@ private func cursorToolNamesTests(_ t: TestRunner) {
         try expectEqual(CursorToolNames.canonical("edit_file_v2"), "edit_file")
         try expectEqual(CursorToolNames.canonical("read_file"), "read_file")
         try expectEqual(CursorToolNames.canonical("rg"), "ripgrep_raw_search")
-        // 名字里本来就有 v 数字但不是后缀的别误伤
+        // Names that contain v + digit but not as a suffix must not be mangled
         try expectEqual(CursorToolNames.canonical("codebase_search"), "codebase_search")
     }
 
@@ -517,7 +522,7 @@ private func cursorToolNamesTests(_ t: TestRunner) {
         try expectEqual(
             CursorToolNames.mcpDisplayName("mcp_dataworks-log-mcp_get_dag_instances_list"),
             "dataworks-log-mcp.get_dag_instances_list")
-        // 只有服务名没有工具名时退回服务名
+        // With only a server name and no tool name, fall back to the server name
         try expectEqual(CursorToolNames.mcpDisplayName("mcp_server"), "server")
         try expectEqual(CursorToolNames.usageKind("mcp_server_tool"), "mcp")
         try expectEqual(CursorToolNames.usageKind("read_file_v2"), "tool")
@@ -586,9 +591,9 @@ private func cursorStateTailerTests(_ t: TestRunner) {
 
         var events: [(TaskEvent, Bool)] = []
         let tailer = fixture.makeTailer { events.append(($0, $1)) }
-        tailer.scanOnce()  // 建水位
+        tailer.scanOnce()  // establish the watermark
 
-        // 一轮开始：新增用户气泡 + 生成中
+        // Turn starts: a new user bubble + generating
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "在跑的会话", status: "none",
             bubbles: [.user("改一下 README")], generating: true, contextPercent: 12.5)
@@ -608,7 +613,7 @@ private func cursorStateTailerTests(_ t: TestRunner) {
         try expectEqual(events.first?.0.source, .cursor)
         try expectEqual(events.first?.0.sessionId, "c1")
 
-        // 跑工具：再进一格
+        // Run a tool: advance one more step
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "在跑的会话", status: "none",
             bubbles: [.user("改一下 README"), .tool("read_file_v2", status: "loading")],
@@ -617,11 +622,11 @@ private func cursorStateTailerTests(_ t: TestRunner) {
         tailer.scanOnce()
         try expect(
             events.contains { if case .activity(let tool) = $0.0.kind {
-                return tool == "read_file"   // _v2 后缀应已归一化
+                return tool == "read_file"   // the _v2 suffix should be normalized away
             } else { return false } },
             "应出 activity(read_file)，实得 \(events.map(\.0.kind))")
 
-        // 收尾
+        // Finish
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "在跑的会话", status: "completed",
             bubbles: [.user("改一下 README"), .tool("read_file_v2", status: "completed"),
@@ -632,7 +637,7 @@ private func cursorStateTailerTests(_ t: TestRunner) {
         try expect(
             events.isEmpty,
             "收口要等一轮确认，这一轮不该出收尾卡，实得 \(events.map(\.0.kind))")
-        tailer.scanOnce()  // 状态仍是 completed 且水位不再推进 → 落定
+        tailer.scanOnce()  // status still completed and the watermark no longer advances → settle
         try expect(
             events.contains { if case .taskFinished(let outcome, let title, _) = $0.0.kind {
                 return outcome == .success && title == "在跑的会话"
@@ -641,8 +646,9 @@ private func cursorStateTailerTests(_ t: TestRunner) {
     }
 
     t.test("一轮里 aborted 先落、completed 后落 → 收尾按最终状态记成功（实勘行为）") {
-        // 实勘：同一个 composer 在 2s 内先写 status=aborted 再写 completed。
-        // 当场收尾会把成功的一轮记成中断，故收口要等一轮确认。
+        // Observed: the same composer writes status=aborted and then completed within 2s. Closing
+        // on the spot would record a successful turn as interrupted, so closing waits one round for
+        // confirmation.
         let fixture = try CursorFixture()
         defer { fixture.cleanUp() }
         try fixture.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
@@ -656,9 +662,9 @@ private func cursorStateTailerTests(_ t: TestRunner) {
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "会话", status: "none",
             bubbles: [.user("跑一下")], generating: false)
-        tailer.scanOnce()  // 进入 live
+        tailer.scanOnce()  // go live
 
-        // 中途瞬时写成 aborted（水位同时又进了一格）
+        // Transiently written as aborted mid-way (the watermark also advanced one step)
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "会话", status: "aborted",
             bubbles: [.user("跑一下"), .tool("read_file", status: "completed")])
@@ -669,13 +675,13 @@ private func cursorStateTailerTests(_ t: TestRunner) {
                 else { return false } },
             "瞬时 aborted 不该当场收尾，实得 \(events.map(\.0.kind))")
 
-        // 最终写成 completed
+        // Finally written as completed
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "会话", status: "completed",
             bubbles: [.user("跑一下"), .tool("read_file", status: "completed"), .assistant("好了")])
-        tailer.scanOnce()  // 看到 completed，记为待定
+        tailer.scanOnce()  // completed seen, marked pending
         events.removeAll()
-        tailer.scanOnce()  // 状态不变且水位不动 → 落定
+        tailer.scanOnce()  // status unchanged and watermark still → settle
         try expect(
             events.contains { if case .taskFinished(let outcome, _, _) = $0.0.kind {
                 return outcome == .success
@@ -694,13 +700,14 @@ private func cursorStateTailerTests(_ t: TestRunner) {
         let tailer = fixture.makeTailer { events.append(($0, $1)) }
         tailer.scanOnce()
 
-        // 一次轮询之间：从无到有跑完整轮（水位前进 + 直接 completed）
+        // Between two polls: a whole turn ran from nothing to done (watermark advanced + straight
+        // to completed)
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "会话", status: "completed",
             bubbles: [.user("快问快答"), .assistant("答完了")])
-        tailer.scanOnce()  // 待定
+        tailer.scanOnce()  // pending
         events.removeAll()
-        tailer.scanOnce()  // 落定
+        tailer.scanOnce()  // settle
         try expect(
             events.contains { if case .taskStarted = $0.0.kind { return true }
                 else { return false } },
@@ -738,9 +745,9 @@ private func cursorStateTailerTests(_ t: TestRunner) {
             id: "c1", workspaceId: "ws1", name: "会话", status: "aborted",
             bubbles: [.user("跑个命令"), .tool("run_terminal_cmd", status: "cancelled")],
             generating: false)
-        tailer.scanOnce()  // 待定
+        tailer.scanOnce()  // pending
         events.removeAll()
-        tailer.scanOnce()  // 状态仍是 aborted 且水位不动 → 落定
+        tailer.scanOnce()  // status still aborted and watermark still → settle
         try expect(
             events.contains { if case .taskFinished(let outcome, _, _) = $0.0.kind {
                 return outcome == .interrupted
@@ -763,7 +770,7 @@ private func cursorStateTailerTests(_ t: TestRunner) {
         let tailer = fixture.makeTailer { events.append(($0, $1)) }
         tailer.scanOnce()
 
-        // 三个会话都推进一格，只有正经会话该出卡
+        // All three sessions advance one step; only the regular session should produce a card
         try fixture.addComposer(
             id: "keep", workspaceId: "ws1", name: "正经会话", status: "none",
             bubbles: [.user("一")], generating: true)
@@ -854,7 +861,8 @@ private func cursorUsageScannerTests(_ t: TestRunner) {
         let fixture = try CursorFixture()
         defer { fixture.cleanUp() }
         try fixture.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
-        // 实勘形态：inputTokens 逐轮单调递增（整个上下文重发）
+        // Observed shape: inputTokens grows monotonically turn by turn (the whole context is
+        // re-sent)
         try fixture.addComposer(
             id: "c1", workspaceId: "ws1", name: "会话", status: "completed",
             bubbles: [
@@ -888,7 +896,7 @@ private func cursorUsageScannerTests(_ t: TestRunner) {
             id: "c1", workspaceId: "ws1", name: "会话", status: "completed",
             bubbles: [
                 .assistant("答一", input: 80_000, output: 100, model: "gpt-5.1-codex"),
-                .assistant("答二", input: 9_000, output: 100, model: nil),  // 压缩后
+                .assistant("答二", input: 9_000, output: 100, model: nil),  // after compaction
             ])
         CursorWorkspaceIndex.resetCacheForTesting()
 
@@ -900,7 +908,7 @@ private func cursorUsageScannerTests(_ t: TestRunner) {
         try expect(
             rows.allSatisfy { $0.model.hasPrefix("cursor/") },
             "模型名应统一带 cursor/ 前缀（pricing 里按该前缀标 unknown），实得 \(rows.map(\.model))")
-        // 没有 modelInfo 的那轮退回 composerData.modelConfig.modelName
+        // The turn without modelInfo falls back to composerData.modelConfig.modelName
         try expect(rows.contains { $0.model == "cursor/gpt-5.1-codex" })
         try expect(rows.contains { $0.model == "cursor/default" })
     }
@@ -912,9 +920,10 @@ private func cursorAuditScannerTests(_ t: TestRunner) {
     t.suite("CursorAuditScanner · 工具轨迹")
 
     t.test("库指纹门控：没变化就跳过，主库或 WAL 一动就必须重扫") {
-        // 这条门控是应用 CPU 的关键：审计是 2 秒节奏，而每轮要打开一个 250 MB 的库
-        // 再全量索引会话（sample 抓到它是头号热点）。但它一旦失效就是**静默丢审计**，
-        // 所以「变化后必须重扫」这半边比「没变就跳过」更要钉住。
+        // This gate is key to the app's CPU use: audit runs on a 2-second cadence, and each round
+        // would open a 250 MB DB and fully re-index sessions (sampling showed it as the top
+        // hotspot). But if it ever breaks, audit is **silently lost**, so the "must rescan after a
+        // change" half matters even more to pin down than "skip when unchanged".
         let fixture = try CursorFixture()
         defer { fixture.cleanUp() }
         try fixture.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
@@ -927,10 +936,10 @@ private func cursorAuditScannerTests(_ t: TestRunner) {
         let store = try EurekaStore(path: fixture.root.appendingPathComponent("eureka.sqlite"))
         let scanner = fixture.makeAuditScanner(store: store)
         try expectEqual(try scanner.scanOnce(), 1)
-        // 库没动 → 门控生效，直接 0（这一轮连库都不该打开）
+        // DB untouched → the gate applies, straight 0 (this round should not even open the DB)
         try expectEqual(try scanner.scanOnce(), 0)
 
-        // 主库变了（新增一个会话）→ 必须重扫并采到新行
+        // Main DB changed (a new session added) → must rescan and pick up the new row
         try fixture.addComposer(
             id: "c2", workspaceId: "ws1", name: "会话二", status: "completed",
             bubbles: [.tool("read_file_v2", status: "completed",
@@ -939,9 +948,11 @@ private func cursorAuditScannerTests(_ t: TestRunner) {
         try expectEqual(try scanner.scanOnce(), 1, "主库变化后必须重扫，否则静默丢审计")
         try expectEqual(try scanner.scanOnce(), 0)
 
-        // WAL 那半边（新写入落在 `-wal`、主库 size/mtime 都不动）在单测里造不出来 ——
-        // 普通 SQLite 写入会直接改主库，而"跳过"与"扫了但无新数据"都返回 0，无法区分。
-        // 那一半靠 `fingerprint` 把 `-wal` 纳入判据来保证，别在这里写假断言。
+        // The WAL half (new writes land in `-wal`, main DB size/mtime unchanged) can't be
+        // reproduced in a unit test — a plain SQLite write modifies the main DB directly, and
+        // "skipped" and "scanned but nothing new" both return 0, so they can't be told apart. That
+        // half is guaranteed by `fingerprint` including `-wal` in its criteria; don't write a fake
+        // assertion here.
     }
 
     t.test("toolFormerData 落成审计流水，参数按 Cursor 词表提取；重扫幂等") {
@@ -1000,14 +1011,15 @@ private func cursorAuditScannerTests(_ t: TestRunner) {
     }
 }
 
-// MARK: - fixture：现造一个 Cursor 形状的 state.vscdb
+// MARK: - fixture: build a Cursor-shaped state.vscdb from scratch
 
-/// 按真实库结构建表：`cursorDiskKV(key,value)` + `composerHeaders(...)`，
-/// 外加 `workspaceStorage/<id>/{workspace.json,state.vscdb}`。
+/// Creates tables matching the real DB: `cursorDiskKV(key,value)` + `composerHeaders(...)`,
+/// plus `workspaceStorage/<id>/{workspace.json,state.vscdb}`.
 final class CursorFixture {
-    /// 一条气泡的最小描述（真实库里字段几十个，测试只造用得上的那几个）
+    /// Minimal description of a bubble (the real DB has dozens of fields; tests build only the ones
+    /// they use)
     struct Bubble {
-        var role: Int  // 1 = user，2 = assistant（工具气泡也在 assistant 侧）
+        var role: Int  // 1 = user, 2 = assistant (tool bubbles are on the assistant side too)
         var text: String = ""
         var input: Int = 0
         var output: Int = 0
@@ -1031,8 +1043,9 @@ final class CursorFixture {
             Bubble(role: 2, toolName: name, toolStatus: status, rawArgs: rawArgs, params: params)
         }
 
-        /// 拼成真实库里那一行的 JSON。用 JSONSerialization 而不是手写字符串：
-        /// rawArgs 里带引号和换行（apply_patch 是裸补丁文本），手写转义必踩坑。
+        /// Builds the JSON of that row as stored in the real DB. Uses JSONSerialization rather than
+        /// a handwritten string: rawArgs contains quotes and newlines (apply_patch is raw patch
+        /// text), so hand-escaping is bound to break.
         func json(createdAt: String) -> String {
             var root: [String: Any] = [
                 "type": role, "createdAt": createdAt, "text": text,
@@ -1058,7 +1071,8 @@ final class CursorFixture {
     let stateDB: URL
     let workspaceStorage: URL
 
-    /// `root` 传 nil 则自建临时目录（本文件用）；ProjectRootsTests 复用时传它自己的 base
+    /// Pass nil for `root` to create a temp dir (used by this file); ProjectRootsTests passes its
+    /// own base when reusing it
     init(root: URL? = nil) throws {
         self.root = root ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-cursor-\(UUID().uuidString)", isDirectory: true)
@@ -1108,7 +1122,7 @@ final class CursorFixture {
             [.text(#"{"allComposers":[\#(all)]}"#)])
     }
 
-    /// 写 / 覆写一个 composer（header + composerData + 各 bubble 行）
+    /// Writes / overwrites a composer (header + composerData + each bubble row)
     func addComposer(
         id: String,
         workspaceId: String,
@@ -1181,7 +1195,7 @@ final class CursorFixture {
     func makeTailer(handler: @escaping (TaskEvent, Bool) -> Void) -> CursorStateTailer {
         CursorStateTailer(
             dbPath: stateDB, workspaceStorageRoot: workspaceStorage,
-            // 时间窗放宽：fixture 的 recency 就是"现在"，但测试机可能跑得慢
+            // Widened time window: the fixture's recency is "now", but the test machine may be slow
             staleThreshold: 3600, recentWindow: 365 * 86400, handler: handler)
     }
 
@@ -1203,7 +1217,8 @@ final class CursorFixture {
     }
 }
 
-/// 取首个元素，空数组直接失败（比 `xs.first!` 有可读的报错）
+/// Returns the first element, failing outright on an empty array (gives a more readable error
+/// than `xs.first!`)
 func expectFirst<T>(_ values: [T], _ message: String = "期望非空数组") throws -> T {
     try expect(!values.isEmpty, message)
     return values[0]

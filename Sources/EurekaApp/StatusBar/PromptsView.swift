@@ -3,23 +3,26 @@ import EurekaIngest
 import EurekaKit
 import SwiftUI
 
-/// Prompt 库：从全部会话提取的用户提问，统一浏览/搜索/复用。
-/// 列表 = 收藏星标 + 来源徽标 + 首行标题 + 项目/会话 + 时间；详情 = 全文 + 复制/回跳会话。
+/// Prompt library: user prompts extracted from every session, in one place to browse, search
+/// and reuse.
+/// List = favorite star + source badge + first-line title + project/session + time; detail =
+/// full text + copy / jump back to the session.
 struct PromptsView: View {
     @ObservedObject var service: PromptsService
-    /// 跳回所属会话（transcript 定位到该提问）
+    /// Jump back to the owning session (transcript scrolled to this prompt)
     var sessionBrowser: SessionBrowserService
-    /// Prompt 毕业（升级为技能/指令）走知识面服务
+    /// Prompt graduation (upgrade to a skill / instructions) goes through the knowledge service
     var skillMemory: SkillMemoryService
 
-    /// 内嵌详情页当前展示的条目（nil = 列表）
+    /// Entry currently shown in the inline detail page (nil = list)
     @State private var detail: PromptEntry?
     @State private var deleting: PromptEntry?
-    /// 来源筛选（nil = 全部）
+    /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
-    /// 已展开的高频重复组（指纹集合）
+    /// Expanded frequent-repeat groups (set of fingerprints)
     @State private var expandedGroups: Set<String> = []
-    /// 「最费劲」排序：severity 降序 → 步数降序（找出最该改写/模板化的提问）
+    /// "Most effort" sort: severity descending → step count descending (surfaces the prompts
+    /// most worth rewriting / templating)
     @State private var effortSort = false
 
     /// Offscreen-render / preview injection: open straight into one entry's detail
@@ -34,8 +37,9 @@ struct PromptsView: View {
         self._detail = State(initialValue: initialDetail)
     }
 
-    /// 搜索 + 来源 + 收藏筛选后的列表（service 已按 first_seen 倒序）；
-    /// 「最费劲」开关按评价重排（无评价的排后，保持原相对顺序）
+    /// List after search + source + favorites filtering (service already sorts by first_seen
+    /// descending); the "most effort" toggle re-sorts by evaluation (unevaluated entries go last,
+    /// keeping their relative order)
     private var filtered: [PromptEntry] {
         let base = service.prompts
             .filter { selectedSource == nil || $0.source == selectedSource }
@@ -49,7 +53,7 @@ struct PromptsView: View {
             let lc = le?.stepCount ?? 0
             let rc = re?.stepCount ?? 0
             if lc != rc { return lc > rc }
-            return lhs.offset < rhs.offset  // 稳定排序：同分保持时间序
+            return lhs.offset < rhs.offset  // stable sort: ties keep time order
         }.map(\.element)
     }
 
@@ -78,28 +82,28 @@ struct PromptsView: View {
         .onChange(of: service.focusId) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
         .confirmationDialog(
-            deleting.map { "从 Prompt 库移除「\($0.title)」？源会话不受影响。" } ?? "",
+            deleting.map { L10n.format("Remove “%@” from Prompts? The source session is not affected.", zhHans: "从 Prompt 库移除「%@」？源会话不受影响。", String($0.title)) } ?? "",
             isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             titleVisibility: .visible
         ) {
-            Button("移除", role: .destructive) {
+            Button(L10n.text("Remove", zhHans: "移除"), role: .destructive) {
                 if let entry = deleting {
                     service.delete(entry.id)
                     if detail?.id == entry.id { detail = nil }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
-    // MARK: - 顶部栏
+    // MARK: - Top bar
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Prompt 库").font(.system(size: 15, weight: .bold))
+            Text(L10n.text("Prompts", zhHans: "Prompt 库")).font(.system(size: 15, weight: .bold))
             SearchField(
-                placeholder: "搜索提问", text: $service.searchText,
+                placeholder: L10n.text("Search prompts", zhHans: "搜索提问"), text: $service.searchText,
                 scanning: service.scanning, resultCount: service.prompts.count)
             Spacer(minLength: 12)
             Button {
@@ -110,7 +114,7 @@ struct PromptsView: View {
                     .foregroundStyle(service.favoritesOnly ? Theme.gold : .secondary)
             }
             .buttonStyle(.borderless)
-            .help(service.favoritesOnly ? "显示全部提问" : "只看收藏")
+            .help(service.favoritesOnly ? L10n.text("Show all prompts", zhHans: "显示全部提问") : L10n.text("Favorites only", zhHans: "只看收藏"))
             Button {
                 effortSort.toggle()
             } label: {
@@ -120,23 +124,24 @@ struct PromptsView: View {
             }
             .buttonStyle(.borderless)
             .help(effortSort
-                ? "恢复时间排序"
-                : "最费劲的提问排前（引来纠偏/走弯路多/步数多——最该改写或模板化）")
+                ? L10n.text("Sort by time again", zhHans: "恢复时间排序")
+                : L10n.text("Show the hardest prompts first (corrections, detours, many steps — the best ones to rewrite or templatize)", zhHans: "最费劲的提问排前（引来纠偏/走弯路多/步数多——最该改写或模板化）"))
             ScanStatusLabel(
                 scanning: service.scanning, phase: service.scanPhase,
                 lastScanAt: service.lastScanAt)
-            RefreshButton(help: "重新提取（增量：只解析有新消息的会话）") { service.refresh() }
+            RefreshButton(help: L10n.text("Extract again (incremental: only sessions with new messages)", zhHans: "重新提取（增量：只解析有新消息的会话）")) { service.refresh() }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
 
-    // MARK: - 主体
+    // MARK: - Body
 
     @ViewBuilder
     private var content: some View {
-        // 每次渲染只算一遍：sourceCounts / filtered 都是 O(全库) 扫描，
-        // 之前 statsCard + 每个来源 chip 各算一次，库一大渲染就开始拖
+        // Computed once per render: sourceCounts / filtered are both O(whole library) scans;
+        // previously statsCard and every source chip each computed them, and rendering started to
+        // drag once the library got large
         let counts = sourceCounts
         let sources = counts.sorted { $0.value > $1.value }.map(\.key)
         let rows = filtered
@@ -145,45 +150,48 @@ struct PromptsView: View {
                 statsCard(counts: counts, sourceCount: sources.count)
                 SourceFilterBar(
                     selected: $selectedSource,
-                    allLabel: "全部", allIcon: "text.quote",
+                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: "text.quote",
                     totalCount: service.totalCount,
                     sources: sources,
                     count: { counts[$0] ?? 0 })
                 if rows.isEmpty && service.groups.isEmpty {
                     emptyState.padding(.top, 40)
                 } else if service.isSearching {
-                    // 搜索 = 平铺命中（含被默认折叠的分类，找什么都能找到）
+                    // Search = flat hits (including kinds folded by default, so anything can be
+                    // found)
                     promptList(rows)
                 } else {
-                    // 三段式：收藏（用户资产）→ 高频重复（模板/技能候选）→ 最近
+                    // Three sections: favorites (user assets) → frequent repeats (template / skill
+                    // candidates)
+                    // → recent
                     let favorites = rows.filter(\.favorite)
                     let recent = rows.filter { !$0.favorite }
                     if !favorites.isEmpty {
-                        sectionHeader("star.fill", "收藏", favorites.count)
+                        sectionHeader("star.fill", L10n.text("Favorites", zhHans: "收藏"), favorites.count)
                         promptList(favorites)
                     }
                     if selectedSource == nil, !service.groups.isEmpty {
                         sectionHeader(
-                            "repeat", "高频重复", service.groups.count,
-                            note: "反复在问的同一件事 —— 升级为技能/指令的头号候选")
+                            "repeat", L10n.text("Repeated often", zhHans: "高频重复"), service.groups.count,
+                            note: L10n.text("The same thing asked again and again — the best candidates to turn into a skill or instructions", zhHans: "反复在问的同一件事 —— 升级为技能/指令的头号候选"))
                         groupsList
                     }
                     HStack(spacing: 8) {
-                        sectionHeader("clock", "最近", recent.count)
+                        sectionHeader("clock", L10n.text("Recent", zhHans: "最近"), recent.count)
                         Spacer(minLength: 8)
                         Toggle(isOn: Binding(
                             get: { service.showAll },
                             set: { service.showAll = $0 })) {
-                            Text("显示全部（含琐碎/长粘贴）")
+                            Text(L10n.text("Show all (including trivial text and long pastes)", zhHans: "显示全部（含琐碎/长粘贴）"))
                                 .font(Theme.font.themed(10))
                                 .foregroundStyle(.secondary)
                         }
                         .toggleStyle(.checkbox)
                         .controlSize(.mini)
-                        .help("默认折叠 \(service.foldedCount) 条低复用价值条目（琐碎短语/日志粘贴/历史噪音）")
+                        .help(L10n.format("Folds %@ low-reuse items by default (trivial phrases, log pastes, historical noise)", zhHans: "默认折叠 %@ 条低复用价值条目（琐碎短语/日志粘贴/历史噪音）", String(service.foldedCount)))
                     }
                     if recent.isEmpty {
-                        Text("这个来源近期没有可复用的提问")
+                        Text(L10n.text("This source has no reusable prompts recently", zhHans: "这个来源近期没有可复用的提问"))
                             .font(Theme.font.themed(10.5))
                             .foregroundStyle(.tertiary)
                             .padding(.top, 4)
@@ -197,7 +205,7 @@ struct PromptsView: View {
         .background(Theme.surfaceSecondary)
     }
 
-    /// 段落标题：图标 + 名称 + 计数
+    /// Section header: icon + name + count
     private func sectionHeader(
         _ icon: String, _ title: String, _ count: Int, note: String? = nil
     ) -> some View {
@@ -219,8 +227,9 @@ struct PromptsView: View {
         }
     }
 
-    /// 一段条目列表（懒加载：prompt 库是首个数据量可上万的条目面，
-    /// 普通 VStack 会在打开页签时一次性物化全部行、卡死主线程）
+    /// One section's entry list (lazy: the prompt library is the first entry surface that can
+    /// reach tens of thousands of items; a plain VStack would materialize every row at once when
+    /// the tab opens and freeze the main thread)
     private func promptList(_ entries: [PromptEntry]) -> some View {
         KnowledgeListContainer {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -245,7 +254,8 @@ struct PromptsView: View {
                 ? nil : { service.launchInTerminal(entry.id) })
     }
 
-    /// 高频重复组：组行（代表标题 + ×N · M 个项目）点击展开成员
+    /// Frequent-repeat groups: a group row (representative title + ×N · M projects) expands its
+    /// members on click
     private var groupsList: some View {
         KnowledgeListContainer {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -283,15 +293,15 @@ struct PromptsView: View {
         let top = counts.sorted { $0.value > $1.value }.prefix(4)
         return StatOverviewCard(
             value: "\(service.totalCount)",
-            unit: "提问",
-            subtitle: "\(sourceCount) 个来源 · 收藏 \(service.favoriteCount)",
-            distributionTitle: "来源分布",
+            unit: L10n.text("prompts", zhHans: "提问"),
+            subtitle: L10n.format("%@ sources · %@ favorites", zhHans: "%@ 个来源 · 收藏 %@", String(sourceCount), String(service.favoriteCount)),
+            distributionTitle: L10n.text("By source", zhHans: "来源分布"),
             segments: top.map {
                 .init(label: $0.key.displayName, count: $0.value, color: Theme.brand)
             },
             showBar: false,
             trailingNote: service.foldedCount > 0
-                ? "已折叠 \(service.foldedCount) 条低价值条目" : nil)
+                ? L10n.format("%@ low-value items folded", zhHans: "已折叠 %@ 条低价值条目", String(service.foldedCount)) : nil)
     }
 
     private var sourceCounts: [AgentSource: Int] {
@@ -306,15 +316,17 @@ struct PromptsView: View {
         withAnimation(.easeOut(duration: 0.15)) { detail = entry }
     }
 
-    /// 跳回所属会话（切页签 + 滚动定位到该提问）。
-    /// 与命令面板 transcript 命中同款顺序：先发通知切页+选中，再补 messageIdx 定位
-    /// （pendingJump 在 transcript 加载完成后被 SessionDetailView 消费）。
+    /// Jump back to the owning session (switch tab + scroll to this prompt).
+    /// Same order as a command-palette transcript hit: first post the notification to switch page
+    /// and select, then fill in messageIdx for positioning (pendingJump is consumed by
+    /// SessionDetailView once the transcript has loaded).
     private func jumpToSession(_ entry: PromptEntry) {
         NotificationCenter.default.post(name: .eurekaRevealSession, object: entry.sessionId)
         sessionBrowser.revealMessage(sessionId: entry.sessionId, messageIdx: entry.messageIdx)
     }
 
-    /// 跨页直达落点：按 id 找到条目并打开详情（找不到不清空——扫描可能还没跑到）
+    /// Cross-page jump landing: find the entry by id and open its detail (not cleared when not
+    /// found — the scan may not have reached it yet)
     private func consumeFocus() {
         guard let id = service.focusId, let entry = service.entry(id: id) else { return }
         withAnimation(.easeOut(duration: 0.15)) { detail = entry }
@@ -326,12 +338,12 @@ struct PromptsView: View {
         if service.scanning {
             VStack(spacing: 10) {
                 ProgressView()
-                Text("正在提取用户提问…")
+                Text(L10n.text("Extracting prompts…", zhHans: "正在提取用户提问…"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Text("首次提取需解析全部会话记录，可能需要一两分钟；"
-                    + "之后为增量提取，秒级完成。可先切到其他页签，提取在后台继续。")
-                    .font(.system(size: 10))
+                Text(L10n.text("The first extract parses every session and can take a minute or two;", zhHans: "首次提取需解析全部会话记录，可能需要一两分钟；")
+                    + L10n.text(" later extracts are incremental and finish in seconds. You can switch tabs — extraction continues in the background.", zhHans: "之后为增量提取，秒级完成。可先切到其他页签，提取在后台继续。"))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
@@ -341,49 +353,51 @@ struct PromptsView: View {
             EmptyStateView(
                 icon: "text.quote",
                 title: service.isSearching || service.favoritesOnly || selectedSource != nil
-                    ? "没有匹配的提问" : "还没有提取到提问",
+                    ? L10n.text("No matching prompts", zhHans: "没有匹配的提问") : L10n.text("No prompts extracted yet", zhHans: "还没有提取到提问"),
                 hint: service.isSearching || service.favoritesOnly || selectedSource != nil
                     ? nil
-                    : "提问从各 Agent 的会话记录中自动提取（会话页签扫描完成后开始）")
+                    : L10n.text("Prompts are extracted from each agent’s sessions (after the Sessions tab finishes scanning)", zhHans: "提问从各 Agent 的会话记录中自动提取（会话页签扫描完成后开始）"))
         }
     }
 }
 
-// MARK: - 评价呈现的共享文案
+// MARK: - Shared copy for presenting evaluations
 
-/// 规则 id → 短标签（行级色点旁的首要问题词 / 详情证据卡的信号名）
+/// Rule id → short label (the primary-issue word next to a row's color dot / the signal name
+/// on the detail evidence card)
 func promptRuleLabel(_ rule: String) -> String {
     switch rule {
-    case "explore-heavy": return "找文件开销大"
-    case "reread": return "反复回读"
-    case "rework": return "改后回看"
-    case "retry": return "反复重试"
-    case "churn": return "反复改同文件"
-    case "clarify": return "反问澄清"
-    case "corrective": return "引来纠偏"
-    case "reformulated": return "重述打转"
-    case "outcome-error": return "报错收尾"
+    case "explore-heavy": return L10n.text("Heavy file search", zhHans: "找文件开销大")
+    case "reread": return L10n.text("Reread", zhHans: "反复回读")
+    case "rework": return L10n.text("Rework", zhHans: "改后回看")
+    case "retry": return L10n.text("Retry", zhHans: "反复重试")
+    case "churn": return L10n.text("File churn", zhHans: "反复改同文件")
+    case "clarify": return L10n.text("Clarification", zhHans: "反问澄清")
+    case "corrective": return L10n.text("Correction", zhHans: "引来纠偏")
+    case "reformulated": return L10n.text("Restated", zhHans: "重述打转")
+    case "outcome-error": return L10n.text("Ended in error", zhHans: "报错收尾")
     default: return rule
     }
 }
 
-/// 规则 id → 指回提示词的改进建议（详情证据卡用；与 TurnDiagnostics 的 advice 同口径）
+/// Rule id → improvement advice pointing back at the prompt (for the detail evidence card;
+/// same wording basis as TurnDiagnostics' advice)
 func promptRuleAdvice(_ rule: String) -> String {
     switch rule {
-    case "explore-heavy": return "提示词里直接点名文件/目录，能省掉定位开销"
-    case "reread": return "上下文没一次给够：把相关文件/约束一次性给全"
-    case "rework": return "改之前没看清：给出确切的改动位置"
-    case "retry": return "验收标准不清：把「怎样算成功」写进提示词"
-    case "churn": return "同一文件被反复改：先要一份改动方案再落笔"
-    case "clarify": return "提问有歧义：把选择项与约束提前写清"
-    case "corrective": return "下一条提问在纠偏——这条没有一次说清"
-    case "reformulated": return "随后换词重问了同一件事：补足上下文或验收标准"
-    case "outcome-error": return "本轮以 API 错误收尾"
+    case "explore-heavy": return L10n.text("Name the files or directories in the prompt to skip the search", zhHans: "提示词里直接点名文件/目录，能省掉定位开销")
+    case "reread": return L10n.text("Context arrived in pieces: include the related files and constraints up front", zhHans: "上下文没一次给够：把相关文件/约束一次性给全")
+    case "rework": return L10n.text("The change was made before looking closely: give the exact place to edit", zhHans: "改之前没看清：给出确切的改动位置")
+    case "retry": return L10n.text("The success check was unclear: write “what counts as done” into the prompt", zhHans: "验收标准不清：把「怎样算成功」写进提示词")
+    case "churn": return L10n.text("The same file was edited over and over: ask for a plan before editing", zhHans: "同一文件被反复改：先要一份改动方案再落笔")
+    case "clarify": return L10n.text("The prompt was ambiguous: state the choices and constraints up front", zhHans: "提问有歧义：把选择项与约束提前写清")
+    case "corrective": return L10n.text("The next prompt corrected this one — it wasn’t said clearly the first time", zhHans: "下一条提问在纠偏——这条没有一次说清")
+    case "reformulated": return L10n.text("The same thing was asked again in different words: add context or a success check", zhHans: "随后换词重问了同一件事：补足上下文或验收标准")
+    case "outcome-error": return L10n.text("This turn ended in an API error", zhHans: "本轮以 API 错误收尾")
     default: return ""
     }
 }
 
-/// 首要问题词：纠偏最能说明问题，其次取第一条命中的规则
+/// Primary-issue word: a correction says the most, otherwise the first matched rule
 func promptPrimaryRule(_ eval: PromptEval) -> String? {
     if eval.ruleIds.contains("corrective") { return "corrective" }
     return eval.ruleIds.first
@@ -393,18 +407,21 @@ func promptSeverityColor(_ severity: TurnDiagnostics.Severity) -> Color {
     severity == .bad ? .red : .orange
 }
 
-// MARK: - 列表行
+// MARK: - List row
 
-/// 一行提问：收藏星标 + 首行标题 + 来源/项目/时间副标 + 悬停复制/终端运行/回跳操作。
+/// One prompt row: favorite star + first-line title + source/project/time subtitle + hover
+/// actions for copy / run in terminal / jump back.
 private struct PromptRow: View {
     let entry: PromptEntry
     let service: PromptsService
-    /// 评价结果；nil = 该源不可评价或未重扫（静默无点，不显示"clean"）
+    /// Evaluation result; nil = the source isn't evaluable or hasn't been rescanned (silent, no
+    /// dot, never shows "clean")
     var eval: PromptEval?
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onJump: () -> Void
-    /// 在终端以此提问启动新会话；nil = 该源不支持（按钮不显示）
+    /// Starts a new session with this prompt in the terminal; nil = the source doesn't support it
+    /// (button hidden)
     var onRun: (() -> Void)?
 
     @State private var hovering = false
@@ -415,11 +432,11 @@ private struct PromptRow: View {
                 service.toggleFavorite(entry.id)
             } label: {
                 Image(systemName: entry.favorite ? "star.fill" : "star")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(entry.favorite ? Theme.gold : .secondary.opacity(0.6))
             }
             .buttonStyle(.borderless)
-            .help(entry.favorite ? "取消收藏" : "收藏")
+            .help(entry.favorite ? L10n.text("Unfavorite", zhHans: "取消收藏") : L10n.text("Favorites", zhHans: "收藏"))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.title)
@@ -428,7 +445,7 @@ private struct PromptRow: View {
                     .truncationMode(.tail)
                 HStack(spacing: 6) {
                     SourceBadge(source: entry.source, size: 11)
-                    // 只在 notice/bad 时出点（不给每条判分；缺行静默）
+                    // Show a dot only for notice/bad (no per-entry grade; missing rows stay silent)
                     if let eval, eval.severity >= .notice {
                         HStack(spacing: 3) {
                             Circle()
@@ -440,8 +457,8 @@ private struct PromptRow: View {
                                     .foregroundStyle(promptSeverityColor(eval.severity))
                             }
                         }
-                        .help("这条提问执行得费劲（点开看证据）：" +
-                            eval.ruleIds.map(promptRuleLabel).joined(separator: "、"))
+                        .help(L10n.text("This prompt was hard to run (open for the evidence): ", zhHans: "这条提问执行得费劲（点开看证据）：") +
+                            eval.ruleIds.map(promptRuleLabel).joined(separator: L10n.text(", ", zhHans: "、")))
                     }
                     if let project = entry.projectName {
                         Text(project).font(Theme.font.themed(10)).foregroundStyle(.secondary)
@@ -452,7 +469,7 @@ private struct PromptRow: View {
                             .foregroundStyle(.tertiary)
                     }
                     if entry.useCount > 0 {
-                        Text("已用 \(entry.useCount) 次")
+                        Text(L10n.format("Used %@ times", zhHans: "已用 %@ 次", String(entry.useCount)))
                             .font(Theme.font.themed(9.5))
                             .foregroundStyle(Theme.brandFg.opacity(0.7))
                     }
@@ -471,19 +488,19 @@ private struct PromptRow: View {
                             Image(systemName: "play.fill").font(.system(size: 10))
                         }
                         .buttonStyle(.borderless)
-                        .help("在终端以此提问启动新会话（\(entry.source.displayName)）")
+                        .help(L10n.format("Start a new session in Terminal with this prompt (%@)", zhHans: "在终端以此提问启动新会话（%@）", String(entry.source.displayName)))
                     }
                     Button(action: onCopy) {
                         Image(systemName: "doc.on.doc").font(.system(size: 10))
                     }
                     .buttonStyle(.borderless)
-                    .help("复制提问原文")
+                    .help(L10n.text("Copy the prompt text", zhHans: "复制提问原文"))
                     Button(action: onJump) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                     }
                     .buttonStyle(.borderless)
-                    .help("在所属会话中查看")
+                    .help(L10n.text("View in its session", zhHans: "在所属会话中查看"))
                 }
                 .foregroundStyle(.secondary)
             }
@@ -499,12 +516,14 @@ private struct PromptRow: View {
     }
 }
 
-// MARK: - 高频重复组行
+// MARK: - Frequent-repeat group row
 
-/// 组行：代表标题 + 出现次数/项目数徽章 + 展开箭头。点击整行切换展开。
+/// Group row: representative title + occurrence / project count badge + disclosure chevron.
+/// Clicking anywhere on the row toggles expansion.
 private struct PromptGroupRow: View {
     let group: PromptGroup
-    /// 组内执行费劲（severity ≥ notice）的次数——"反复问且每次都费劲" = 最该模板化
+    /// Number of runs in the group that took effort (severity ≥ notice) — "asked repeatedly and
+    /// hard every time" = most worth templating
     let effortCount: Int
     let expanded: Bool
     let onToggle: () -> Void
@@ -524,17 +543,17 @@ private struct PromptGroupRow: View {
                     .truncationMode(.tail)
                 HStack(spacing: 6) {
                     SourceBadge(source: group.representative.source, size: 11)
-                    Text("出现 \(group.count) 次")
+                    Text(L10n.format("Seen %@ times", zhHans: "出现 %@ 次", String(group.count)))
                         .font(Theme.font.themedMono(10))
                         .foregroundStyle(Theme.brandFg)
                     if effortCount > 0 {
-                        Text("\(effortCount) 次费劲")
+                        Text(L10n.format("%@ hard runs", zhHans: "%@ 次费劲", String(effortCount)))
                             .font(Theme.font.themed(9.5))
                             .foregroundStyle(.orange)
-                            .help("反复在问且执行费劲——最该模板化或升级为技能的候选")
+                            .help(L10n.text("Asked repeatedly and hard to run — the best candidate to templatize or turn into a skill", zhHans: "反复在问且执行费劲——最该模板化或升级为技能的候选"))
                     }
                     if group.projectCount > 1 {
-                        Text("跨 \(group.projectCount) 个项目")
+                        Text(L10n.format("Across %@ projects", zhHans: "跨 %@ 个项目", String(group.projectCount)))
                             .font(Theme.font.themed(10))
                             .foregroundStyle(Theme.goldFg)
                     }
@@ -558,9 +577,10 @@ private struct PromptGroupRow: View {
     }
 }
 
-// MARK: - 详情页
+// MARK: - Detail page
 
-/// 提问详情：全文可选中复制 + 标签编辑 + 复制/终端启动/毕业（技能·指令）/回跳/移除。
+/// Prompt detail: selectable full text for copying + tag editing + copy / terminal launch /
+/// graduate (skill or instructions) / jump back / remove.
 private struct PromptDetailView: View {
     let entry: PromptEntry
     let service: PromptsService
@@ -571,9 +591,9 @@ private struct PromptDetailView: View {
 
     @State private var newTag = ""
     @State private var copied = false
-    /// 毕业表单（nil = 未打开）
+    /// Graduation form (nil = not open)
     @State private var graduation: GraduationMode?
-    /// 毕业/启动结果的短暂提示
+    /// Brief notice for the graduation / launch result
     @State private var actionNote: String?
 
     enum GraduationMode: String, Identifiable {
@@ -615,7 +635,7 @@ private struct PromptDetailView: View {
                 Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
             }
             .buttonStyle(.borderless)
-            .help("返回列表")
+            .help(L10n.text("Back to the list", zhHans: "返回列表"))
             SourceBadge(source: entry.source, size: 14)
             Text(entry.title)
                 .font(.system(size: 13, weight: .semibold))
@@ -623,7 +643,7 @@ private struct PromptDetailView: View {
             Spacer(minLength: 8)
             if let session = service.sessionName(for: entry) {
                 Text(session)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -641,7 +661,7 @@ private struct PromptDetailView: View {
             if let project = entry.projectName {
                 metaItem("folder", project)
             }
-            Text("\(entry.text.count) 字")
+            Text(L10n.format("%@ characters", zhHans: "%@ 字", String(entry.text.count)))
             Spacer(minLength: 0)
         }
         .font(Theme.font.themed(10))
@@ -656,13 +676,15 @@ private struct PromptDetailView: View {
         }
     }
 
-    /// 「实际效果」证据卡：这条 prompt 让 agent 付出了什么、你事后满不满意。
-    /// 三档结论 + 证据 + 建议，不打综合分（评价体系的呈现原则）。
+    /// "What actually happened" evidence card: what this prompt cost the agent, and whether you
+    /// were satisfied afterwards.
+    /// Three-tier verdict + evidence + advice, no composite score (the evaluation system's
+    /// presentation principle).
     private func evalCard(_ eval: PromptEval) -> some View {
         let capability = PromptEvalCapability.level(for: entry.source)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("实际效果")
+                Text(L10n.text("What actually happened", zhHans: "实际效果"))
                     .font(Theme.font.themed(11, .semibold))
                     .foregroundStyle(.secondary)
                 if eval.severity >= .notice {
@@ -670,47 +692,47 @@ private struct PromptDetailView: View {
                         Circle()
                             .fill(promptSeverityColor(eval.severity))
                             .frame(width: 6, height: 6)
-                        Text(eval.severity == .bad ? "费劲" : "有摩擦")
+                        Text(eval.severity == .bad ? L10n.text("Hard", zhHans: "费劲") : L10n.text("Friction", zhHans: "有摩擦"))
                             .font(Theme.font.themed(9.5))
                             .foregroundStyle(promptSeverityColor(eval.severity))
                     }
                 }
                 Spacer(minLength: 4)
                 if capability == .followupOnly {
-                    Text("该源无工具轨迹，仅纠偏信号")
+                    Text(L10n.text("This source has no tool trace, only correction signals", zhHans: "该源无工具轨迹，仅纠偏信号"))
                         .font(Theme.font.themed(9))
                         .foregroundStyle(.tertiary)
                 }
             }
-            // 计量行
+            // Metrics row
             HStack(spacing: 12) {
                 if capability != .followupOnly {
-                    Text("\(eval.stepCount) 步工具")
+                    Text(L10n.format("%@ tool steps", zhHans: "%@ 步工具", String(eval.stepCount)))
                     if eval.errorSteps > 0 {
-                        Text("\(eval.errorSteps) 步失败").foregroundStyle(.red)
+                        Text(L10n.format("%@ failed steps", zhHans: "%@ 步失败", String(eval.errorSteps))).foregroundStyle(.red)
                     }
                 }
                 if let duration = eval.duration, duration >= 5 {
                     Text(formatDuration(duration))
                 }
                 if eval.outcome == "error" {
-                    Text("报错收尾").foregroundStyle(.red)
+                    Text(L10n.text("Ended in error", zhHans: "报错收尾")).foregroundStyle(.red)
                 }
                 Spacer(minLength: 0)
             }
             .font(Theme.font.themedMono(10))
             .foregroundStyle(.secondary)
-            // 信号与建议（逐条证据）
+            // Signals and advice (one piece of evidence per line)
             let rules = eval.ruleIds.filter { $0 != "outcome-error" }
             if !rules.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(rules, id: \.self) { rule in
                         HStack(alignment: .top, spacing: 6) {
                             Image(systemName: "exclamationmark.circle")
-                                .font(.system(size: 9))
+                                .font(Theme.font.themed(9))
                                 .foregroundStyle(.orange)
                                 .padding(.top, 1.5)
-                            Text("\(promptRuleLabel(rule))：\(promptRuleAdvice(rule))")
+                            Text(L10n.format("%@: %@", zhHans: "%@：%@", String(promptRuleLabel(rule)), String(promptRuleAdvice(rule))))
                                 .font(Theme.font.themed(10.5))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -718,11 +740,11 @@ private struct PromptDetailView: View {
                     }
                 }
             } else if eval.severity == .clean {
-                Text("一次说清，执行顺畅")
+                Text(L10n.text("Said clearly once, and it ran smoothly", zhHans: "一次说清，执行顺畅"))
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
             }
-            // 静态结构提示（弱先验，不参与结论）
+            // Static structure hints (weak prior, not part of the verdict)
             structureHints(eval.structureFlags)
         }
         .padding(14)
@@ -743,10 +765,10 @@ private struct PromptDetailView: View {
     private func structureHints(_ flags: PromptStructure.Flags) -> some View {
         let hints: [String] = {
             var notes: [String] = []
-            if flags.contains(.acceptance) { notes.append("✓ 带验收标准") }
-            if flags.contains(.filePath) { notes.append("✓ 点名了文件") }
+            if flags.contains(.acceptance) { notes.append(L10n.text("✓ Includes a success check", zhHans: "✓ 带验收标准")) }
+            if flags.contains(.filePath) { notes.append(L10n.text("✓ Names a file", zhHans: "✓ 点名了文件")) }
             if flags.contains(.deicticStart) {
-                notes.append("△ 指代词开头——离开会话即失效，模板化前补上下文")
+                notes.append(L10n.text("△ Starts with a pointer word — it dies outside the session; add context before templatizing", zhHans: "△ 指代词开头——离开会话即失效，模板化前补上下文"))
             }
             return notes
         }()
@@ -759,15 +781,15 @@ private struct PromptDetailView: View {
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
         seconds >= 3600
-            ? String(format: "%.1f 小时", seconds / 3600)
+            ? L10n.format("%@ hours", zhHans: "%@ 小时", String(format: "%.1f", seconds / 3600))
             : seconds >= 60
-                ? String(format: "%.0f 分钟", seconds / 60)
-                : String(format: "%.0f 秒", seconds)
+                ? L10n.format("%@ minutes", zhHans: "%@ 分钟", String(format: "%.0f", seconds / 60))
+                : L10n.format("%@ seconds", zhHans: "%@ 秒", String(format: "%.0f", seconds))
     }
 
     private var tagsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("标签")
+            Text(L10n.text("Tags", zhHans: "标签"))
                 .font(Theme.font.themed(11, .semibold))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
@@ -787,7 +809,7 @@ private struct PromptDetailView: View {
                     .padding(.vertical, 3)
                     .background(Capsule().fill(Theme.gold.opacity(0.12)))
                 }
-                TextField("添加标签", text: $newTag)
+                TextField(L10n.text("Add a tag", zhHans: "添加标签"), text: $newTag)
                     .textFieldStyle(.plain)
                     .font(Theme.font.themed(10))
                     .frame(width: 90)
@@ -813,7 +835,7 @@ private struct PromptDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 PrimaryButton(
-                    title: copied ? "已复制" : "复制提问", icon: copied ? "checkmark" : "doc.on.doc"
+                    title: copied ? L10n.text("Copied", zhHans: "已复制") : L10n.text("Copy prompt", zhHans: "复制提问"), icon: copied ? "checkmark" : "doc.on.doc"
                 ) {
                     service.copyToPasteboard(entry.id)
                     copied = true
@@ -821,39 +843,39 @@ private struct PromptDetailView: View {
                 }
                 if service.launchCommand(for: entry.id) != nil {
                     SecondaryButton(
-                        title: "在终端启动新会话", icon: "play.fill",
-                        help: "Terminal 中以此提问开一个新的 \(entry.source.displayName) 会话"
-                            + (entry.cwd.map { "（\($0)）" } ?? "")
+                        title: L10n.text("Start a new session in Terminal", zhHans: "在终端启动新会话"), icon: "play.fill",
+                        help: L10n.format("Open a new %@ session in Terminal with this prompt", zhHans: "Terminal 中以此提问开一个新的 %@ 会话", "\(entry.source.displayName)")
+                            + (entry.cwd.map { L10n.format(" (%@)", zhHans: "（%@）", "\($0)") } ?? "")
                     ) {
                         service.launchInTerminal(entry.id)
-                        note("已在 Terminal 中启动新会话")
+                        note(L10n.text("Started a new session in Terminal", zhHans: "已在 Terminal 中启动新会话"))
                     }
                 }
                 SecondaryButton(
-                    title: "升级为技能", icon: "graduationcap",
-                    help: "把这条提问沉淀为技能（SKILL.md）——以后 agent 自动加载，不用再重复输入"
+                    title: L10n.text("Turn into a skill", zhHans: "升级为技能"), icon: "graduationcap",
+                    help: L10n.text("Save this prompt as a skill (SKILL.md) — the agent loads it automatically, so you don’t type it again", zhHans: "把这条提问沉淀为技能（SKILL.md）——以后 agent 自动加载，不用再重复输入")
                 ) {
                     graduation = .skill
                 }
                 SecondaryButton(
-                    title: "升级为指令", icon: "text.book.closed",
-                    help: "沉淀为持久指令，之后每次会话自动加载（Claude 追加到 ~/.claude/CLAUDE.md；Codex 追加到 AGENTS.md）"
+                    title: L10n.text("Turn into instructions", zhHans: "升级为指令"), icon: "text.book.closed",
+                    help: L10n.text("Save it as standing instructions, loaded every session (Claude appends to ~/.claude/CLAUDE.md; Codex appends to AGENTS.md)", zhHans: "沉淀为持久指令，之后每次会话自动加载（Claude 追加到 ~/.claude/CLAUDE.md；Codex 追加到 AGENTS.md）")
                 ) {
                     graduation = .instruction
                 }
                 SecondaryButton(
-                    title: "在会话中查看", icon: "arrow.up.left.and.arrow.down.right",
-                    help: "切到会话页签并定位到这条提问", action: onJumpToSession)
+                    title: L10n.text("View in session", zhHans: "在会话中查看"), icon: "arrow.up.left.and.arrow.down.right",
+                    help: L10n.text("Switch to Sessions and scroll to this prompt", zhHans: "切到会话页签并定位到这条提问"), action: onJumpToSession)
                 Spacer(minLength: 0)
                 if entry.useCount > 0 {
-                    Text("已使用 \(entry.useCount) 次"
-                        + (entry.lastUsedAt.map { " · 最近 " + $0.formatted(.dateTime.month().day()) } ?? ""))
+                    Text(L10n.format("Used %@ times", zhHans: "已使用 %@ 次", String(entry.useCount))
+                        + (entry.lastUsedAt.map { L10n.text(" · last ", zhHans: " · 最近 ") + $0.formatted(.dateTime.month().day()) } ?? ""))
                         .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
                 SecondaryButton(
-                    title: "移除", icon: "trash", destructive: true,
-                    help: "从 Prompt 库移除（源会话不受影响）", action: onDelete)
+                    title: L10n.text("Remove", zhHans: "移除"), icon: "trash", destructive: true,
+                    help: L10n.text("Remove from Prompts (the source session is not affected)", zhHans: "从 Prompt 库移除（源会话不受影响）"), action: onDelete)
             }
             if let actionNote {
                 Text(actionNote)
@@ -877,14 +899,15 @@ private struct PromptDetailView: View {
     }
 }
 
-// MARK: - 毕业表单
+// MARK: - Graduation form
 
-/// 把一条提问沉淀为技能或持久指令：选目标源 + 命名 → 写盘 → 跳到对应知识页。
+/// Turns a prompt into a skill or persistent instructions: pick target source + name → write to
+/// disk → jump to the matching knowledge page.
 private struct PromptGraduationSheet: View {
     let mode: PromptDetailView.GraduationMode
     let entry: PromptEntry
     let skillMemory: SkillMemoryService
-    /// 完成回调：message 非 nil 时显示在详情页（nil = 用户取消）
+    /// Completion callback: a non-nil message is shown on the detail page (nil = user cancelled)
     let onDone: (String?) -> Void
 
     @State private var name = ""
@@ -892,35 +915,36 @@ private struct PromptGraduationSheet: View {
     @State private var running = false
     @State private var errorNote: String?
 
-    /// 指令毕业只开放 PromptInstructionDestination 裁定的源（claude 追加 ~/.claude/CLAUDE.md /
-    /// codex 追加 AGENTS.md）；技能毕业全源可用（SKILL.md 格式同构）
+    /// Instructions graduation is only offered for sources PromptInstructionDestination allows
+    /// (claude appends to ~/.claude/CLAUDE.md / codex appends to AGENTS.md); skill graduation works
+    /// for every source (the SKILL.md format is shared)
     private var targets: [AgentSource] {
         mode == .skill ? AgentSource.allCases : PromptInstructionDestination.supportedSources
     }
 
-    /// 指令模式下当前目标的落点说明（切换目标源时跟着变）
+    /// In instructions mode, where the current target lands (changes with the target source)
     private var instructionHint: String {
         guard let destination = PromptInstructionDestination.destination(for: target) else {
-            return "该源没有可写的持久指令文件。"
+            return L10n.text("This source has no writable instructions file.", zhHans: "该源没有可写的持久指令文件。")
         }
-        return "追加一节到 \(destination.fileLabel)（写前自动备份），之后 \(target.displayName) 每次会话自动加载。"
+        return L10n.format("Append a section to %@ (backup first); %@ then loads it every session.", zhHans: "追加一节到 %@（写前自动备份），之后 %@ 每次会话自动加载。", String(destination.fileLabel), String(target.displayName))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(mode == .skill ? "升级为技能" : "升级为指令")
+            Text(mode == .skill ? L10n.text("Turn into a skill", zhHans: "升级为技能") : L10n.text("Turn into instructions", zhHans: "升级为指令"))
                 .font(.system(size: 14, weight: .bold))
             Text(mode == .skill
-                ? "把这条提问写成 SKILL.md —— 之后 agent 按描述自动加载，或用 /名称 显式调用。"
+                ? L10n.text("Write this prompt as SKILL.md — the agent then loads it from the description, or you call it with /name.", zhHans: "把这条提问写成 SKILL.md —— 之后 agent 按描述自动加载，或用 /名称 显式调用。")
                 : instructionHint)
                 .font(Theme.font.themed(11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Picker("目标", selection: $target) {
+            Picker(L10n.text("Target", zhHans: "目标"), selection: $target) {
                 ForEach(targets, id: \.self) { Text($0.displayName) }
             }
             .pickerStyle(.menu)
-            TextField("名称", text: $name)
+            TextField(L10n.text("Name", zhHans: "名称"), text: $name)
                 .textFieldStyle(.roundedBorder)
             if let errorNote {
                 Text(errorNote)
@@ -929,9 +953,9 @@ private struct PromptGraduationSheet: View {
             }
             HStack {
                 Spacer()
-                Button("取消") { onDone(nil) }
+                Button(L10n.text("Cancel", zhHans: "取消")) { onDone(nil) }
                     .keyboardShortcut(.cancelAction)
-                Button(running ? "写入中…" : "创建") { graduate() }
+                Button(running ? L10n.text("Writing…", zhHans: "写入中…") : L10n.text("Create", zhHans: "创建")) { graduate() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(running
                         || name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -942,7 +966,7 @@ private struct PromptGraduationSheet: View {
         .onAppear {
             name = entry.title
             if !targets.contains(target) { target = targets[0] }
-            // 默认目标 = 提问所属的源（在支持列表里的话）
+            // Default target = the prompt's own source (if it's in the supported list)
             if targets.contains(entry.source) { target = entry.source }
         }
     }
@@ -958,17 +982,18 @@ private struct PromptGraduationSheet: View {
                 description: entry.title, body: entry.text
             ) { path in
                 finish(path: path, kind: "skill",
-                       failure: "创建失败：目标已存在同名技能或目录不可写")
+                       failure: L10n.text("Couldn’t create it: a skill with that name already exists, or the directory isn’t writable", zhHans: "创建失败：目标已存在同名技能或目录不可写"))
             }
         case .instruction:
-            // reveal 的 kind 随落点走（两个落点在索引里都是指令，落指令页；
-            // 早先按 "memory" reveal 会跳到记忆页找不到目标）
+            // The reveal kind follows the destination (both destinations are instructions in the
+            // index, so it lands on the Instructions page; revealing as "memory" earlier jumped to
+            // the memory page and couldn't find the target)
             let kind = PromptInstructionDestination.destination(for: target)?.knowledgeKind
                 ?? "instruction"
             skillMemory.graduatePromptToInstructions(
                 source: target, name: trimmed, body: entry.text
             ) { path in
-                finish(path: path, kind: kind, failure: "写入失败：指令文件读不出来或目录不可写")
+                finish(path: path, kind: kind, failure: L10n.text("Couldn’t write: the instructions file can’t be read, or the directory isn’t writable", zhHans: "写入失败：指令文件读不出来或目录不可写"))
             }
         }
     }
@@ -979,11 +1004,11 @@ private struct PromptGraduationSheet: View {
             errorNote = failure
             return
         }
-        // 跳到对应知识页并定位到新文件
+        // Jump to the matching knowledge page and focus the new file
         NotificationCenter.default.post(
             name: .eurekaRevealKnowledge, object: path, userInfo: ["kind": kind])
         onDone(kind == "skill"
-            ? "已升级为 \(target.displayName) 技能"
-            : "已追加到 \(target.displayName) 指令文件 \(URL(fileURLWithPath: path).lastPathComponent)")
+            ? L10n.format("Upgraded to a %@ skill", zhHans: "已升级为 %@ 技能", String(target.displayName))
+            : L10n.format("Appended to the %@ instructions file %@", zhHans: "已追加到 %@ 指令文件 %@", String(target.displayName), String(URL(fileURLWithPath: path).lastPathComponent)))
     }
 }

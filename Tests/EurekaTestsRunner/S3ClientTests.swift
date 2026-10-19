@@ -2,10 +2,10 @@ import EurekaStore
 import EurekaSync
 import Foundation
 
-/// 可编程 mock 传输：捕获请求、按 URL 匹配返回
+/// Programmable mock transport: captures requests and answers by URL match
 final class MockTransport: HTTPTransport {
     var requests: [(request: URLRequest, body: Data?)] = []
-    /// 按 url path 片段匹配的应答；默认 200 空体
+    /// Responses matched by URL path fragment; defaults to 200 with an empty body
     var handler: (URLRequest, Data?) throws -> HTTPReply = { _, _ in
         HTTPReply(status: 200, body: Data(), headers: ["etag": "\"mock-etag\""])
     }
@@ -36,9 +36,9 @@ func s3ClientTests(_ t: TestRunner) {
             "storage.googleapis.com")
         let custom = StorageProvider.custom.endpointHost(region: "r")
         try expect(custom == nil, "custom 应由用户自填")
-        // 首期只开放 COS + 自定义
+        // Only COS + custom are enabled in the first phase
         try expectEqual(StorageProvider.selectable, [.tencentCOS, .custom])
-        // rawValue 稳定（持久化 token）
+        // rawValue is stable (persisted token)
         try expectEqual(StorageProvider(rawValue: "tencent-cos"), .tencentCOS)
     }
 
@@ -96,7 +96,7 @@ func s3ClientTests(_ t: TestRunner) {
         }
     }
 
-    // MARK: - SyncEngine（真实临时目录 + 临时库 + mock 传输）
+    // MARK: - SyncEngine (real temp dir + temp DB + mock transport)
 
     func makeEngineFixture(
         transport: MockTransport, limits: SyncEngine.Limits = SyncEngine.Limits()
@@ -157,13 +157,13 @@ func s3ClientTests(_ t: TestRunner) {
         }
         var limits = SyncEngine.Limits()
         limits.maxRetries = 2
-        limits.retryBackoffSeconds = 0.01  // 测试快速退避
+        limits.retryBackoffSeconds = 0.01  // fast backoff for tests
         let fixture = try makeEngineFixture(transport: transport, limits: limits)
         defer { try? FileManager.default.removeItem(at: fixture.base) }
         let report = fixture.engine.runCycle()
         try expectEqual(report.failed, 0)
-        try expectEqual(report.uploaded, 2)  // 首文件重试 2 次后成功，第二个直接成功
-        try expectEqual(calls, 4)            // 2 失败 + 2 成功
+        try expectEqual(report.uploaded, 2)  // The first file succeeds after 2 retries; the second succeeds directly
+        try expectEqual(calls, 4)            // 2 failures + 2 successes
     }
 
     t.test("重试：4xx 不重试（权限/键错误重试无意义）") {
@@ -204,10 +204,11 @@ func s3ClientTests(_ t: TestRunner) {
         try expectEqual(first.uploaded, 2)
         try expectEqual(first.failed, 0)
         try expectEqual(try store.syncState.allEntries().count, 2)
-        // 上传文件明细：数量与 uploaded 一致，含文件名
+        // Uploaded file details: count matches uploaded and includes file names
         try expectEqual(first.uploadedFiles.count, 2)
         try expect(first.uploadedFiles.allSatisfy { !$0.name.isEmpty && $0.size >= 0 })
-        // 进度：首帧 totalFiles=2 completed=0，末帧 completed=2、字节齐平
+        // Progress: first frame totalFiles=2 completed=0; last frame completed=2 with bytes
+        // matching
         try expect(!snapshots.isEmpty, "应有进度回调")
         try expectEqual(snapshots.first?.totalFiles, 2)
         try expectEqual(snapshots.first?.completedFiles, 0)
@@ -265,7 +266,7 @@ func s3ClientTests(_ t: TestRunner) {
 }
 
 private extension URL {
-    /// 建父目录后返回自身（测试便捷）
+    /// Creates the parent directory, then returns self (test convenience)
     func createParent() throws -> URL {
         try FileManager.default.createDirectory(
             at: deletingLastPathComponent(), withIntermediateDirectories: true)

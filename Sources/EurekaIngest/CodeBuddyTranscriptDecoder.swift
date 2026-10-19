@@ -1,24 +1,25 @@
 import Foundation
 import EurekaKit
 
-/// 解析 CodeBuddy CLI 会话行（`projects/<cwd-slug>/<sessionId>.jsonl`，JSONL 事件日志）。
-/// schema 已对真实会话核验（2026-07，~/.codebuddy）：每行带 id/parentId/timestamp(epoch ms)/
-/// sessionId/cwd，`type` 取值：
-/// - `message` role=user：`content:[{type:"input_text",text}]`；
-///   `providerData.skipRun:true` 是本地命令回显等元行，不算真实提问
-/// - `message` role=assistant：`status:"completed"`，`content:[{type:"output_text",text}]`
-/// - `function_call`：`{callId, name, arguments:<JSON 字符串>}`，token 在
-///   `providerData.usage` / `message.usage`（实勘为 camelCase：inputTokens/outputTokens/
-///   inputTokensDetails[0].cached_tokens；snake_case input_tokens 等作兜底），
-///   model 在 `providerData.model`
-/// - `function_call_result` / `reasoning` / `file-history-snapshot`：不进事件流
-/// - `summary`：`{summary:"<首条用户 prompt>"}`（兜底标题）
-/// - `ai-title`：`{aiTitle:"..."}`（AI 生成的会话标题）
-/// 未知类型一律忽略不抛错。session id / cwd 由调用方从路径与行字段带入。
+/// Parses CodeBuddy CLI session lines (`projects/<cwd-slug>/<sessionId>.jsonl`, a JSONL event log).
+/// Schema verified against real sessions (2026-07, ~/.codebuddy): every line carries
+/// id/parentId/timestamp(epoch ms)/sessionId/cwd, and `type` is one of:
+/// - `message` role=user: `content:[{type:"input_text",text}]`; `providerData.skipRun:true` marks
+///   meta lines such as local command echoes, not real prompts
+/// - `message` role=assistant: `status:"completed"`, `content:[{type:"output_text",text}]`
+/// - `function_call`: `{callId, name, arguments:<JSON string>}`; tokens live in
+///   `providerData.usage` / `message.usage` (observed as camelCase: inputTokens/outputTokens/
+///   inputTokensDetails[0].cached_tokens; snake_case input_tokens etc. as fallback), model in
+///   `providerData.model`
+/// - `function_call_result` / `reasoning` / `file-history-snapshot`: not part of the event stream
+/// - `summary`: `{summary:"<first user prompt>"}` (fallback title)
+/// - `ai-title`: `{aiTitle:"..."}` (AI-generated session title)
+/// Unknown types are ignored, never thrown. The caller supplies session id / cwd from the path and
+/// line fields.
 public enum CodeBuddyTranscriptDecoder {
-    // MARK: - 生命周期解码
+    // MARK: - Lifecycle decoding
 
-    /// 单行解码 → 领域事件（0 或 1 个）
+    /// Decodes one line → domain event (0 or 1)
     public static func decode(
         line: Data, sessionId: String, cwd: String?
     ) -> TaskEvent? {
@@ -29,7 +30,8 @@ public enum CodeBuddyTranscriptDecoder {
         return decode(root: root, sessionId: sessionId, cwd: cwd)
     }
 
-    /// 已解析行的解码（tailer 单次 JSON 解析后与旁路提取共用）
+    /// Decodes an already-parsed line (shared with side-channel extraction after the tailer's
+    /// single JSON parse)
     public static func decode(
         root: [String: Any], sessionId: String, cwd: String?
     ) -> TaskEvent? {
@@ -46,7 +48,7 @@ public enum CodeBuddyTranscriptDecoder {
         case "message":
             switch root["role"] as? String {
             case "user":
-                // skipRun = 本地命令回显/系统注入的元行，不是真实新一轮
+                // skipRun = a local command echo / system-injected meta line, not a real new turn
                 if (root["providerData"] as? [String: Any])?["skipRun"] as? Bool == true {
                     return nil
                 }
@@ -63,20 +65,20 @@ public enum CodeBuddyTranscriptDecoder {
             return event(.activity(tool: root["name"] as? String))
 
         case "ai-title", "summary":
-            // titleUpdate 只改已有任务的标题（TaskStore 不为它建任务），
-            // 对未知会话安全，不会制造幻影任务
+            // titleUpdate only retitles an existing task (TaskStore never creates one for it),
+            // so it is safe for unknown sessions and never creates phantom tasks
             guard let title = title(root) else { return nil }
             return event(.titleUpdate(title: title))
 
         default:
-            // reasoning / function_call_result / file-history-snapshot / 未知：忽略
+            // reasoning / function_call_result / file-history-snapshot / unknown: ignored
             return nil
         }
     }
 
-    // MARK: - 旁路提取（tailer/scanner/indexer 复用；全部容缺）
+    // MARK: - Side-channel extraction (reused by tailer/scanner/indexer; all tolerate missing fields)
 
-    /// message+user 的正文（content input_text 拼接）；skipRun/空正文返回 nil
+    /// Body of a message+user line (concatenated content input_text); nil for skipRun/empty body
     public static func userText(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "message",
               root["role"] as? String == "user",
@@ -90,7 +92,7 @@ public enum CodeBuddyTranscriptDecoder {
         return text.isEmpty ? nil : text
     }
 
-    /// message+assistant 的正文（content output_text 拼接）；其它返回 nil
+    /// Body of a message+assistant line (concatenated content output_text); nil otherwise
     public static func assistantText(_ root: [String: Any]) -> String? {
         guard root["type"] as? String == "message",
               root["role"] as? String == "assistant",
@@ -103,7 +105,7 @@ public enum CodeBuddyTranscriptDecoder {
         return text.isEmpty ? nil : text
     }
 
-    /// ai-title / summary 行的标题文本；其它类型返回 nil
+    /// Title text of an ai-title / summary line; nil for other types
     public static func title(_ root: [String: Any]) -> String? {
         switch root["type"] as? String {
         case "ai-title":
@@ -115,7 +117,7 @@ public enum CodeBuddyTranscriptDecoder {
         }
     }
 
-    /// function_call 行的 (工具名, 解析后的 arguments)；arguments 是 JSON 字符串
+    /// (tool name, parsed arguments) of a function_call line; arguments is a JSON string
     public static func toolCall(_ root: [String: Any]) -> (name: String, args: [String: Any])? {
         guard root["type"] as? String == "function_call",
               let name = root["name"] as? String, !name.isEmpty
@@ -128,9 +130,10 @@ public enum CodeBuddyTranscriptDecoder {
         return (name, args)
     }
 
-    /// function_call 行携带的归一化用量；无 usage 或全零返回 nil。
-    /// 实勘主格式是 camelCase（inputTokens 含缓存部分 → 口径 input = inputTokens − cached、
-    /// cacheRead = cached）；snake_case（input_tokens 等，Claude 式不含缓存 → 不减）兜底。
+    /// Normalized usage carried by a function_call line; nil when there is no usage or it is all
+    /// zero. The observed main format is camelCase (inputTokens includes the cached part → input =
+    /// inputTokens − cached, cacheRead = cached); snake_case (input_tokens etc., Claude-style
+    /// excluding cache → no subtraction) is the fallback.
     public static func usage(_ root: [String: Any]) -> (model: String?, usage: Usage)? {
         guard root["type"] as? String == "function_call" else { return nil }
         let providerData = root["providerData"] as? [String: Any]
@@ -148,14 +151,15 @@ public enum CodeBuddyTranscriptDecoder {
 
         let rawInput = int(dict, ["inputTokens", "input_tokens"])
         let output = int(dict, ["outputTokens", "output_tokens"])
-        // camelCase：缓存读在 inputTokensDetails[0].cached_tokens；
-        // snake_case：cache_read_input_tokens / cached_tokens 平铺
+        // camelCase: cache reads in inputTokensDetails[0].cached_tokens;
+        // snake_case: flat cache_read_input_tokens / cached_tokens
         var cached = int(dict, ["cache_read_input_tokens", "cached_tokens"])
         if cached == 0,
            let details = dict["inputTokensDetails"] as? [[String: Any]] {
             cached = details.reduce(0) { $0 + int($1, ["cached_tokens"]) }
         }
-        // camelCase 的 inputTokens 含缓存读（OpenAI 口径）；snake_case 不含（Claude 口径）
+        // camelCase inputTokens includes cache reads (OpenAI convention); snake_case does not
+        // (Claude convention)
         let includesCache = dict["inputTokens"] != nil
         let input = includesCache ? max(0, rawInput - cached) : rawInput
         let usage = Usage(input: input, output: output, cacheRead: cached)
@@ -163,7 +167,7 @@ public enum CodeBuddyTranscriptDecoder {
         return (model, usage)
     }
 
-    /// 归一化 token 用量（CodeBuddy 无 cache creation 概念）
+    /// Normalized token usage (CodeBuddy has no cache-creation concept)
     public struct Usage: Equatable {
         public var input: Int
         public var output: Int
@@ -171,7 +175,7 @@ public enum CodeBuddyTranscriptDecoder {
         public var total: Int { input + output + cacheRead }
     }
 
-    /// 行时间：`timestamp` 的 epoch 毫秒（>1e12 判毫秒，否则按秒）
+    /// Line time: `timestamp` in epoch milliseconds (>1e12 means milliseconds, otherwise seconds)
     public static func timestamp(_ root: [String: Any]) -> Date? {
         if let number = root["timestamp"] as? NSNumber {
             let value = number.doubleValue

@@ -1,9 +1,9 @@
 import Foundation
 import EurekaKit
 
-/// 解析 Codex rollout 单行 JSON（`{timestamp, type, payload}`）。
-/// rollout 是 Codex 的主事件源：task_started/task_complete/turn_aborted/error 齐全，
-/// 外部 notify 只有 agent-turn-complete（仅作低延迟冗余）。
+/// Parses a single Codex rollout JSON line (`{timestamp, type, payload}`). The rollout is Codex's
+/// main event source: task_started/task_complete/turn_aborted/error are all present, while external
+/// notify only has agent-turn-complete (kept just as low-latency redundancy).
 public enum CodexRolloutDecoder {
     public enum Decoded {
         case sessionMeta(id: String, cwd: String?, startedAt: Date?)
@@ -12,7 +12,7 @@ public enum CodexRolloutDecoder {
         case tokenUsage(CodexTokenTotals)
     }
 
-    /// token_count 的累计值（M5 用相邻差值法记账）
+    /// Cumulative token_count values (M5 bills by differencing adjacent values)
     public struct CodexTokenTotals: Equatable, Sendable {
         public var timestamp: Date
         public var inputTokens: Int
@@ -33,7 +33,7 @@ public enum CodexRolloutDecoder {
         return isoWithFraction.date(from: string) ?? isoPlain.date(from: string)
     }
 
-    /// 单行解码；sessionId/cwd 是该文件 session_meta 的上下文
+    /// Decode one line; sessionId/cwd are the context from this file's session_meta
     public static func decode(
         line: Data, sessionId: String, cwd: String?
     ) -> [Decoded] {
@@ -78,7 +78,8 @@ public enum CodexRolloutDecoder {
 
         switch payload["type"] as? String {
         case "task_started":
-            // started_at 是秒级 epoch，比行时间戳更准（落盘可能滞后）
+            // started_at is a second-precision epoch, more accurate than the line timestamp (the
+            // write may lag)
             let startedAt = (payload["started_at"] as? Double).map {
                 Date(timeIntervalSince1970: $0)
             }
@@ -89,7 +90,7 @@ public enum CodexRolloutDecoder {
             )]
 
         case "user_message":
-            // 出现在 task_started 之后，借 taskStarted 的 upsert 语义补标题
+            // Appears after task_started; fill in the title via taskStarted's upsert semantics
             guard
                 let message = payload["message"] as? String,
                 let title = summarizeTitle(message)
@@ -97,7 +98,8 @@ public enum CodexRolloutDecoder {
             return [task(.taskStarted(title: title))]
 
         case "thread_name_updated":
-            // Codex app-server/桌面端生成或修改的正式会话名，优先级高于 prompt 摘要。
+            // The formal session name generated or edited by the Codex app-server/desktop app;
+            // takes priority over the prompt summary.
             guard let rawName = payload["thread_name"] as? String else { return [] }
             let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { return [] }
@@ -120,7 +122,7 @@ public enum CodexRolloutDecoder {
 
         case "turn_aborted":
             return [task(
-                .taskFinished(outcome: .interrupted, title: nil, detail: "已中断"),
+                .taskFinished(outcome: .interrupted, title: nil, detail: L10n.text("Interrupted", zhHans: "已中断")),
                 turnId: payload["turn_id"] as? String
             )]
 
@@ -142,7 +144,8 @@ public enum CodexRolloutDecoder {
                         reasoningOutputTokens: totals["reasoning_output_tokens"] as? Int ?? 0
                     )))
                 }
-                // 上下文占用：最近一次请求的 token 总量 ≈ 当前会话上下文大小
+                // Context usage: the token total of the latest request ≈ current session context
+                // size
                 if let last = info["last_token_usage"] as? [String: Any],
                    let lastTotal = last["total_tokens"] as? Int,
                    let window = info["model_context_window"] as? Int, window > 0 {

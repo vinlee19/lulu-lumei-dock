@@ -1,16 +1,17 @@
 import Foundation
 import EurekaKit
 
-/// 增量 tail Codex rollout 文件（~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl）。
-/// resume 的旧会话在创建日目录原地追加（mtime 刷新、不新建当天目录），所以每轮
-/// 整树枚举日期目录、只 tail mtime 落入 recentWindow 的文件（已跟踪的始终续 tail）。
-/// 按 offset 续读、半行不消费。
-/// 新发现的文件流式找出最后的生命周期状态，不向 UI 重放中间历史。
+/// Incrementally tails Codex rollout files (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl).
+/// A resumed old session appends in place under its creation-date directory (mtime refreshes,
+/// no new dated directory), so each tick enumerates the whole date tree and only tails files
+/// whose mtime falls inside recentWindow (tracked files are always tailed). Reads resume from
+/// the offset and leave a trailing partial line unconsumed. Newly discovered files are streamed
+/// to find the last lifecycle state without replaying intermediate history to the UI.
 public final class CodexRolloutTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
     public typealias RateLimitHandler = (RateLimitSnapshot) -> Void
 
-    /// 默认 ~/.codex/sessions，可用 EUREKA_CODEX_SESSIONS 覆盖（测试用）
+    /// Defaults to ~/.codex/sessions; override with EUREKA_CODEX_SESSIONS (for tests)
     public static func defaultSessionsRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
@@ -39,7 +40,7 @@ public final class CodexRolloutTailer {
     private var contexts: [String: FileContext] = [:]
     private var threadNames: [String: String] = [:]
     private var loadedThreadNames = false
-    /// session_index.jsonl 的 mtime+size 指纹；未变化则跳过整文件重解析
+    /// mtime+size fingerprint of session_index.jsonl; skip re-parsing the whole file if unchanged
     private var sessionIndexFingerprint: (mtime: TimeInterval, size: UInt64)?
 
     public init(
@@ -64,7 +65,8 @@ public final class CodexRolloutTailer {
     public func start(pollInterval: TimeInterval = 2) {
         HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // leeway 让系统合并唤醒省电；必须小于轮询间隔（1s 档用 100ms）
+        // leeway lets the system coalesce wakeups to save power; must stay below the poll interval
+        // (100ms for the 1s tier)
         let leeway: DispatchTimeInterval = pollInterval >= 2
             ? .milliseconds(500) : .milliseconds(100)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval, leeway: leeway)
@@ -78,7 +80,7 @@ public final class CodexRolloutTailer {
         timer = nil
     }
 
-    /// 公开供测试与启动时同步调用
+    /// Public for tests and for the synchronous call at launch
     public func scanOnce() {
         HealthRegistry.shared.beat(Self.healthName)
         refreshThreadNames()
@@ -87,8 +89,9 @@ public final class CodexRolloutTailer {
         }
     }
 
-    /// session_index.jsonl 是正式线程名的 append-only 索引；变化时给活跃任务补 titleUpdate。
-    /// 每秒轮询时先比对 mtime+size 指纹（廉价 stat），只有真正变化才重读整个文件。
+    /// session_index.jsonl is the append-only index of official thread names; on change, emit
+    /// titleUpdate for active tasks. The per-second poll compares the mtime+size fingerprint first
+    /// (a cheap stat) and only rereads the whole file when it really changed.
     private func refreshThreadNames() {
         let attrs = try? FileManager.default.attributesOfItem(atPath: sessionIndexURL.path)
         let fingerprint = attrs.flatMap { dict -> (mtime: TimeInterval, size: UInt64)? in
@@ -97,7 +100,7 @@ public final class CodexRolloutTailer {
             else { return nil }
             return (mtime, size)
         }
-        // 指纹一致（含文件持续不存在）则无需重解析
+        // Same fingerprint (including a file that stays missing) → no re-parse needed
         if loadedThreadNames, fingerprint?.mtime == sessionIndexFingerprint?.mtime,
            fingerprint?.size == sessionIndexFingerprint?.size {
             return
@@ -119,12 +122,13 @@ public final class CodexRolloutTailer {
         loadedThreadNames = true
     }
 
-    // MARK: - 文件发现
+    // MARK: - File discovery
 
-    /// 整树枚举全部日期目录的 rollout 文件，但只 tail mtime 落入 recentWindow 的。
-    /// resume 的旧会话在创建日目录原地追加、mtime 随之刷新，所以 mtime 过滤不会漏掉
-    /// 重新活跃的会话；已在 offsets 跟踪的文件不受窗口限制，始终续 tail。
-    /// 冷历史每轮只付出目录列举 + stat 的成本。
+    /// Enumerates rollout files across every date directory but only tails those whose mtime
+    /// falls inside recentWindow. A resumed old session appends in place under its creation-date
+    /// directory and refreshes its mtime, so the mtime filter never misses a re-activated session;
+    /// files already tracked in offsets ignore the window and are always tailed. Cold history only
+    /// costs a directory listing + stat per tick.
     private func recentRolloutFiles(now: Date = Date()) -> [URL] {
         CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot).compactMap { entry in
             if offsets[entry.url.path] != nil { return entry.url }
@@ -134,7 +138,7 @@ public final class CodexRolloutTailer {
         }
     }
 
-    // MARK: - 增量读取
+    // MARK: - Incremental reads
 
     private func tail(_ url: URL) {
         let path = url.path
@@ -144,7 +148,7 @@ public final class CodexRolloutTailer {
             initialScan(url, size: size)
             return
         }
-        if size < offset { offset = 0 }  // 文件被截断/重写
+        if size < offset { offset = 0 }  // file truncated/rewritten
         guard size > offset else { return }
 
         guard let handle = FileHandle(forReadingAtPath: path) else { return }
@@ -157,7 +161,8 @@ public final class CodexRolloutTailer {
         offsets[path] = offset + UInt64(consumed)
     }
 
-    /// 处理完整行（最后的半行不消费，等下次轮询），返回消费的字节数
+    /// Processes complete lines (the trailing partial line is left for the next poll); returns
+    /// bytes consumed
     private func processLines(_ data: Data, context: FileContext) -> Int {
         guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return 0 }
         let complete = data[data.startIndex...lastNewline]
@@ -180,7 +185,7 @@ public final class CodexRolloutTailer {
         for item in decoded {
             switch item {
             case .sessionMeta:
-                break  // context 已在发现文件时建立
+                break  // context was built when the file was discovered
             case .event(var event):
                 event.sessionStartedAt = context.sessionStartedAt
                 switch event.kind {
@@ -203,16 +208,18 @@ public final class CodexRolloutTailer {
             case .rateLimits(let snapshot):
                 rateLimitHandler?(snapshot)
             case .tokenUsage:
-                break  // M5 用量引擎消费
+                break  // consumed by the M5 usage engine
             }
         }
     }
 
-    /// 新发现的文件：读完整首行建上下文，再流式恢复"最后状态"——
-    /// - 仍在进行中（最后 task_started 晚于最后 task_complete）：补发 running 事件
-    /// - 已完成（最后 task_complete 晚于最后 task_started）：补发 finished 事件
-    ///   让最近完成的任务能正常出卡（超过 staleThreshold 则仅写历史，不弹岛）
-    /// 不使用固定尾窗：长 turn 的最近 prompt 很容易早于尾部 64KB。
+    /// Newly discovered file: read the full first line to build context, then stream through to
+    /// recover the "last state":
+    /// - still in progress (last task_started later than last task_complete): emit a running event
+    /// - finished (last task_complete later than last task_started): emit a finished event so a
+    ///   recently finished task still gets its card (past staleThreshold it only goes to history,
+    ///   no island)
+    /// No fixed tail window: a long turn's latest prompt can easily sit before the last 64KB.
     private func initialScan(_ url: URL, size: UInt64) {
         let path = url.path
         let ctx = context(for: url)
@@ -247,7 +254,7 @@ public final class CodexRolloutTailer {
             }
             return true
         }
-        // 半行不消费；下次追加完成后从该行开头重读。
+        // Leave the partial line unconsumed; reread from its start once the append completes.
         offsets[path] = min(consumed, size)
 
         if let snapshot = lastRateLimits {
@@ -258,9 +265,10 @@ public final class CodexRolloutTailer {
 
         if let started = lastStartedEvent {
             if let finished = lastFinishedEvent, finished.timestamp >= started.timestamp {
-                // 任务已结束：以 sessionStarted 直接注册为空闲（通知卡由 notify 通道负责）
-                // 避免发 taskFinished：store 里没有 existing task → idle 无法建立；
-                // 也避免重复卡或与 dedup 窗口产生竞态。
+                // Task already finished: register it as idle via sessionStarted (the notify channel
+                // owns the notice card). Avoid taskFinished: with no existing task in the store,
+                // idle cannot be established; it also avoids duplicate cards or a race with the
+                // dedup window.
                 var ev = started
                 ev.kind = .sessionStarted
                 ev.sessionStartedAt = ctx.sessionStartedAt
@@ -271,14 +279,16 @@ public final class CodexRolloutTailer {
                     handler(titleEv, false)
                 }
             } else {
-                // 仍在进行中：补发 running（不按 stale 抑制，timestamp 用真实开始时间）
+                // Still in progress: emit running (not suppressed as stale; timestamp is the real
+                // start time)
                 var event = started
                 event.sessionStartedAt = ctx.sessionStartedAt
                 if let title = resolvedTitle { event.kind = .taskStarted(title: title) }
                 handler(event, false)
             }
         } else if let finished = lastFinishedEvent {
-            // 尾窗未含 task_started（超长会话），但任务已结束：同样注册空闲
+            // Tail window has no task_started (very long session) but the task has finished:
+            // register idle too
             var ev = finished
             ev.kind = .sessionStarted
             ev.sessionStartedAt = ctx.sessionStartedAt
@@ -296,7 +306,8 @@ public final class CodexRolloutTailer {
         if let cached = contexts[path] { return cached }
 
         var ctx = FileContext(sessionId: sessionIdFromFilename(url), cwd: nil, sessionStartedAt: nil)
-        // 首行应是 session_meta；当前 Codex 会把 instructions 放在同一行，常超过 16KB。
+        // The first line should be session_meta; current Codex puts instructions on the same line,
+        // often over 16KB.
         CodexJSONLReader.forEachCompleteLine(url) { line in
             let decoded = CodexRolloutDecoder.decode(
                 line: line, sessionId: ctx.sessionId, cwd: nil)
@@ -309,7 +320,7 @@ public final class CodexRolloutTailer {
         return ctx
     }
 
-    /// rollout-2026-06-08T23-36-02-<uuid>.jsonl → uuid 兜底
+    /// rollout-2026-06-08T23-36-02-<uuid>.jsonl → uuid as fallback
     private func sessionIdFromFilename(_ url: URL) -> String {
         let stem = url.deletingPathExtension().lastPathComponent
         let parts = stem.split(separator: "-")

@@ -1,9 +1,10 @@
 import Foundation
 import EurekaKit
 
-/// Kimi 会话索引：扫 `sessions/<wd_名_12hex>/<session_uuid>/state.json` → AgentSessionInfo。
-/// 不依赖 session_index.jsonl（append-only、可能引用已删会话；元数据反正都在 state.json）；
-/// 目录名 wd_… 不可反解 cwd —— workDir 一律取 state.json。
+/// Kimi session index: scans `sessions/<wd_name_12hex>/<session_uuid>/state.json` →
+/// AgentSessionInfo. Does not rely on session_index.jsonl (append-only, may reference deleted
+/// sessions; the metadata is all in state.json anyway); the wd_… directory name cannot be reversed
+/// into a cwd — workDir always comes from state.json.
 public enum KimiSessionIndexer {
     public static func index(
         sessionsRoot: URL = KimiPaths.sessionsRoot(),
@@ -39,18 +40,22 @@ public enum KimiSessionIndexer {
         let updatedAt = (root["updatedAt"] as? String).flatMap(KimiWireDecoder.parseISO)
         let rawTitle = (root["title"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // 默认标题 "New Session" 不当名字（Kimi 首轮后才自动生成真标题）
+        // The default title "New Session" is not a name (Kimi only generates a real title after the
+        // first turn)
         let title: String? = (rawTitle?.isEmpty == false && rawTitle != "New Session")
             ? rawTitle : nil
 
-        // 0 轮次会话（开了就关、默认标题、5 分钟内无更新）不进列表——本机观测的空会话正是此特征；
-        // 若真实会话证伪此启发（首轮不更新 updatedAt / 不生成标题），删掉这个过滤即可，最坏多一行。
+        // Zero-turn sessions (opened then closed, default title, no update within 5 minutes) stay
+        // out of the list — exactly the trait of the empty sessions observed locally. If real
+        // sessions disprove this heuristic (first turn doesn't update updatedAt / generate a
+        // title), just drop this filter; worst case is one extra row.
         if title == nil, let created = createdAt,
            (updatedAt ?? created).timeIntervalSince(created) < 300 {
             return nil
         }
 
-        // size = 所有 agent（main + 子代理）的 wire.jsonl 之和；lastActive 回退 wire mtime
+        // size = sum of every agent's (main + subagents) wire.jsonl; lastActive falls back to the
+        // wire mtime
         let agentsDir = dir.appendingPathComponent("agents", isDirectory: true)
         var totalSize: UInt64 = 0
         var newestWireMtime: Date?

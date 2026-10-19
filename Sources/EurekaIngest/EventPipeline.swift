@@ -1,11 +1,12 @@
 import Foundation
 import EurekaKit
 
-/// 事件管道：spool（Claude hooks + Codex notify）与 Codex rollout tailer 两路汇流，
-/// 统一做去重与富化（错误嗅探/ai-title），串行后交给单一 handler。
+/// Event pipeline: merges the spool (Claude hooks + Codex notify) and the Codex rollout tailer,
+/// applies dedup and enrichment (error sniffing / ai-title), then serializes into a single handler.
 public final class EventPipeline {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
-    /// 审计旁路：Claude PostToolUse hook 解码出的操作事件（不经 TaskStore）
+    /// Audit side channel: operation events decoded from Claude PostToolUse hooks (bypass
+    /// TaskStore)
     public typealias AuditHandler = (AuditEvent, _ isStale: Bool) -> Void
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.pipeline")
@@ -28,7 +29,7 @@ public final class EventPipeline {
     private var cursorTranscriptTailer: CursorTranscriptTailer?
     private var zcodeTailer: ZcodeRolloutTailer?
 
-    /// 最近一次 Codex 限额快照（M6 面板消费）
+    /// Latest Codex rate-limit snapshot (consumed by the M6 panel)
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
 
     private let claudeProjectsRoot: URL
@@ -62,8 +63,9 @@ public final class EventPipeline {
         let resolvedSessionIndexURL = codexSessionIndexURL
             ?? CodexThreadNameIndex.resolvedURL(for: codexSessionsRoot)
         self.codexThreadNames = CodexThreadNameIndex.load(resolvedSessionIndexURL)
-        // 只审计 hook 通道的 PostToolUse（inject 也走这两个通道）。
-        // Trae CN 的载荷与 Claude 同形，同一个解码器换 source 即可。
+        // Audit only PostToolUse from the hook channels (inject also uses these two channels). Trae
+        // CN's payload has the same shape as Claude's, so the same decoder works with a different
+        // source.
         let hookAuditSources: [String: AgentSource] = [
             "claude-hook": .claude, "trae-hook": .trae,
         ]
@@ -90,54 +92,56 @@ public final class EventPipeline {
                 self?.ingest(event, isStale: isStale)
             }
         )
-        // opencode 无 hook/notify，尾随 opencode.db event 表做实时
+        // opencode has no hook/notify; tail the opencode.db event table for live updates
         opencodeTailer = OpencodeEventTailer(dbPath: opencodeDbPath) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // grok 无 hook/notify，尾随 ~/.grok/sessions/*/*/events.jsonl 做实时
+        // grok has no hook/notify; tail ~/.grok/sessions/*/*/events.jsonl for live updates
         grokTailer = GrokRolloutTailer(sessionsRoot: grokSessionsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // antigravity 内容为 protobuf，只按 conversations/<uuid>.db 写入判 running/idle
+        // antigravity content is protobuf; judge running/idle only from writes to
+        // conversations/<uuid>.db
         antigravityTailer = AntigravityActivityTailer(
             conversationsRoot: antigravityConversationsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // kimi 无 hook/notify，尾随 sessions/*/*/agents/main/wire.jsonl 做实时
+        // kimi has no hook/notify; tail sessions/*/*/agents/main/wire.jsonl for live updates
         kimiTailer = KimiWireTailer(sessionsRoot: kimiSessionsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // gemini 无 hook/notify，尾随 tmp/*/chats/session-*.jsonl 做实时
+        // gemini has no hook/notify; tail tmp/*/chats/session-*.jsonl for live updates
         geminiTailer = GeminiChatTailer(
             tmpRoot: geminiTmpRoot, projectsFile: geminiProjectsFile) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // qwen 无 hook/notify，尾随 projects/*/chats/*.jsonl 做实时
+        // qwen has no hook/notify; tail projects/*/chats/*.jsonl for live updates
         qwenTailer = QwenChatTailer(projectsRoot: qwenProjectsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // hermes 的 shell hooks 会同步阻塞 agent 线程且需交互授权 → 轮询 state.db（含各 profile）。
-        // 代价：拿不到「等待授权」态（sessions 表没有该状态），故 Hermes 不出 permission 卡。
+        // hermes shell hooks block the agent thread synchronously and need interactive approval →
+        // poll state.db (all profiles). Cost: no "awaiting approval" state (the sessions table
+        // lacks it), so Hermes shows no permission card.
         hermesTailer = HermesStateTailer { [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // codebuddy 无 hook/notify，尾随 projects/<cwd-slug>/*.jsonl 做实时
+        // codebuddy has no hook/notify; tail projects/<cwd-slug>/*.jsonl for live updates
         codeBuddyTailer = CodeBuddyChatTailer(projectsRoot: codeBuddyProjectsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // qoder 无 hook/notify，尾随 projects/<slug>/*.jsonl 做实时
+        // qoder has no hook/notify; tail projects/<slug>/*.jsonl for live updates
         qoderTailer = QoderChatTailer(projectsRoot: qoderProjectsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // cursor 是 IDE，没有 hook/notify 也没有 transcript 文件 → 只读轮询 state.vscdb
+        // cursor is an IDE with no hook/notify and no transcript file → poll state.vscdb read-only
         cursorTailer = CursorStateTailer(
             dbPath: cursorStateDB, workspaceStorageRoot: cursorWorkspaceStorageRoot,
             transcriptOwned: { now in
@@ -148,15 +152,16 @@ public final class EventPipeline {
         ) { [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // cursor 的第二条通道：agent-transcripts 有显式 turn_ended，收尾比库侧准。
-        // 有转录的会话，生命周期由它独占（库侧上面那个闭包负责让位），两边 sessionId
-        // 都是 composerId，不会出两张卡。
+        // cursor's second channel: agent-transcripts has an explicit turn_ended, so it closes turns
+        // more accurately than the DB. For sessions with a transcript it owns the lifecycle
+        // exclusively (the DB-side closure above yields); both sides use composerId as sessionId,
+        // so no duplicate cards.
         cursorTranscriptTailer = CursorTranscriptTailer(
             cliHome: cursorCLIHome, workspaceStorageRoot: cursorWorkspaceStorageRoot
         ) { [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        // zcode 无 hook/notify，尾随 cli/rollout/model-io-sess_*.jsonl 做实时
+        // zcode has no hook/notify; tail cli/rollout/model-io-sess_*.jsonl for live updates
         zcodeTailer = ZcodeRolloutTailer(
             rolloutRoot: zcodeRolloutRoot, dbPath: zcodeDbPath,
             modelConfigURL: ZcodePaths.modelConfig()) {
@@ -180,8 +185,9 @@ public final class EventPipeline {
         cursorTailer?.start(pollInterval: 2)
         cursorTranscriptTailer?.start(pollInterval: 2)
         zcodeTailer?.start(pollInterval: 2)
-        // Claude transcript 常驻监视（含启动首扫现场重建）：
-        // 装 hooks 前启动的老会话不发任何 hook 事件，这是它们唯一的可见通道
+        // Always-on Claude transcript watch (including state rebuild on the launch scan): old
+        // sessions started before hooks were installed emit no hook events, so this is their only
+        // visible channel
         let watcher = ClaudeTranscriptWatcher(projectsRoot: claudeProjectsRoot) {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
@@ -208,9 +214,10 @@ public final class EventPipeline {
         claudeWatcher?.stop()
     }
 
-    /// Claude 上下文估算的节流（每会话最多 20s 一次，读文件尾有成本）
+    /// Throttle for Claude context estimation (at most once per 20s per session; reading the file
+    /// tail has a cost)
     private var lastContextEstimate: [String: Date] = [:]
-    /// 会话首启时间缓存（每会话只读一次文件头）
+    /// Cache of session first-start time (each session's file head is read only once)
     private var sessionFirstAt: [String: Date] = [:]
 
     private func ingest(_ event: TaskEvent, isStale: Bool) {
@@ -226,7 +233,7 @@ public final class EventPipeline {
     private func enrich(_ event: TaskEvent) -> [TaskEvent] {
         var events = [event]
 
-        // Codex 正式 thread_name 的优先级高于 prompt 摘要；notify 与 rollout 共用此处。
+        // Codex's official thread_name outranks the prompt summary; shared by notify and rollout.
         if event.source == .codex {
             var enriched = event
             switch event.kind {
@@ -247,7 +254,8 @@ public final class EventPipeline {
             events[0] = enriched
         }
 
-        // 会话首启时间：所有带 transcript 的 Claude 事件统一补上（头读一次，缓存）
+        // Session first-start time: filled in for every Claude event with a transcript (head read
+        // once, cached)
         if event.source == .claude, event.sessionStartedAt == nil,
            let transcriptPath = event.transcriptPath {
             let firstAt: Date?
@@ -257,7 +265,7 @@ public final class EventPipeline {
                 firstAt = ClaudeSessionFirstTimestamp.read(transcriptPath: transcriptPath)
                 if let firstAt { sessionFirstAt[event.sessionId] = firstAt }
                 if sessionFirstAt.count > 128 {
-                    sessionFirstAt.removeAll()  // 简单防膨胀，重读成本极低
+                    sessionFirstAt.removeAll()  // simple bound on growth; rereading is very cheap
                 }
             }
             if let firstAt {
@@ -265,7 +273,8 @@ public final class EventPipeline {
             }
         }
 
-        // Claude"成功"完成 → 嗅探尾部：API 错误升级为出错；ai-title 升级标题
+        // Claude "success" finish → sniff the tail: API errors upgrade to error; ai-title upgrades
+        // the title
         if event.source == .claude,
            case .taskFinished(outcome: .success, let title, let detail) = event.kind,
            let transcriptPath = event.transcriptPath {
@@ -284,8 +293,9 @@ public final class EventPipeline {
             events[0] = enriched
         }
 
-        // Claude 心跳（节流 20s）/ 等待确认（立即，用户此刻最需要识别会话）
-        // → 读 transcript 尾部：上下文占用 + ai-title 会话名
+        // Claude heartbeat (throttled to 20s) / awaiting confirmation (immediate, when the user
+        // most needs to identify the session) → read the transcript tail: context usage + ai-title
+        // session name
         if event.source == .claude, let transcriptPath = event.transcriptPath {
             let now = Date()
             var shouldInspect = false
@@ -313,7 +323,8 @@ public final class EventPipeline {
                         kind: kind, timestamp: now, cwd: event.cwd,
                         transcriptPath: transcriptPath)
                 }
-                // 标题先于 waiting 事件送达，等待卡一出来就带会话名
+                // The title arrives before the waiting event, so the waiting card shows the session
+                // name right away
                 if let aiTitle = info.aiTitle {
                     events.insert(extra(.titleUpdate(title: aiTitle)), at: 0)
                 }

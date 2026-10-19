@@ -2,9 +2,9 @@ import EurekaIngest
 import EurekaKit
 import Foundation
 
-/// 一致性检查的**口径**测试。
-/// 这块最大的风险不是算错，而是报得太多 —— 一张全是噪声的卡，用户看两次就再也不看了。
-/// 所以每条用例都在钉一个「**不该**报」的边界。
+/// Tests for the consistency check's **criteria**. The biggest risk here is not miscounting but
+/// over-reporting -- a card full of noise gets looked at twice and then never again. So every case
+/// pins down a boundary where it should **not** report.
 func consistencyCheckerTests(_ t: TestRunner) {
     t.suite("ConsistencyChecker · 跨源一致性口径")
 
@@ -23,8 +23,9 @@ func consistencyCheckerTests(_ t: TestRunner) {
     }
 
     t.test("指令缺口：只按「用户已在 ≥2 个仓库用过的约定」判，不照理想清单挑刺") {
-        // 用户在 a/b 两仓库都配了 CLAUDE.md + AGENTS.md → 这两种是他的习惯；
-        // c 只有 CLAUDE.md → 报缺 AGENTS.md。GEMINI.md 只在 a 出现过一次 → 不算约定，不报。
+        // The user configured CLAUDE.md + AGENTS.md in both repos a/b -> those two are their habit;
+        // c only has CLAUDE.md -> report AGENTS.md missing. GEMINI.md appears only once, in a ->
+        // not a convention, not reported.
         let memories = [
             instruction("a", "CLAUDE.md"), instruction("a", "AGENTS.md"),
             instruction("a", "GEMINI.md"),
@@ -42,8 +43,9 @@ func consistencyCheckerTests(_ t: TestRunner) {
     }
 
     t.test("指令缺口：没有记忆库的「仓库」不参与（sandbox 工作目录不是项目）") {
-        // ProjectResolver 会把 ~/.slock/agents/<uuid> 这类 sandbox cwd 认成仓库根，
-        // 本机实测 17 个"仓库"里有 5 个如此。它们既无指令也无记忆库 → 不该刷缺口。
+        // ProjectResolver treats sandbox cwds like ~/.slock/agents/<uuid> as repo roots; 5 of the
+        // 17 "repos" measured on this machine are like that. They have neither instructions nor a
+        // memory library -> they must not flood the gap list.
         let memories = [
             instruction("real-a", "CLAUDE.md"), instruction("real-a", "AGENTS.md"),
             instruction("real-b", "CLAUDE.md"), instruction("real-b", "AGENTS.md"),
@@ -59,7 +61,7 @@ func consistencyCheckerTests(_ t: TestRunner) {
             skills: [], memories: memories, libraries: libraries,
             repoNames: [
                 "real-a", "real-b", "active-no-instruction",
-                "c2cac433-5e0f-4379-99db-a867424d8e6f",  // sandbox：无指令无记忆库
+                "c2cac433-5e0f-4379-99db-a867424d8e6f",  // sandbox: no instructions, no memory library
             ])
         try expectEqual(
             report.instructionGaps.map(\.project), ["active-no-instruction"],
@@ -68,16 +70,18 @@ func consistencyCheckerTests(_ t: TestRunner) {
 
     t.test("技能缺口：只报「只差这一个源」的，且源自身技能数够多才参与对账") {
         var skills: [SkillEntry] = []
-        // claude / cursor / gemini 各 12 个技能 → 都够门槛（≥10）参与对账
+        // claude / cursor / gemini have 12 skills each -> all meet the threshold (>=10) and take
+        // part in reconciliation
         for index in 0..<12 {
             skills.append(skill("shared-\(index)", .claude))
             skills.append(skill("shared-\(index)", .cursor))
-            // gemini 独独缺 shared-0/1/2 三个
+            // gemini alone is missing shared-0/1/2
             if index >= 3 { skills.append(skill("shared-\(index)", .gemini)) }
         }
-        // gemini 补到 12 个（用它自己独有的技能），保证它参与对账
+        // Top gemini up to 12 (with skills only it has) so it takes part in reconciliation
         for index in 0..<3 { skills.append(skill("gemini-only-\(index)", .gemini)) }
-        // kimi 只有 2 个技能 → 门槛不够，不参与（否则它会"缺"一大堆）
+        // kimi has only 2 skills -> below the threshold, excluded (otherwise it would be "missing"
+        // a whole pile)
         skills.append(skill("shared-0", .kimi))
         skills.append(skill("kimi-only", .kimi))
 
@@ -97,7 +101,8 @@ func consistencyCheckerTests(_ t: TestRunner) {
             skills.append(skill("shared-\(index)", .claude))
             skills.append(skill("shared-\(index)", .cursor))
         }
-        // gemini 与 opencode 都够门槛，但都缺 shared-0 → 缺 2 个源，不报
+        // gemini and opencode both meet the threshold but both lack shared-0 -> missing from 2
+        // sources, not reported
         for index in 1..<12 {
             skills.append(skill("shared-\(index)", .gemini))
             skills.append(skill("shared-\(index)", .opencode))
@@ -137,13 +142,13 @@ func mcpDriftTests(_ t: TestRunner) {
 
     t.test("同名不同定义 → 漂移；同名同定义 / 单源 → 不报") {
         let servers = [
-            // notion：codex 远程 vs grok 本地（实勘案例）→ 漂移
+            // notion: codex remote vs grok local (a case found in the wild) -> drift
             entry(.codex, "notion", url: "https://mcp.notion.com/mcp"),
             entry(.grok, "notion", command: "npx -y @notionhq/notion-mcp-server"),
-            // xhawk：两源同一定义 → 不报
+            // xhawk: same definition in both sources -> not reported
             entry(.cursor, "xhawk", url: "https://app.xhawk.ai/api/mcp"),
             entry(.gemini, "xhawk", url: "https://app.xhawk.ai/api/mcp"),
-            // 单源 → 不报
+            // Single source -> not reported
             entry(.claude, "solo", command: "npx solo"),
         ]
         let drifts = ConsistencyChecker.mcpDrifts(servers)
