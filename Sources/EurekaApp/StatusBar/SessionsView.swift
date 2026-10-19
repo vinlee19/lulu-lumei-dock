@@ -12,6 +12,10 @@ struct SessionsView: View {
     /// constructs this; non-optional so the view refreshes once scanning finishes
     @ObservedObject var skillMemory: SkillMemoryService
     @ObservedObject var plans: PlansService
+    /// AI summaries (row status, context menu)
+    @ObservedObject var summaries: SessionSummaryService = .shared
+    /// Detail tab to start on (offscreen renders of the summary tab)
+    var initialDetailTab: SessionDetailView.DetailTab = .conversation
     /// Groups manually collapsed in the project view (all expanded by default)
     @State private var collapsed: Set<String> = []
     /// Multi-select mode and the selected set (session ids)
@@ -94,7 +98,9 @@ struct SessionsView: View {
                     withAnimation(.easeOut(duration: 0.15)) {
                         lineage = pane == .graph ? .graph(turn: 0) : .list
                     }
-                })
+                },
+                summaries: summaries,
+                initialTab: initialDetailTab)
                 // 375 + the list's 300 = the 675pt content width of the minimum window
                 .frame(minWidth: 375, maxWidth: .infinity)
                 .layoutPriority(1)
@@ -490,7 +496,28 @@ struct SessionsView: View {
             isSelected: service.selected?.id == session.id,
             multiSelect: multiSelect,
             isChecked: checkedIds.contains(session.id),
-            onToggleCheck: { toggleCheck(session) })
+            onToggleCheck: { toggleCheck(session) },
+            summaryStatus: summaries.rowStatus[summaries.key(session)])
+            .contextMenu { summaryContextMenu(session) }
+    }
+
+    /// Row context menu: summarize with any executor, or open the saved summary
+    @ViewBuilder
+    private func summaryContextMenu(_ session: AgentSessionInfo) -> some View {
+        if let reason = SummarySourceSupport.unsupportedReason(session.source) {
+            Text(reason)
+        } else {
+            Button(L10n.text("Show AI Summary", zhHans: "查看 AI 总结")) {
+                service.select(session)
+                summaries.revealSummary(for: session)
+            }
+            Menu(L10n.text("Summarize with", zhHans: "AI 总结")) {
+                SummaryExecutorMenuItems(summaries: summaries, session: session) {
+                    service.select(session)
+                    summaries.revealSummary(for: session)
+                }
+            }
+        }
     }
 
     private func toggleCheck(_ session: AgentSessionInfo) {
@@ -609,6 +636,8 @@ private struct SessionRow: View {
     let multiSelect: Bool
     let isChecked: Bool
     let onToggleCheck: () -> Void
+    /// AI summary status (nil = never summarized; renders nothing)
+    var summaryStatus: SessionSummaryService.RowStatus?
 
     @State private var copied = false
     @State private var hovering = false
@@ -654,6 +683,9 @@ private struct SessionRow: View {
                         TerminalBadge(
                             binding: terminal,
                             isRunning: TerminalActivator.isRunning(terminal))
+                    }
+                    if let summaryStatus {
+                        SummaryRowBadge(status: summaryStatus)
                     }
                 }
                 .font(Theme.font.themed(10))
