@@ -202,6 +202,9 @@ enum EurekaCLI {
             MainActor.assumeIsolated {
                 IconRenderer.render(to: path)
             }
+        case "--summarize":
+            // One AI session summary through the app's own coordinator (adapter smoke checks)
+            SummaryCLI.run(Array(args.dropFirst()))
         case "--help", "-h":
             printUsage()
         default:
@@ -573,6 +576,7 @@ enum EurekaCLI {
           --pack-mascot-v3 <dir> <file>  Pack 12 2×2 storyboards into a v3 atlas
           --render-shell [dir]       Offscreen-render the sidebar (including branding) and audit page in light/dark modes
           --render-lineage [dir]     Offscreen-render turn lineage graphs (golden baseline + live data)
+          --summarize <session-id>   AI-summarize one session with a local CLI (--executor / --model / --budget / --cancel-after; --executors lists them)
         """, zhHans: """
         eureka [选项]
           （无参数）                 启动菜单栏应用
@@ -592,6 +596,7 @@ enum EurekaCLI {
           --pack-mascot-v3 <目录> <文件>  将 12 张 2×2 分镜打包为 v3 图集
           --render-shell [目录]      离屏渲染侧栏（含品牌区）与审计页，明/暗两版
           --render-lineage [目录]    离屏渲染轮次血缘图（golden 基准 + 真实数据）
+          --summarize <会话 id>      用本地 CLI 为一个会话生成 AI 总结（--executor / --model / --budget / --cancel-after；--executors 列出执行器）
         """))
     }
 
