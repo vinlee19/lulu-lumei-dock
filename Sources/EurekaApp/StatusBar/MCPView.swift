@@ -841,7 +841,7 @@ private struct MCPDetailView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
                     Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
@@ -1641,7 +1641,7 @@ private struct MCPDetailView: View {
         let projectConfigured = entries.contains { $0.projectName != nil }
         return VStack(spacing: 4) {
             Image(systemName: projectConfigured ? "folder.fill.badge.checkmark" : "folder.badge.plus")
-                .font(.system(size: 12))
+                .font(Theme.font.themed(12))
                 .foregroundStyle(projectConfigured ? .secondary : Theme.brandFg.opacity(0.8))
             Text(L10n.text("Project", zhHans: "项目级"))
                 .font(Theme.font.themed(9))
@@ -1913,7 +1913,7 @@ private struct MCPServerFormView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
                     Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
@@ -2092,7 +2092,7 @@ private struct MCPServerFormView: View {
                         Button {
                             rows.wrappedValue.removeAll { $0.id == row.id }
                         } label: {
-                            Image(systemName: "minus.circle").font(.system(size: 12))
+                            Image(systemName: "minus.circle").font(Theme.font.themed(12))
                         }
                         .buttonStyle(.borderless)
                         .help(L10n.text("Delete this row", zhHans: "删除该行"))
@@ -2103,7 +2103,7 @@ private struct MCPServerFormView: View {
                     expanded.wrappedValue = true
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "plus.circle").font(.system(size: 11))
+                        Image(systemName: "plus.circle").font(Theme.font.themed(11))
                         Text(addLabel).font(Theme.font.themed(11))
                     }
                 }
@@ -2333,7 +2333,7 @@ private struct MCPServerFormView: View {
                 Text(L10n.text("Project (.mcp.json)", zhHans: "项目级（.mcp.json）"))
                     .font(Theme.font.themed(11, projectInstall ? .semibold : .regular))
                 if projectInstall {
-                    Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                    Image(systemName: "checkmark").font(Theme.font.themed(8, .bold))
                         .foregroundStyle(Theme.brandFg)
                 }
             }
@@ -2408,7 +2408,7 @@ private struct MCPServerFormView: View {
                 Text(source.displayName)
                     .font(Theme.font.themed(11, isSelected ? .semibold : .regular))
                 if isSelected {
-                    Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                    Image(systemName: "checkmark").font(Theme.font.themed(8, .bold))
                         .foregroundStyle(Theme.brandFg)
                 }
             }

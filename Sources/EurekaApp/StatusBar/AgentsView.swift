@@ -112,7 +112,7 @@ struct AgentsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Agents").font(.system(size: 15, weight: .bold))
+            Text("Agents").font(Theme.font.themed(15, .bold))
             SearchField(
                 placeholder: L10n.text("Search subagents", zhHans: "搜索子代理"), text: $service.searchText,
                 scanning: service.scanning, resultCount: totalCount)
@@ -289,7 +289,7 @@ struct AgentsView: View {
                     }
                 }
                 if let error = service.lastError {
-                    Text(error).font(.system(size: 10)).foregroundStyle(.orange)
+                    Text(error).font(Theme.font.themed(10)).foregroundStyle(.orange)
                 }
             }
             .padding(22)
@@ -315,7 +315,7 @@ struct AgentsView: View {
         if service.scanning {
             VStack(spacing: 8) {
                 ProgressView()
-                Text(L10n.text("Scanning…", zhHans: "正在扫描…")).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L10n.text("Scanning…", zhHans: "正在扫描…")).font(Theme.font.themed(12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         } else {
@@ -476,7 +476,7 @@ private struct AgentCard: View {
                     MiniSwitch(isOn: item.enabled) { onToggle() }
                 }
                 Text(item.description ?? "")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(Theme.font.themed(11)).foregroundStyle(.secondary)
                     .lineLimit(2, reservesSpace: true).lineSpacing(1.5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
@@ -484,12 +484,12 @@ private struct AgentCard: View {
                 HStack(spacing: 8) {
                     ModelChip(model: item.model)
                     if let tools = item.toolLabel {
-                        Text(tools).font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                        Text(tools).font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
                     if let calls = item.calls {
                         Text(L10n.format("Called %@ times", zhHans: "调用 %@ 次", String(calls)))
-                            .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                            .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -526,7 +526,7 @@ private struct AgentRow: View {
                         if item.builtin { TagChip(L10n.text("Built-in", zhHans: "内置"), neutral: true) }
                     }
                     if let desc = item.description, !desc.isEmpty {
-                        Text(desc).font(.system(size: 10.5)).foregroundStyle(.tertiary).lineLimit(1)
+                        Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -540,10 +540,10 @@ private struct AgentRow: View {
 
     @ViewBuilder private var trailing: some View {
         HStack(spacing: 12) {
-            Text(item.model).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(item.model).font(Theme.font.themed(11)).foregroundStyle(.secondary)
             if let calls = item.calls {
                 Text(L10n.format("Called %@ times", zhHans: "调用 %@ 次", String(calls)))
-                    .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(Theme.font.themedMono(10.5)).foregroundStyle(.tertiary)
             }
             MiniSwitch(isOn: item.enabled) { onToggle() }
         }
@@ -587,7 +587,7 @@ private struct AgentDetailView: View {
                 builtinOverview
             } else if editing {
                 TextEditor(text: $text)
-                    .font(.system(size: 12).monospaced())
+                    .font(Theme.font.monoSkillName(12, weight: .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: text)
@@ -605,7 +605,7 @@ private struct AgentDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if let desc = agent.description, !desc.isEmpty {
                     Text(desc)
-                        .font(.system(size: 12))
+                        .font(Theme.font.themed(12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -622,7 +622,7 @@ private struct AgentDetailView: View {
 
     private func infoBadge(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 9.5))
+            .font(Theme.font.themed(9.5))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -633,14 +633,14 @@ private struct AgentDetailView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
             SourceBadge(source: agent.source, size: 12)
             Text(agent.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             if let project = agent.scope.projectName {
                 TagChip(project)
@@ -654,19 +654,19 @@ private struct AgentDetailView: View {
             }
             if hasFile {
                 Button { service.openInEditor(path: agent.path) } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 11))
+                    Image(systemName: "square.and.pencil").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Open in default editor", zhHans: "用默认编辑器打开"))
                 Button { service.reveal(path: agent.path) } label: {
-                    Image(systemName: "folder").font(.system(size: 11))
+                    Image(systemName: "folder").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
             }
             if editable {
                 Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash").font(.system(size: 11))
+                    Image(systemName: "trash").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
@@ -679,14 +679,14 @@ private struct AgentDetailView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text(editable ? agent.path : L10n.format("Managed by Claude Code (read-only) · %@", zhHans: "由 Claude Code 管理（只读） · %@", agent.path))
-                .font(.system(size: 9).monospaced())
+                .font(Theme.font.monoSkillName(9, weight: .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
             if let note = saveNote {
                 Text(note)
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             if editing {
@@ -743,7 +743,7 @@ private struct CodexProfileDetailView: View {
             Divider()
             HStack {
                 Text(L10n.format("Writes the [profiles.%@] table in ~/.codex/config.toml", zhHans: "写入 ~/.codex/config.toml 的 [profiles.%@] 段", name.isEmpty ? "…" : name))
-                    .font(.system(size: 9).monospaced())
+                    .font(Theme.font.monoSkillName(9, weight: .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -777,19 +777,19 @@ private struct CodexProfileDetailView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
             SourceBadge(source: .codex, size: 12)
             Text(target.isNew ? L10n.text("New Codex Profile", zhHans: "新建 Codex Profile") : target.profile.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
             if !target.isNew {
                 Button(role: .destructive) { onDelete(target.profile) } label: {
-                    Image(systemName: "trash").font(.system(size: 11))
+                    Image(systemName: "trash").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Remove this table from config.toml", zhHans: "从 config.toml 移除该段"))

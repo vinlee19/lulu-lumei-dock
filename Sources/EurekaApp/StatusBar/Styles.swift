@@ -87,11 +87,11 @@ struct CapsuleTabButton: View {
                             .frame(width: 14, height: 14)
                             .overlay(
                                 Image(systemName: icon)
-                                    .font(.system(size: 7.5, weight: .semibold))
+                                    .font(Theme.font.themed(7.5, .semibold))
                                     .foregroundStyle(.white))
                     } else {
                         Image(systemName: icon)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Theme.font.themed(10, .semibold))
                     }
                 }
                 // Empty title = icon-only mode (as with three-mode `LayoutToggle`): drop the Text
@@ -164,12 +164,12 @@ struct SidebarNavButton: View {
                         .frame(width: 20, height: 20)
                         .overlay(
                             Image(systemName: icon)
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(Theme.font.themed(10, .semibold))
                                 .foregroundStyle(.white)
                         )
                 } else {
                     Image(systemName: icon)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Theme.font.themed(12, .medium))
                         .frame(width: 20, height: 20)
                 }
                 Text(title)
@@ -243,7 +243,7 @@ struct StatTile: View {
                 HStack(spacing: 4) {
                     if let icon {
                         Image(systemName: icon)
-                            .font(.system(size: 9))
+                            .font(Theme.font.themed(9))
                             .foregroundStyle(tint)
                     }
                     if let source {
@@ -305,7 +305,7 @@ private struct CardGlyphButton: View {
     var body: some View {
         Button(action: action.action) {
             Image(systemName: action.icon)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(Theme.font.themed(10.5, .medium))
                 .foregroundStyle(tint)
                 .frame(width: 22, height: 22)
                 .background(
@@ -466,7 +466,7 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 34))
+                .font(Theme.font.themed(34))
                 .foregroundStyle(Theme.brandFg.opacity(0.5))
             Text(title)
                 .font(Theme.font.themed(12))
@@ -567,7 +567,7 @@ struct SearchField: View {
             .frame(width: 24, height: 24)
             .overlay(
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11.5, weight: .bold))
+                    .font(Theme.font.themed(11.5, .bold))
                     .foregroundStyle(Theme.onBrand))
             .overlay(
                 Group {
@@ -596,7 +596,7 @@ struct SearchField: View {
             }
             Button { text = "" } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(Theme.font.themed(9, .bold))
                     .foregroundStyle(Theme.brandFg)
                     .frame(width: 19, height: 19)
                     .background(Circle().fill(Theme.brandFill(0.14)))
@@ -627,7 +627,7 @@ struct SourceSectionHeader: View {
             Button(action: onToggle) {
                 HStack(spacing: 7) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.font.themed(9, .semibold))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(collapsed ? 0 : 90))
                     if let source {
@@ -970,7 +970,7 @@ struct RoundGlyphButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.font.themed(11, .semibold))
                 .foregroundStyle(RoundGlyphChrome.glyph(active: active))
                 .modifier(RoundGlyphChrome(active: active, hovering: hovering))
         }
@@ -1051,11 +1051,11 @@ private struct BrutalCapsuleLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             if let icon {
-                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                Image(systemName: icon).font(Theme.font.themed(10, .semibold))
             }
             Text(title).font(Theme.font.themed(11, .semibold)).lineLimit(1)
             if let trailingIcon {
-                Image(systemName: trailingIcon).font(.system(size: 8, weight: .bold)).opacity(0.7)
+                Image(systemName: trailingIcon).font(Theme.font.themed(8, .bold)).opacity(0.7)
             }
         }
         .foregroundStyle(foreground)
@@ -1167,10 +1167,10 @@ struct MenuButton<Items: View>: View {
             Menu(content: items) {
                 HStack(spacing: 5) {
                     if let icon {
-                        Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                        Image(systemName: icon).font(Theme.font.themed(10, .semibold))
                     }
                     Text(title).font(Theme.font.themed(11, .semibold)).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)).opacity(0.7)
+                    Image(systemName: "chevron.down").font(Theme.font.themed(8, .bold)).opacity(0.7)
                 }
                 .foregroundStyle(Theme.ink)
             }
@@ -1197,9 +1197,9 @@ struct MenuButton<Items: View>: View {
 @ViewBuilder
 private func systemLabel(title: String, icon: String?) -> some View {
     if let icon {
-        Label(title, systemImage: icon).font(.system(size: 11))
+        Label(title, systemImage: icon).font(Theme.font.themed(11))
     } else {
-        Text(title).font(.system(size: 11))
+        Text(title).font(Theme.font.themed(11))
     }
 }
 
@@ -1242,7 +1242,7 @@ struct PaneHeader<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(Theme.font.themed(11, .medium))
                 .foregroundStyle(ThemeStyle.current.isHardEdged ? AnyShapeStyle(Theme.ink) : AnyShapeStyle(.secondary))
             Text(title)
                 .font(Theme.font.themed(12, .semibold))
@@ -1564,7 +1564,7 @@ struct SourceFilterChip: View {
                 if let source {
                     SourceBadge(source: source, size: 14)
                 } else {
-                    Image(systemName: allIcon).font(.system(size: 11, weight: .semibold))
+                    Image(systemName: allIcon).font(Theme.font.themed(11, .semibold))
                 }
                 Text(label)
                     .font(Theme.font.themed(11.5, isSelected ? .semibold : .medium))
@@ -1674,7 +1674,7 @@ struct TerminalBadge: View {
         let tint: Color = isRunning ? Theme.brand : .secondary
         HStack(spacing: 3) {
             Image(systemName: "terminal")
-                .font(.system(size: 8, weight: .semibold))
+                .font(Theme.font.themed(8, .semibold))
             Text(binding.displayName)
                 .font(Theme.font.themed(9.5, .medium))
                 .lineLimit(1)

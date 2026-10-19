@@ -97,9 +97,9 @@ struct MemoryGraphCanvasView: View {
                 if rail.type == nil {
                     HStack(spacing: 4) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .font(.system(size: 9))
+                            .font(Theme.font.themed(9))
                         Text("\(rail.title) \(rail.count)")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Theme.font.themed(10, .semibold))
                     }
                     .foregroundStyle(Theme.goldFg)
                     .padding(.top, 6)
@@ -227,10 +227,10 @@ struct MemoryGraphNodeView: View {
     private var content: some View {
         if isCategory {
             HStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 9.5))
-                Text(node.title).font(.system(size: 10.5, weight: .semibold))
+                Image(systemName: icon).font(Theme.font.themed(9.5))
+                Text(node.title).font(Theme.font.themed(10.5, .semibold))
                 Text(node.subtitle)
-                    .font(.system(size: 9.5).monospacedDigit())
+                    .font(Theme.font.themedMono(9.5))
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
@@ -238,19 +238,19 @@ struct MemoryGraphNodeView: View {
         } else {
             HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(Theme.font.themed(10, .medium))
                     .foregroundStyle(tint)
                     .frame(width: 12)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(node.title)
                         // Contract: the label must fit in the fixed frame the engine provides; text
                         // must never feed back into the layout
-                        .font(.system(size: 10.5, weight: .semibold))
+                        .font(Theme.font.themed(10.5, .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if !node.subtitle.isEmpty {
                         Text(node.subtitle)
-                            .font(.system(size: 9))
+                            .font(Theme.font.themed(9))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -259,7 +259,7 @@ struct MemoryGraphNodeView: View {
                 Spacer(minLength: 0)
                 if node.degree > 1, case .entry = node.kind {
                     Text("\(node.degree)")
-                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                        .font(Theme.font.themedMono(9, .semibold))
                         .foregroundStyle(Theme.brandFg)
                         .fixedSize()
                 }

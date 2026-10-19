@@ -249,22 +249,22 @@ struct SessionsView: View {
                     if service.scanning {
                         ProgressView(L10n.text("Indexing sessions…", zhHans: "正在索引会话…"))
                         Text(L10n.text("Scanning 14 sources one by one. This takes a moment.", zhHans: "14 个来源逐个扫描，稍等片刻"))
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(.tertiary)
                     } else {
                         Image(systemName: "archivebox")
-                            .font(.system(size: 26))
+                            .font(Theme.font.themed(26))
                             .foregroundStyle(Theme.brandFg.opacity(0.4))
                         Text(service.isSearching
                             ? L10n.text("No matching sessions", zhHans: "没有匹配的会话")
                             : (settings.sessionRangeAll
                                 ? L10n.text("No sessions", zhHans: "没有会话")
                                 : L10n.text("No sessions in the last 30 days", zhHans: "近 30 天没有会话")))
-                            .font(.system(size: 12))
+                            .font(Theme.font.themed(12))
                             .foregroundStyle(.secondary)
                         if !service.isSearching && !settings.sessionRangeAll {
                             Text(L10n.text("Older records are under All time", zhHans: "更早的记录在「全部时间」里"))
-                                .font(.system(size: 10))
+                                .font(Theme.font.themed(10))
                                 .foregroundStyle(.tertiary)
                         }
                     }
@@ -358,13 +358,13 @@ struct SessionsView: View {
                         .fixedSize()
                 } else {
                     Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Theme.font.themed(10, .semibold))
                     Text(L10n.text("All sources", zhHans: "全部来源"))
                         .font(Theme.font.themed(11, .medium))
                         .fixedSize()
                 }
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Theme.font.themed(8, .semibold))
                     .opacity(0.7)
             }
             .foregroundStyle(fg)
@@ -418,7 +418,7 @@ struct SessionsView: View {
                         .frame(width: 14, height: 14)
                         .overlay(
                             Image(systemName: "line.3.horizontal.decrease")
-                                .font(.system(size: 7, weight: .semibold))
+                                .font(Theme.font.themed(7, .semibold))
                                 .foregroundStyle(.white))
                 }
                 Text(name)
@@ -429,7 +429,7 @@ struct SessionsView: View {
                     .foregroundStyle(selected ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
                 if selected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(Theme.font.themed(8, .bold))
                         .foregroundStyle(Theme.brandFg)
                 }
             }
@@ -507,12 +507,12 @@ struct SessionsView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "text.magnifyingglass")
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(Theme.goldFg)
                 Text(L10n.text("Matches in conversations", zhHans: "对话内容命中"))
                     .font(Theme.font.themed(11, .semibold))
                 Text("\(service.fullTextHits.count)")
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
@@ -531,11 +531,11 @@ struct SessionsView: View {
                                 .lineLimit(1)
                             Spacer(minLength: 4)
                             Text(hit.role == "user" ? L10n.text("User", zhHans: "用户") : L10n.text("Assistant", zhHans: "助手"))
-                                .font(.system(size: 9))
+                                .font(Theme.font.themed(9))
                                 .foregroundStyle(.tertiary)
                             if let ts = hit.ts {
                                 Text(relativeFormatter.localizedString(for: ts, relativeTo: Date()))
-                                    .font(.system(size: 9))
+                                    .font(Theme.font.themed(9))
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -567,26 +567,26 @@ private struct ProjectHeaderRow: View {
         Button(action: onTap) {
             HStack(spacing: 7) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Theme.font.themed(9, .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(Theme.brandFg.opacity(0.8))
                 Text(group.name)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font.themed(12, .medium))
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 if let cost = group.totalCostUSD {
                     Text("≈\(formatCost(cost))")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .font(Theme.font.themedMono(10, .medium))
                         .foregroundStyle(Theme.cost)
                 }
                 Text(L10n.format("%@ sessions", zhHans: "%@ 个", String(group.sessions.count)))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                 Text(formatBytes(group.totalBytes))
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12)
@@ -618,7 +618,7 @@ private struct SessionRow: View {
             if multiSelect {
                 Button(action: onToggleCheck) {
                     Image(systemName: isChecked ? "checkmark.square.fill" : "square")
-                        .font(.system(size: 12))
+                        .font(Theme.font.themed(12))
                         .foregroundStyle(session.source.supportsSessionDeletion
                             ? (isChecked ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.secondary))
                             : AnyShapeStyle(.tertiary))
@@ -632,7 +632,7 @@ private struct SessionRow: View {
                 HStack(spacing: 5) {
                     SourceBadge(source: session.source, size: 11)
                     Text(session.displayName)
-                        .font(.system(size: 12.5))
+                        .font(Theme.font.themed(12.5))
                         .lineLimit(1)
                         .help(session.displayName)
                 }
@@ -656,7 +656,7 @@ private struct SessionRow: View {
                             isRunning: TerminalActivator.isRunning(terminal))
                     }
                 }
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
                 // Truncate rather than wrap: a squeezed row used to break a relative time like "1 min ago" across lines
                 .lineLimit(1)
@@ -668,7 +668,7 @@ private struct SessionRow: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
             } label: {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Copy resume command", zhHans: "拷贝恢复命令"))

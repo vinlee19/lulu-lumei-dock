@@ -502,7 +502,7 @@ struct UsageDashboardView: View {
                         .labelsHidden()
                         .datePickerStyle(.field)
                         .controlSize(.small)
-                    Text(L10n.text("to", zhHans: "至")).font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(L10n.text("to", zhHans: "至")).font(Theme.font.themed(10)).foregroundStyle(.secondary)
                     DatePicker("", selection: $customTo, displayedComponents: .date)
                         .labelsHidden()
                         .datePickerStyle(.field)
@@ -963,7 +963,7 @@ struct UsageDashboardView: View {
             .buttonStyle(.borderless)
             .disabled(page >= totalPages)
             // Jump to page
-            Text(L10n.text("Go to", zhHans: "跳至")).font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(L10n.text("Go to", zhHans: "跳至")).font(Theme.font.themed(10)).foregroundStyle(.tertiary)
             TextField("", text: $pageInput)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 40)

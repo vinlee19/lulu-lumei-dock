@@ -44,7 +44,7 @@ struct TurnLineageBoardView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(L10n.format("Turn %@", zhHans: "第 %@ 轮", String(diagnostics.turnIndex + 1)))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 statChip(L10n.format("%@ steps", zhHans: "%@ 步", String(diagnostics.stepCount)))
                 statChip(L10n.format("%@ nodes", zhHans: "%@ 节点", String(result.nodes.count)))
                 if diagnostics.rereadCount > 0 {
@@ -61,7 +61,7 @@ struct TurnLineageBoardView: View {
                     // Explain "why there's no thinking", otherwise users will assume we failed to
                     // capture it
                     Text(L10n.text("Thinking text was stripped by this CLI", zhHans: "思考明文被该 CLI 剥离"))
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                         .help(L10n.text(
                             "Claude strips the thinking text when it writes the transcript and keeps only an encrypted signature. Codex / Kimi / Qwen keep the text, and it shows up here as a thinking node.",
@@ -75,12 +75,12 @@ struct TurnLineageBoardView: View {
                         .frame(width: 6, height: 6)
                         .padding(.top, 4)
                     Text(signal.title)
-                        .font(.system(size: 10.5, weight: .medium))
+                        .font(Theme.font.themed(10.5, .medium))
                         .foregroundStyle(severityColor(signal.severity))
                         .fixedSize()
                     // This line is what users actually want: how to write the prompt next time
                     Text(signal.advice)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
@@ -92,7 +92,7 @@ struct TurnLineageBoardView: View {
 
     private func statChip(_ text: String, tint: Color = .secondary) -> some View {
         Text(text)
-            .font(.system(size: 9.5).monospacedDigit())
+            .font(Theme.font.themedMono(9.5))
             .foregroundStyle(tint)
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
@@ -135,7 +135,7 @@ struct TurnLineageBoardView: View {
                     }
                 }
                 .frame(width: 20, alignment: .leading)
-            Text(text).font(.system(size: 9.5)).foregroundStyle(.tertiary)
+            Text(text).font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
         }
         .fixedSize()
     }
@@ -146,7 +146,7 @@ struct TurnLineageBoardView: View {
         let node = placed.node
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "chevron.right.circle.fill")
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .foregroundStyle(Theme.brandFg)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -158,13 +158,13 @@ struct TurnLineageBoardView: View {
                     Spacer(minLength: 0)
                     if let messageId = node.messageId, let onJumpToMessage {
                         Button(L10n.text("Jump to message", zhHans: "跳到消息")) { onJumpToMessage(messageId) }
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .buttonStyle(.borderless)
                     }
                 }
                 if !node.subtitle.isEmpty {
                     Text(node.subtitle)
-                        .font(.system(size: 10.5).monospaced())
+                        .font(Theme.font.monoSkillName(10.5, weight: .regular))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         // Multi-line text must lock its intrinsic height, or it gets squeezed back
@@ -176,7 +176,7 @@ struct TurnLineageBoardView: View {
                         "Steps %@",
                         zhHans: "对应第 %@ 步",
                         node.stepIndices.map { String($0 + 1) }.joined(separator: L10n.text(", ", zhHans: "、"))))
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -206,10 +206,10 @@ struct TurnLineageBoardView: View {
         }
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "rectangle.compress.vertical")
-                .font(.system(size: 12))
+                .font(Theme.font.themed(12))
                 .foregroundStyle(Theme.goldFg)
             Text(text)
-                .font(.system(size: 10.5))
+                .font(Theme.font.themed(10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)

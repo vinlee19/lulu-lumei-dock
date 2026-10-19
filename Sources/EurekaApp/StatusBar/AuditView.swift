@@ -122,7 +122,7 @@ struct AuditView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(L10n.text("Audit", zhHans: "审计")).font(.system(size: 15, weight: .bold))
+            Text(L10n.text("Audit", zhHans: "审计")).font(Theme.font.themed(15, .bold))
             SearchField(
                 placeholder: L10n.text("Search commands / paths / tool names", zhHans: "搜索命令 / 文件路径 / 工具名"),
                 text: $keyword, resultCount: service.total)
@@ -204,7 +204,7 @@ struct AuditView: View {
         // lines must be declared here
         .toggleStyle(.themedSwitch)
         .controlSize(.small)
-        .font(.system(size: 11.5))
+        .font(Theme.font.themed(11.5))
         .padding(Theme.spacing.card)
         .frame(width: 320)
     }
@@ -397,10 +397,10 @@ struct AuditView: View {
         icon: String, label: String, count: Int, isSelected: Bool, tint: Color
     ) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 10, weight: .medium))
-            Text(label).font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+            Image(systemName: icon).font(Theme.font.themed(10, .medium))
+            Text(label).font(Theme.font.themed(11, isSelected ? .semibold : .medium))
             Text("\(count)")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .font(Theme.font.themedMono(10, .medium))
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.85))
                                             : AnyShapeStyle(.tertiary))
         }
@@ -452,10 +452,10 @@ struct AuditView: View {
         @ViewBuilder action: () -> Action = { EmptyView() }
     ) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(tint)
+            Image(systemName: icon).font(Theme.font.themed(12)).foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(text)
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail {
@@ -510,7 +510,7 @@ struct AuditView: View {
                         Spacer(minLength: 0)
                     }
                     Text(isExpanded ? event.detail : firstLine(event.detail))
-                        .font(.system(size: 10.5).monospaced())
+                        .font(Theme.font.monoSkillName(10.5, weight: .regular))
                         .foregroundStyle(.primary)
                         .lineLimit(isExpanded ? nil : 1)
                         .truncationMode(.middle)
@@ -522,7 +522,7 @@ struct AuditView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(event.timestamp, format: .dateTime.month().day().hour().minute())
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(.tertiary)
                     .fixedSize()
             }
@@ -549,7 +549,7 @@ struct AuditView: View {
                     .strokeBorder(TileSpec.border(Theme.brand), lineWidth: 0.5))
             .overlay(
                 Image(systemName: kind.icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font.themed(12, .medium))
                     .foregroundStyle(Theme.brandFg))
             .help(kind.label)
     }
@@ -559,34 +559,34 @@ struct AuditView: View {
     private var paginationBar: some View {
         HStack(spacing: 8) {
             Text(L10n.format("%@ total", zhHans: "共 %@ 条", String(service.total)))
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.tertiary)
             // Same as subtitle: the whole-DB risk count and the filtered "N total" have different
             // bases, so don't show them side by side
             if service.riskTotal > 0, !filtering {
                 Text(L10n.format("· Risk %@", zhHans: "· 风险 %@", String(service.riskTotal)))
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(Theme.failureRed)
             }
             Spacer()
             Button { goTo(page - 1) } label: {
-                Image(systemName: "chevron.left").font(.system(size: 9))
+                Image(systemName: "chevron.left").font(Theme.font.themed(9))
             }
             .buttonStyle(.borderless)
             .disabled(page <= 1)
             Text("\(page) / \(totalPages)")
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.secondary)
             Button { goTo(page + 1) } label: {
-                Image(systemName: "chevron.right").font(.system(size: 9))
+                Image(systemName: "chevron.right").font(Theme.font.themed(9))
             }
             .buttonStyle(.borderless)
             .disabled(page >= totalPages)
-            Text(L10n.text("Go to", zhHans: "跳至")).font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(L10n.text("Go to", zhHans: "跳至")).font(Theme.font.themed(10)).foregroundStyle(.tertiary)
             TextField("", text: $pageInput)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 40)
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .multilineTextAlignment(.center)
                 .onSubmit {
                     if let target = Int(pageInput.trimmingCharacters(in: .whitespaces)) {

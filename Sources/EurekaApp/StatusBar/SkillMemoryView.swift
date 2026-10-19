@@ -172,7 +172,7 @@ struct SkillMemoryView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(mode.title).font(.system(size: 15, weight: .bold))
+            Text(mode.title).font(Theme.font.themed(15, .bold))
             SearchField(
                 placeholder: mode.searchPlaceholder,
                 text: $service.searchText, scanning: service.scanning,
@@ -265,7 +265,7 @@ struct SkillMemoryView: View {
                     count: { count(for: $0) })
                 body(for: mode)
                 if let error = service.lastError {
-                    Text(error).font(.system(size: 10)).foregroundStyle(.orange)
+                    Text(error).font(Theme.font.themed(10)).foregroundStyle(.orange)
                 }
             }
             .padding(22)
@@ -643,7 +643,7 @@ struct SkillMemoryView: View {
         if service.scanning {
             VStack(spacing: 8) {
                 ProgressView()
-                Text(L10n.text("Scanning…", zhHans: "正在扫描…")).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L10n.text("Scanning…", zhHans: "正在扫描…")).font(Theme.font.themed(12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         } else {
@@ -776,7 +776,7 @@ private struct SkillCard: View {
                 // Always takes 2 lines: grid cards stay equal height, avoiding ragged gaps in
                 // LazyVGrid
                 Text(skill.description ?? "")
-                    .font(.system(size: 11.5))
+                    .font(Theme.font.themed(11.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2, reservesSpace: true).lineSpacing(1.5)
                     .multilineTextAlignment(.leading)
@@ -785,14 +785,14 @@ private struct SkillCard: View {
                 HStack(spacing: 6) {
                     if let stat, stat.count > 0 {
                         Text(L10n.format("%@ hits", zhHans: "命中 %@ 次", String(stat.count)))
-                            .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                            .font(Theme.font.themedMono(10.5, .semibold))
                             .foregroundStyle(Theme.brandFg)
                     }
                     if let project = skill.scope.projectName { TagChip(project) }
                     Spacer(minLength: 0)
                     if let last = stat?.lastTs {
                         Text(relativeFormatter.localizedString(for: last, relativeTo: Date()))
-                            .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                            .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -877,7 +877,7 @@ private struct SkillListRow: View {
                         if let project = skill.scope.projectName { TagChip(project) }
                     }
                     if let desc = skill.description, !desc.isEmpty {
-                        Text(desc).font(.system(size: 10.5)).foregroundStyle(.tertiary).lineLimit(1)
+                        Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -899,12 +899,12 @@ private struct SkillListRow: View {
                             .frame(width: max(4, 72 * CGFloat(stat.count) / CGFloat(maxHit)), height: 6)
                     }
                 Text(L10n.format("%@ times", zhHans: "%@ 次", String(stat.count)))
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(12, .semibold))
                     .foregroundStyle(Theme.brandFg)
             }
             if let last = stat?.lastTs {
                 Text(relativeFormatter.localizedString(for: last, relativeTo: Date()))
-                    .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                    .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
             }
             MiniSwitch(isOn: skill.enabled) { service.setSkillEnabled(skill, !skill.enabled) }
         }
@@ -948,8 +948,8 @@ private func revealSession(_ sessionId: String) {
 /// Label of the "origin session" button/menu (used by the detail page toolbar)
 private func sessionLabel(_ text: String) -> some View {
     HStack(spacing: 3) {
-        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 10))
-        Text(text).font(.system(size: 10.5))
+        Image(systemName: "bubble.left.and.bubble.right.fill").font(Theme.font.themed(10))
+        Text(text).font(Theme.font.themed(10.5))
     }
 }
 
@@ -1056,7 +1056,7 @@ private struct MemoryLibraryRow: View {
                         }
                     }
                     Text(abbreviateHome(library.directory))
-                        .font(.system(size: 10).monospaced())
+                        .font(Theme.font.monoSkillName(10, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1).truncationMode(.middle)
                 }
@@ -1065,7 +1065,7 @@ private struct MemoryLibraryRow: View {
                 HStack(spacing: 10) {
                     MemoryLibraryMeta(library: library)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.font.themed(9, .semibold))
                         .foregroundStyle(.tertiary)
                 }
                 .fixedSize()
@@ -1101,12 +1101,12 @@ private struct MemoryLibraryCard: View {
                     }
                 }
                 Text(abbreviateHome(library.directory))
-                    .font(.system(size: 10.5).monospaced())
+                    .font(Theme.font.monoSkillName(10.5, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(2).truncationMode(.middle)
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
-                    Text(L10n.text("Memory library", zhHans: "记忆库")).font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                    Text(L10n.text("Memory library", zhHans: "记忆库")).font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
                     MemoryLibraryMeta(library: library)
                 }
@@ -1127,9 +1127,9 @@ private struct MemoryLibraryMeta: View {
             if library.linkedSessionCount > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 8.5))
+                        .font(Theme.font.themed(8.5))
                     Text("\(library.linkedSessionCount)")
-                        .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
+                        .font(Theme.font.themedMono(9.5, .semibold))
                 }
                 .foregroundStyle(Theme.goldFg)
                 .help(L10n.format(
@@ -1138,10 +1138,10 @@ private struct MemoryLibraryMeta: View {
                     String(library.linkedSessionCount)))
             }
             Text(formatBytes(library.sizeBytes))
-                .font(.system(size: 9.5).monospacedDigit()).foregroundStyle(.tertiary)
-            Text("·").font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                .font(Theme.font.themedMono(9.5)).foregroundStyle(.tertiary)
+            Text("·").font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
             Text(library.latestModifiedAt, formatter: relativeFormatter)
-                .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
         }
     }
 }
@@ -1178,7 +1178,7 @@ private struct MemoryCard: View {
                 }
                 Text(memory.summary ?? abbreviateHome(memory.path))
                     .font(memory.summary == nil
-                        ? .system(size: 10.5).monospaced() : .system(size: 10.5))
+                        ? Theme.font.monoSkillName(10.5, weight: .regular) : Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2).truncationMode(.middle)
                 Spacer(minLength: 0)
@@ -1188,10 +1188,10 @@ private struct MemoryCard: View {
                     if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     Spacer(minLength: 0)
                     Text(formatBytes(memory.sizeBytes))
-                        .font(.system(size: 9.5).monospacedDigit()).foregroundStyle(.tertiary)
-                    Text("·").font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                        .font(Theme.font.themedMono(9.5)).foregroundStyle(.tertiary)
+                    Text("·").font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
                     Text(memory.modifiedAt, formatter: relativeFormatter)
-                        .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                        .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
                 }
             }
         } menu: {
@@ -1231,7 +1231,7 @@ private struct MemoryListRow: View {
                     }
                     Text(memory.summary ?? abbreviateHome(memory.path))
                         .font(memory.summary == nil
-                            ? .system(size: 10).monospaced() : .system(size: 10))
+                            ? Theme.font.monoSkillName(10, weight: .regular) : Theme.font.themed(10))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1).truncationMode(.middle)
                 }
@@ -1248,9 +1248,9 @@ private struct MemoryListRow: View {
         HStack(spacing: 10) {
             if showsScope, let project = memory.projectName { TagChip(project) }
             Text(formatBytes(memory.sizeBytes))
-                .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
             Text(memory.modifiedAt, formatter: relativeFormatter)
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
         }
     }
 }
@@ -1297,7 +1297,7 @@ private struct MemoryDetailView: View {
             }
             if editing {
                 TextEditor(text: $text)
-                    .font(.system(size: 12).monospaced())
+                    .font(Theme.font.monoSkillName(12, weight: .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: Self.strippingFrontmatter(text))
@@ -1339,10 +1339,10 @@ private struct MemoryDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                    .font(.system(size: 10)).foregroundStyle(Theme.brandFg)
-                Text(L10n.text("Related", zhHans: "关联")).font(.system(size: 11, weight: .semibold))
+                    .font(Theme.font.themed(10)).foregroundStyle(Theme.brandFg)
+                Text(L10n.text("Related", zhHans: "关联")).font(Theme.font.themed(11, .semibold))
                 Text(L10n.format("%@ links", zhHans: "%@ 处", String(relation.graph.nodes.count - 1)))
-                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
                 Spacer()
                 Button(showRelations ? L10n.text("Collapse", zhHans: "收起") : L10n.text("Expand", zhHans: "展开")) { showRelations.toggle() }
                     .buttonStyle(.borderless)
@@ -1397,14 +1397,14 @@ private struct MemoryDetailView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
             SourceBadge(source: memory.source, size: 12)
             Text(memory.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             if let project = memory.projectName { TagChip(project) }
             memoryTypeChip(memory)
@@ -1438,19 +1438,19 @@ private struct MemoryDetailView: View {
                     CapsuleTabButton(title: L10n.text("Edit", zhHans: "编辑"), fillWidth: false, isSelected: editing) { editing = true }
                 }
                 Button { service.openInEditor(path: memory.path) } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 11))
+                    Image(systemName: "square.and.pencil").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Open in default editor", zhHans: "用默认编辑器打开"))
             }
             Button { service.reveal(path: memory.path) } label: {
-                Image(systemName: "folder").font(.system(size: 11))
+                Image(systemName: "folder").font(Theme.font.themed(11))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
             if memory.isDeletable {
                 Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash").font(.system(size: 11))
+                    Image(systemName: "trash").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
@@ -1463,14 +1463,14 @@ private struct MemoryDetailView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text(memory.isEditable ? memory.path : L10n.format("Codex generated state (read-only) · %@", zhHans: "Codex 生成状态（只读） · %@", memory.path))
-                .font(.system(size: 9).monospaced())
+                .font(Theme.font.monoSkillName(9, weight: .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
             if let note = saveNote {
                 Text(note)
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             if editing {
@@ -1533,19 +1533,19 @@ private struct MemoryLibraryView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
             SourceBadge(source: library.source, size: 12)
             Text(L10n.format("%@ memory library", zhHans: "%@ 记忆库", library.projectName))
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
             LayoutToggle(layout: $layout, cases: [.list, .graph])
             Button { service.reveal(path: library.directory) } label: {
-                Image(systemName: "folder").font(.system(size: 11))
+                Image(systemName: "folder").font(Theme.font.themed(11))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Show the memory library folder in Finder", zhHans: "在 Finder 中显示记忆库目录"))
@@ -1586,8 +1586,8 @@ private struct MemoryLibraryView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11)).foregroundStyle(Theme.goldFg)
-                    Text(L10n.text("Index and directory are out of sync", zhHans: "索引与目录不一致")).font(.system(size: 11.5, weight: .semibold))
+                        .font(Theme.font.themed(11)).foregroundStyle(Theme.goldFg)
+                    Text(L10n.text("Index and directory are out of sync", zhHans: "索引与目录不一致")).font(Theme.font.themed(11.5, .semibold))
                     Spacer(minLength: 8)
                     if !unindexed.isEmpty {
                         Button(showingUnindexedOnly ? L10n.text("Show all", zhHans: "显示全部") : L10n.text("Unindexed only", zhHans: "只看未收录")) {
@@ -1604,7 +1604,7 @@ private struct MemoryLibraryView: View {
                         }
                     }
                     .buttonStyle(.borderless)
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(Theme.font.themed(10.5, .medium))
                     .disabled(repairingIndex)
                     .help(L10n.text("Add missing entries and drop index lines that point at files that no longer exist (MEMORY.md is backed up before writing)", zhHans: "补录未收录条目、删除指向已不存在文件的索引行（写前自动备份 MEMORY.md）"))
                 }
@@ -1615,7 +1615,7 @@ private struct MemoryLibraryView: View {
                         String(unindexed.count),
                         unindexed.prefix(3).map(\.title).joined(separator: L10n.text(", ", zhHans: "、"))
                             + (unindexed.count > 3 ? L10n.text(" etc.", zhHans: " 等") : "")))
-                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        .font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
                 }
                 if !dangling.isEmpty {
                     Text(L10n.format(
@@ -1623,7 +1623,7 @@ private struct MemoryLibraryView: View {
                         zhHans: "%1$@ 条索引条目指向已不存在的文件：%2$@",
                         String(dangling.count),
                         dangling.prefix(3).joined(separator: L10n.text(", ", zhHans: "、"))))
-                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        .font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
                 }
             }
             .padding(10)
@@ -1768,7 +1768,7 @@ private struct MemoryGraphSection: View {
                 legendItem(L10n.text("Source sessions", zhHans: "来源会话"), color: Theme.gold.opacity(0.7), dashed: true)
                 Spacer(minLength: 0)
                 Text(L10n.format("%1$@ memories · %2$@ sessions", zhHans: "%1$@ 条记忆 · %2$@ 个会话", String(graph.entryCount), String(graph.sessionCount)))
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(.tertiary)
             }
             if graph.unresolvedLinkCount > 0 || graph.missingSessionCount > 0 {
@@ -1780,7 +1780,7 @@ private struct MemoryGraphSection: View {
                         Text(L10n.format("%@ memories have a deleted source session (gray dashed line, not clickable)", zhHans: "%@ 条记忆的来源会话已删除（灰色虚线，点不开）", String(graph.missingSessionCount)))
                     }
                 }
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
             }
         }
@@ -1794,7 +1794,7 @@ private struct MemoryGraphSection: View {
             LegendLine()
                 .stroke(color, style: StrokeStyle(lineWidth: 1.4, dash: dashed ? [2.5, 2.5] : []))
                 .frame(width: 16, height: 1.4)
-            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(label).font(Theme.font.themed(10)).foregroundStyle(.secondary)
         }
     }
 

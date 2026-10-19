@@ -73,11 +73,11 @@ struct AdvancedSettingsView: View {
     private func pathRow(_ name: String, _ url: URL) -> some View {
         HStack(spacing: 8) {
             Text(name)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .frame(width: 76, alignment: .leading)
             Text(url.path.replacingOccurrences(
                 of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
-                .font(.system(size: 10).monospaced())
+                .font(Theme.font.monoSkillName(10, weight: .regular))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -86,7 +86,7 @@ struct AdvancedSettingsView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } label: {
                 Image(systemName: "arrow.up.forward.square")
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
@@ -102,7 +102,7 @@ struct AdvancedSettingsView: View {
                 .controlSize(.small)
             if let message = usageService.exportMessage {
                 Text(message)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
             }
         }
@@ -112,18 +112,18 @@ struct AdvancedSettingsView: View {
             }
             .controlSize(.small)
             Text(L10n.text("You can query eureka.sqlite directly with sqlite3", zhHans: "可直接 sqlite3 查询 eureka.sqlite"))
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
         }
         Text(L10n.text("Stable relay path: ~/Library/Application Support/Eureka/bin/lululumei-relay (the app re-syncs it on upgrade so hooks keep working; the old name eureka-relay remains a symlink)", zhHans: "relay 稳定路径：~/Library/Application Support/Eureka/bin/lululumei-relay（升级 app 自动重同步，hooks 不断链；旧名 eureka-relay 保留为软链）"))
-            .font(.system(size: 9.5))
+            .font(Theme.font.themed(9.5))
             .foregroundStyle(.tertiary)
         Divider()
         Toggle(L10n.text("Cross-session full-text index", zhHans: "跨会话全文搜索索引"), isOn: $settings.fullTextSearchEnabled)
         Text(L10n.text(
             "Indexes Claude / Codex / Grok / Kimi / CodeBuddy / Qoder conversations locally so search on the Sessions page can jump to a message. The index updates incrementally with usage scans and never leaves this Mac. Turning it off freezes the index. Sources that share one database (OpenCode / Hermes / Cursor) and Antigravity are excluded: the index is keyed by transcript path, and those sources keep every session in a single .db.",
             zhHans: "在本地为 Claude / Codex / Grok / Kimi / CodeBuddy / Qoder 的对话内容建索引，会话页搜索时可直达消息；索引随用量扫描增量更新，全程本地。关闭后索引冻结不再更新。共享单库的来源（OpenCode / Hermes / Cursor）与 Antigravity 不入索引：索引以转录文件路径为主键，而它们所有会话共用同一个 .db。"))
-            .font(.system(size: 9.5))
+            .font(Theme.font.themed(9.5))
             .foregroundStyle(.tertiary)
         // Destructive and slow to rebuild (a full rescan of every transcript): confirm first,
         // same as the audit page's Clear.
@@ -154,7 +154,7 @@ private struct PricingSection: View {
             Text(L10n.text(
                 "A public price list is fetched once a day and no user data is sent. If the fetch fails, the local cache or the bundled snapshot is kept. Subscription plans (Kimi Code, Zhipu / Volcengine Coding Plan, and similar) are priced at the vendor's pay-as-you-go rate as an API-equivalent cost. Models that only have a reseller quote are not priced.",
                 zhHans: "每天拉取一次公开价格表，不发送任何用户数据；失败时继续用本地缓存或随包快照。订阅套餐（Kimi Code、智谱 / 火山 Coding Plan 等）按厂商按量价折算 API 等价费用；只有转售平台报价的模型不计价。"))
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
             statusLine
             HStack(spacing: 8) {
@@ -192,7 +192,7 @@ private struct PricingSection: View {
                 Text(error).foregroundStyle(.red)
             }
         }
-        .font(.system(size: 10))
+        .font(Theme.font.themed(10))
         .foregroundStyle(.secondary)
     }
 
@@ -200,10 +200,10 @@ private struct PricingSection: View {
     private var unpricedList: some View {
         let rows = usageService.pricingDiagnostics
         if rows.isEmpty {
-            Text(L10n.text("Every model has a price", zhHans: "所有模型都已定价")).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(L10n.text("Every model has a price", zhHans: "所有模型都已定价")).font(Theme.font.themed(10)).foregroundStyle(.secondary)
         } else {
             HStack {
-                Text(L10n.format("Unpriced / estimated (%@)", zhHans: "未定价 / 估算（%@）", String(rows.count))).font(.system(size: 10.5, weight: .semibold))
+                Text(L10n.format("Unpriced / estimated (%@)", zhHans: "未定价 / 估算（%@）", String(rows.count))).font(Theme.font.themed(10.5, .semibold))
                 Spacer()
                 Button(L10n.text("Copy Override Template", zhHans: "复制覆盖模板")) { copyTemplate(rows) }.controlSize(.small)
             }
@@ -218,12 +218,12 @@ private struct PricingSection: View {
                     Text(formatTokens(row.tokens)).monospacedDigit()
                         .frame(width: 56, alignment: .trailing)
                 }
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
             }
             Text(L10n.text(
                 "Fill in the prices (USD per million tokens) and save the template as ~/Library/Application Support/Eureka/pricing.json, then click Reload Custom Prices. Custom prices win.",
                 zhHans: "把模板里的价格（USD / 百万 token）填好后保存为 ~/Library/Application Support/Eureka/pricing.json，再点「重新载入自定义价格」。自定义价格优先级最高。"))
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -255,7 +255,7 @@ private struct HealthSection: View {
         VStack(alignment: .leading, spacing: 6) {
             if rows.isEmpty {
                 Text(L10n.text("Data sources have not started", zhHans: "数据源尚未启动"))
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
             }
             ForEach(rows, id: \.name) { row in
@@ -264,10 +264,10 @@ private struct HealthSection: View {
                         .fill(Theme.healthColor(row.entry.status()))
                         .frame(width: 7, height: 7)
                     Text(L10n.healthTitle(row.name))
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                     Spacer()
                     Text(detail(for: row.entry))
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -276,7 +276,7 @@ private struct HealthSection: View {
                         "Failed %@ times · latest: %@",
                         zhHans: "失败 %@ 次 · 最近：%@",
                         String(row.entry.failureCount), note))
-                        .font(.system(size: 9))
+                        .font(Theme.font.themed(9))
                         .foregroundStyle(.orange)
                         .lineLimit(1)
                         .padding(.leading, 13)
@@ -334,21 +334,21 @@ struct CollapsibleCard<Content: View>: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: icon)
-                        .font(.system(size: 14))
+                        .font(Theme.font.themed(14))
                         .foregroundStyle(tint)
                         .frame(width: 28, height: 28)
                         .background(RoundedRectangle(cornerRadius: 7).fill(tint.opacity(0.1)))
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(Theme.font.themed(12, .semibold))
                             .foregroundStyle(.primary)
                         Text(subtitle)
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Theme.font.themed(10, .semibold))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(expanded ? 180 : 0))
                 }

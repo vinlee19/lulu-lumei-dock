@@ -136,13 +136,13 @@ struct HistoryView: View {
         if tasks.isEmpty && runningTasks.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "tray")
-                    .font(.system(size: 28))
+                    .font(Theme.font.themed(28))
                     .foregroundStyle(Theme.brandFg.opacity(0.45))
                 Text(L10n.text("No task history yet", zhHans: "还没有任务记录"))
-                    .font(.system(size: 12))
+                    .font(Theme.font.themed(12))
                     .foregroundStyle(.secondary)
                 Text(L10n.text("Try a claude / codex / grok task", zhHans: "跑一次 claude / codex / grok 任务试试"))
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -214,7 +214,7 @@ struct HistoryView: View {
             Text(L10n.text("Task history", zhHans: "任务历史"))
                 .font(Theme.font.pageTitle)
             Text(L10n.format("Across %@ sources · %@ sessions", zhHans: "跨 %@ 个来源 · 共 %@ 个会话", "\(Set(tasks.map(\.source)).count)", "\(userSessionCount)"))
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .foregroundStyle(.tertiary)
             if let exportMessage {
                 Text(exportMessage)
@@ -335,10 +335,10 @@ struct HistoryView: View {
         HStack(spacing: 5) {
             Text(title)
             Text("\(count)")
-                .font(.system(size: 9).monospacedDigit())
+                .font(Theme.font.themedMono(9))
                 .foregroundStyle(.quaternary)
         }
-        .font(.system(size: 10, weight: .semibold))
+        .font(Theme.font.themed(10, .semibold))
         .foregroundStyle(.tertiary)
         .padding(.horizontal, 12)
         .padding(.top, 12)
@@ -358,7 +358,7 @@ private struct RunningRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 13))
+                .font(Theme.font.themed(13))
                 .foregroundStyle(Theme.brand)
                 .frame(width: 16)
                 .padding(.top, 1)
@@ -369,10 +369,10 @@ private struct RunningRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(task.title ?? task.projectName ?? task.sessionId)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Theme.font.themed(12, .medium))
                         .lineLimit(2)
                     Text(L10n.text("Running", zhHans: "运行中"))
-                        .font(.system(size: 9.5, weight: .medium))
+                        .font(Theme.font.themed(9.5, .medium))
                         .foregroundStyle(Theme.brandFg)
                 }
                 HStack(spacing: 4) {
@@ -389,7 +389,7 @@ private struct RunningRow: View {
                             isRunning: TerminalActivator.isRunning(terminal))
                     }
                 }
-                .font(.system(size: 10.5))
+                .font(Theme.font.themed(10.5))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             }
@@ -403,7 +403,7 @@ private struct RunningRow: View {
                     "Running for %@",
                     zhHans: "已运行 %@",
                     formatDuration(Date().timeIntervalSince(task.startedAt))))
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(Theme.font.themedMono(11))
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 1)
@@ -428,7 +428,7 @@ private struct HistoryRow: View {
         HStack(alignment: .top, spacing: 8) {
             // Status circle: success green ✓ / failure red ✕ / interrupted gray —
             Image(systemName: iconName)
-                .font(.system(size: 13))
+                .font(Theme.font.themed(13))
                 .foregroundStyle(iconColor)
                 .frame(width: 16)
                 .padding(.top, 1)
@@ -439,16 +439,16 @@ private struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(task.title ?? task.projectName ?? task.sessionId)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Theme.font.themed(12, .medium))
                         .lineLimit(2)
                     // Outcome text label (icon color alone isn't distinguishable at a glance, so
                     // add text)
                     Text(task.outcome.label)
-                        .font(.system(size: 9.5, weight: .medium))
+                        .font(Theme.font.themed(9.5, .medium))
                         .foregroundStyle(iconColor)
                     if task.turnCount > 1 {
                         Text(L10n.format("%@ turns", zhHans: "%@ 轮", String(task.turnCount)))
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(Theme.font.themed(9.5, .medium))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -466,14 +466,14 @@ private struct HistoryRow: View {
                             isRunning: TerminalActivator.isRunning(terminal))
                     }
                 }
-                .font(.system(size: 10.5))
+                .font(Theme.font.themed(10.5))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
 
                 // Colored annotation for failure red / interrupted gray
                 if let detail = task.detail, task.outcome != .success {
                     Text(detail)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(task.outcome == .error
                             ? Theme.failureRed : Theme.autoCleanGray)
                         .lineLimit(2)
@@ -489,11 +489,11 @@ private struct HistoryRow: View {
                 }
                 if let duration = task.totalDuration {
                     Text(L10n.format("Duration %@", zhHans: "时长 %@", formatDuration(duration)))
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(Theme.font.themedMono(11))
                         .foregroundStyle(.secondary)
                 }
                 Text("Tokens \(tokens.map(formatTokens) ?? "—")")
-                    .font(.system(size: 11).monospacedDigit())
+                    .font(Theme.font.themedMono(11))
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 1)

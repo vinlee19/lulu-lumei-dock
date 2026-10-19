@@ -18,7 +18,7 @@ struct CommandPaletteView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font.themed(13, .semibold))
                     .foregroundStyle(.secondary)
                 TextField(L10n.text("Search sessions / Skills / Memory / instructions / Plans…", zhHans: "搜索会话 / 技能 / 记忆 / 指令 / 计划…"), text: $service.query)
                     .textFieldStyle(.plain)

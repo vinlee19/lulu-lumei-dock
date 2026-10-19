@@ -36,25 +36,25 @@ struct TurnTrailRowView: View {
                 // the global accent)
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(Theme.font.themed(8, .semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     Image(systemName: "wrench.adjustable")
-                        .font(.system(size: 8.5))
+                        .font(Theme.font.themed(8.5))
                     Text(L10n.format(
                         "This turn · %@ steps",
                         zhHans: "本轮轨迹 · %@ 步",
                         String(message.steps.count)))
-                        .font(.system(size: 10, weight: .medium))
+                        .font(Theme.font.themed(10, .medium))
                     Text(kindSummary)
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(Theme.goldFg.opacity(0.75))
                         .lineLimit(1)
                     if errorCount > 0 {
                         HStack(spacing: 2) {
                             Image(systemName: "exclamationmark.circle")
-                                .font(.system(size: 8.5))
+                                .font(Theme.font.themed(8.5))
                             Text(L10n.format("%@ failed", zhHans: "%@ 失败", String(errorCount)))
-                                .font(.system(size: 9.5))
+                                .font(Theme.font.themed(9.5))
                         }
                         .foregroundStyle(Theme.failureRed)
                     }
@@ -87,16 +87,16 @@ struct TurnTrailRowView: View {
     private func stepRow(_ step: ToolStep) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Image(systemName: step.kind.icon)
-                .font(.system(size: 8.5))
+                .font(Theme.font.themed(8.5))
                 .frame(width: 12)
                 .foregroundStyle(step.isError ? Color.red.opacity(0.8) : Theme.brandFg.opacity(0.55))
             Text(step.name)
-                .font(.system(size: 10, weight: .semibold))
+                .font(Theme.font.themed(10, .semibold))
                 .foregroundStyle(step.isError ? Color.red.opacity(0.9) : Theme.brandFg.opacity(0.75))
                 .lineLimit(1)
             if !step.detail.isEmpty {
                 Text(step.detail)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -104,7 +104,7 @@ struct TurnTrailRowView: View {
             }
             if step.isError {
                 Image(systemName: "exclamationmark.circle")
-                    .font(.system(size: 8.5))
+                    .font(Theme.font.themed(8.5))
                     .foregroundStyle(.red.opacity(0.8))
             }
             Spacer(minLength: 0)
@@ -176,13 +176,13 @@ struct ThinkingRowView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(Theme.font.themed(8, .semibold))
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         Text(L10n.text("💭 Thinking", zhHans: "💭 思考"))
-                            .font(.system(size: 10, weight: .medium))
+                            .font(Theme.font.themed(10, .medium))
                         if !isExpanded {
                             Text(preview)
-                                .font(.system(size: 9.5))
+                                .font(Theme.font.themed(9.5))
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -196,7 +196,7 @@ struct ThinkingRowView: View {
 
                 if isExpanded {
                     Text(message.text)
-                        .font(.system(size: 11.5))
+                        .font(Theme.font.themed(11.5))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         // Multi-line text must lock its intrinsic height, or it gets squeezed back

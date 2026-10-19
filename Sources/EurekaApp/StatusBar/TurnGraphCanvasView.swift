@@ -147,19 +147,19 @@ struct TurnGraphNodeView: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
+                .font(Theme.font.themed(10, .medium))
                 .foregroundStyle(tint)
                 .frame(width: 12)
             VStack(alignment: .leading, spacing: 0) {
                 Text(node.title)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(Theme.font.themed(10.5, .semibold))
                     // Contract: the label must fit the fixed frame the engine gives; text must
                     // never feed back into layout
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if !node.subtitle.isEmpty {
                     Text(node.subtitle)
-                        .font(.system(size: 9))
+                        .font(Theme.font.themed(9))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -168,13 +168,13 @@ struct TurnGraphNodeView: View {
             Spacer(minLength: 0)
             if node.occurrences > 1 {
                 Text("×\(node.occurrences)")
-                    .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(9, .semibold))
                     .foregroundStyle(Theme.goldFg)
                     .fixedSize()
             }
             if node.isError {
                 Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 9))
+                    .font(Theme.font.themed(9))
                     .foregroundStyle(Theme.failureRed)
                     .fixedSize()
             }
@@ -195,7 +195,7 @@ struct TurnGraphNodeView: View {
             // line
             if !overflowBadges.isEmpty {
                 Text("↩︎\(overflowBadges.count)")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Theme.font.themed(8, .semibold))
                     .foregroundStyle(Theme.goldFg)
                     .padding(.horizontal, 3)
                     .background(Capsule().fill(Theme.gold.opacity(0.18)))

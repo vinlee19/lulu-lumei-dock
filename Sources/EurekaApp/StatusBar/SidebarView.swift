@@ -50,7 +50,7 @@ struct SidebarView: View {
                         // each: before that, at 512 the whole "System / Settings" group fell
                         // outside the scroll area, hiding the Settings entry by default.
                         Text(group.label)
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(Theme.font.themed(9.5, .medium))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 10)
                             .padding(.top, 2)
@@ -83,7 +83,7 @@ struct SidebarView: View {
     private var header: some View {
         HStack(spacing: 7) {
             Text("lulu-lumei-dock")
-                .font(.system(size: 12, weight: .semibold))
+                .font(Theme.font.themed(12, .semibold))
                 .foregroundStyle(.primary)
             Spacer(minLength: 0)
         }
@@ -101,7 +101,7 @@ struct SidebarView: View {
                 LuluLogoTile(size: 26)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("lulu-lumei-dock")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(Theme.font.themed(10, .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Text("v\(appVersion)")

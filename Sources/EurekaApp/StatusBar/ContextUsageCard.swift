@@ -39,7 +39,7 @@ struct ContextUsageCard: View {
                         .font(Theme.font.themed(10.5, .medium))
                         .foregroundStyle(.secondary)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Theme.font.themed(10, .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 22, height: 22)
                         .background(

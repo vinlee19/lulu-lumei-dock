@@ -101,7 +101,7 @@ struct PromptsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(L10n.text("Prompts", zhHans: "Prompt 库")).font(.system(size: 15, weight: .bold))
+            Text(L10n.text("Prompts", zhHans: "Prompt 库")).font(Theme.font.themed(15, .bold))
             SearchField(
                 placeholder: L10n.text("Search prompts", zhHans: "搜索提问"), text: $service.searchText,
                 scanning: service.scanning, resultCount: service.prompts.count)
@@ -110,7 +110,7 @@ struct PromptsView: View {
                 service.favoritesOnly.toggle()
             } label: {
                 Image(systemName: service.favoritesOnly ? "star.fill" : "star")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.font.themed(11, .medium))
                     .foregroundStyle(service.favoritesOnly ? Theme.gold : .secondary)
             }
             .buttonStyle(.borderless)
@@ -119,7 +119,7 @@ struct PromptsView: View {
                 effortSort.toggle()
             } label: {
                 Image(systemName: "flame")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.font.themed(11, .medium))
                     .foregroundStyle(effortSort ? Color.orange : .secondary)
             }
             .buttonStyle(.borderless)
@@ -211,7 +211,7 @@ struct PromptsView: View {
     ) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(Theme.font.themed(10, .semibold))
                 .foregroundStyle(Theme.brandFg)
             Text(title)
                 .font(Theme.font.themed(11.5, .semibold))
@@ -339,7 +339,7 @@ struct PromptsView: View {
             VStack(spacing: 10) {
                 ProgressView()
                 Text(L10n.text("Extracting prompts…", zhHans: "正在提取用户提问…"))
-                    .font(.system(size: 12))
+                    .font(Theme.font.themed(12))
                     .foregroundStyle(.secondary)
                 Text(L10n.text("The first extract parses every session and can take a minute or two;", zhHans: "首次提取需解析全部会话记录，可能需要一两分钟；")
                     + L10n.text(" later extracts are incremental and finish in seconds. You can switch tabs — extraction continues in the background.", zhHans: "之后为增量提取，秒级完成。可先切到其他页签，提取在后台继续。"))
@@ -485,13 +485,13 @@ private struct PromptRow: View {
                 HStack(spacing: 10) {
                     if let onRun {
                         Button(action: onRun) {
-                            Image(systemName: "play.fill").font(.system(size: 10))
+                            Image(systemName: "play.fill").font(Theme.font.themed(10))
                         }
                         .buttonStyle(.borderless)
                         .help(L10n.format("Start a new session in Terminal with this prompt (%@)", zhHans: "在终端以此提问启动新会话（%@）", String(entry.source.displayName)))
                     }
                     Button(action: onCopy) {
-                        Image(systemName: "doc.on.doc").font(.system(size: 10))
+                        Image(systemName: "doc.on.doc").font(Theme.font.themed(10))
                     }
                     .buttonStyle(.borderless)
                     .help(L10n.text("Copy the prompt text", zhHans: "复制提问原文"))
@@ -533,7 +533,7 @@ private struct PromptGroupRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.font.themed(9, .semibold))
                 .foregroundStyle(.tertiary)
                 .frame(width: 11)
             VStack(alignment: .leading, spacing: 3) {
@@ -632,13 +632,13 @@ private struct PromptDetailView: View {
     private var toolbar: some View {
         HStack(spacing: 8) {
             Button(action: onBack) {
-                Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.left").font(Theme.font.themed(11, .semibold))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Back to the list", zhHans: "返回列表"))
             SourceBadge(source: entry.source, size: 14)
             Text(entry.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             Spacer(minLength: 8)
             if let session = service.sessionName(for: entry) {
@@ -671,7 +671,7 @@ private struct PromptDetailView: View {
 
     private func metaItem(_ icon: String, _ text: String) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 9))
+            Image(systemName: icon).font(Theme.font.themed(9))
             Text(text)
         }
     }
@@ -800,7 +800,7 @@ private struct PromptDetailView: View {
                             service.setTags(entry.id, tags: entry.tags.filter { $0 != tag })
                         } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 7, weight: .bold))
+                                .font(Theme.font.themed(7, .bold))
                         }
                         .buttonStyle(.borderless)
                     }
@@ -933,7 +933,7 @@ private struct PromptGraduationSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(mode == .skill ? L10n.text("Turn into a skill", zhHans: "升级为技能") : L10n.text("Turn into instructions", zhHans: "升级为指令"))
-                .font(.system(size: 14, weight: .bold))
+                .font(Theme.font.themed(14, .bold))
             Text(mode == .skill
                 ? L10n.text("Write this prompt as SKILL.md — the agent then loads it from the description, or you call it with /name.", zhHans: "把这条提问写成 SKILL.md —— 之后 agent 按描述自动加载，或用 /名称 显式调用。")
                 : instructionHint)

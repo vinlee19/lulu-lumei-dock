@@ -73,7 +73,7 @@ struct PlansView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Plans").font(.system(size: 15, weight: .bold))
+            Text("Plans").font(Theme.font.themed(15, .bold))
             SearchField(
                 placeholder: L10n.text("Search plans", zhHans: "搜索计划"), text: $service.searchText,
                 scanning: service.scanning, resultCount: service.plans.count)
@@ -169,11 +169,11 @@ struct PlansView: View {
             VStack(spacing: 10) {
                 ProgressView()
                 Text(L10n.text("Scanning and extracting plans…", zhHans: "正在扫描并提取计划…"))
-                    .font(.system(size: 12))
+                    .font(Theme.font.themed(12))
                     .foregroundStyle(.secondary)
                 Text(L10n.text("The first scan parses every Codex session and can take a few minutes;", zhHans: "首次扫描需解析全部 Codex 会话记录，可能需要几分钟；")
                     + L10n.text(" later scans are incremental and finish in seconds. You can switch tabs — scanning continues in the background.", zhHans: "之后为增量扫描，秒级完成。可先切到其他页签，扫描在后台继续。"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
@@ -251,26 +251,26 @@ private struct PlanCard: View {
                     // Plan titles are longer than skill names: allow 2 lines and always reserve the
                     // space (equal-height grid)
                     Text(plan.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.font.themed(13, .semibold))
                         .lineLimit(2, reservesSpace: true)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 4)
                     Circle().fill(planAccentColor(plan.status)).frame(width: 7, height: 7)
                 }
                 Text(plan.summary ?? "")
-                    .font(.system(size: 11.5))
+                    .font(Theme.font.themed(11.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
                     Text(plan.status.displayName)
-                        .font(.system(size: 10.5, weight: .semibold))
+                        .font(Theme.font.themed(10.5, .semibold))
                         .foregroundStyle(planAccentColor(plan.status))
                     if let project = plan.project { TagChip(project) }
                     Spacer(minLength: 0)
                     Text(plan.modifiedAt, formatter: relativeFormatter)
-                        .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                        .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
                 }
             }
         } menu: {
@@ -298,16 +298,16 @@ private struct PlanRow: View {
                 SourceLogoTile(source: plan.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plan.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.font.themed(13, .semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     HStack(spacing: 6) {
                         if let project = plan.project {
-                            Text(project).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                            Text(project).font(Theme.font.themed(10.5)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         if let summary = plan.summary {
                             Text(summary)
-                                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                                .font(Theme.font.themed(10.5)).foregroundStyle(.tertiary)
                                 .lineLimit(1).truncationMode(.tail)
                         }
                     }
@@ -324,23 +324,23 @@ private struct PlanRow: View {
     @ViewBuilder private var trailing: some View {
         HStack(spacing: 10) {
             Text(plan.status.displayName)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.font.themed(11, .semibold))
                 .foregroundStyle(planAccentColor(plan.status))
             if plan.status == .document {
-                Image(systemName: "doc.text").font(.system(size: 11)).foregroundStyle(Theme.goldFg)
+                Image(systemName: "doc.text").font(Theme.font.themed(11)).foregroundStyle(Theme.goldFg)
             } else if let progress = plan.progress {
                 PlanProgressBar(progress: progress, width: 66)
                 Text("\(Int((progress * 100).rounded()))%")
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .font(Theme.font.themedMono(12, .semibold))
             }
             if plan.stepsTotal > 0 {
                 Text(L10n.format("%@ / %@ steps", zhHans: "%@ / %@ 步", String(plan.stepsDone), String(plan.stepsTotal)))
-                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
             }
             Text(plan.modifiedAt, formatter: relativeFormatter)
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
             Text(formatBytes(plan.sizeBytes))
-                .font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary)
+                .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
                 .frame(width: 46, alignment: .trailing)
         }
     }
@@ -400,7 +400,7 @@ private struct PlanDetailView: View {
             Divider()
             if editing {
                 TextEditor(text: $text)
-                    .font(.system(size: 12).monospaced())
+                    .font(Theme.font.monoSkillName(12, weight: .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: text)
@@ -414,8 +414,8 @@ private struct PlanDetailView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
@@ -425,7 +425,7 @@ private struct PlanDetailView: View {
                 SourceBadge(source: plan.source, size: 14)
             }
             Text(plan.title)
-                .font(.system(size: 15, weight: .bold))
+                .font(Theme.font.themed(15, .bold))
                 .lineLimit(1)
             if let project = plan.project {
                 TagChip(project)
@@ -445,18 +445,18 @@ private struct PlanDetailView: View {
                 }
             }
             Button { service.openInEditor(path: plan.path) } label: {
-                Image(systemName: "square.and.pencil").font(.system(size: 11))
+                Image(systemName: "square.and.pencil").font(Theme.font.themed(11))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Open in the default editor", zhHans: "用默认编辑器打开"))
             Button { service.reveal(path: plan.path) } label: {
-                Image(systemName: "folder").font(.system(size: 11))
+                Image(systemName: "folder").font(Theme.font.themed(11))
             }
             .buttonStyle(.borderless)
             .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
             if editable {
                 Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash").font(.system(size: 11))
+                    Image(systemName: "trash").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Move to the Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
@@ -472,14 +472,14 @@ private struct PlanDetailView: View {
                 ? (plan.kind == .projectDocument
                     ? L10n.format("Project document (real file in the repo) · %@", zhHans: "项目文档（仓库内真实文件） · %@", String(plan.path)) : plan.path)
                 : L10n.format("Materialized copy (read-only, rebuilt each scan) · %@", zhHans: "物化副本（只读，每轮扫描自动重建） · %@", String(plan.path)))
-                .font(.system(size: 9).monospaced())
+                .font(Theme.font.monoSkillName(9, weight: .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
             if let note = saveNote {
                 Text(note)
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             if editing {

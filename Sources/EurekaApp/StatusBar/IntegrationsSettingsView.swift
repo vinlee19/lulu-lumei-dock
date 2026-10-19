@@ -28,7 +28,7 @@ struct IntegrationsSettingsView: View {
             SectionCard(L10n.text("Update policy", zhHans: "更新策略")) { updatePolicy }
             if let message = installer.message {
                 Text(message)
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -43,7 +43,7 @@ struct IntegrationsSettingsView: View {
             Text(L10n.text(
                 "It works with no hooks installed: the app reads local transcripts, rollouts, and databases, and events show up on the next scan. With hooks, task cards are live and the app can record which terminal a session is running in.",
                 zhHans: "不装任何 hook 也能用：应用会直接读本地的 transcript / rollout / 数据库，只是事件要等下一轮扫描才出现。装上 hook 后任务卡是实时的，并且能记录会话跑在哪个终端。"))
-                .font(.system(size: 10.5))
+                .font(Theme.font.themed(10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             riskNotice
@@ -67,11 +67,11 @@ struct IntegrationsSettingsView: View {
     private func noticeLine(_ icon: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 9))
+                .font(Theme.font.themed(9))
                 .foregroundStyle(Theme.brandFg)
                 .frame(width: 12)
             Text(text)
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -83,7 +83,7 @@ struct IntegrationsSettingsView: View {
         let report = installer.foreignHooks
         return HStack(alignment: .top, spacing: 5) {
             Image(systemName: "person.2")
-                .font(.system(size: 9))
+                .font(Theme.font.themed(9))
                 .foregroundStyle(Theme.goldFg)
                 .frame(width: 12)
             Text(L10n.format(
@@ -91,7 +91,7 @@ struct IntegrationsSettingsView: View {
                 zhHans: "检测到其它工具的 hook：%@（%@ 个事件）。它们与我们并存，不会被改动。",
                 report.tools.joined(separator: L10n.text(", ", zhHans: "、")),
                 String(report.events.count)))
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -109,10 +109,10 @@ struct IntegrationsSettingsView: View {
                 SourceBadge(source: integration.source, size: 13)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(integration.benefit)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                     Text(integration.configURL.path)
-                        .font(.system(size: 9.5).monospaced())
+                        .font(Theme.font.monoSkillName(9.5, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -137,12 +137,12 @@ struct IntegrationsSettingsView: View {
                     "Chained: each notification is forwarded unchanged to %@, then recorded",
                     zhHans: "已串联：每次通知先原样转给 %@，再记录事件",
                     chained))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
             }
             if let detail = diagnosis.detail {
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(color(for: diagnosis.severity))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -188,7 +188,7 @@ struct IntegrationsSettingsView: View {
     private func diagnosisBadge(_ diagnosis: HookDiagnosis) -> some View {
         let tint = color(for: diagnosis.severity)
         return Text(diagnosis.label)
-            .font(.system(size: 10, weight: .medium))
+            .font(Theme.font.themed(10, .medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Capsule().fill(tint.opacity(0.15)))
@@ -212,7 +212,7 @@ struct IntegrationsSettingsView: View {
             Text(L10n.text(
                 "Only integrations you already installed are refreshed; one you never turned on is never installed. Config that cannot be rewritten safely (a hand-edited path, a parse failure, or someone else's entry) is skipped entirely and called out here. Entries that still name eureka-relay are switched to lululumei-relay along the way.",
                 zhHans: "只会刷新你已经装过的那几项；永远不会安装你没开过的集成。遇到无法安全改写的配置（路径被手改、解析失败、他人占用）会整体跳过并在此提示；仍引用旧名 eureka-relay 的条目会顺带改为 lululumei-relay。"))
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
             if !installer.autoUpdateSkipped.isEmpty {
@@ -220,7 +220,7 @@ struct IntegrationsSettingsView: View {
                     "Last automatic update skipped: %@ — see the notes above.",
                     zhHans: "上次自动更新已跳过：%@ —— 原因见上方各项说明。",
                     installer.autoUpdateSkipped.map(\.title).joined(separator: L10n.text(", ", zhHans: "、"))))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(Theme.goldFg)
                     .fixedSize(horizontal: false, vertical: true)
             }

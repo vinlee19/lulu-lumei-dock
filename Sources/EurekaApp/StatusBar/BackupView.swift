@@ -100,15 +100,15 @@ struct BackupView: View {
                 case .running:
                     ProgressView().controlSize(.mini)
                     Text(L10n.text("Testing…", zhHans: "测试中…"))
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.secondary)
                 case .success:
                     Label(L10n.text("Connected", zhHans: "连接成功"), systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(Theme.font.themed(10, .medium))
                         .foregroundStyle(Theme.enabledGreen)
                 case .failure(let message):
                     Label(message, systemImage: "xmark.octagon.fill")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(Theme.font.themed(10, .medium))
                         .foregroundStyle(Theme.failureRed)
                         .lineLimit(2)
                         .help(message)
@@ -118,7 +118,7 @@ struct BackupView: View {
             }
             if let error = service.lastError {
                 Text(error)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.orange)
             }
         }
@@ -133,17 +133,17 @@ struct BackupView: View {
                     .progressViewStyle(.linear)
                 HStack(spacing: 8) {
                     Text(L10n.format("%@/%@ files", zhHans: "%@/%@ 个文件", String(progress.completedFiles), String(progress.totalFiles)))
-                        .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                        .font(Theme.font.themedMono(10.5, .medium))
                     // Always use the GB-aware formatter: formatBytes would show a large backup as
                     // "1234.5 MB"
                     Text("\(formatSyncBytes(max(0, progress.transferredBytes))) / \(formatSyncBytes(max(0, progress.totalBytes)))")
-                        .font(.system(size: 10.5).monospacedDigit())
+                        .font(Theme.font.themedMono(10.5))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
                 if let current = progress.currentFile {
                     Text(L10n.format("Uploading: %@", zhHans: "正在上传：%@", current))
-                        .font(.system(size: 10).monospaced())
+                        .font(Theme.font.monoSkillName(10, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -153,7 +153,7 @@ struct BackupView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text(L10n.text("Scanning local files…", zhHans: "正在扫描本地文件…"))
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -173,7 +173,7 @@ struct BackupView: View {
             }
             if let result = service.lastResult {
                 Text(L10n.format("Last run: %@", zhHans: "上轮：%@", result))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
             }
         }
@@ -252,7 +252,7 @@ struct BackupView: View {
         let ratio = sourceBytes > 0 ? Double(bucket.bytes) / Double(sourceBytes) : 0
         return HStack(spacing: 8) {
             Text(bucket.kind ?? L10n.text("Root files", zhHans: "根文件"))
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .foregroundStyle(.secondary)
                 .frame(width: 108, alignment: .leading)
             GeometryReader { geo in
@@ -264,11 +264,11 @@ struct BackupView: View {
             }
             .frame(height: 4)
             Text(L10n.format("%@ files", zhHans: "%@ 个", String(bucket.count)))
-                .font(.system(size: 10.5).monospacedDigit())
+                .font(Theme.font.themedMono(10.5))
                 .foregroundStyle(.secondary)
                 .frame(width: 54, alignment: .trailing)
             Text(formatSyncBytes(bucket.bytes))
-                .font(.system(size: 10.5).monospacedDigit())
+                .font(Theme.font.themedMono(10.5))
                 .foregroundStyle(.tertiary)
                 .frame(width: 66, alignment: .trailing)
         }
@@ -331,7 +331,7 @@ struct BackupView: View {
             Text(L10n.text("Size", zhHans: "大小")).frame(width: 68, alignment: .trailing)
             Text(L10n.text("Makeup", zhHans: "构成")).frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
         }
-        .font(.system(size: 10, weight: .semibold))
+        .font(Theme.font.themed(10, .semibold))
         .foregroundStyle(.tertiary)
         .padding(.bottom, 2)
     }
@@ -339,20 +339,20 @@ struct BackupView: View {
     private var historyPager: some View {
         HStack(spacing: 8) {
             Text(L10n.format("%@ runs", zhHans: "共 %@ 轮", String(service.runsTotal)))
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.tertiary)
             Spacer()
             Button {
                 goToHistoryPage(historyPage - 1)
-            } label: { Image(systemName: "chevron.left").font(.system(size: 9)) }
+            } label: { Image(systemName: "chevron.left").font(Theme.font.themed(9)) }
             .buttonStyle(.borderless)
             .disabled(historyPage <= 1)
             Text("\(historyPage) / \(totalHistoryPages)")
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.secondary)
             Button {
                 goToHistoryPage(historyPage + 1)
-            } label: { Image(systemName: "chevron.right").font(.system(size: 9)) }
+            } label: { Image(systemName: "chevron.right").font(Theme.font.themed(9)) }
             .buttonStyle(.borderless)
             .disabled(historyPage >= totalHistoryPages)
         }
@@ -375,13 +375,13 @@ struct BackupView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Theme.font.themed(8, .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .opacity(run.files.isEmpty ? 0 : 1)
                     .frame(width: 10)
                 Text(run.date, format: .dateTime.month().day().hour().minute())
-                    .font(.system(size: 10.5).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5))
                     .foregroundStyle(.secondary)
                     .frame(width: 84, alignment: .leading)
                 HStack(spacing: 4) {
@@ -389,26 +389,26 @@ struct BackupView: View {
                         .fill(run.error == nil ? Theme.enabledGreen : Theme.failureRed)
                         .frame(width: 6, height: 6)
                     Text(run.error == nil ? L10n.text("Succeeded", zhHans: "成功") : L10n.text("Failed", zhHans: "失败"))
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(run.error == nil ? .secondary : Color(Theme.failureRed))
                 }
                 .frame(width: 46, alignment: .leading)
                 Text(L10n.format("%@ files", zhHans: "%@ 个", String(run.uploaded)))
-                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5, .medium))
                     .frame(width: 58, alignment: .trailing)
                 Text(run.uploadedBytes > 0 ? formatSyncBytes(run.uploadedBytes) : "—")
-                    .font(.system(size: 10.5).monospacedDigit())
+                    .font(Theme.font.themedMono(10.5))
                     .foregroundStyle(.secondary)
                     .frame(width: 68, alignment: .trailing)
                 compositionBar(groups)
                     .frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
                 if run.failed > 0 {
                     Text(L10n.format("Failed %@", zhHans: "失败 %@", String(run.failed)))
-                        .font(.system(size: 10)).foregroundStyle(Color(Theme.failureRed))
+                        .font(Theme.font.themed(10)).foregroundStyle(Color(Theme.failureRed))
                 }
                 if run.deferred > 0 {
                     Text(L10n.format("Deferred %@", zhHans: "待传 %@", String(run.deferred)))
-                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
                 }
             }
             .padding(.vertical, 3)
@@ -418,7 +418,7 @@ struct BackupView: View {
 
         if let error = run.error {
             Text(error)
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(Color(Theme.failureRed))
                 .lineLimit(2)
                 .padding(.leading, 18)
@@ -436,7 +436,7 @@ struct BackupView: View {
                         "This run uploaded %@ files; only the first %@ are listed",
                         zhHans: "本轮共 %@ 个文件，只记录了前 %@ 个明细",
                         String(run.uploaded), String(run.files.count)))
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)
                 }
@@ -451,7 +451,7 @@ struct BackupView: View {
     private func compositionBar(_ groups: [RunGroup]) -> some View {
         let total = max(Int64(1), groups.reduce(Int64(0)) { $0 + $1.bytes })
         if groups.isEmpty {
-            Text("—").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            Text("—").font(Theme.font.themed(10.5)).foregroundStyle(.tertiary)
         } else {
             GeometryReader { geo in
                 HStack(spacing: 1) {
@@ -478,25 +478,25 @@ struct BackupView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 7, weight: .semibold))
+                    .font(Theme.font.themed(7, .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(open ? 90 : 0))
                 if let source = AgentSource(rawValue: group.source) {
                     SourceBadge(source: source, size: 10)
                 } else {
                     Image(systemName: "folder.fill")
-                        .font(.system(size: 9))
+                        .font(Theme.font.themed(9))
                         .foregroundStyle(Theme.brandFg.opacity(0.7))
                 }
                 Text(group.category)
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .font(Theme.font.themed(10.5, .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 6)
                 Text(L10n.format("%@ files", zhHans: "%@ 个", String(group.files.count)))
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(.secondary)
                 Text(formatSyncBytes(group.bytes))
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(Theme.font.themedMono(10))
                     .foregroundStyle(.tertiary)
                     .frame(width: 66, alignment: .trailing)
             }
@@ -510,20 +510,20 @@ struct BackupView: View {
             ForEach(Array(shown.enumerated()), id: \.offset) { _, file in
                 HStack(spacing: 6) {
                     Text(file.name)
-                        .font(.system(size: 10).monospaced())
+                        .font(Theme.font.monoSkillName(10, weight: .regular))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 4)
                     Text(formatSyncBytes(max(0, file.size)))
-                        .font(.system(size: 10).monospacedDigit())
+                        .font(Theme.font.themedMono(10))
                         .foregroundStyle(.tertiary)
                 }
                 .padding(.leading, 20)
             }
             if group.files.count > shown.count {
                 Text(L10n.format("…%@ more", zhHans: "…剩 %@ 个", String(group.files.count - shown.count)))
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 20)
             }
@@ -563,14 +563,14 @@ struct BackupView: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "icloud.and.arrow.up")
-                .font(.system(size: 34))
+                .font(Theme.font.themed(34))
                 .foregroundStyle(Theme.brandFg.opacity(0.5))
             Text(L10n.text("After automatic backup is on, skills, memory, plans, and every session record upload incrementally to your cloud storage", zhHans: "开启自动备份后，技能、记忆、计划与全部会话记录会增量上传到你的云端存储"))
-                .font(.system(size: 12))
+                .font(Theme.font.themed(12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Text(L10n.text("Upload only, never delete · keys stay in the macOS Keychain · Tencent Cloud COS and custom S3-compatible storage", zhHans: "只上传不删除 · 密钥仅存于 macOS 钥匙串 · 支持腾讯云 COS 与自定义 S3 兼容存储"))
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
             Button(L10n.text("Configure…", zhHans: "配置…")) { showConfig = true }
                 .controlSize(.small)
@@ -611,16 +611,16 @@ struct BackupView: View {
     private func stat(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                .font(Theme.font.themedMono(15, .semibold))
             Text(label)
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
         }
     }
 
     private func summaryBadge(_ text: String, color: Color = Theme.brand) -> some View {
         Text(text)
-            .font(.system(size: 9.5, weight: .medium))
+            .font(Theme.font.themed(9.5, .medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Capsule().fill(color.opacity(0.12)))
@@ -666,7 +666,7 @@ private struct BackupConfigSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(L10n.text("Cloud backup configuration", zhHans: "云端备份配置"))
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font.themed(13, .semibold))
                 .padding(12)
             Divider()
 
@@ -708,13 +708,13 @@ private struct BackupConfigSheet: View {
                             .multilineTextAlignment(.trailing)
                             .onSubmit { clampInterval() }
                         Text(L10n.text("minutes (minimum 1)", zhHans: "分钟（最小 1）"))
-                            .font(.system(size: 10.5))
+                            .font(Theme.font.themed(10.5))
                             .foregroundStyle(.secondary)
                     }
                     row(L10n.text("Retries", zhHans: "失败重试")) {
                         Stepper(value: $settings.cosRetryAttempts, in: 0...5) {
                             Text(L10n.format("%@ times", zhHans: "%@ 次", String(settings.cosRetryAttempts)))
-                                .font(.system(size: 11).monospacedDigit())
+                                .font(Theme.font.themedMono(11))
                         }
                         .controlSize(.small)
                         TextField("3", value: $settings.cosRetryBackoffSeconds, format: .number)
@@ -722,7 +722,7 @@ private struct BackupConfigSheet: View {
                             .frame(width: 48)
                             .multilineTextAlignment(.trailing)
                         Text(L10n.text("second backoff, doubling (network errors and 5xx only)", zhHans: "秒退避 ×2 递增（仅网络错误/5xx 重试）"))
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(.secondary)
                     }
 
@@ -765,11 +765,11 @@ private struct BackupConfigSheet: View {
                         .disabled(secretId.trimmingCharacters(in: .whitespaces).isEmpty
                             || secretKey.trimmingCharacters(in: .whitespaces).isEmpty)
                         Text(service.credentialsConfigured ? L10n.text("Keychain: configured", zhHans: "钥匙串：已配置") : L10n.text("Keychain: not configured", zhHans: "钥匙串：未配置"))
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(service.credentialsConfigured ? .green : .secondary)
                         if let credentialsError {
                             Text(credentialsError)
-                                .font(.system(size: 10))
+                                .font(Theme.font.themed(10))
                                 .foregroundStyle(Theme.failureRed)
                         }
                     }
@@ -778,16 +778,16 @@ private struct BackupConfigSheet: View {
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(L10n.text("Request preview", zhHans: "请求预览"))
-                            .font(.system(size: 10.5, weight: .medium))
+                            .font(Theme.font.themed(10.5, .medium))
                             .foregroundStyle(.secondary)
                         Text(urlPreview)
-                            .font(.system(size: 9.5).monospaced())
+                            .font(Theme.font.monoSkillName(9.5, weight: .regular))
                             .foregroundStyle(.tertiary)
                             .lineLimit(2)
                             .truncationMode(.middle)
                             .textSelection(.enabled)
                         Text(L10n.text("Auth uses AWS SigV4 headers (Authorization / x-amz-date / x-amz-content-sha256). Upload only, never delete, and keys stay in the macOS Keychain.", zhHans: "认证走 AWS SigV4 签名头（Authorization / x-amz-date / x-amz-content-sha256）；只上传不删除，密钥仅存于 macOS 钥匙串。"))
-                            .font(.system(size: 9.5))
+                            .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -808,7 +808,7 @@ private struct BackupConfigSheet: View {
             .padding(10)
         }
         .frame(width: 520, height: 480)
-        .font(.system(size: 11.5))
+        .font(Theme.font.themed(11.5))
         .onAppear { service.refreshCredentialStatus() }
         .onDisappear { clampInterval() }
     }
@@ -820,11 +820,11 @@ private struct BackupConfigSheet: View {
     private var auditArchiveSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(L10n.text("Audit archive (Parquet)", zhHans: "审计归档（Parquet）"), isOn: $settings.auditArchiveEnabled)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
             Text(L10n.text(
                 "Audit records are written as Parquet per UTC day and uploaded to <prefix>/<host>/eureka/audit/dt=YYYY-MM-DD/. Secrets, tokens, and passwords in commands are redacted before upload (Authorization, KEY=, URL credentials, and common key formats). The rest of the command and paths are kept, so lock the bucket down and turn on server-side encryption. Once this is on, local cleanup only deletes days that uploaded successfully: a failed upload is kept past the retention window instead of being dropped.",
                 zhHans: "把审计记录按 UTC 日写成 Parquet，上传到 <前缀>/<主机>/eureka/audit/dt=YYYY-MM-DD/。上传前自动遮掉命令里的密钥、令牌、密码（Authorization、KEY=、URL 凭证、常见密钥格式等），但命令、路径等其余内容保留，建议给存储桶配置访问控制与服务端加密。开启后，本地只清理已确认上传的日期：上传失败时记录会超过保留期继续保留，不会丢。"))
-                .font(.system(size: 9.5))
+                .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -834,7 +834,7 @@ private struct BackupConfigSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(L10n.text("Custom folders", zhHans: "自定义目录"))
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(Theme.font.themed(10.5, .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button(L10n.text("Add Folder…", zhHans: "添加文件夹…")) { pickFolder() }
@@ -842,22 +842,22 @@ private struct BackupConfigSheet: View {
             }
             if settings.customSyncFolders.isEmpty {
                 Text(L10n.text("Include any local folder in the backup. Remote key = <prefix>/<host>/custom/<remote name>/<relative path>", zhHans: "把任意本地目录纳入备份：远端键 = <前缀>/<主机>/custom/<远端名>/<相对路径>"))
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
             }
             ForEach($settings.customSyncFolders) { $folder in
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(Theme.brandFg.opacity(0.8))
                     Text(folder.path)
-                        .font(.system(size: 10).monospaced())
+                        .font(Theme.font.monoSkillName(10, weight: .regular))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(folder.path)
                     Spacer(minLength: 4)
                     Text("→ custom/")
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                     TextField(L10n.text("Remote name", zhHans: "远端名"), text: $folder.remoteName)
                         .textFieldStyle(.roundedBorder)
@@ -871,7 +871,7 @@ private struct BackupConfigSheet: View {
                         settings.customSyncFolders.removeAll { $0.id == folder.id }
                     } label: {
                         Image(systemName: "trash")
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
@@ -906,7 +906,7 @@ private struct BackupConfigSheet: View {
         HStack(spacing: 8) {
             Text(label)
                 .frame(width: 64, alignment: .leading)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .foregroundStyle(.secondary)
             content()
         }

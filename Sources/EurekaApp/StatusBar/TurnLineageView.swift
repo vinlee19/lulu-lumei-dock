@@ -94,14 +94,14 @@ struct TurnLineageView: View {
         HStack(spacing: 12) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
-            Text(L10n.text("Turn lineage", zhHans: "轮次血缘")).font(.system(size: 15, weight: .bold))
+            Text(L10n.text("Turn lineage", zhHans: "轮次血缘")).font(Theme.font.themed(15, .bold))
             Text(sessionName)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer(minLength: 12)
@@ -134,15 +134,15 @@ struct TurnLineageView: View {
     private var turnStepper: some View {
         HStack(spacing: 4) {
             Button { current = max(0, current - 1) } label: {
-                Image(systemName: "chevron.left").font(.system(size: 9))
+                Image(systemName: "chevron.left").font(Theme.font.themed(9))
             }
             .buttonStyle(.borderless)
             .disabled(current <= 0)
             Text("\(current + 1) / \(turns.count)")
-                .font(.system(size: 10).monospacedDigit())
+                .font(Theme.font.themedMono(10))
                 .foregroundStyle(.secondary)
             Button { current = min(turns.count - 1, current + 1) } label: {
-                Image(systemName: "chevron.right").font(.system(size: 9))
+                Image(systemName: "chevron.right").font(Theme.font.themed(9))
             }
             .buttonStyle(.borderless)
             .disabled(current >= turns.count - 1)
@@ -260,21 +260,21 @@ struct TurnLineageView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(L10n.format("Turn %@", zhHans: "第 %@ 轮", String(index + 1)))
-                            .font(.system(size: 11.5, weight: .semibold))
+                            .font(Theme.font.themed(11.5, .semibold))
                             .fixedSize()
                         Text(turn.promptText.isEmpty ? L10n.text("(No prompt, session resumed)", zhHans: "（无提问，会话恢复）") : turn.promptText)
-                            .font(.system(size: 11))
+                            .font(Theme.font.themed(11))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     if item.signals.isEmpty {
                         Text(L10n.text("Nothing to flag", zhHans: "没有发现问题"))
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(.tertiary)
                     } else {
                         Text(item.signals.map(\.title).joined(separator: " · "))
-                            .font(.system(size: 10))
+                            .font(Theme.font.themed(10))
                             .foregroundStyle(severityColor(item.severity))
                             .lineLimit(1)
                     }
@@ -298,8 +298,8 @@ struct TurnLineageView: View {
 
     private func metric(_ value: String, _ label: String) -> some View {
         VStack(spacing: 0) {
-            Text(value).font(.system(size: 11, weight: .semibold).monospacedDigit())
-            Text(label).font(.system(size: 8.5)).foregroundStyle(.tertiary)
+            Text(value).font(Theme.font.themedMono(11, .semibold))
+            Text(label).font(Theme.font.themed(8.5)).foregroundStyle(.tertiary)
         }
         .frame(minWidth: 26)
     }

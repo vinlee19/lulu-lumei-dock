@@ -44,7 +44,7 @@ struct ConsistencyCard: View {
                 header(report, clean: clean, issueCount: issueCount)
                 if let note = fixNote {
                     Text(note)
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                         .padding(.top, expanded ? 0 : 6)
                 }
@@ -90,12 +90,12 @@ struct ConsistencyCard: View {
         HStack(spacing: 8) {
             Image(systemName: clean
                 ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .font(.system(size: 13))
+                .font(Theme.font.themed(13))
                 .foregroundStyle(clean ? Theme.enabledGreen : Theme.gold)
             VStack(alignment: .leading, spacing: 1) {
-                Text(L10n.text("Configuration consistency", zhHans: "配置一致性")).font(.system(size: 12.5, weight: .semibold))
+                Text(L10n.text("Configuration consistency", zhHans: "配置一致性")).font(Theme.font.themed(12.5, .semibold))
                 Text(summary(report, clean: clean))
-                    .font(.system(size: 10.5))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -105,7 +105,7 @@ struct ConsistencyCard: View {
                     withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
                 }
                 .buttonStyle(.borderless)
-                .font(.system(size: 11))
+                .font(Theme.font.themed(11))
             }
         }
     }
@@ -173,17 +173,17 @@ struct ConsistencyCard: View {
                             SourceLogoTile(source: gap.source, size: 18)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(L10n.format("%1$@ is missing %2$@", zhHans: "%1$@ 缺 %2$@ 个", gap.source.displayName, String(gap.missing.count)))
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(Theme.font.themed(11, .medium))
                                 Text(gap.missing.prefix(6).joined(separator: L10n.text(", ", zhHans: "、"))
                                     + (gap.missing.count > 6 ? L10n.text(" etc.", zhHans: " 等") : ""))
-                                    .font(.system(size: 10))
+                                    .font(Theme.font.themed(10))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(2)
                             }
                             Spacer(minLength: 8)
                             Button(L10n.format("Fill in %@", zhHans: "补齐 %@ 个", String(gap.missing.count))) { fixGap = gap }
                                 .buttonStyle(.borderless)
-                                .font(.system(size: 10.5))
+                                .font(Theme.font.themed(10.5))
                                 .help(L10n.format("Copy these skills from a configured source to %@", zhHans: "把这些技能从已配置的源复制到 %@", gap.source.displayName))
                         }
                     }
@@ -197,7 +197,7 @@ struct ConsistencyCard: View {
                                 .font(Theme.font.monoSkillName(11, weight: .medium))
                             ForEach(drift.variants, id: \.self) { variant in
                                 Text(variant)
-                                    .font(.system(size: 9.5).monospaced())
+                                    .font(Theme.font.monoSkillName(9.5, weight: .regular))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -260,8 +260,8 @@ struct ConsistencyCard: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                Text(hint).font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                Text(title).font(Theme.font.themed(11, .semibold)).foregroundStyle(.secondary)
+                Text(hint).font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
             }
             content()
         }

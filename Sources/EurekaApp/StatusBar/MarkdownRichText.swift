@@ -34,11 +34,11 @@ struct MarkdownRichText: View {
             if text.hasPrefix("|") {
                 // Table fallback: monospaced rendering keeps the columns aligned
                 Text(text)
-                    .font(.system(size: 11.5).monospaced())
+                    .font(Theme.font.monoSkillName(11.5, weight: .regular))
                     .textSelection(.enabled)
             } else {
                 Text(Self.inline(text))
-                    .font(.system(size: 13))
+                    .font(Theme.font.themed(13))
                     .lineSpacing(2.5)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -61,16 +61,16 @@ struct MarkdownRichText: View {
             HStack(alignment: .top, spacing: 6) {
                 if let check {
                     Image(systemName: Self.checkIcon(check))
-                        .font(.system(size: 12.5))
+                        .font(Theme.font.themed(12.5))
                         .foregroundStyle(Self.checkColor(check))
                         .padding(.top, 1.5)
                 } else {
                     Text(ordered ? "\(index)." : "•")
-                        .font(.system(size: 12.5).monospacedDigit())
+                        .font(Theme.font.themedMono(12.5))
                         .foregroundStyle(Theme.brandFg.opacity(0.8))
                 }
                 Text(Self.inline(text))
-                    .font(.system(size: 13))
+                    .font(Theme.font.themed(13))
                     .lineSpacing(2.5)
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(check == .done ? AnyShapeStyle(.secondary)
@@ -84,7 +84,7 @@ struct MarkdownRichText: View {
                     .fill(Theme.brand.opacity(0.4))
                     .frame(width: 3)
                 Text(Self.inline(text))
-                    .font(.system(size: 12.5))
+                    .font(Theme.font.themed(12.5))
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.primary.opacity(0.8))
@@ -121,7 +121,7 @@ struct MarkdownRichText: View {
                 GridRow {
                     ForEach(0..<columns, id: \.self) { col in
                         Text(Self.inline(col < header.count ? header[col] : ""))
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(Theme.font.themed(12, .semibold))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -130,7 +130,7 @@ struct MarkdownRichText: View {
                     GridRow {
                         ForEach(0..<columns, id: \.self) { col in
                             Text(Self.inline(col < row.count ? row[col] : ""))
-                                .font(.system(size: 12))
+                                .font(Theme.font.themed(12))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -176,7 +176,7 @@ struct CodeBlockView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language ?? "code")
-                    .font(.system(size: 9).monospaced())
+                    .font(Theme.font.monoSkillName(9, weight: .regular))
                     .foregroundStyle(.tertiary)
                 Spacer()
                 Button {
@@ -188,7 +188,7 @@ struct CodeBlockView: View {
                     }
                 } label: {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 9))
+                        .font(Theme.font.themed(9))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
@@ -198,7 +198,7 @@ struct CodeBlockView: View {
             .padding(.vertical, 4)
             Divider().opacity(0.5)
             Text(code)
-                .font(.system(size: 11.5).monospaced())
+                .font(Theme.font.monoSkillName(11.5, weight: .regular))
                 .textSelection(.enabled)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -105,7 +105,7 @@ struct SkillDetailView: View {
                 MarkdownDocumentCard(text: text)
             case .edit:
                 TextEditor(text: $text)
-                    .font(.system(size: 12).monospaced())
+                    .font(Theme.font.monoSkillName(12, weight: .regular))
                     .padding(8)
             }
             if pane != .overview, let entry {
@@ -142,8 +142,8 @@ struct SkillDetailView: View {
         HStack(spacing: 8) {
             Button(action: onBack) {
                 HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(.system(size: 11))
+                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
+                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
                 }
             }
             .buttonStyle(.borderless)
@@ -173,17 +173,17 @@ struct SkillDetailView: View {
                     }
                 }
                 Button { service.openInEditor(path: entry.path) } label: {
-                    Image(systemName: "square.and.pencil").font(.system(size: 11))
+                    Image(systemName: "square.and.pencil").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Open in default editor", zhHans: "用默认编辑器打开"))
                 Button { service.reveal(path: entry.path) } label: {
-                    Image(systemName: "folder").font(.system(size: 11))
+                    Image(systemName: "folder").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"))
                 Button(role: .destructive) { onDelete(entry) } label: {
-                    Image(systemName: "trash").font(.system(size: 11))
+                    Image(systemName: "trash").font(Theme.font.themed(11))
                 }
                 .buttonStyle(.borderless)
                 .help(L10n.text("Move to Trash (can be restored)", zhHans: "移入废纸篓（可恢复）"))
@@ -196,14 +196,14 @@ struct SkillDetailView: View {
     private func documentFooter(_ entry: SkillEntry) -> some View {
         HStack(spacing: 8) {
             Text(entry.path)
-                .font(.system(size: 9).monospaced())
+                .font(Theme.font.monoSkillName(9, weight: .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
             if let note = saveNote {
                 Text(note)
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
             if pane == .edit {
@@ -227,7 +227,7 @@ struct SkillDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 sectionTitle(L10n.text("Description", zhHans: "描述"))
                 Text(desc)
-                    .font(.system(size: 13.5))
+                    .font(Theme.font.themed(13.5))
                     .lineSpacing(6)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -247,11 +247,11 @@ struct SkillDetailView: View {
                     "%2$@ of %1$@ tools available",
                     zhHans: "%1$@ 个工具中 %2$@ 个可用",
                     String(AgentSource.allCases.count), String(configured)))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                 if entry != nil {
                     Text(L10n.text("· Unconfigured sources can be installed in one click · Custom copies can be overwritten", zhHans: "· 未配置可一键安装 · 自建可覆盖更新"))
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -270,15 +270,15 @@ struct SkillDetailView: View {
                         SourceBadge(source: source, size: 22)
                             .opacity(origin == nil ? 0.28 : 1)
                         Text(source.displayName)
-                            .font(.system(size: 9))
+                            .font(Theme.font.themed(9))
                             .foregroundStyle(origin == nil ? .tertiary : .secondary)
                         if installable {
                             Text(L10n.text("Install", zhHans: "安装"))
-                                .font(.system(size: 8, weight: .semibold))
+                                .font(Theme.font.themed(8, .semibold))
                                 .foregroundStyle(Theme.brandFg)
                         } else {
                             Text(originLabel(origin))
-                                .font(.system(size: 8, weight: .medium))
+                                .font(Theme.font.themed(8, .medium))
                                 .foregroundStyle(originColor(origin))
                         }
                     }
@@ -311,7 +311,7 @@ struct SkillDetailView: View {
             }
             if let note = installNote {
                 Text(note)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
             }
         }
@@ -426,7 +426,7 @@ struct SkillDetailView: View {
                 }
                 if target.source == .claude {
                     Text(L10n.text("Tokens at trigger ≈ the context size of that turn, not the cost of running the whole skill", zhHans: "触发时 token ≈ 调用当轮上下文规模，非技能整段执行开销"))
-                        .font(.system(size: 9))
+                        .font(Theme.font.themed(9))
                         .foregroundStyle(.tertiary)
                 }
                 trendChart
@@ -434,7 +434,7 @@ struct SkillDetailView: View {
                 Text(target.source == .claude
                     ? L10n.text("No recent calls", zhHans: "近期暂无调用记录")
                     : L10n.text("This source has no per-skill call data (only Claude can be counted)", zhHans: "该来源无逐技能调用数据（仅 Claude 可统计）"))
-                    .font(.system(size: 11))
+                    .font(Theme.font.themed(11))
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 12)
             }
@@ -459,7 +459,7 @@ struct SkillDetailView: View {
         let info = sessionBrowser?.sessionsById[row.sessionId]
         return HStack(spacing: 6) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(info == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Theme.brandFg))
             Text(info?.displayName ?? L10n.format("Session %@ (unavailable)", zhHans: "会话 %@（已不可达）", String(row.sessionId.prefix(8))))
                 .font(Theme.font.themed(11.5))
@@ -485,11 +485,11 @@ struct SkillDetailView: View {
     private var trendChart: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(L10n.text("Calls in the last 30 days", zhHans: "近 30 天调用"))
-                .font(.system(size: 9))
+                .font(Theme.font.themed(9))
                 .foregroundStyle(.tertiary)
             if series.isEmpty {
                 Text(L10n.text("No calls in the last 30 days", zhHans: "近 30 天无调用"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
@@ -529,7 +529,7 @@ struct SkillDetailView: View {
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold))
+            .font(Theme.font.themed(10, .semibold))
             .foregroundStyle(.secondary)
     }
 
@@ -539,7 +539,7 @@ struct SkillDetailView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 9))
+                .font(Theme.font.themed(9))
                 .foregroundStyle(gold ? Theme.goldFg.opacity(0.9) : Color.primary.opacity(0.35))
             Text(value)
                 .font(Theme.font.statNumber(18))

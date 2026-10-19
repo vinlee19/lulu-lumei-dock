@@ -110,7 +110,7 @@ struct SettingsView: View {
                 Text(L10n.text(
                     "The interface language. English is the default, and the change applies immediately.",
                     zhHans: "界面语言。默认是英文，立即生效。"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 3) {
                     ForEach(AppLanguage.allCases, id: \.self) { language in
@@ -127,7 +127,7 @@ struct SettingsView: View {
                 Text(L10n.text(
                     "Choose the appearance. The change applies immediately.",
                     zhHans: "选择应用的外观主题，立即生效。"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 3) {
                     capsuleOption(
@@ -148,7 +148,7 @@ struct SettingsView: View {
                 Text(L10n.text(
                     "Choose the panel style. The change applies immediately. The island and the desktop companion are not affected.",
                     zhHans: "选择面板的界面风格，立即生效；灵动岛与桌面伙伴不受影响。"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                 FlowLayout(spacing: 3, lineSpacing: 3) {
                     capsuleOption(
@@ -189,7 +189,7 @@ struct SettingsView: View {
                     isOn: $settings.eventSystemNotifyEnabled)
                 if let hint = notificationHint, settings.eventSystemNotifyEnabled {
                     Text(hint)
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.orange)
                 }
                 HStack {
@@ -198,7 +198,7 @@ struct SettingsView: View {
                     Text(L10n.format(
                         "%@s", zhHans: "%@ 秒",
                         String(Int(settings.autoDismissSeconds))))
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(Theme.font.themedMono(11))
                         .frame(width: 36, alignment: .trailing)
                 }
                 Toggle(
@@ -209,7 +209,7 @@ struct SettingsView: View {
                 Text(L10n.markdown(
                     "Detection is **per app**, not per tab: if any tab of that app is frontmost, you count as watching. Permission cards always appear — they need you, and hiding one would leave you waiting. Requires an installed hook or a detected terminal.",
                     zhHans: "判定只到**应用**级、分不清标签页：开着多个标签时，任意一个在前台都算「在看」。「等待授权」卡不受此开关影响，永远会弹 —— 那是需要你动手的提示，藏错了你会白等。需要已装 hook 或探测到终端归属才生效。"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 Toggle(
@@ -231,7 +231,7 @@ struct SettingsView: View {
                 Text(L10n.text(
                     "Drag the island anywhere, including onto another display. Drag it back near the notch and it snaps home.",
                     zhHans: "按住岛拖拽可移到任意位置（含外接屏）；拖回刘海附近会自动吸附复位。"))
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
                 Button(L10n.text(
                     "Reset to the default position (centered on the notch)",
@@ -275,13 +275,13 @@ struct SettingsView: View {
                             String(workingCount),
                             String(waitingCount),
                             String(builtIn.lookDirections.count)))
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(Theme.font.themed(9.5, .medium))
                             .foregroundStyle(Theme.brandFg)
                     }
                     Text(L10n.text(
                         "Put a custom pack in mascots/<name>/ plus manifest.json (the folder has notes and an example). Drag to move, it looks toward the pointer when idle, and right-click hides it.",
                         zhHans: "自定义包放 mascots/<名字>/ + manifest.json（文件夹里有说明与示例）；拖动可移动位置，空闲时会看向鼠标，右键可隐藏。"))
-                        .font(.system(size: 9.5))
+                        .font(Theme.font.themed(9.5))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -293,7 +293,7 @@ struct SettingsView: View {
                 ))
                 if let hint = settings.launchAtLoginHint {
                     Text(hint)
-                        .font(.system(size: 10))
+                        .font(Theme.font.themed(10))
                         .foregroundStyle(.orange)
                 }
             }
@@ -317,13 +317,13 @@ struct SettingsView: View {
                     Text(L10n.format(
                         "%@ h", zhHans: "%@ 小时",
                         String(format: "%.1f", settings.wellnessThresholdHours)))
-                        .font(.system(size: 11).monospacedDigit())
+                        .font(Theme.font.themedMono(11))
                         .frame(width: 52, alignment: .trailing)
                 }
                 Text(L10n.text(
                     "After a nudge, at most one more per hour. Five or more sessions at once, or tasks still running after 23:00, also get a quiet reminder.",
                     zhHans: "提醒后每小时最多再提醒一次；并发 ≥5 个会话、23 点后还在跑任务也会轻声提示。"))
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -357,7 +357,7 @@ struct SettingsView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
+                    .font(Theme.font.themed(10))
                 Text(label)
                     .font(Theme.font.themed(11, selected ? .semibold : .regular))
             }

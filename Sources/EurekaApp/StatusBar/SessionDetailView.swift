@@ -96,10 +96,10 @@ struct SessionDetailView: View {
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
-                        .font(.system(size: 32))
+                        .font(Theme.font.themed(32))
                         .foregroundStyle(Theme.brandFg.opacity(0.4))
                     Text(L10n.text("Select a session on the left to read the conversation", zhHans: "选择左侧会话查看对话记录"))
-                        .font(.system(size: 12))
+                        .font(Theme.font.themed(12))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -176,7 +176,7 @@ struct SessionDetailView: View {
             HStack(spacing: 8) {
                 SourceBadge(source: session.source, size: 14)
                 Text(session.displayName)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font.themed(13, .semibold))
                     .lineLimit(2)
                     .help(session.displayName)
                 Spacer(minLength: 8)
@@ -239,7 +239,7 @@ struct SessionDetailView: View {
             // themed mono face and a CardActionButton, instead of a bare grey pill
             HStack(spacing: 8) {
                 Image(systemName: "terminal")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Theme.font.themed(10, .semibold))
                     .foregroundStyle(Theme.brandFg)
                 Text(L10n.text("Resume command", zhHans: "恢复命令"))
                     .font(Theme.font.themed(10.5, .medium))
@@ -396,7 +396,7 @@ struct SessionDetailView: View {
             TerminalActivator.activate(binding)
         } label: {
             Image(systemName: "arrow.up.forward.app")
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
         }
         .buttonStyle(.borderless)
         .disabled(!running)
@@ -411,9 +411,9 @@ struct SessionDetailView: View {
     private func metaItem(_ icon: String, _ text: String) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon)
-                .font(.system(size: 9))
+                .font(Theme.font.themed(9))
             Text(text)
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -704,7 +704,7 @@ private struct ArtifactChip: View {
             HStack(spacing: 5) {
                 if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 9.5, weight: .medium))
+                        .font(Theme.font.themed(9.5, .medium))
                         .foregroundStyle(hovering ? Theme.brandFg : .secondary)
                 }
                 Text(title)
@@ -875,7 +875,7 @@ private struct MessageRowView: View {
                             lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
                 .overlay(
                     Image(systemName: icon)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Theme.font.themed(10, .semibold))
                         .foregroundStyle(tint))
                 .padding(.top, 1)
         }

@@ -42,18 +42,18 @@ struct AboutView: View {
                 LuluLogoTile(size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("lulu-lumei-dock")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(Theme.font.themed(14, .semibold))
                     Text(L10n.format(
                         "Version %@ · local AI coding activity panel",
                         zhHans: "版本 %@ · 本地 AI 编码活动面板",
                         appVersion))
-                        .font(.system(size: 10.5))
+                        .font(Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                     Text(L10n.format(
                         "Data directory: %@",
                         zhHans: "数据目录：%@",
                         SpoolPaths.root().path))
-                        .font(.system(size: 9.5).monospaced())
+                        .font(Theme.font.monoSkillName(9.5, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -80,7 +80,7 @@ struct AboutView: View {
             }
             if !updateService.isAvailable {
                 Text(L10n.text("Dev builds (swift run) do not check for app updates. That starts working after the app is installed as a .app.", zhHans: "开发模式（swift run）不检查应用更新；安装为 .app 后可用。"))
-                    .font(.system(size: 9.5))
+                    .font(Theme.font.themed(9.5))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -94,7 +94,7 @@ struct AboutView: View {
     private var toolsHeader: some View {
         HStack {
             Text(L10n.text("CLI tools", zhHans: "CLI 工具"))
-                .font(.system(size: 12, weight: .semibold))
+                .font(Theme.font.themed(12, .semibold))
             Spacer()
             Button(L10n.text("Check for CLI Updates", zhHans: "检查 CLI 更新")) { cliTools.checkLatest() }
                 .controlSize(.small)
@@ -107,9 +107,9 @@ struct AboutView: View {
             HStack(spacing: 7) {
                 SourceBadge(source: tool.source, size: 14)
                 Text(tool.name)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font.themed(12, .semibold))
                 Text("macOS")
-                    .font(.system(size: 8.5))
+                    .font(Theme.font.themed(8.5))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1.5)
                     .background(Capsule().fill(Color.primary.opacity(0.06)))
@@ -131,11 +131,11 @@ struct AboutView: View {
                 if tool.localVersion != nil, tool.latestVersion != nil {
                     if CLIToolsService.hasUpdate(tool) {
                         Text(L10n.text("Update available", zhHans: "可更新"))
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(Theme.font.themed(9.5, .medium))
                             .foregroundStyle(.orange)
                     } else {
                         Text(L10n.text("Up to date", zhHans: "已就绪"))
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(Theme.font.themed(9.5, .medium))
                             .foregroundStyle(.green)
                     }
                 }
@@ -165,18 +165,18 @@ struct AboutView: View {
     private func statusIcon(_ tool: CLIToolsService.Tool) -> some View {
         Image(systemName: tool.localVersion != nil
             ? "checkmark.circle.fill" : "exclamationmark.circle")
-            .font(.system(size: 12))
+            .font(Theme.font.themed(12))
             .foregroundStyle(tool.localVersion != nil ? .green : .orange)
     }
 
     private func versionRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 10))
+                .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
             Spacer()
             Text(value)
-                .font(.system(size: 10.5).monospaced())
+                .font(Theme.font.monoSkillName(10.5, weight: .regular))
                 .foregroundStyle(.secondary)
         }
     }
@@ -192,10 +192,10 @@ struct AboutView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.font.themed(9, .semibold))
                         .rotationEffect(.degrees(showInstallCommands ? 90 : 0))
                     Text(L10n.text("Manual install commands", zhHans: "手动安装命令"))
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Theme.font.themed(11, .medium))
                 }
                 .foregroundStyle(.secondary)
                 .contentShape(Rectangle())
@@ -205,7 +205,7 @@ struct AboutView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(cliTools.tools) { tool in
                         Text(tool.displayInstallCommand)
-                            .font(.system(size: 10).monospaced())
+                            .font(Theme.font.monoSkillName(10, weight: .regular))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
