@@ -4,7 +4,7 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.37.0] - 2026-10-19
 
 ### Added
 
@@ -13,6 +13,57 @@ this project uses [Semantic Versioning](https://semver.org/).
   stored on this Mac. A fresh install, and any install that has never chosen
   a language, comes up in English. Health-registry names stay stable keys and
   are translated only where they are shown.
+- **opencode 2.x sessions, including OpenChamber's bundled `opencode serve`.**
+  opencode 2.x writes only `session_v2` + `session_message`, so live cards,
+  usage and the session list missed every 2.x session. Those tables are now
+  tailed with their own watermark (no hooks needed), their usage and tool
+  calls are counted, and their messages open in the session viewer. Rows
+  copied over from 1.x during the upgrade are not counted twice.
+- **Harness background calls fold into one row.** Memory compaction,
+  branch-name generation and similar headless prompts used to appear as
+  sessions of their own. History now shows one "N background calls" row per
+  day, the session list one per group (everything stays visible while
+  searching), and the day counts, header total and sidebar badge count only
+  sessions you started. The prompt library treats them as noise.
+- **Same-name skills take one list row.** A skill installed for several CLIs
+  is listed once, with the install sources as a row of logos.
+
+### Changed
+
+- **Session page redesign.** The transcript has role avatars (your initial
+  for the user, the agent's logo and product name for replies), message
+  cards with clear separation between consecutive replies, and stats laid out
+  label over value. Artifacts produced by the session are chips, the resume
+  command sits in its own strip with a copy button, the session list is
+  narrower with a two-row toolbar, and the transcript search is wider.
+- **Neo-Brutalism reaches every page.** Buttons, menus, round toolbar
+  glyphs, switches, segmented pickers, filter chips, count chips and pane
+  headers now have a hard-edged form (ink outline, flat fill, offset shadow)
+  instead of falling back to system controls. Usage and Limits cards get the
+  ink frame and shadow, progress bars are flat, and main-window text uses
+  Space Grotesk / Space Mono throughout. The classic style is unchanged.
+- Costs use one format everywhere on the usage page, token counts gain a
+  billions tier, Neo-Brutalism's gold no longer sits next to the failure red,
+  and the session header shows its start time without year and seconds.
+- Code comments are English only, enforced by `make lint-comments`; the
+  repository gains bilingual contributing and workflow guides.
+
+### Fixed
+
+- **Claude Code desktop sessions finish.** Desktop transcripts never write
+  `turn_duration`, so hook-less sessions looked like they ran forever and were
+  reaped as interrupted after 4 hours. A main-chain `end_turn` reply and the
+  user-interrupt line now end the turn, short turns between two polls get
+  both a start and a finish, and hooks plus transcript no longer produce two
+  cards for the same turn.
+- **The context gauge no longer runs past 100%.** Models missing from the 1M
+  table (opus-4-7, sonnet-5-5) were measured against the 200K default, so a
+  211.8K session read 105.9% and its bar spilled out of the card. Both are
+  now listed as 1M, and usage past the listed window steps the window up
+  instead of overflowing, both on the session card and in the island's ctx%.
+- Relative times and session dates follow the interface language, English
+  sort tabs no longer truncate in the session list, and a scan finished a
+  moment ago reads "just now" instead of "in 0 sec".
 
 ## [0.36.0] - 2026-10-16
 
@@ -1898,6 +1949,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.37.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.37.0
 [0.36.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.36.0
 [0.35.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.2
 [0.35.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.1
