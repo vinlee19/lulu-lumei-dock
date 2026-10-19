@@ -58,6 +58,8 @@ struct SkillMemoryView: View {
     @State private var graphLibraryKey: String?
     /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
+    /// Same-name skill groups the user expanded in list mode (keys are lowercased names)
+    @State private var expandedSkillGroups: Set<String> = []
     /// Management area layout: list / icon grid (list by default, matching the design mockup)
     @State private var layout: KnowledgeLayout = .list
 
@@ -302,9 +304,29 @@ struct SkillMemoryView: View {
                                     onOpen: { openSkillDetail(skill) },
                                     onDelete: { deleting = .skill(skill) })
                             } else {
-                                SkillGroupRow(
-                                    group: group,
-                                    onOpen: { if let skill = group.skills.first { openSkillDetail(skill) } })
+                                let expanded = expandedSkillGroups.contains(group.id)
+                                KnowledgeGroupRow(
+                                    name: group.name,
+                                    subtitle: group.skills.first?.description,
+                                    sources: group.skills.map(\.source),
+                                    expanded: expanded
+                                ) {
+                                    if expanded {
+                                        expandedSkillGroups.remove(group.id)
+                                    } else {
+                                        expandedSkillGroups.insert(group.id)
+                                    }
+                                }
+                                if expanded {
+                                    ForEach(group.skills) { skill in
+                                        SkillListRow(
+                                            skill: skill, service: service,
+                                            stat: ctx.stats[skill.id], maxHit: ctx.maxHit,
+                                            onOpen: { openSkillDetail(skill) },
+                                            onDelete: { deleting = .skill(skill) })
+                                            .padding(.leading, 20)
+                                    }
+                                }
                             }
                             if index < groups.count - 1 {
                                 Divider().opacity(0.4).padding(.leading, 50)
@@ -808,47 +830,6 @@ private struct SkillInstallGroup: Identifiable {
     var skills: [SkillEntry]
 }
 
-/// Same-name skills folded into one row; the trailing source logos show where it is installed.
-private struct SkillGroupRow: View {
-    let group: SkillInstallGroup
-    let onOpen: () -> Void
-
-    var body: some View {
-        KnowledgeRow(enabled: true, onOpen: onOpen) {
-            HStack(spacing: 10) {
-                if let first = group.skills.first {
-                    SourceLogoTile(source: first.source, size: 28)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(group.name)
-                        .font(Theme.font.monoSkillName(13, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(group.skills.first?.description ?? "")
-                        .font(Theme.font.themed(10.5))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) {
-                    ForEach(group.skills.prefix(6)) { skill in
-                        SourceLogoTile(source: skill.source, size: 16)
-                    }
-                    if group.skills.count > 6 {
-                        Text("+\(group.skills.count - 6)")
-                            .font(Theme.font.themed(10))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .help(L10n.format(
-                    "Installed in %@ places; opens the first one",
-                    zhHans: "装在 %@ 处，点开第一份", String(group.skills.count)))
-            }
-        } menu: {
-            EmptyView()
-        }
-    }
-}
 
 /// Skill list row: logo + two-line name/description + usage bar · hit count + last used + enable
 /// toggle; actions appear on hover

@@ -28,6 +28,8 @@ struct MCPView: View {
     @State private var layout: KnowledgeLayout = .list
     /// Config location pending delete confirmation
     @State private var deletingEntry: MCPServerEntry?
+    /// Same-name server groups the user expanded in list mode (keys are lowercased names)
+    @State private var expandedGroups: Set<String> = []
 
     /// Offscreen render / preview only: initial layout / detail / form (during interaction these
     /// are driven by the user)
@@ -150,6 +152,34 @@ struct MCPView: View {
         service.servers.filter { selectedSource == nil || $0.source == selectedSource }
     }
 
+    /// List mode folds same-name servers (one MCP configured for several CLIs) into one group;
+    /// order follows the first copy of each name. Each copy keeps its own row once expanded.
+    private var groupedEntries: [(key: String, entries: [MCPServerEntry])] {
+        var groups: [(key: String, entries: [MCPServerEntry])] = []
+        var index: [String: Int] = [:]
+        for entry in filteredEntries {
+            let key = entry.name.lowercased()
+            if let at = index[key] {
+                groups[at].entries.append(entry)
+            } else {
+                index[key] = groups.count
+                groups.append((key, [entry]))
+            }
+        }
+        return groups
+    }
+
+    private func row(for entry: MCPServerEntry) -> some View {
+        MCPRow(
+            entry: entry, service: service,
+            toolInfo: toolInfo(for: entry),
+            callStat: callStat(for: entry),
+            onOpen: { open(entry) },
+            onEdit: { edit(entry) },
+            onToggle: { toggle(entry) },
+            onDelete: { deletingEntry = entry })
+    }
+
     /// Number of distinct server names after dedup (main number on the stats card)
     private var dedupedCount: Int {
         Set(service.servers.map { $0.name.lowercased() }).count
@@ -216,18 +246,33 @@ struct MCPView: View {
                         }
                     }
                 } else {
+                    let groups = groupedEntries
                     KnowledgeListContainer {
                         VStack(spacing: 0) {
-                            ForEach(Array(filteredEntries.enumerated()), id: \.element.id) { index, entry in
-                                MCPRow(
-                                    entry: entry, service: service,
-                                    toolInfo: toolInfo(for: entry),
-                                    callStat: callStat(for: entry),
-                                    onOpen: { open(entry) },
-                                    onEdit: { edit(entry) },
-                                    onToggle: { toggle(entry) },
-                                    onDelete: { deletingEntry = entry })
-                                if index < filteredEntries.count - 1 {
+                            ForEach(Array(groups.enumerated()), id: \.element.key) { index, group in
+                                if group.entries.count == 1, let entry = group.entries.first {
+                                    row(for: entry)
+                                } else {
+                                    let expanded = expandedGroups.contains(group.key)
+                                    KnowledgeGroupRow(
+                                        name: group.entries[0].name,
+                                        subtitle: group.entries[0].urlSummary ?? group.entries[0].commandSummary,
+                                        sources: group.entries.map(\.source),
+                                        expanded: expanded
+                                    ) {
+                                        if expanded {
+                                            expandedGroups.remove(group.key)
+                                        } else {
+                                            expandedGroups.insert(group.key)
+                                        }
+                                    }
+                                    if expanded {
+                                        ForEach(group.entries) { entry in
+                                            row(for: entry).padding(.leading, 20)
+                                        }
+                                    }
+                                }
+                                if index < groups.count - 1 {
                                     Divider().opacity(0.4).padding(.leading, 50)
                                 }
                             }
