@@ -25,12 +25,15 @@ let package = Package(
         .target(name: "EurekaInstall", dependencies: ["EurekaKit"]),
         // Cloud backup: incremental S3/COS upload (SigV4 signing, sync engine, Keychain credentials)
         .target(name: "EurekaSync", dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest"]),
+        // AI session summaries: local CLI adapters, process-group lifecycle, chunk/merge engine,
+        // run coordinator (UI lives in the app target)
+        .target(name: "EurekaSummary", dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest"]),
         // The menu-bar app itself
         .executableTarget(
             name: "eureka",
             dependencies: [
                 "EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall",
-                "EurekaSync",
+                "EurekaSync", "EurekaSummary",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/EurekaApp",
@@ -55,7 +58,10 @@ let package = Package(
         // Test runner (CLT has no XCTest, so a hand-rolled harness)
         .executableTarget(
             name: "eureka-tests",
-            dependencies: ["EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall", "EurekaSync"],
+            dependencies: [
+                "EurekaKit", "EurekaStore", "EurekaIngest", "EurekaUsage", "EurekaInstall",
+                "EurekaSync", "EurekaSummary",
+            ],
             path: "Tests/EurekaTestsRunner",
             resources: [.copy("Fixtures")]
         ),

@@ -141,5 +141,6 @@ promptLibraryTests(t)
 promptClassifierTests(t)
 promptEvalTests(t)
 promptGraduationTests(t)
+sessionSummaryTests(t)
 
 t.finish()
