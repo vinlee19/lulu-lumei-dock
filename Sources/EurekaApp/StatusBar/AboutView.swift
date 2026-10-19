@@ -25,8 +25,9 @@ struct AboutView: View {
             }
             installCommands
             Spacer(minLength: 8)
-            Button(L10n.text("Quit lulu-lumei-dock", zhHans: "退出 lulu-lumei-dock")) { NSApp.terminate(nil) }
-                .controlSize(.small)
+            SecondaryButton(
+                title: L10n.text("Quit lulu-lumei-dock", zhHans: "退出 lulu-lumei-dock"), classic: .push
+            ) { NSApp.terminate(nil) }
         }
         .onAppear {
             cliTools.detectLocal()
@@ -59,10 +60,11 @@ struct AboutView: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
-                Button(L10n.text("Show Data in Finder", zhHans: "在 Finder 显示数据")) {
+                SecondaryButton(
+                    title: L10n.text("Show Data in Finder", zhHans: "在 Finder 显示数据"), classic: .push
+                ) {
                     NSWorkspace.shared.activateFileViewerSelecting([SpoolPaths.root()])
                 }
-                .controlSize(.small)
             }
 
             Divider()
@@ -74,8 +76,9 @@ struct AboutView: View {
                 ))
                 .disabled(!updateService.isAvailable)
                 Spacer()
-                Button(L10n.text("Check for Updates…", zhHans: "检查更新…")) { updateService.checkForUpdates() }
-                    .controlSize(.small)
+                SecondaryButton(
+                    title: L10n.text("Check for Updates…", zhHans: "检查更新…"), classic: .push
+                ) { updateService.checkForUpdates() }
                     .disabled(!updateService.canCheckForUpdates)
             }
             if !updateService.isAvailable {
@@ -86,7 +89,7 @@ struct AboutView: View {
             }
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     // MARK: - CLI tools
@@ -96,8 +99,9 @@ struct AboutView: View {
             Text(L10n.text("CLI tools", zhHans: "CLI 工具"))
                 .font(Theme.font.themed(12, .semibold))
             Spacer()
-            Button(L10n.text("Check for CLI Updates", zhHans: "检查 CLI 更新")) { cliTools.checkLatest() }
-                .controlSize(.small)
+            SecondaryButton(
+                title: L10n.text("Check for CLI Updates", zhHans: "检查 CLI 更新"), classic: .push
+            ) { cliTools.checkLatest() }
                 .disabled(cliTools.tools.contains { $0.checkingLatest })
         }
     }
@@ -140,26 +144,27 @@ struct AboutView: View {
                     }
                 }
                 Spacer()
-                Button(copiedToolId == tool.id ? L10n.text("Copied", zhHans: "已复制") : L10n.text("Copy install command", zhHans: "复制安装命令")) {
+                SecondaryButton(
+                    title: copiedToolId == tool.id
+                        ? L10n.text("Copied", zhHans: "已复制")
+                        : L10n.text("Copy install command", zhHans: "复制安装命令"),
+                    classic: .push
+                ) {
                     cliTools.copyInstallCommand(tool)
                     copiedToolId = tool.id
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         if copiedToolId == tool.id { copiedToolId = nil }
                     }
                 }
-                .controlSize(.small)
                 // Show "Update" only when a newer version really exists (semver: latest > local);
                 // it runs in a visible Terminal
                 if CLIToolsService.hasUpdate(tool), !tool.updateCommand.isEmpty {
-                    Button(L10n.text("Update", zhHans: "更新")) { cliTools.updateTool(tool) }
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.brand)
+                    PrimaryButton(title: L10n.text("Update", zhHans: "更新")) { cliTools.updateTool(tool) }
                 }
             }
         }
         .padding(Theme.spacing.card)
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 
     private func statusIcon(_ tool: CLIToolsService.Tool) -> some View {

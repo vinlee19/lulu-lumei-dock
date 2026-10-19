@@ -98,8 +98,10 @@ struct AdvancedSettingsView: View {
     @ViewBuilder
     private var dataContent: some View {
         HStack {
-            Button(L10n.text("Export the last 30 days of usage as CSV", zhHans: "导出近 30 天用量 CSV")) { usageService.exportCSV() }
-                .controlSize(.small)
+            SecondaryButton(
+                title: L10n.text("Export the last 30 days of usage as CSV", zhHans: "导出近 30 天用量 CSV"),
+                classic: .push
+            ) { usageService.exportCSV() }
             if let message = usageService.exportMessage {
                 Text(message)
                     .font(Theme.font.themed(10))
@@ -107,10 +109,11 @@ struct AdvancedSettingsView: View {
             }
         }
         HStack {
-            Button(L10n.text("Show Database File", zhHans: "显示数据库文件")) {
+            SecondaryButton(
+                title: L10n.text("Show Database File", zhHans: "显示数据库文件"), classic: .push
+            ) {
                 NSWorkspace.shared.activateFileViewerSelecting([EurekaStore.defaultURL()])
             }
-            .controlSize(.small)
             Text(L10n.text("You can query eureka.sqlite directly with sqlite3", zhHans: "可直接 sqlite3 查询 eureka.sqlite"))
                 .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
@@ -127,8 +130,9 @@ struct AdvancedSettingsView: View {
             .foregroundStyle(.tertiary)
         // Destructive and slow to rebuild (a full rescan of every transcript): confirm first,
         // same as the audit page's Clear.
-        Button(L10n.text("Clear Full-Text Index", zhHans: "清空全文索引")) { confirmingClearIndex = true }
-            .controlSize(.small)
+        SecondaryButton(
+            title: L10n.text("Clear Full-Text Index", zhHans: "清空全文索引"), classic: .push
+        ) { confirmingClearIndex = true }
             .confirmationDialog(
                 L10n.text("Clear the cross-session full-text index? The next scan rebuilds it, which can take a few minutes when there are many sessions.", zhHans: "确认清空跨会话全文索引？下次扫描会重新建索引，大量会话时需要几分钟。"),
                 isPresented: $confirmingClearIndex, titleVisibility: .visible
@@ -158,14 +162,23 @@ private struct PricingSection: View {
                 .foregroundStyle(.tertiary)
             statusLine
             HStack(spacing: 8) {
-                Button(pricing.status.refreshing ? L10n.text("Updating…", zhHans: "更新中…") : L10n.text("Update Now", zhHans: "立即更新")) { pricing.refreshNow() }
+                SecondaryButton(
+                    title: pricing.status.refreshing
+                        ? L10n.text("Updating…", zhHans: "更新中…")
+                        : L10n.text("Update Now", zhHans: "立即更新"),
+                    classic: .push
+                ) { pricing.refreshNow() }
                     .disabled(pricing.status.refreshing)
-                Button(L10n.text("Open the pricing.json Folder", zhHans: "打开 pricing.json 所在目录")) {
+                SecondaryButton(
+                    title: L10n.text("Open the pricing.json Folder", zhHans: "打开 pricing.json 所在目录"),
+                    classic: .push
+                ) {
                     NSWorkspace.shared.open(SpoolPaths.root())
                 }
-                Button(L10n.text("Reload Custom Prices", zhHans: "重新载入自定义价格")) { pricing.reloadOverride() }
+                SecondaryButton(
+                    title: L10n.text("Reload Custom Prices", zhHans: "重新载入自定义价格"), classic: .push
+                ) { pricing.reloadOverride() }
             }
-            .controlSize(.small)
             Divider()
             unpricedList
         }
@@ -205,7 +218,9 @@ private struct PricingSection: View {
             HStack {
                 Text(L10n.format("Unpriced / estimated (%@)", zhHans: "未定价 / 估算（%@）", String(rows.count))).font(Theme.font.themed(10.5, .semibold))
                 Spacer()
-                Button(L10n.text("Copy Override Template", zhHans: "复制覆盖模板")) { copyTemplate(rows) }.controlSize(.small)
+                SecondaryButton(
+                    title: L10n.text("Copy Override Template", zhHans: "复制覆盖模板"), classic: .push
+                ) { copyTemplate(rows) }
             }
             ForEach(rows.prefix(30)) { row in
                 HStack(spacing: 6) {
@@ -367,6 +382,6 @@ struct CollapsibleCard<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radius.card).fill(Theme.surface))
+        .dashboardCard()
     }
 }
