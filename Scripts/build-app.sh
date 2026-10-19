@@ -25,6 +25,7 @@ fi
 if [[ "${LULU_SKIP_BUILD:-0}" != "1" ]]; then
   swift build "${SWIFT_BUILD_ARGS[@]}" --product eureka
   swift build "${SWIFT_BUILD_ARGS[@]}" --product eureka-relay
+  swift build "${SWIFT_BUILD_ARGS[@]}" --product eureka-ask
 fi
 
 BUILD_PATH="$(swift build "${SWIFT_BUILD_ARGS[@]}" --show-bin-path)"
@@ -35,12 +36,15 @@ readonly SPARKLE_PATH="$APP_PATH/Contents/Frameworks/Sparkle.framework"
 
 [[ -x "$BUILD_PATH/eureka" ]] || { echo "✗ 未找到 release eureka" >&2; exit 1; }
 [[ -x "$BUILD_PATH/eureka-relay" ]] || { echo "✗ 未找到 release eureka-relay" >&2; exit 1; }
+[[ -x "$BUILD_PATH/eureka-ask" ]] || { echo "✗ 未找到 release eureka-ask" >&2; exit 1; }
 [[ -d "$APP_BUNDLE" ]] || { echo "✗ 未找到 $APP_BUNDLE" >&2; exit 1; }
 [[ -d "$SPARKLE_SOURCE" ]] || { echo "✗ 未找到 Sparkle 2.9.2 framework" >&2; exit 1; }
 lipo "$BUILD_PATH/eureka" -verify_arch arm64 >/dev/null \
   || { echo "✗ release eureka 不含 arm64 架构" >&2; exit 1; }
 lipo "$BUILD_PATH/eureka-relay" -verify_arch arm64 >/dev/null \
   || { echo "✗ release eureka-relay 不含 arm64 架构" >&2; exit 1; }
+lipo "$BUILD_PATH/eureka-ask" -verify_arch arm64 >/dev/null \
+  || { echo "✗ release eureka-ask 不含 arm64 架构" >&2; exit 1; }
 
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" \
@@ -48,6 +52,7 @@ mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" \
 
 cp "$BUILD_PATH/eureka" "$APP_PATH/Contents/MacOS/eureka"
 cp "$BUILD_PATH/eureka-relay" "$APP_PATH/Contents/MacOS/eureka-relay"
+cp "$BUILD_PATH/eureka-ask" "$APP_PATH/Contents/MacOS/eureka-ask"
 
 # 资源 bundle 放在标准 Resources/ 目录；只拷应用自己的 bundle。
 readonly PACKAGED_BUNDLE="$APP_PATH/Contents/Resources/eureka_eureka.bundle"
@@ -97,6 +102,8 @@ codesign --force --sign "$SIGNING_IDENTITY" \
 codesign --force --sign "$SIGNING_IDENTITY" "$SPARKLE_PATH"
 codesign --force --sign "$SIGNING_IDENTITY" --identifier com.vinlee.eureka.relay \
   "$APP_PATH/Contents/MacOS/eureka-relay"
+codesign --force --sign "$SIGNING_IDENTITY" --identifier com.vinlee.eureka.ask \
+  "$APP_PATH/Contents/MacOS/eureka-ask"
 codesign --force --sign "$SIGNING_IDENTITY" "$APP_PATH"
 
 codesign --verify --strict "$SPARKLE_PATH/Versions/B/XPCServices/Installer.xpc"

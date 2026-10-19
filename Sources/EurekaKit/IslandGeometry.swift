@@ -129,6 +129,48 @@ public enum IslandGeometry {
         public static let bottomPadding: CGFloat = 10
     }
 
+    /// 提问卡的行高与间距（1.0× 基准，未乘 scale）。`QuestionCardView` 按这些值排版，
+    /// `questionCardHeight` 按同一组值算高度。
+    public enum QuestionCard {
+        /// 刘海融合时内容要从刘海下沿开始（`topInset` 由调用方传入刘海高度），其余情况的上边距
+        public static let plainTopPadding: CGFloat = 14
+        /// 来源 + header 标签 + 进度「1/2」
+        public static let headerHeight: CGFloat = 20
+        /// 问题原文每行的高度；按实际行数（1–2 行）排，一行的问题不留第二行的空白
+        public static let questionLineHeight: CGFloat = 20
+        public static let maxQuestionLines = 2
+        public static let sectionGap: CGFloat = 8
+        public static let optionHeight: CGFloat = 38
+        public static let optionSpacing: CGFloat = 6
+        /// 「其他…」行（展开后是输入框，同高）
+        public static let otherRowHeight: CGFloat = 32
+        /// 「在终端回答」/「确定」按钮行
+        public static let footerHeight: CGFloat = 28
+        public static let bottomPadding: CGFloat = 12
+        /// 选项再多也只排这么多行（AskUserQuestion 约定 2–4 个）
+        public static let maxOptions = 4
+    }
+
+    /// 问题区高度（1.0× 基准）：行数限制在 1–2 行
+    public static func questionTextHeight(lines: Int) -> CGFloat {
+        CGFloat(min(max(lines, 1), QuestionCard.maxQuestionLines)) * QuestionCard.questionLineHeight
+    }
+
+    /// 提问卡高度（1.0× 基准）。`questionLines`：问题原文排出来的行数；
+    /// `topInset`：刘海融合时为刘海高度，否则 0
+    public static func questionCardHeight(
+        optionCount: Int, questionLines: Int, topInset: CGFloat
+    ) -> CGFloat {
+        typealias M = QuestionCard
+        let rows = min(max(optionCount, 1), M.maxOptions)
+        let top = max(topInset + 6, M.plainTopPadding)
+        return top + M.headerHeight + M.sectionGap + questionTextHeight(lines: questionLines)
+            + M.sectionGap
+            + CGFloat(rows) * M.optionHeight + CGFloat(rows - 1) * M.optionSpacing
+            + M.optionSpacing + M.otherRowHeight + M.sectionGap + M.footerHeight
+            + M.bottomPadding
+    }
+
     /// 展开子 agent 框时不显示空闲分区：两者同时出现会超出 panel 高度（panel 不能加高 ——
     /// 自定义位置存的是 panel 左下角，改高度会让用户拖好的悬浮岛整体上移）
     public static func taskListShowsIdle(idleCount: Int, expandedSubagentCount: Int) -> Bool {

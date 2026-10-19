@@ -4,6 +4,8 @@ build:
 	$(SWIFT) build
 
 test:
+	# 答题 hook 的端到端测试直接运行 eureka-ask，它不是 eureka-tests 的依赖，要先单独构建
+	$(SWIFT) build --product eureka-ask
 	$(SWIFT) run eureka-tests
 
 run:

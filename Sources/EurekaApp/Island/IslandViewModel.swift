@@ -45,6 +45,22 @@ final class IslandViewModel: ObservableObject {
     /// 展示形态变化回调（panel 控制器据此显隐窗口）
     var onDisplayChange: (@MainActor (Display) -> Void)?
 
+    /// 当前提问卡的作答进度（当前卡不是提问卡时为 nil）
+    @Published private(set) var questionDraft: QuestionDraft?
+    /// 正在提问卡里输入「其他」：panel 要临时成为 key window 才收得到键盘
+    @Published private(set) var wantsKeyboard = false
+    /// 把回答交给 hook（AppDelegate 接到 QuestionInbox）
+    var onQuestionReply: (@MainActor (_ questionId: String, _ reply: QuestionReply) -> Void)?
+    /// 键盘焦点需求变化（panel 控制器据此 makeKey / 交还焦点）
+    var onKeyboardChange: (@MainActor (Bool) -> Void)?
+
+    enum QuestionReply: Equatable {
+        /// 键是问题原文
+        case answer([String: String])
+        /// 回终端回答
+        case terminal
+    }
+
     private var queue = IslandCardQueue()
     private var hovering = false
     private var dismissTimer: Timer?
@@ -99,6 +115,87 @@ final class IslandViewModel: ObservableObject {
         refresh()
     }
 
+    // MARK: - 提问卡
+
+    /// 与 hook 那边等待中的问题对账：新来的入队，已不在等待的（hook 超时 / 终端里中断）撤卡
+    func updatePendingQuestions(_ questions: [PendingQuestion]) {
+        let waiting = Set(questions.map(\.id))
+        let queued = Set(queue.questionIds)
+        guard waiting != queued else { return }
+        for id in queued.subtracting(waiting) {
+            queue.removeQuestion(id: id)
+        }
+        for question in questions where !queued.contains(question.id) {
+            queue.enqueue(.question(question))
+        }
+        refresh()
+    }
+
+    func chooseOption(_ label: String) {
+        mutateDraft { $0.choose(label) }
+    }
+
+    func toggleOption(_ label: String) {
+        mutateDraft { $0.toggle(label) }
+    }
+
+    func confirmSelection() {
+        mutateDraft { $0.confirmSelection() }
+    }
+
+    func beginOther() {
+        mutateDraft { $0.beginOther() }
+    }
+
+    func cancelOther() {
+        mutateDraft { $0.cancelOther() }
+    }
+
+    func submitOther(_ text: String) {
+        mutateDraft { $0.submitOther(text) }
+    }
+
+    /// 「在终端回答」：hook 静默退出，Claude 弹出终端选择框
+    func answerInTerminal() {
+        guard let draft = questionDraft else { return }
+        finishQuestion(id: draft.question.id, reply: .terminal)
+    }
+
+    private func mutateDraft(_ change: (inout QuestionDraft) -> Void) {
+        guard var draft = questionDraft else { return }
+        change(&draft)
+        if draft.isComplete {
+            finishQuestion(id: draft.question.id, reply: .answer(draft.answers))
+            return
+        }
+        questionDraft = draft
+        setWantsKeyboard(draft.isTypingOther)
+    }
+
+    private func finishQuestion(id: String, reply: QuestionReply) {
+        onQuestionReply?(id, reply)
+        queue.removeQuestion(id: id)
+        refresh()
+    }
+
+    /// 提问卡在不在台上决定作答进度：换到另一张提问卡就从头答它，离开提问卡就清掉
+    private func syncQuestionDraft() {
+        if case .card(.question(let question)) = display {
+            if questionDraft?.question.id != question.id {
+                questionDraft = QuestionDraft(question: question)
+            }
+        } else {
+            questionDraft = nil
+        }
+        setWantsKeyboard(questionDraft?.isTypingOther ?? false)
+    }
+
+    private func setWantsKeyboard(_ value: Bool) {
+        guard wantsKeyboard != value else { return }
+        wantsKeyboard = value
+        onKeyboardChange?(value)
+    }
+
     func islandTapped() {
         switch display {
         case .compact:
@@ -111,6 +208,8 @@ final class IslandViewModel: ObservableObject {
             setDisplay(.taskList)
             scheduleAutoDismiss()
         case .card(let card):
+            // 提问卡只认里面的按钮：点到空白处不能把 agent 正在等的问题划走
+            if case .question = card { return }
             if case .finished(let task) = card {
                 unreadFinished.markRead(task)
             }
@@ -182,6 +281,13 @@ final class IslandViewModel: ObservableObject {
             return .zero
         case .compact:
             return pillSize
+        case .card(.question(let question)):
+            let current = questionDraft?.current ?? question.questions.first
+            let height = IslandGeometry.questionCardHeight(
+                optionCount: current?.options.count ?? 0,
+                questionLines: questionLines,
+                topInset: questionTopInset)
+            return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         case .card:
             return layout.expandedCardSize
         case .taskList:
@@ -190,6 +296,39 @@ final class IslandViewModel: ObservableObject {
                 expandedSubagentCount: expandedSubagentCount)
             return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         }
+    }
+
+    /// 提问卡标题行里的「哪个会话在问」：会话标题 → 项目名
+    var questionSessionLabel: String? {
+        guard let question = questionDraft?.question else { return nil }
+        if let id = question.taskId,
+           let task = (activeTasks + idleTasks).first(where: { $0.id == id }) {
+            return taskDisplayName(task)
+        }
+        return question.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+    }
+
+    /// 当前问题原文排出来的行数（1–2），提问卡高度与问题区高度都按它算。
+    /// 用与视图相同的字号、宽度测量；宽度少算 4pt 留余量 —— 估少了第二行会被压缩，估多了只是多一行空
+    var questionLines: Int {
+        guard let text = questionDraft?.current.question else { return 1 }
+        let font = NSFont.systemFont(ofSize: 14 * uiScale, weight: .semibold)
+        let width = layout.expandedCardSize.width
+            - 2 * QuestionCardView.horizontalPadding * uiScale - 4
+        let bounds = (text as NSString).boundingRect(
+            with: CGSize(width: max(width, 1), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        // 行高用排版引擎自己的口径；ascender/descender 算出的值比它小，一行会被除成 1.x 行再进位成 2
+        let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+        let lines = Int((bounds.height / lineHeight - 0.25).rounded(.up))
+        return min(max(lines, 1), IslandGeometry.QuestionCard.maxQuestionLines)
+    }
+
+    /// 提问卡内容要让开的刘海高度（1.0× 基准；不与刘海融合时为 0）。
+    /// 提问卡按钮多，顶部那一行若钻到刘海后面就点不到
+    var questionTopInset: CGFloat {
+        fuseWithNotch ? screen.safeAreaTopInset / uiScale : 0
     }
 
     /// 展开的子 agent 框里的子 agent 数（仅当展开任务在可见的前几行且确有子 agent；否则 0）
@@ -252,6 +391,7 @@ final class IslandViewModel: ObservableObject {
         // 离开任务列表即收起子 agent 框，避免下次再进时停在旧展开态
         if case .taskList = new {} else { expandedSubagentTaskId = nil }
         display = new
+        syncQuestionDraft()
         logIsland(new)
         onDisplayChange?(new)
     }
@@ -306,7 +446,9 @@ final class IslandViewModel: ObservableObject {
         case .card(.finished(let task)): name = "card-finished(\(task.outcome.rawValue))"
         case .card(.waiting): name = "card-waiting"
         case .card(.notice): name = "card-notice"
-        case .card(.alert(let alert)): name = "card-alert(\(alert.ruleId))"        case .taskList: name = "taskList"
+        case .card(.alert(let alert)): name = "card-alert(\(alert.ruleId))"
+        case .card(.question(let question)): name = "card-question(\(question.questions.count))"
+        case .taskList: name = "taskList"
         }
         print("[eureka] island=\(name)")
         fflush(stdout)

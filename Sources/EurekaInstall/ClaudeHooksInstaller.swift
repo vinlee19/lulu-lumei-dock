@@ -81,7 +81,8 @@ public enum ClaudeHooksInstaller {
         for (event, _) in hooks {
             var entries = entriesOf(hooks, event)
             let before = entries.count
-            entries.removeAll(where: isEurekaEntry)
+            // 灵动岛答题那条（lululumei-ask）也是我们的：卸 Claude hooks 时一起卸
+            entries.removeAll { isEurekaEntry($0) || ClaudeAskHookInstaller.isAskEntry($0) }
             if entries.isEmpty && before > 0 {
                 hooks.removeValue(forKey: event)
             } else {
@@ -155,7 +156,8 @@ public enum ClaudeHooksInstaller {
         var events: Set<String> = []
         var tools: Set<String> = []
         for (event, _) in hooks {
-            for entry in entriesOf(hooks, event) where !isEurekaEntry(entry) {
+            for entry in entriesOf(hooks, event)
+            where !isEurekaEntry(entry) && !ClaudeAskHookInstaller.isAskEntry(entry) {
                 for command in entry["hooks"] as? [[String: Any]] ?? [] {
                     guard let text = command["command"] as? String,
                           let name = HookCommandPath.shortName(of: text) else { continue }

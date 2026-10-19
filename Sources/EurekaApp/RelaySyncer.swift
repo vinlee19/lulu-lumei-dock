@@ -33,11 +33,38 @@ enum RelaySyncer {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
-    /// 同步（内容不同才覆盖），返回稳定路径；找不到源时返回 nil
+    /// 灵动岛答题 hook 的稳定路径 `bin/lululumei-ask`（settings.json 只引用这里）
+    static var stableAskURL: URL {
+        binDirectory.appendingPathComponent(ClaudeAskHookInstaller.binaryName)
+    }
+
+    /// 与当前可执行文件同目录的 eureka-ask
+    static var bundledAskURL: URL? {
+        guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
+            return nil
+        }
+        let candidate = executable.deletingLastPathComponent()
+            .appendingPathComponent("eureka-ask")
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+    }
+
+    /// 同步 relay（内容不同才覆盖），返回稳定路径；找不到源时返回 nil
     @discardableResult
     static func sync() -> URL? {
         guard let source = bundledRelayURL else { return nil }
-        let target = stableRelayURL
+        let target = syncBinary(from: source, to: stableRelayURL)
+        if target != nil { linkLegacyName() }
+        return target
+    }
+
+    /// 同步答题 hook，返回稳定路径；找不到源时返回 nil
+    @discardableResult
+    static func syncAsk() -> URL? {
+        guard let source = bundledAskURL else { return nil }
+        return syncBinary(from: source, to: stableAskURL)
+    }
+
+    private static func syncBinary(from source: URL, to target: URL) -> URL? {
         let fm = FileManager.default
         do {
             try fm.createDirectory(
@@ -45,12 +72,11 @@ enum RelaySyncer {
             if let existing = try? Data(contentsOf: target),
                let fresh = try? Data(contentsOf: source),
                SHA256.hash(data: existing) == SHA256.hash(data: fresh) {
-                linkLegacyName()
                 return target  // 已是最新
             }
             // 先落临时文件再替换，避免覆盖正在执行的二进制
             let tmp = target.deletingLastPathComponent()
-                .appendingPathComponent(".\(RelayIdentity.binaryName).tmp")
+                .appendingPathComponent(".\(target.lastPathComponent).tmp")
             try? fm.removeItem(at: tmp)
             try fm.copyItem(at: source, to: tmp)
             if fm.fileExists(atPath: target.path) {
@@ -59,10 +85,9 @@ enum RelaySyncer {
                 try fm.moveItem(at: tmp, to: target)
             }
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
-            linkLegacyName()
             return target
         } catch {
-            fputs("[eureka] relay 同步失败: \(error)\n", stderr)
+            fputs("[eureka] \(target.lastPathComponent) 同步失败: \(error)\n", stderr)
             return fm.fileExists(atPath: target.path) ? target : nil
         }
     }

@@ -52,6 +52,9 @@ let package = Package(
         ),
         // hooks/notify 调用的轻量转发 CLI：静默、永远 exit 0
         .executableTarget(name: "eureka-relay", path: "Sources/eureka-relay"),
+        // AskUserQuestion 的 PreToolUse hook：挂起等灵动岛上的回答，再把答案写到 stdout。
+        // 与 relay 约束相反，所以是独立程序（零依赖）
+        .executableTarget(name: "eureka-ask", path: "Sources/eureka-ask"),
         // 测试 runner（CLT 无 XCTest，自建 harness）
         .executableTarget(
             name: "eureka-tests",

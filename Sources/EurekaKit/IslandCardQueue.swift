@@ -35,6 +35,19 @@ public struct IslandCardQueue: Equatable, Sendable {
             } else {
                 pending.insert(card, at: 0)
             }
+        case .question(let question):
+            guard !questionIds.contains(question.id) else { return }
+            // agent 正停着等答案：正在展示的知会型卡让位（放回队首，答完再看）
+            if let shown = current, Self.isPassive(shown) {
+                pending.insert(shown, at: 0)
+                current = card
+            } else if current == nil {
+                current = card
+            } else {
+                // 排在已有的提问卡之后、其余卡之前（多个提问按到达顺序答）
+                let index = pending.firstIndex { if case .question = $0 { return false } else { return true } }
+                pending.insert(card, at: index ?? pending.count)
+            }
         case .finished, .notice:
             if current == nil {
                 current = card
@@ -48,7 +61,26 @@ public struct IslandCardQueue: Equatable, Sendable {
     private static func isPassive(_ card: IslandState.Card) -> Bool {
         switch card {
         case .finished, .notice: return true
-        case .waiting, .alert: return false
+        case .waiting, .alert, .question: return false
+        }
+    }
+
+    /// 队列（当前 + 待显）中所有提问卡的 id
+    public var questionIds: [String] {
+        ([current].compactMap { $0 } + pending).compactMap {
+            if case .question(let question) = $0 { return question.id }
+            return nil
+        }
+    }
+
+    /// 答完 / 回终端 / hook 已放弃：撤掉这张提问卡
+    public mutating func removeQuestion(id: String) {
+        pending.removeAll {
+            if case .question(let question) = $0 { return question.id == id }
+            return false
+        }
+        if case .question(let question) = current, question.id == id {
+            current = pending.isEmpty ? nil : pending.removeFirst()
         }
     }
 

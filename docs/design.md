@@ -252,6 +252,44 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
 - Codex：task_started→running；task_complete→finished(success)；turn_aborted→interrupted；error→error
 - 兜底：running 超 4h 无心跳 → interrupted（防 hook 丢失泄漏）
 
+## 在灵动岛上回答提问（Claude AskUserQuestion）
+
+Claude Code 官方允许 PreToolUse hook 替 AskUserQuestion 作答：返回 `permissionDecision: "allow"` 加带 `answers` 的 `updatedInput`，Claude 就不弹终端选择框，直接拿答案继续。relay 必须静默，所以作答由独立程序 `eureka-ask`（稳定路径 `bin/lululumei-ask`）承担，只注册在 `matcher: "AskUserQuestion"` 上。
+
+```mermaid
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+sequenceDiagram
+    participant C as Claude Code
+    participant H as lululumei-ask
+    participant F as spool 目录
+    participant A as Eureka app
+    A->>F: 每 5 秒写 island-heartbeat（pid）
+    C->>H: PreToolUse(AskUserQuestion) stdin
+    H->>F: 心跳新鲜？写 questions/<id>.json
+    A->>F: 每 0.5 秒读 questions/
+    A->>A: 提问卡插队展示，用户点选
+    A->>F: 写 answers/<id>.json（rename 原子落盘）
+    H->>F: 每 100ms 读到答案，删掉两份文件
+    H->>C: stdout：allow + updatedInput(questions 原样 + answers)
+    C->>C: 拿到答案继续
+```
+
+| 情况 | hook 行为 | Claude 看到的 |
+|---|---|---|
+| 岛上答完所有问题 | 输出 allow + answers | 直接继续，不弹终端选择框 |
+| 点「在终端回答」/ 答案缺题 | 静默 exit 0 | 终端照常弹出选择框 |
+| app 没运行、功能关闭、心跳超过 15 秒 | 立即静默 exit 0（等待中则 2 秒内放手） | 终端照常弹出选择框 |
+| 等满 600 秒 | 静默 exit 0 | 终端照常弹出选择框 |
+| 终端里中断 / 被信号终止 | 删问题文件后退出；SIGKILL 时 app 按 pid 判活清卡 | 按 Claude 自己的中断处理 |
+
+答案格式：键是问题原文；单选是选项 label；多选按选项顺序用「, 」连接；「其他」是输入的文字（多选时接在已勾选项后面）。提问卡不自动收起，到达时顶掉正在展示的完成卡 / 健康提示卡；点卡片空白处不会划走它。输入「其他」时 panel 临时成为 key window（不激活 app），提交后把键盘还给原来的应用。
+
+Codex 的 `request_user_input` 只在 Plan 模式下由主线程可用，且没有 hook 在它调用时触发，app 无法替它作答，因此不在范围内。
+
 ## 里程碑
 
 M0 骨架 → M1 端到端最小链路（relay→spool→状态栏计数）→ M2 真实 Claude hooks →

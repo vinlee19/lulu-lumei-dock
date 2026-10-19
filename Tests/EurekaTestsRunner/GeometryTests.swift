@@ -178,6 +178,26 @@ func geometryTests(_ t: TestRunner) {
             "进行中最多 4 行，多出的算一行「…等 N 个」")
     }
 
+    t.test("提问卡：选项封顶 4 行，问题区按 1–2 行定高，让开刘海后最高的卡仍放得进 panel") {
+        typealias M = IslandGeometry.QuestionCard
+        let four = IslandGeometry.questionCardHeight(optionCount: 4, questionLines: 2, topInset: 0)
+        try expectEqual(
+            IslandGeometry.questionCardHeight(optionCount: 9, questionLines: 2, topInset: 0), four)
+        try expectEqual(
+            IslandGeometry.questionCardHeight(optionCount: 4, questionLines: 1, topInset: 0),
+            four - M.questionLineHeight, "一行的问题不留第二行的空白")
+        try expectEqual(
+            IslandGeometry.questionCardHeight(optionCount: 4, questionLines: 5, topInset: 0), four,
+            "问题最多排两行")
+        try expectEqual(
+            IslandGeometry.questionCardHeight(optionCount: 4, questionLines: 2, topInset: 38),
+            four - M.plainTopPadding + 38 + 6, "刘海下沿再空 6")
+        let tallest = IslandGeometry.questionCardHeight(
+            optionCount: 4, questionLines: 2, topInset: 44)
+        try expect(tallest + 17 <= IslandGeometry.Layout.standard.panelSize.height,
+                   "最高 \(tallest) 放不进 panel")
+    }
+
     t.test("任务列表：展开子 agent 框时收起空闲分区，最高的列表仍放得进 panel") {
         typealias M = IslandGeometry.TaskList
         try expect(IslandGeometry.taskListShowsIdle(idleCount: 3, expandedSubagentCount: 0))

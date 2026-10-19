@@ -7,6 +7,13 @@ extension Notification.Name {
     static let eurekaResetIslandPosition = Notification.Name("eureka.resetIslandPosition")
 }
 
+/// borderless 窗口默认 `canBecomeKey == false`，提问卡的「其他…」输入框就收不到键盘。
+/// 放开它不会抢焦点：`becomesKeyOnlyIfNeeded` 下只有点到输入框这类控件才成为 key，
+/// 点按钮照旧不碰焦点；nonactivatingPanel 也保证成为 key 时不激活本 app
+final class IslandPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 /// 灵动岛 NSPanel 控制器：panel 固定为最大尺寸，默认贴刘海屏顶部居中；
 /// 支持按住拖拽到任意位置（含外接屏），位置持久化，拖回默认位置附近自动吸附回融合形态。
 /// 展开/收起全靠 SwiftUI 动画，透明区域 hitTest 穿透。
@@ -14,8 +21,10 @@ extension Notification.Name {
 final class IslandPanelController {
     let viewModel = IslandViewModel()
 
-    private let panel: NSPanel
+    private let panel: IslandPanel
     private let hostingView: IslandHostingView<IslandRootView>
+    /// 为了输入「其他」把键盘拿过来之前，用户正在用的应用（输完还给它）
+    private var keyboardOwnerBeforeTyping: NSRunningApplication?
     private var orderOutWorkItem: DispatchWorkItem?
     private var moveSettleWorkItem: DispatchWorkItem?
     /// 程序化 setFrame 期间忽略 didMove（只响应用户拖拽）
@@ -26,7 +35,7 @@ final class IslandPanelController {
     private var outsideClickMonitors: [Any] = []
 
     init() {
-        panel = NSPanel(
+        panel = IslandPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -66,6 +75,9 @@ final class IslandPanelController {
         }
         viewModel.onDisplayChange = { [weak self] display in
             self?.displayChanged(display)
+        }
+        viewModel.onKeyboardChange = { [weak self] wantsKeyboard in
+            self?.keyboardChanged(wantsKeyboard)
         }
         NotificationCenter.default.addObserver(
             self,
@@ -223,6 +235,23 @@ final class IslandPanelController {
             reposition()
             // 不抢焦点地置顶展示
             panel.orderFrontRegardless()
+        }
+    }
+
+    // MARK: - 提问卡输入
+
+    /// 提问卡展开「其他…」输入框时让 panel 成为 key（不激活本 app），输完把键盘还给原来的应用
+    private func keyboardChanged(_ wantsKeyboard: Bool) {
+        if wantsKeyboard {
+            let front = NSWorkspace.shared.frontmostApplication
+            if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                keyboardOwnerBeforeTyping = front
+            }
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            guard panel.isKeyWindow else { return }
+            keyboardOwnerBeforeTyping?.activate()
+            keyboardOwnerBeforeTyping = nil
         }
     }
 
