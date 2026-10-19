@@ -81,7 +81,8 @@ final class MascotPanelController {
         viewModel.setPack(MascotPackLoader.load(packID: id))
     }
 
-    /// 设置页给当前形象换图 / 改名后立即重载（包 id 不变，设置项不会触发）
+    /// Reloads right after the Settings page swaps an image / renames the current mascot (the pack
+    /// id doesn't change, so the setting won't trigger it)
     @objc private func packFilesChanged(_ note: Notification) {
         MainActor.assumeIsolated {
             guard (note.object as? String) == currentPackID else { return }
@@ -89,7 +90,8 @@ final class MascotPanelController {
         }
     }
 
-    /// 低频采样鼠标位置：idle 时让双角色自然看向鼠标，睡眠时移动可唤醒。
+    /// Samples the mouse position at low frequency: in idle the two characters naturally look
+    /// toward the mouse; while asleep, moving it can wake them.
     private func updatePointerBehavior() {
         guard panel.isVisible else {
             lastPointerLocation = nil

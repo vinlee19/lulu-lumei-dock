@@ -116,7 +116,7 @@ struct MascotPack {
     }
 }
 
-/// 设置页列出的一个可选形象
+/// One selectable mascot listed on the Settings page
 struct MascotPackInfo: Identifiable, Equatable {
     enum Kind: Equatable { case builtIn, preset, custom }
 
@@ -134,13 +134,15 @@ enum MascotPackLoader {
         SpoolPaths.root().appendingPathComponent("mascots", isDirectory: true)
     }
 
-    /// 随 App 打包的预设形象根目录：Resources/mascots/presets/<id>/manifest.json
+    /// Root directory of the preset mascots bundled with the app:
+    /// Resources/mascots/presets/<id>/manifest.json
     static func presetsRoot() -> URL? {
         AppResources.bundle.url(
             forResource: "presets", withExtension: nil, subdirectory: "mascots")
     }
 
-    /// 确保 mascots/ 存在并放一份说明 + 示例 manifest(首次),再在 Finder 打开
+    /// Ensures mascots/ exists and places a readme + sample manifest in it (first time), then opens
+    /// it in Finder
     static func revealCustomFolder() {
         let root = customRoot()
         let fm = FileManager.default
@@ -499,7 +501,8 @@ enum MascotPackLoader {
         return pack
     }
 
-    /// 可选形象：内置噜噜 → 预设（随 App 打包）→ 用户包（customRoot 下含 manifest.json 的目录）
+    /// Selectable mascots: built-in Lulu → presets (bundled with the app) → user packs (directories
+    /// under customRoot containing manifest.json)
     static func availablePacks() -> [MascotPackInfo] {
         var result = [MascotPackInfo(id: builtInID, name: builtInName, kind: .builtIn)]
         if let root = presetsRoot() {
@@ -521,7 +524,8 @@ enum MascotPackLoader {
         return result
     }
 
-    /// 根目录下直接含 manifest.json 的子目录（按名称排序，跳过隐藏目录与非法名）
+    /// Subdirectories of the root that directly contain manifest.json (sorted by name, skipping
+    /// hidden directories and invalid names)
     static func packDirectories(in root: URL) -> [URL] {
         let dirs = (try? FileManager.default.contentsOfDirectory(
             at: root, includingPropertiesForKeys: [.isDirectoryKey],
@@ -539,7 +543,7 @@ enum MascotPackLoader {
         try? Data(contentsOf: dir.appendingPathComponent("manifest.json"))
     }
 
-    /// 包 id 对应的目录（内置噜噜没有目录）
+    /// Directory for a pack id (the built-in Lulu has no directory)
     static func directory(for ref: MascotPackRef) -> URL? {
         switch ref {
         case .builtIn:
@@ -551,14 +555,15 @@ enum MascotPackLoader {
         }
     }
 
-    /// 按 id 加载;非法/缺失回退内置
+    /// Loads by id; invalid/missing falls back to the built-in one
     static func load(packID: String) -> MascotPack {
         let ref = MascotPackRef(id: packID)
         guard let dir = directory(for: ref) else { return builtIn() }
         return parse(directory: dir, id: ref.id) ?? builtIn()
     }
 
-    /// 解析包目录里的 manifest.json(state→ 文件名字符串 或 帧数组)。预设与用户包共用同一格式。
+    /// Parses manifest.json in the pack directory (state → file-name string or frame array).
+    /// Presets and user packs share the same format.
     static func parse(directory dir: URL, id: String) -> MascotPack? {
         let manifestURL = dir.appendingPathComponent("manifest.json")
         guard let data = try? Data(contentsOf: manifestURL),

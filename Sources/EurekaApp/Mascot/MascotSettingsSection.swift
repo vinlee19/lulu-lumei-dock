@@ -2,11 +2,13 @@ import AppKit
 import EurekaKit
 import SwiftUI
 
-/// 设置 → 通用 →「桌面伙伴」：开关、形象选择（预设 + 我的）、上传与按状态换图。
+/// Settings → General → "Desktop companion": toggle, mascot picker (Presets + My companions),
+/// upload, and per-state image swapping.
 struct MascotSettingsSection: View {
     @ObservedObject var settings: AppSettings
     @StateObject private var library = MascotLibrary()
-    /// 上传时是否从四角抠掉纯色背景（只影响之后上传的图）
+    /// Whether to cut away the solid-color background from the four corners on upload (affects only
+    /// images uploaded afterwards)
     @AppStorage("mascotUploadRemovesBackground") private var removeBackground = false
     @State private var nameDraft = ""
     @State private var confirmingDelete: MascotPackInfo?
@@ -77,7 +79,7 @@ struct MascotSettingsSection: View {
         }
     }
 
-    // MARK: - 形象网格
+    // MARK: - Mascot grid
 
     @ViewBuilder
     private func packGrid(title: String, packs: [MascotPackInfo], showsUpload: Bool) -> some View {
@@ -110,7 +112,7 @@ struct MascotSettingsSection: View {
         }
     }
 
-    // MARK: - 上传包编辑区
+    // MARK: - Uploaded pack editor
 
     @ViewBuilder
     private func editor(_ editing: MascotLibrary.Editing) -> some View {
@@ -188,7 +190,7 @@ struct MascotSettingsSection: View {
         return L10n.format("Uses \"%@\"", zhHans: "沿用「%@」", Self.title(for: source))
     }
 
-    // MARK: - 其他
+    // MARK: - Other
 
     @ViewBuilder
     private var builtInSummary: some View {
@@ -210,7 +212,7 @@ struct MascotSettingsSection: View {
         }
     }
 
-    /// 选中项变化：上传包载入编辑区，名称输入框同步
+    /// Selection changed: an uploaded pack loads into the editing area and the name field syncs
     private func syncSelection() {
         library.select(packID: settings.mascotPack)
         nameDraft = library.editing?.name ?? ""
@@ -242,7 +244,7 @@ struct MascotSettingsSection: View {
     }
 }
 
-/// 一个可选形象：缩略图 + 名称，选中时品牌色描边
+/// One selectable mascot: thumbnail + name, outlined in the brand color when selected
 private struct PackTile: View {
     let name: String
     let image: NSImage?
@@ -284,7 +286,7 @@ private struct PackTile: View {
     }
 }
 
-/// 「上传图片」入口格
+/// The "Upload image" entry tile
 private struct UploadTile: View {
     let action: () -> Void
 
