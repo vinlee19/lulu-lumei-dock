@@ -1,6 +1,12 @@
 import EurekaKit
 import SwiftUI
 
+/// Card-grid columns shared by the knowledge pages: as many 280–520pt columns as fit, so cards
+/// drop to one or two columns in a narrow window instead of being squeezed into a fixed three.
+enum KnowledgeGrid {
+    static let columns = [GridItem(.adaptive(minimum: 280, maximum: 520), spacing: 14)]
+}
+
 /// Collapsed list row for several same-name entries installed in different places (one skill or
 /// MCP server configured for several CLIs). It only summarises: name, the install sources as
 /// logos and a count. Tapping expands it so the caller can list every instance with its own row

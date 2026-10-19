@@ -43,11 +43,7 @@ struct MCPView: View {
         self._formTarget = State(initialValue: initialFormTarget)
     }
 
-    private let gridColumns = [
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14),
-    ]
+    private let gridColumns = KnowledgeGrid.columns
 
     var body: some View {
         Group {

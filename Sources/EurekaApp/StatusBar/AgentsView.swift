@@ -250,9 +250,7 @@ struct AgentsView: View {
 
     // MARK: - Body (stat overview card + source chips + flat list / grid)
 
-    private let gridColumns = [GridItem(.flexible(), spacing: 14),
-                               GridItem(.flexible(), spacing: 14),
-                               GridItem(.flexible(), spacing: 14)]
+    private let gridColumns = KnowledgeGrid.columns
 
     private var content: some View {
         ScrollView {

@@ -249,9 +249,7 @@ struct SkillMemoryView: View {
 
     // MARK: - Body (stats overview card + source chips + flat list/grid)
 
-    private let gridColumns = [GridItem(.flexible(), spacing: 14),
-                               GridItem(.flexible(), spacing: 14),
-                               GridItem(.flexible(), spacing: 14)]
+    private let gridColumns = KnowledgeGrid.columns
 
     @ViewBuilder
     private var content: some View {
