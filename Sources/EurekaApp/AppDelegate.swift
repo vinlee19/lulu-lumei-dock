@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         label: "com.vinlee.eureka.terminalprobe", qos: .utility)
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 正在等岛上回答的 hook 立刻放手，Claude 回终端提问
+        // 正在等岛上回答的 hook 立刻放手，只留 Claude 自己的确认界面
         questionBridge?.stop()
     }
 

@@ -5,9 +5,9 @@ import Foundation
 /// 灵动岛答题的 app 一端（另一端是 `lululumei-ask` hook，见 Sources/eureka-ask/main.swift）。
 ///
 /// 目录约定（都在 spool 根目录下）：
-/// - `island-heartbeat`：app 每 5 秒写入自己的 pid。hook 看它判断岛在不在，不在就立刻让 Claude 回终端提问；
+/// - `island-heartbeat`：app 每 5 秒写入自己的 pid。hook 看它判断岛在不在，不在就立刻退出，只留 Claude 自己的确认界面；
 /// - `questions/<id>.json`：hook 等待期间存在，退出时自己删掉；
-/// - `answers/<id>.json`：这里写入答案（或「回终端回答」），hook 读到后删掉。
+/// - `answers/<id>.json`：这里写入答案（或「收起」），hook 读到后删掉。
 ///
 /// hook 被 SIGKILL 之类收不到的信号终止时不会删问题文件 → 这里按文件里的 pid 判活，死了就清掉。
 public struct QuestionInbox {
@@ -73,6 +73,7 @@ public struct QuestionInbox {
             source: .claude,
             sessionId: record["sessionId"] as? String,
             cwd: record["cwd"] as? String,
+            transcriptPath: record["transcriptPath"] as? String,
             hookPid: Int32(pid),
             createdAt: Date(timeIntervalSince1970: createdMs / 1000),
             questions: questions)
@@ -95,7 +96,7 @@ public struct QuestionInbox {
             multiSelect: raw["multiSelect"] as? Bool ?? false)
     }
 
-    /// `<id>.json` → id；只接受 hook 清洗后可能出现的字符，其余（路径分隔符等）一律拒绝
+    /// `<id>.json` → id；只接受字母数字、`-`、`_`（hook 生成的 UUID 只含这些），其余（路径分隔符等）一律拒绝
     static func questionId(fromFileName name: String) -> String? {
         guard name.hasSuffix(".json") else { return nil }
         let id = String(name.dropLast(".json".count))
@@ -111,8 +112,8 @@ public struct QuestionInbox {
     public enum Reply: Equatable, Sendable {
         /// 键是问题原文
         case answer([String: String])
-        /// 用户选择回终端回答：hook 静默退出，Claude 弹出终端选择框
-        case terminal
+        /// 岛上收起这道题，或它已在 Claude 自己的确认界面里答完：hook 静默退出
+        case dismiss
     }
 
     public func send(_ reply: Reply, to questionId: String) throws {
@@ -122,7 +123,7 @@ public struct QuestionInbox {
         let body: [String: Any]
         switch reply {
         case .answer(let answers): body = ["action": "answer", "answers": answers]
-        case .terminal: body = ["action": "terminal"]
+        case .dismiss: body = ["action": "dismiss"]
         }
         let data = try JSONSerialization.data(withJSONObject: body)
         let fm = FileManager.default

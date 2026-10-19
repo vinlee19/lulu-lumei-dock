@@ -4,16 +4,22 @@ import EurekaKit
 
 /// 灵动岛答题的 app 侧调度：心跳、轮询等待中的问题、把回答交给 hook。
 ///
-/// - 心跳每 5 秒一次：hook 只在心跳新鲜时才挂起等岛上的回答，否则立刻让 Claude 回终端提问；
+/// - 心跳每 5 秒一次：hook 只在心跳新鲜时才挂起等岛上的回答，否则立刻退出；
 ///   关掉功能 / app 退出时删掉心跳，正在等的 hook 2 秒内放手；
-/// - 每 0.5 秒看一眼 `questions/`：hook 挂起后用户能马上看到卡片，hook 放弃（超时 / 终端里中断）也能马上撤卡。
+/// - 每 0.5 秒看一眼 `questions/`：hook 挂起后用户能马上看到卡片，hook 放弃（超时 / 这一轮被中断）也能马上撤卡；
+/// - 用户在 Claude 自己的确认界面里先答时 hook 不会被终止：轮询时顺带看会话转录（`QuestionTranscriptProbe`），
+///   题已了结就撤卡并让 hook 放手。
 @MainActor
 final class IslandQuestionBridge {
     private let inbox: QuestionInbox
+    private let probe = QuestionTranscriptProbe()
     private weak var viewModel: IslandViewModel?
     private var pollTimer: Timer?
     private var heartbeatTimer: Timer?
-    private var lastIds: [String] = []
+    /// 上次轮询看到的等待中问题
+    private var pending: [PendingQuestion] = []
+    /// 已在 Claude 里了结、让 hook 放手的题：hook 退出前文件还在，别重复写「收起」
+    private var settledIds: Set<String> = []
     private(set) var isEnabled = false
 
     init(viewModel: IslandViewModel, inbox: QuestionInbox = QuestionInbox()) {
@@ -42,7 +48,9 @@ final class IslandQuestionBridge {
             heartbeatTimer = nil
             pollTimer = nil
             inbox.removeHeartbeat()
-            lastIds = []
+            pending = []
+            settledIds = []
+            probe.retain(only: [])
             viewModel?.updatePendingQuestions([])
         }
     }
@@ -61,25 +69,34 @@ final class IslandQuestionBridge {
     }
 
     private func poll() {
-        let pending = inbox.pending()
-        let ids = pending.map(\.id)
-        guard ids != lastIds else { return }
-        for question in pending where !lastIds.contains(question.id) {
+        let current = inbox.pending()
+        let ids = current.map(\.id)
+        probe.retain(only: Set(ids))
+        for question in current where !settledIds.contains(question.id) && probe.isSettled(question) {
+            settledIds.insert(question.id)
+            log("question-settled=\(question.id)")
+            send(.dismiss, to: question.id)
+            viewModel?.withdrawQuestion(id: question.id)
+        }
+        guard ids != pending.map(\.id) else { return }
+        let previous = Set(pending.map(\.id))
+        for question in current where !previous.contains(question.id) {
             log("question=\(question.id) count=\(question.questions.count)")
         }
-        lastIds = ids
-        viewModel?.updatePendingQuestions(pending)
+        pending = current
+        settledIds.formIntersection(ids)
+        viewModel?.updatePendingQuestions(current.filter { !settledIds.contains($0.id) })
     }
 
     private func send(_ reply: IslandViewModel.QuestionReply, to id: String) {
         let message: QuestionInbox.Reply
         switch reply {
         case .answer(let answers): message = .answer(answers)
-        case .terminal: message = .terminal
+        case .dismiss: message = .dismiss
         }
         do {
             try inbox.send(message, to: id)
-            log("question-reply=\(id) \(reply == .terminal ? "terminal" : "answer")")
+            log("question-reply=\(id) \(reply == .dismiss ? "dismiss" : "answer")")
         } catch {
             log("灵动岛答题回写失败 \(id): \(error)")
         }

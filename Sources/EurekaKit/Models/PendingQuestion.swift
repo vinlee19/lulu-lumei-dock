@@ -3,24 +3,27 @@ import Foundation
 /// agent 抛给用户的选择题（Claude Code 的 AskUserQuestion），正等着在灵动岛上回答。
 /// 由 `lululumei-ask` hook 写入 `<spool>/questions/<id>.json`，hook 进程挂起直到收到答案。
 public struct PendingQuestion: Equatable, Sendable, Identifiable {
-    /// 文件名 id（来自 tool_use_id，已清洗成只含字母数字 `-` `_`）
+    /// 文件名 id（hook 每次等待生成的 UUID）
     public var id: String
     public var source: AgentSource
     public var sessionId: String?
     public var cwd: String?
-    /// 等待中的 hook 进程；它不在了说明 Claude 已经放弃这次等待（超时 / 终端里中断）
+    /// 会话转录：用户在 Claude 自己的确认界面里先答时，靠它发现这道题已了结
+    public var transcriptPath: String?
+    /// 等待中的 hook 进程；它不在了说明 Claude 已经放弃这次等待（超时 / 用户中断了这一轮）
     public var hookPid: Int32
     public var createdAt: Date
     public var questions: [AskQuestion]
 
     public init(
         id: String, source: AgentSource = .claude, sessionId: String? = nil, cwd: String? = nil,
-        hookPid: Int32, createdAt: Date, questions: [AskQuestion]
+        transcriptPath: String? = nil, hookPid: Int32, createdAt: Date, questions: [AskQuestion]
     ) {
         self.id = id
         self.source = source
         self.sessionId = sessionId
         self.cwd = cwd
+        self.transcriptPath = transcriptPath
         self.hookPid = hookPid
         self.createdAt = createdAt
         self.questions = questions

@@ -57,8 +57,8 @@ final class IslandViewModel: ObservableObject {
     enum QuestionReply: Equatable {
         /// 键是问题原文
         case answer([String: String])
-        /// 回终端回答
-        case terminal
+        /// 岛上收起，到 Claude 自己的确认界面里回答
+        case dismiss
     }
 
     private var queue = IslandCardQueue()
@@ -117,7 +117,7 @@ final class IslandViewModel: ObservableObject {
 
     // MARK: - 提问卡
 
-    /// 与 hook 那边等待中的问题对账：新来的入队，已不在等待的（hook 超时 / 终端里中断）撤卡
+    /// 与 hook 那边等待中的问题对账：新来的入队，已不在等待的（hook 超时 / 这一轮被中断）撤卡
     func updatePendingQuestions(_ questions: [PendingQuestion]) {
         let waiting = Set(questions.map(\.id))
         let queued = Set(queue.questionIds)
@@ -155,10 +155,16 @@ final class IslandViewModel: ObservableObject {
         mutateDraft { $0.submitOther(text) }
     }
 
-    /// 「在终端回答」：hook 静默退出，Claude 弹出终端选择框
-    func answerInTerminal() {
+    /// 「在 Claude 里回答」：收起岛上的卡，hook 静默退出，Claude 自己的确认界面一直都在
+    func dismissQuestion() {
         guard let draft = questionDraft else { return }
-        finishQuestion(id: draft.question.id, reply: .terminal)
+        finishQuestion(id: draft.question.id, reply: .dismiss)
+    }
+
+    /// 这道题已在 Claude 里了结（IslandQuestionBridge 判定）：撤卡，不再回写 hook
+    func withdrawQuestion(id: String) {
+        queue.removeQuestion(id: id)
+        refresh()
     }
 
     private func mutateDraft(_ change: (inout QuestionDraft) -> Void) {

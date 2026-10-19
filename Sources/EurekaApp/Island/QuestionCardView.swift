@@ -6,7 +6,8 @@ import SwiftUI
 /// - 单选题点一下选项就记下答案；多选题勾选后点「确定」；
 /// - 「其他…」展开成输入框（这时岛临时接管键盘，回车发送）；
 /// - 多个问题逐个回答，全部答完才交给 hook，agent 随即继续；
-/// - 「在终端回答」让 hook 放手，Claude 在终端照常弹出选择框。
+/// - Claude 自己的确认界面（终端选择框 / 桌面端确认卡）同时开着，哪边先答用哪边；
+///   「在 Claude 里回答」只收起岛上这张卡。
 ///
 /// 行高与间距来自 `IslandGeometry.QuestionCard`，卡片高度按同一组值算。
 struct QuestionCardView: View {
@@ -24,7 +25,7 @@ struct QuestionCardView: View {
     var onBeginOther: () -> Void = {}
     var onCancelOther: () -> Void = {}
     var onSubmitOther: (String) -> Void = { _ in }
-    var onAnswerInTerminal: () -> Void = {}
+    var onDismiss: () -> Void = {}
 
     @State private var otherText = ""
     @FocusState private var otherFocused: Bool
@@ -225,8 +226,8 @@ struct QuestionCardView: View {
 
     private var footer: some View {
         HStack(spacing: 8 * scale) {
-            Button(action: onAnswerInTerminal) {
-                Text("在终端回答")
+            Button(action: onDismiss) {
+                Text("在 Claude 里回答")
                     .font(.system(size: 11.5 * scale, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
                     .padding(.horizontal, 10 * scale)
@@ -234,7 +235,7 @@ struct QuestionCardView: View {
                     .background(Capsule().fill(Color.white.opacity(0.1)))
             }
             .buttonStyle(.plain)
-            .help("交回终端：Claude 在终端里照常弹出这道题")
+            .help("收起这张卡，到 Claude 的确认框里回答")
             Spacer(minLength: 0)
             if question.multiSelect {
                 let count = draft.selected.count
