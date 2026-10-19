@@ -311,12 +311,30 @@ final class InstallerService: ObservableObject {
                 updated.append(integration.title)
             }
         }
+        if syncStandaloneAskEntry() {
+            updated.append("灵动岛答题 hook")
+        }
         autoUpdateSkipped = skipped
         if !updated.isEmpty {
             let separator = L10n.text(", ", zhHans: "、")
             message = L10n.format("Automatically updated: %@ (original configuration backed up)", zhHans: "已自动更新：%@（原配置已备份）", String(updated.joined(separator: separator)))
         }
         if !updated.isEmpty || !skipped.isEmpty { refresh() }
+    }
+
+    /// 没装 Claude hooks、settings.json 里却单独装着答题那一条（上面的循环会跳过它）：
+    /// 与开关不一致或不是当前写法（路径变了 / 挂错事件）就按开关重写这一条。写了盘返回 true
+    private func syncStandaloneAskEntry() -> Bool {
+        let diagnosis = diagnosis(for: .claudeHooks)
+        guard !diagnosis.isInstalledInSomeForm, !diagnosis.blocksAutomaticWrite,
+              askHookInstalled != askHookEnabled() else { return false }
+        let url = claudeSettingsURL
+        let original = ConfigFile.read(url)
+        guard ClaudeAskHookInstaller.hasAnyEntry(in: original),
+              let updated = try? applyAskHook(to: original), updated != original,
+              (try? ConfigFile.backupThenWrite(path: url, newContent: updated)) != nil
+        else { return false }
+        return true
     }
 
 }

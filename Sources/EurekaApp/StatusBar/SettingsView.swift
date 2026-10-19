@@ -339,11 +339,11 @@ struct SettingsView: View {
     /// 答题 hook 的实际状态：开关开着不等于装上了（要先装 Claude Code hooks）
     private var askHookHint: String {
         guard settings.answerQuestionsOnIsland else {
-            return "关闭时 Claude 的选择题照常在终端里回答。"
+            return "关闭时 Claude 的选择题只在 Claude 自己的确认界面里回答。"
         }
         if installer.askHookInstalled {
-            return "已生效：Claude 提问时岛上弹出选项，点选即作答；最多等 10 分钟，"
-                + "超时或点「在终端回答」就回到终端提问。"
+            return "已生效：Claude 提问时岛上同时弹出选项，岛上或 Claude 里哪边先答用哪边；"
+                + "岛上的卡最多保留 10 分钟。"
         }
         return "尚未生效：需要先在「集成」页安装 Claude Code hooks，会一并在 settings.json 加一条"
             + " AskUserQuestion 专用 hook。"

@@ -88,7 +88,7 @@ struct IslandRootView: View {
                     onBeginOther: { viewModel.beginOther() },
                     onCancelOther: { viewModel.cancelOther() },
                     onSubmitOther: { viewModel.submitOther($0) },
-                    onAnswerInTerminal: { viewModel.answerInTerminal() })
+                    onDismiss: { viewModel.dismissQuestion() })
             }
         case .card(let card):
             ExpandedCardView(card: card, queuedCount: viewModel.queuedCount, scale: scale)

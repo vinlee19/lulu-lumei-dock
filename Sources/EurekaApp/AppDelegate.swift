@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Release a hook waiting for an island answer right away so Claude asks in its own UI
+        // Release a hook waiting for an island answer right away, leaving only Claude's own dialog
         questionBridge?.stop()
     }
 

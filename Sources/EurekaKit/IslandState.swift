@@ -12,7 +12,7 @@ public struct IslandState: Equatable, Sendable {
         /// auto-dismisses)
         case alert(RiskAlert)
         /// agent 的选择题（AskUserQuestion），在岛上点选作答。插队置顶、不自动收起：
-        /// agent 正停着等答案，收掉了用户就只能干等到 hook 超时
+        /// agent 正停着等答案，题答完（岛上或 Claude 里）才撤
         case question(PendingQuestion)
     }
 
@@ -55,7 +55,7 @@ extension IslandState.Card {
         case .waiting: return 4   // 授权/输入请求要看清：默认 6+4=10s
         case .notice: return 5    // 关怀文案给足阅读时间
         case .alert: return 6     // 安全告警多停一会（审计页与通知中心另有留存）
-        case .question: return nil  // 答完 / 回终端 / hook 放弃时才撤
+        case .question: return nil  // 答完 / 收起 / hook 放弃时才撤
         }
     }
 

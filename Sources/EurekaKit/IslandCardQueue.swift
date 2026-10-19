@@ -79,7 +79,7 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// 答完 / 回终端 / hook 已放弃：撤掉这张提问卡
+    /// 答完 / 收起 / hook 已放弃：撤掉这张提问卡
     public mutating func removeQuestion(id: String) {
         pending.removeAll {
             if case .question(let question) = $0 { return question.id == id }

@@ -1,21 +1,24 @@
 import Foundation
 
-// eureka-ask：Claude Code 的 PreToolUse(matcher: AskUserQuestion) hook，让用户在灵动岛上回答提问。
+// eureka-ask：Claude Code 的 PermissionRequest(matcher: AskUserQuestion) hook，让用户在灵动岛上回答提问。
 // Built as `eureka-ask`; the app installs it at the stable path as `lululumei-ask`.
+//
+// PermissionRequest 的 hook 与 Claude 自己的确认界面（终端选择框 / 桌面端确认卡）同时运行，
+// 谁先给出回答用谁：岛上答了，Claude 撤掉自己的界面；在 Claude 里答了，这里的输出不再被采用。
 //
 // 它和 relay 是**两个程序**，约束正好相反：relay 永远静默、<50ms、只报告；
 // 这里要挂起等用户点选，再把答案写到 stdout —— Claude 读到
-// `permissionDecision: "allow"` + 带 `answers` 的 `updatedInput` 就不再弹终端选择框。
+// `decision.behavior: "allow"` + 带 `answers` 的 `updatedInput` 就按这份答案执行。
 // 所以它只注册在 AskUserQuestion 上，绝不能挂到别的工具（stdout 会被当成放行决定）。
 //
 // 与 app 的约定（`EurekaIngest.QuestionInbox` 是另一端）：
 //   <root>/island-heartbeat          app 每 5 秒写入自己的 pid；超过 15 秒没更新 = 岛不在
 //   <root>/questions/<id>.json       本进程等待期间存在；退出时删除
 //   <root>/answers/<id>.json         app 写入 {"action":"answer","answers":{问题:答案}}
-//                                    或 {"action":"terminal"}（用户选择回终端回答）
+//                                    或 {"action":"dismiss"}（岛上收起这道题 / 已在 Claude 里答完）
 //
-// 任何不满足的情况（不是 AskUserQuestion / 岛不在 / 超时 / 回终端 / 出错 / 被信号终止）
-// 都**静默 exit 0、stdout 不写一个字节** —— Claude 照常在终端提问，绝不会卡住或被代答。
+// 任何不满足的情况（不是 AskUserQuestion / 岛不在 / 超时 / 收起 / 出错 / 被信号终止）
+// 都**静默 exit 0、stdout 不写一个字节** —— 交给 Claude 自己的确认界面，绝不会被代答。
 
 let maxStdinBytes = 1_048_576
 /// 最多等 10 分钟；settings.json 里给这条 hook 的 timeout 是 610 秒，留出收尾余量
@@ -53,14 +56,6 @@ func islandIsAlive(root: URL) -> Bool {
         let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
     else { return false }
     return kill(pid, 0) == 0
-}
-
-/// 文件名用的 id：只留字母数字、`-`、`_`，其余（含路径分隔符）一律丢掉；为空就生成一个
-func questionId(from toolUseId: Any?) -> String {
-    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-    let raw = (toolUseId as? String) ?? ""
-    let cleaned = String(raw.unicodeScalars.filter { allowed.contains($0) }.prefix(128))
-    return cleaned.isEmpty ? UUID().uuidString : cleaned
 }
 
 func writeAtomically(_ data: Data, to url: URL) throws {
@@ -109,10 +104,10 @@ func run() {
         (try? fm.createDirectory(at: answersDir, withIntermediateDirectories: true)) != nil
     else { return }
 
-    let id = questionId(from: payload["tool_use_id"])
+    // PermissionRequest 的输入里没有 tool_use_id，每次等待用一个新 id
+    let id = UUID().uuidString
     let questionURL = questionsDir.appendingPathComponent("\(id).json")
     let answerURL = answersDir.appendingPathComponent("\(id).json")
-    try? fm.removeItem(at: answerURL)  // 同 id 的旧答案不能被这一轮读到
 
     var record: [String: Any] = [
         "v": 1,
@@ -139,7 +134,7 @@ func run() {
             emitAnswer(data, toolInput: toolInput)
             return
         }
-        // 等待期间 app 退出 / 卡死：别让用户对着一个没人接的提问干等 10 分钟
+        // 等待期间 app 退出 / 卡死：岛上的卡已经没人显示，进程没必要再挂 10 分钟
         if Date().timeIntervalSince(lastAliveCheck) >= 2 {
             lastAliveCheck = Date()
             guard islandIsAlive(root: root) else { return }
@@ -148,7 +143,7 @@ func run() {
     }
 }
 
-/// 只有 `action == "answer"` 且每个问题都有非空答案才输出；否则静默（回到终端提问）
+/// 只有 `action == "answer"` 且每个问题都有非空答案才输出；否则静默（交给 Claude 自己的确认界面）
 func emitAnswer(_ data: Data, toolInput: [String: Any]) {
     guard
         let object = try? JSONSerialization.jsonObject(with: data),
@@ -168,10 +163,11 @@ func emitAnswer(_ data: Data, toolInput: [String: Any]) {
     updatedInput["answers"] = answers
     let output: [String: Any] = [
         "hookSpecificOutput": [
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": "已在灵动岛上回答",
-            "updatedInput": updatedInput,
+            "hookEventName": "PermissionRequest",
+            "decision": [
+                "behavior": "allow",
+                "updatedInput": updatedInput,
+            ],
         ],
     ]
     guard let json = try? JSONSerialization.data(withJSONObject: output) else { return }
