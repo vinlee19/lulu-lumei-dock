@@ -4,10 +4,37 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.38.0] - 2026-10-19
 
 ### Added
 
+- **AI summaries of past sessions with your own CLI.** Session details have an
+  AI Summary split button and tab: pick Claude Code, Codex or OpenCode (any
+  of them can summarize any readable session, whatever tool recorded it; the
+  last choice is remembered). The summary covers the whole conversation,
+  splitting long sessions into turn-aware parts plus a merge pass, and lays
+  out the goal, how requirements changed, decisions, completed work and
+  verification, open items and handoff notes. Progress shows the stage,
+  elapsed time and part k of n; runs keep going while you navigate and can
+  be cancelled, retried or regenerated. Results are saved with what they
+  covered and which CLI produced them, `[#n]` citations jump to the message,
+  an outdated summary is flagged when the session grows, and copy / Markdown
+  export are built in. Runs are isolated: Claude Code and Codex save no
+  session, OpenCode runs in an app-managed folder that stays out of the
+  session list, history, prompts and island, and their usage is not added
+  to the ledger. Trae and Antigravity explain why they can't be summarized.
+- **Answer Claude's questions on the island.** When Claude Code asks an
+  AskUserQuestion, the island shows the options alongside Claude's own
+  dialog (single and multi select, a free-text "Other…", several questions
+  in turn); whichever side answers first wins, and answering in Claude
+  withdraws the island card. A separate zero-dependency `lululumei-ask` hook
+  does the answering, so the relay stays silent; Settings → General can
+  turn it off.
+- **Unread mark on the island.** A finished card that collapses on its timer
+  leaves a ✓N mark on the pill until you open it or that session starts a
+  new turn, so the island no longer disappears with the news. The pill and
+  task list are restyled: per-source icons lit while running, an alert slot
+  by priority, and separate running / idle sections.
 - **Custom desktop companion.** Settings → General → Desktop companion now
   shows a picker with thumbnails instead of a pack drop-down. Upload one
   image (PNG / JPG / HEIC / WebP, or an animated GIF / APNG, up to 20 MB) and
@@ -23,8 +50,35 @@ this project uses [Semantic Versioning](https://semver.org/).
   the app and appear under "Presets", after the built-in Lulu & Lumei. They
   use the same manifest format as user packs and are read-only in the UI.
 
+### Changed
+
+- **Usage opens on an Overview tab.** The detail tabs sit right under the
+  shared filters, charts live on Overview, and Models, Projects and the other
+  tabs show their table straight under the headline total.
+- **Session page fits narrow windows.** The title has its own row; the
+  actions collapse to Resume plus a More menu when space runs out, the
+  outline hides itself below 640pt, and the stats wrap. Injected turns (task
+  notifications, messages relayed from another session, command output) fold
+  to one muted line and no longer appear in the outline or the prompt count.
+- **Same-name skills and MCP servers expand per copy**, each with its own
+  toggle, edit and delete, and knowledge card grids adapt their column count
+  to the window.
+- **Settings are grouped by purpose** (task notifications, display and
+  limits) with every switch aligned in one trailing column and capped slider
+  widths. About and Advanced settings get framed cards and themed buttons in
+  Neo-Brutalism.
+- Agents that can't be toggled (built-in, plugin-provided, file-less) show a
+  Read-only label instead of a switch, with plugin and project scope chips;
+  prompt rows no longer re-truncate when hover actions appear; the command
+  palette ranks harness background calls last and marks the selection
+  clearly.
+
 ### Fixed
 
+- Clicking outside the island closes the click-opened task list.
+- The AskUserQuestion hook no longer hides Claude's own question dialog
+  (it runs under PermissionRequest; earlier PreToolUse installs migrate on
+  launch).
 - Packs without gaze frames (any custom pack) no longer freeze their caption
   and motion while the pointer is near the companion.
 
@@ -1973,6 +2027,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[0.38.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.38.0
 [0.37.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.37.0
 [0.36.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.36.0
 [0.35.2]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.35.2
