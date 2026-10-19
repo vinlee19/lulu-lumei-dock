@@ -91,7 +91,12 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
     `message.model`、`requestId`、`sessionId`、`isSidechain`；**(requestId,message.id) 流式重复严重，
     必须跨文件持久化去重**（resume/fork 会把旧行复制进新文件）
   - `{"type":"ai-title","aiTitle":"...","sessionId":"..."}` 现成任务标题
-  - `{"type":"system","subtype":"turn_duration","durationMs":...}` 官方耗时（可校验 hook 配对计时）
+  - `{"type":"system","subtype":"turn_duration","durationMs":...}` 官方耗时（可校验 hook 配对计时）；
+    **只有 CLI 入口写**，桌面端（`entrypoint: claude-desktop`，2.1.197–2.1.299 共 566 个样本）一行都没有
+  - turn 结束标记（transcript 监视器无 hooks 时的唯一完成信号，任一出现在最后一个真实 prompt 之后即判空闲）：
+    主链 assistant 行 `message.stop_reason == "end_turn"`（`tool_use` = 还要调工具，`null` = 流式中间块）、
+    用户中断行（user 行 content 数组里 text 以 `[Request interrupted by user` 开头 → 结局记中断）、
+    API 错误行、`turn_duration`
   - API 错误行：`message.model=="<synthetic>"`、`isApiErrorMessage:true`、`apiErrorStatus`、`error`
 - **Codex rollout** `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`（行 = `{timestamp,type,payload}`）：
   - `session_meta`（id/cwd/cli_version）、`event_msg/task_started`（turn_id、started_at 秒级 epoch）、
@@ -114,6 +119,20 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
   - `event`(append-only；rowid 单调)：`session.created.1`/`session.updated.1`/`message.updated.1`/
     `message.part.updated.1`，`data` 含 `sessionID` + `info`/`part`。**opencode 无 hook/notify 子进程回调**，
     实时靠尾随 event 表（首扫定基线不重放；子会话事件按 session.parent_id 过滤）。**无订阅限额概念**（BYO provider）
+  - **2.x 换了一代表**（opencode 2.0.x，以及 OpenChamber 后台自带的 `opencode serve` 写同一个库）：
+    `event` / `message` / `part` 不再写入（`event` 保持 0 行），会话改存 `session_v2`(id,parent_id,directory,
+    title,version,metadata,time_*)，消息改存 `session_message`(session_id,type,seq,time_*,data)。
+    `type`：`user`{text} = turn 开始；`assistant`{model{id,providerID},content[text|reasoning|tool{name}],
+    finish,tokens} 每个推理步一行、流式期间原地更新；`idle`{outcome: succeeded|failed|interrupted,error?}
+    = turn 结束（2.x 顶层会话几乎每个 turn 都有）；`synthetic`/`system`/`compaction`/`*-switched` 是注入或切换。
+    OpenChamber 的会话在 `metadata.openchamber` 下记自己的状态，Eureka 不单列来源，统一记为 opencode。
+  - **升级迁移**：1.x 会话连同消息按原 id 复制进 `session_v2` / `session_message`，`version` 保留 `1.x`。
+    复制来的消息用量已由 `message` 表那条路径计过，2.x 路径按消息 id 逐行排除（id 也在 `message` 表里
+    = 复制来的）；按会话排除会漏掉迁移会话之后续聊的新消息（它们只在 2.x 表里）。
+    会话列表同 id 只留 2.x 那行；tailer 同样按消息 id 跳过复制来的行
+  - 实时（`session_message.rowid` 水位，与 `event` 水位各自独立）、用量（键 `<db>#v2`，只结算
+    `time.completed` 已写的 assistant 行）、会话浏览（`session_message` 有行就读它，否则退回 `message`/`part`）
+    三条路径都同时读两代表
 
 ### Claude 记忆库 `~/.claude/projects/<encoded>/memory/`（本机 11 个库 / 97 个文件实勘）
 

@@ -857,6 +857,11 @@ public enum TranscriptReader {
         guard let db = try? SQLiteDB(path: dbPath, readOnly: true) else {
             return Result(messages: [], truncated: false)
         }
+        // 2.x（opencode 2.x / OpenChamber）把消息存在 session_message；迁移来的 1.x 会话两边都有，
+        // 2.x 那份更全（含迁移后的新消息）→ 有就用它
+        if let v2 = loadOpencodeV2(db: db, sessionId: sessionId, maxMessages: maxMessages) {
+            return v2
+        }
         var messages: [TranscriptMessage] = []
         var truncated = false
         // 消息按创建时间排序；role 在 message.data JSON 里
@@ -909,6 +914,56 @@ public enum TranscriptReader {
                 messages.append(TranscriptMessage(
                     id: messages.count, role: role, text: text, timestamp: timestamp))
             }
+        }
+        return Result(messages: messages, truncated: truncated)
+    }
+
+    /// opencode 2.x：`session_message` 按 seq 排序。user 行正文在 `data.text`；
+    /// assistant 行的 `data.content` 按序是 text / reasoning / tool 分片（reasoning 跳过，tool 记小注）。
+    /// 表不存在（1.x 库 / zcode 库）或该会话没有 2.x 消息 → nil，调用方退回 message/part 表。
+    private static func loadOpencodeV2(db: SQLiteDB, sessionId: String, maxMessages: Int) -> Result? {
+        guard let rows = try? db.query("""
+            SELECT type, data, time_created FROM session_message
+            WHERE session_id = ? AND type IN ('user', 'assistant') ORDER BY seq
+            """, [.text(sessionId)]) { row -> (String, String, Double) in
+                (row.text(0) ?? "", row.text(1) ?? "{}", row.real(2))
+            }, !rows.isEmpty
+        else { return nil }
+
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+        func append(_ role: TranscriptMessage.Role, _ text: String, _ timestamp: Date) {
+            guard !text.isEmpty else { return }
+            guard messages.count < maxMessages else {
+                truncated = true
+                return
+            }
+            messages.append(TranscriptMessage(
+                id: messages.count, role: role, text: text, timestamp: timestamp))
+        }
+        for (type, dataJSON, createdMs) in rows {
+            if truncated { break }
+            let data = (try? JSONSerialization.jsonObject(
+                with: Data(dataJSON.utf8))) as? [String: Any] ?? [:]
+            let timestamp = Date(timeIntervalSince1970: createdMs / 1000)
+            if type == "user" {
+                append(.user, data["text"] as? String ?? "", timestamp)
+                continue
+            }
+            var pending: [String] = []
+            for item in data["content"] as? [[String: Any]] ?? [] {
+                switch item["type"] as? String {
+                case "text":
+                    if let text = item["text"] as? String, !text.isEmpty { pending.append(text) }
+                case "tool":
+                    append(.assistant, pending.joined(separator: "\n"), timestamp)
+                    pending.removeAll()
+                    append(.toolNote, "🔧 \(item["name"] as? String ?? "工具")", timestamp)
+                default:
+                    break
+                }
+            }
+            append(.assistant, pending.joined(separator: "\n"), timestamp)
         }
         return Result(messages: messages, truncated: truncated)
     }

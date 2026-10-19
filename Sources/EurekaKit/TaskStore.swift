@@ -63,6 +63,13 @@ public final class TaskStore {
         switch event.kind {
         case .taskStarted(let title):
             if var task = activeTasks[key] {
+                // Claude 空闲会话收到早于上次收尾的开始：已完成 turn 的迟到信号
+                // （hooks 已报 Stop，transcript 监视才补报同一 turn 的开始）→ 不复活。
+                // 只限 Claude：它是唯一由 hooks 与 transcript 双源报告同一 turn 的源
+                if event.source == .claude, case .idle = task.phase,
+                   event.timestamp < task.lastActivityAt {
+                    return []
+                }
                 // 同会话再次提交（追加引导/等待输入后回复/空闲后新 turn）
                 task.lastActivityAt = event.timestamp
                 if task.title == nil { task.title = title }

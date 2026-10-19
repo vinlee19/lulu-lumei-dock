@@ -525,6 +525,35 @@ func sessionBootstrapTests(_ t: TestRunner) {
         }
     }
 
+    t.test("桌面端无 turn_duration：end_turn 的 assistant 行即 turn 结束 → 空闲") {
+        let url = try fixtureURL("claude-transcript-desktop.jsonl")
+        let snapshot = ClaudeSessionBootstrap.classify(fileURL: url)
+        try expectEqual(snapshot?.running, false)
+        try expectEqual(snapshot?.turnEndOutcome, .success)
+        try expectEqual(
+            snapshot?.turnEndAt, ISO8601DateFormatter().date(from: "2026-10-18T08:00:15Z"))
+        let events = ClaudeSessionBootstrap.inspectSession(fileURL: url, mtime: mtime)
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "应为 sessionStarted（空闲）: \(events)")
+        }
+    }
+
+    t.test("任务名剥掉注入块：后台任务回报只剩标签 → nil（沿用会话旧标题）") {
+        guard var snapshot = ClaudeSessionBootstrap.classify(
+            fileURL: try fixtureURL("claude-transcript-desktop.jsonl"))
+        else { throw ExpectationError(description: "fixture 应能分类") }
+        try expectEqual(snapshot.promptTitle, "检查登录页的报错")
+        snapshot.promptText = "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"
+        try expectEqual(snapshot.promptTitle, nil)
+    }
+
+    t.test("用户中断行视为 turn 结束，结局为中断") {
+        let snapshot = ClaudeSessionBootstrap.classify(
+            fileURL: try fixtureURL("claude-transcript-interrupted.jsonl"))
+        try expectEqual(snapshot?.running, false)
+        try expectEqual(snapshot?.turnEndOutcome, .interrupted)
+    }
+
     t.test("API 错误行视为 turn 结束 → 空闲而非幽灵运行") {
         let events = ClaudeSessionBootstrap.inspectSession(
             fileURL: try fixtureURL("claude-transcript-api-error.jsonl"), mtime: mtime)
@@ -606,6 +635,112 @@ func transcriptWatcherTests(_ t: TestRunner) {
         events.removeAll()
         watcher.scanOnce()
         try expect(events.isEmpty, "无变化不该有事件: \(events)")
+    }
+
+    /// 把 fixture 复制成 projects/<项目>/<会话>.jsonl，mtime 刷成现在
+    func makeSession(_ fixture: String) throws -> (root: URL, file: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-watch-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-web")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("s.jsonl")
+        try FileManager.default.copyItem(at: fixtureURL(fixture), to: file)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()], ofItemAtPath: file.path)
+        return (root, file)
+    }
+
+    /// 追加行并把 mtime 前移（文件系统秒级粒度防 flake）
+    func append(_ lines: String, to file: URL) throws {
+        let handle = try FileHandle(forWritingTo: file)
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: Data(lines.utf8))
+        try handle.close()
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: file.path)
+    }
+
+    func finishes(_ events: [TaskEvent]) -> [TaskOutcome] {
+        events.compactMap {
+            if case .taskFinished(let outcome, _, _) = $0.kind { return outcome } else { return nil }
+        }
+    }
+
+    t.test("桌面端会话：运行中追加 end_turn 行 → 恰好一次成功完成") {
+        let (root, file) = try makeSession("claude-transcript-running.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root) { event, _ in
+            events.append(event)
+        }
+        watcher.scanOnce()
+        guard case .taskStarted = events.first?.kind else {
+            throw ExpectationError(description: "首扫应发现运行中: \(events)")
+        }
+
+        events.removeAll()
+        try append("""
+        {"parentUuid":"u-2008","isSidechain":false,"type":"assistant","uuid":"u-2010","timestamp":"2026-06-09T10:00:40.000Z","message":{"id":"msg_RUN9","model":"claude-opus-5-5","role":"assistant","stop_reason":"end_turn","type":"message","content":[{"type":"text","text":"改好了。"}]},"sessionId":"fixture-running-1","cwd":"/Users/me/work/pipeline"}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expectEqual(finishes(events), [.success], "收尾应产出恰好一次完成: \(events)")
+        try expectEqual(
+            events.first { if case .taskFinished = $0.kind { return true } else { return false } }?
+                .timestamp,
+            ISO8601DateFormatter().date(from: "2026-06-09T10:00:40Z"),
+            "完成时间取 end_turn 行时间")
+    }
+
+    t.test("运行中追加用户中断行 → 完成结局为中断") {
+        let (root, file) = try makeSession("claude-transcript-running.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root) { event, _ in
+            events.append(event)
+        }
+        watcher.scanOnce()
+        events.removeAll()
+        try append("""
+        {"parentUuid":"u-2008","isSidechain":false,"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"uuid":"u-2011","timestamp":"2026-06-09T10:00:45.000Z","sessionId":"fixture-running-1","cwd":"/Users/me/work/pipeline"}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expectEqual(finishes(events), [.interrupted], "\(events)")
+    }
+
+    t.test("短于一次轮询的 turn：两次扫描都空闲但 prompt 变了 → 补开始 + 完成") {
+        let (root, file) = try makeSession("claude-transcript-desktop.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root) { event, _ in
+            events.append(event)
+        }
+        watcher.scanOnce()
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "首扫应登记空闲: \(events)")
+        }
+
+        events.removeAll()
+        try append("""
+        {"parentUuid":"u-4005","isSidechain":false,"type":"user","message":{"role":"user","content":"顺便看下注册页"},"uuid":"u-4010","timestamp":"2026-10-18T08:05:00.000Z","sessionId":"fixture-desktop-1","cwd":"/Users/me/work/web"}
+        {"parentUuid":"u-4010","isSidechain":false,"type":"assistant","uuid":"u-4011","timestamp":"2026-10-18T08:05:03.000Z","message":{"id":"msg_DESK3","model":"claude-opus-5-5","role":"assistant","stop_reason":"end_turn","type":"message","content":[{"type":"text","text":"注册页没问题。"}]},"sessionId":"fixture-desktop-1","cwd":"/Users/me/work/web"}
+
+        """, to: file)
+        watcher.scanOnce()
+        guard case .taskStarted(let title) = events.first?.kind else {
+            throw ExpectationError(description: "应先补开始: \(events)")
+        }
+        try expectEqual(title, "顺便看下注册页")
+        try expectEqual(events.first?.timestamp, ISO8601DateFormatter().date(from: "2026-10-18T08:05:00Z"))
+        try expectEqual(finishes(events), [.success])
+
+        // 端到端：经 TaskStore 出一张完成卡
+        let store = TaskStore()
+        let effects = events.flatMap { store.apply($0) }
+        try expectEqual(effects.filter {
+            if case .taskFinished = $0 { return true } else { return false }
+        }.count, 1)
     }
 
     t.test("空闲会话首见登记 sessionStarted") {
