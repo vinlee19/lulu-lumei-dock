@@ -248,6 +248,9 @@ struct PopoverRootView: View {
                     navigation.tab = .settings
                     navigation.settingsSection = .about
                 }
+            },
+            onOpenSearch: {
+                withAnimation(.easeOut(duration: 0.12)) { paletteVisible = true }
             })
     }
 
@@ -265,6 +268,7 @@ struct PopoverRootView: View {
                 terminals: sessionBrowser.terminals,
                 onExport: { usageService.exportHistoryCSV() },
                 exportMessage: usageService.exportMessage,
+                onOpenSession: { NotificationCenter.default.post(name: .eurekaRevealSession, object: $0) },
                 settings: settings)
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings,
