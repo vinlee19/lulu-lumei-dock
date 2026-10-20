@@ -137,6 +137,11 @@ struct MascotPackInfo: Identifiable, Equatable {
     var id: String
     var name: String
     var kind: Kind
+    /// Manifest problems found when listing (empty for the built-in pack)
+    var issues: [MascotManifestValidator.Issue] = []
+
+    /// The pack can't load at all; selecting it would silently show the built-in pair
+    var isBroken: Bool { issues.contains(where: \.isBlocking) }
 }
 
 enum MascotPackLoader {
@@ -192,8 +197,15 @@ enum MascotPackLoader {
             5. Optional variants: several behaviors for one state. Each item may set id / frames or file / fps /
                caption / motion / weight. motion is one of gentle/focus/curious/nudge/celebrate/
                droop/sleep/sway/still.
-            6. Back in Eureka: Settings → General → Desktop companion, then pick your pack under "My companions" (a new pack may need the settings panel reopened to refresh the list).
-               To swap in a single image you don't need a manifest: click "Upload image" in Settings.
+            6. Back in Eureka: Settings → General → Desktop companion, press Refresh under "My companions" and pick your pack.
+               A pack that can't load shows a warning tile with the reason.
+
+            No manifest needed
+            ------------------
+            - One image: Settings → "Upload image".
+            - A set of images: put them in any folder, name each after its state (working.gif, sleep-1.png,
+              sleep-2.png, or a sleep/ subfolder of frames), then Settings → "Import folder".
+              Aliases work too: work / busy / done / fail / sleep / 工作 / 完成 / 睡觉 … (the full table is in Settings).
 
             Suggested size: square, long edge ≤ 512px. A transparent or solid background is fine (it sits in a rounded card).
             """,
@@ -211,8 +223,14 @@ enum MascotPackLoader {
             5. 可选 variants:给同一个状态配置多个行为,每项支持 id / frames 或 file / fps /
                caption / motion / weight。motion 可选 gentle/focus/curious/nudge/celebrate/
                droop/sleep/sway/still。
-            6. 回 设置 → 通用 → 桌面伙伴,在「我的形象」里选你的包即可(新建后可能需重开设置面板刷新列表)。
-               只想换一张图的话,不用写 manifest:直接在设置里点「上传图片」。
+            6. 回 设置 → 通用 → 桌面伙伴,在「我的形象」点「刷新」后选你的包。
+               无法加载的包会显示警告图标,并写明原因。
+
+            不写 manifest 的方式
+            --------------------
+            - 只有一张图:设置里点「上传图片」。
+            - 有一套图:放进任意文件夹,按状态命名(working.gif、sleep-1.png、sleep-2.png,或 sleep/ 子文件夹放帧),
+              然后在设置里点「导入文件夹」。也认别名:work / busy / done / fail / sleep / 工作 / 完成 / 睡觉 …(完整对照表见设置页)。
 
             建议尺寸:正方形,长边 ≤ 512px;透明或纯色背景都行(会放进圆角卡片里)。
             """)
@@ -530,10 +548,14 @@ enum MascotPackLoader {
         }
         for dir in packDirectories(in: customRoot()) {
             let manifest = readManifest(in: dir)
+            let files = Set(MascotFolderImporter.relativeFiles(in: dir, maxDepth: 3))
             result.append(MascotPackInfo(
                 id: MascotPackRef.custom(dir.lastPathComponent).id,
                 name: manifest.flatMap(MascotManifestEditor.name) ?? dir.lastPathComponent,
-                kind: .custom))
+                kind: .custom,
+                issues: manifest.map {
+                    MascotManifestValidator.validate($0, existingFiles: files)
+                } ?? [.malformed]))
         }
         return result
     }

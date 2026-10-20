@@ -54,11 +54,14 @@ public enum MascotManifestEditor {
     public static let originKey = "origin"
     public static let uploadOrigin = "upload"
 
-    /// States that can get their own image in the UI. idle is the base mascot; other states without
-    /// an image reuse one along the fallback chain.
+    /// States that can get their own art in the UI: every state. idle is the base mascot; other
+    /// states without art reuse one along the fallback chain.
     public static let editableStates: [MascotState] = [
-        .idle, .working, .waiting, .success, .error, .sleeping,
+        .idle, .working, .waiting, .success, .error, .sleeping, .night, .relax, .poke, .wake,
     ]
+
+    /// Frame rates offered for frame-sequence packs (the manifest's top-level "fps")
+    public static let fpsOptions: [Double] = [1, 2, 4, 6, 8, 12]
 
     public enum EditError: Error, Equatable {
         case malformed
@@ -77,6 +80,29 @@ public enum MascotManifestEditor {
             "states": [MascotState.idle.rawValue: baseFile],
         ]
         return encode(root) ?? Data()
+    }
+
+    /// A pack built from a whole folder: each state gets one file (still or animated) or a frame
+    /// sequence; missing states fall back along the chain.
+    public static func makeUploadManifest(
+        name: String, states: [MascotState: [String]], fps: Double = 2
+    ) -> Data {
+        var stateMap: [String: Any] = [:]
+        for (state, files) in states where !files.isEmpty {
+            stateMap[state.rawValue] = files.count == 1 ? files[0] as Any : files as Any
+        }
+        let root: [String: Any] = [
+            "name": name, originKey: uploadOrigin, "fps": fps, "states": stateMap,
+        ]
+        return encode(root) ?? Data()
+    }
+
+    /// Marks an imported hand-written pack as UI-editable (all other fields untouched)
+    public static func markingUpload(_ data: Data) throws -> Data {
+        guard var root = decode(data) else { throw EditError.malformed }
+        root[originKey] = uploadOrigin
+        guard let encoded = encode(root) else { throw EditError.malformed }
+        return encoded
     }
 
     public static func isUpload(_ data: Data) -> Bool {
@@ -100,15 +126,65 @@ public enum MascotManifestEditor {
         return result
     }
 
+    /// Every state's art: a single file becomes a one-element list, a frame array stays as is
+    public static func stateSources(_ data: Data) -> [MascotState: [String]] {
+        guard let states = decode(data)?["states"] as? [String: Any] else { return [:] }
+        var result: [MascotState: [String]] = [:]
+        for (key, value) in states {
+            guard let state = MascotState(rawValue: key) else { continue }
+            if let file = value as? String {
+                result[state] = [file]
+            } else if let files = value as? [String], !files.isEmpty {
+                result[state] = files
+            }
+        }
+        return result
+    }
+
+    /// Every file the manifest points at (states and variants), so swapping one state's art never
+    /// deletes a file a variant still uses
+    public static func referencedFiles(_ data: Data) -> Set<String> {
+        guard let root = decode(data) else { return [] }
+        var files = Set(stateSources(data).values.flatMap { $0 })
+        for items in (root["variants"] as? [String: Any] ?? [:]).values {
+            for item in items as? [[String: Any]] ?? [] {
+                for key in ["frames", "file"] {
+                    if let file = item[key] as? String { files.insert(file) }
+                    if let list = item[key] as? [String] { files.formUnion(list) }
+                }
+            }
+        }
+        return files
+    }
+
+    public static func fps(_ data: Data) -> Double {
+        (decode(data)?["fps"] as? NSNumber)?.doubleValue ?? 2
+    }
+
+    public static func settingFPS(_ fps: Double, in data: Data) throws -> Data {
+        guard var root = decode(data) else { throw EditError.malformed }
+        root["fps"] = max(0.5, min(30, fps))
+        guard let encoded = encode(root) else { throw EditError.malformed }
+        return encoded
+    }
+
     /// Sets (file non-nil) or clears (file nil, back to reusing along the fallback chain) a state's
     /// image.
     public static func settingState(
         _ state: MascotState, file: String?, in data: Data
     ) throws -> Data {
+        try settingState(state, files: file.map { [$0] }, in: data)
+    }
+
+    /// Sets a state's art to one file (still or animated) or a frame sequence; nil or empty clears
+    /// it back to the fallback chain.
+    public static func settingState(
+        _ state: MascotState, files: [String]?, in data: Data
+    ) throws -> Data {
         guard var root = decode(data) else { throw EditError.malformed }
         var states = root["states"] as? [String: Any] ?? [:]
-        if let file {
-            states[state.rawValue] = file
+        if let files, !files.isEmpty {
+            states[state.rawValue] = files.count == 1 ? files[0] as Any : files as Any
         } else {
             guard state != .idle else { throw EditError.cannotRemoveBase }
             states.removeValue(forKey: state.rawValue)
@@ -127,8 +203,8 @@ public enum MascotManifestEditor {
 
     /// Which state's image a state actually shows: its own if it has one, otherwise the first state
     /// with an image along the fallback chain.
-    public static func effectiveSource(
-        for state: MascotState, files: [MascotState: String]
+    public static func effectiveSource<Value>(
+        for state: MascotState, files: [MascotState: Value]
     ) -> MascotState? {
         var current = state
         for _ in 0...MascotState.allCases.count {
@@ -168,8 +244,11 @@ public enum MascotUploadNaming {
 
     /// Image file names inside a pack carry a timestamp: after an image swap the URL always
     /// changes, so the rendering layer won't hit a stale cache.
-    public static func imageFileName(state: MascotState, stamp: Int, ext: String) -> String {
-        "\(state.rawValue)-\(stamp).\(ext.lowercased())"
+    public static func imageFileName(
+        state: MascotState, stamp: Int, frame: Int? = nil, ext: String
+    ) -> String {
+        let suffix = frame.map { "-\(String(format: "%02d", $0))" } ?? ""
+        return "\(state.rawValue)-\(stamp)\(suffix).\(ext.lowercased())"
     }
 
     /// Default display name: the source file name (extension and leading/trailing whitespace

@@ -819,6 +819,18 @@ enum PreviewRenderer {
         snap("pages-settings-mascot-dark",
              ScrollView { MascotSettingsSection(settings: settings).padding(20) },
              dark: true, width: 780, height: 1300)
+        snap("pages-settings-mascot-guide",
+             ScrollView { MascotMakingGuide().padding(20) }, width: 780, height: 900)
+        // With a custom pack on disk (point EUREKA_SPOOL_DIR at a scratch dir to stage one),
+        // render the editable state table too
+        let packWas = settings.mascotPack
+        for custom in MascotPackLoader.availablePacks() where custom.kind == .custom {
+            settings.mascotPack = custom.id
+            snap("pages-settings-mascot-custom-\(custom.id)",
+                 ScrollView { MascotSettingsSection(settings: settings).padding(20) },
+                 width: 780, height: 1500)
+        }
+        settings.mascotPack = packWas
         settings.mascotEnabled = mascotWasEnabled  // don't leave render side effects behind
         snap("pages-settings-general-dark",
              SettingsView(

@@ -18,6 +18,9 @@ struct MascotSettingsSection: View {
     /// (or behind a full-screen window), so Preview must also be visible right here.
     @State private var previewing: MascotState?
     @State private var previewToken = 0
+    /// Result of the last folder import, shown until dismissed
+    @State private var importReport: MascotFolderImporter.Report?
+    @State private var showsGuide = false
 
     private let columns = [GridItem(.adaptive(minimum: 78, maximum: 96), spacing: 8)]
 
@@ -88,6 +91,12 @@ struct MascotSettingsSection: View {
         packGrid(
             title: L10n.text("My companions", zhHans: "我的形象"),
             packs: library.customPacks, showsUpload: true)
+        if let report = importReport {
+            importReportCard(report)
+        }
+        if let broken = library.packs.first(where: { $0.id == settings.mascotPack && $0.isBroken }) {
+            brokenPackNotice(broken)
+        }
         Toggle(
             L10n.text(
                 "Remove a solid background on upload (for images on white or a flat color)",
@@ -102,6 +111,118 @@ struct MascotSettingsSection: View {
         if let editing = library.editing, editing.id == settings.mascotPack {
             nameRow(editing)
         }
+        DisclosureGroup(isExpanded: $showsGuide) {
+            MascotMakingGuide()
+        } label: {
+            Text(L10n.text(
+                "How to bring your own pet: formats, sizes and file names",
+                zhHans: "怎么接入自己的桌面伙伴：格式、尺寸与命名"))
+                .font(Theme.font.themed(11, .semibold))
+                .foregroundStyle(Theme.brandFg)
+        }
+    }
+
+    // MARK: - Import
+
+    private func importFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = L10n.text(
+            "Choose your pet's folder. Images named after states (working.gif, sleep-1.png, done/…) are bound automatically; a manifest.json is used if present.",
+            zhHans: "选择你的桌面伙伴文件夹：按状态命名的图（working.gif、sleep-1.png、done/…）会自动绑定；有 manifest.json 时直接使用。")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let report = library.importFolder(url, removeBackground: removeBackground) {
+            importReport = report
+            settings.mascotPack = report.packID
+        }
+    }
+
+    private func importReportCard(_ report: MascotFolderImporter.Report) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(
+                    L10n.format(
+                        "Imported \"%1$@\": %2$@ of 10 states bound",
+                        zhHans: "已导入「%1$@」：绑定了 10 个状态中的 %2$@ 个",
+                        report.name, String(report.bound.count)),
+                    systemImage: "checkmark.circle.fill")
+                    .font(Theme.font.themed(11, .semibold))
+                    .foregroundStyle(Theme.brandFg)
+                Spacer()
+                Button {
+                    importReport = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+            ForEach(MascotManifestEditor.editableStates.filter { report.bound[$0] != nil }, id: \.self) { state in
+                let files = report.bound[state] ?? []
+                Text("\(Self.title(for: state)) ← \(files.count > 1 ? L10n.format("%1$@ … (%2$@ frames)", zhHans: "%1$@ …（%2$@ 帧）", files[0], String(files.count)) : files[0])")
+                    .font(Theme.font.themedMono(9.5))
+                    .foregroundStyle(.secondary)
+            }
+            if let borrowed = report.idleBorrowedFrom {
+                Text(L10n.format(
+                    "No idle image found, so \"%@\" is used as the base look.",
+                    zhHans: "没找到 idle（平时）图，暂用「%@」作为基础形象。", borrowed))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.orange)
+            }
+            if !report.unmatched.isEmpty {
+                Text(L10n.format(
+                    "Not recognised: %@. Rename them after a state, or bind them below with Change….",
+                    zhHans: "未识别：%@。可按状态改名后重新导入，或在下方状态表用「更换…」手动绑定。",
+                    report.unmatched.prefix(6).joined(separator: ", ")
+                        + (report.unmatched.count > 6 ? " …" : "")))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, issue in
+                Text("⚠︎ " + MascotFolderImporter.describe(issue))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.orange)
+            }
+            Text(L10n.text(
+                "States left out reuse another state's art (see Uses \"…\" below).",
+                zhHans: "没绑定的状态会沿用其他状态的图（见下方「沿用「…」」）。"))
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.container)
+                .fill(Theme.brandFill(0.08)))
+    }
+
+    private func brokenPackNotice(_ info: MascotPackInfo) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label(
+                L10n.format(
+                    "\"%@\" can't load, so the built-in pair is shown instead:",
+                    zhHans: "「%@」无法加载，当前显示的是内置形象。原因：", info.name),
+                systemImage: "exclamationmark.triangle.fill")
+                .font(Theme.font.themed(11, .semibold))
+                .foregroundStyle(.orange)
+            ForEach(Array(info.issues.enumerated()), id: \.offset) { _, issue in
+                Text("· " + MascotFolderImporter.describe(issue))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.secondary)
+            }
+            Text(L10n.text(
+                "Fix manifest.json in the animation-pack folder, then press Refresh.",
+                zhHans: "到动画包文件夹修改 manifest.json 后，点「刷新」即可。"))
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.container)
+                .fill(Color.orange.opacity(0.08)))
     }
 
     // MARK: - States
@@ -132,8 +253,8 @@ struct MascotSettingsSection: View {
         }
         if editing == nil {
             Text(L10n.text(
-                "Preset art can't be changed. Upload an image under My companions to make one you can customize state by state.",
-                zhHans: "预设形象的动作不可修改；在「我的形象」上传一张图，即可逐个状态换图。"))
+                "This companion is read-only here. Upload an image or Import folder under My companions to get one you can bind state by state.",
+                zhHans: "这个形象在这里只读。在「我的形象」里上传图片或导入文件夹，就能逐个状态绑定自己的图。"))
                 .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -148,7 +269,7 @@ struct MascotSettingsSection: View {
             Group {
                 if isPreviewing, let art {
                     MascotAnimationView(animation: art.animation, playback: art.playback)
-                } else if let image = editing?.images[state] ?? art?.thumbnail {
+                } else if let image = art?.thumbnail ?? editing?.images[state] {
                     Image(nsImage: image)
                         .resizable()
                         .interpolation(.high)
@@ -183,20 +304,28 @@ struct MascotSettingsSection: View {
                 preview(state)
             }
             if editable, let editing {
-                SecondaryButton(title: L10n.text("Change…", zhHans: "更换…"), classic: .push) {
-                    guard let url = Self.pickImage(message: L10n.format(
-                        "Choose the image shown for \"%@\"",
-                        zhHans: "选择「%@」时显示的图片", Self.title(for: state)))
-                    else { return }
-                    library.setImage(
-                        for: state, packID: editing.id, from: url,
+                SecondaryButton(
+                    title: L10n.text("Change…", zhHans: "更换…"), classic: .push,
+                    help: L10n.text(
+                        "One image, one GIF / APNG, or several still images as frames",
+                        zhHans: "一张图、一个 GIF / APNG，或多选几张静态图组成帧动画")
+                ) {
+                    let urls = Self.pickImages(message: L10n.format(
+                        "Choose the art for \"%@\": one image or GIF, or several images as frames (played in name order)",
+                        zhHans: "选择「%@」的图：一张图或一个 GIF，或多选几张图组成帧动画（按文件名顺序播放）",
+                        Self.title(for: state)))
+                    library.setImages(
+                        for: state, packID: editing.id, from: urls,
                         removeBackground: removeBackground)
                 }
-                if state != .idle, editing.files[state] != nil {
-                    SecondaryButton(title: L10n.text("Reset", zhHans: "恢复"), classic: .push) {
-                        library.resetImage(for: state, packID: editing.id)
-                    }
+                let canReset = state != .idle && editing.files[state] != nil
+                // Hidden rather than absent, so every row's buttons line up in one column
+                SecondaryButton(title: L10n.text("Reset", zhHans: "恢复"), classic: .push) {
+                    library.resetImage(for: state, packID: editing.id)
                 }
+                .opacity(canReset ? 1 : 0)
+                .disabled(!canReset)
+                .accessibilityHidden(!canReset)
             }
         }
         .padding(.vertical, 5)
@@ -217,13 +346,17 @@ struct MascotSettingsSection: View {
     private func source(
         for state: MascotState, art: MascotLibrary.StateArt?, editing: MascotLibrary.Editing?
     ) -> String {
-        if let editing {
-            if state == .idle {
-                return L10n.text("Base image", zhHans: "基础形象")
+        if let editing, let files = editing.files[state] {
+            let kind: String
+            if files.count > 1 {
+                kind = L10n.format("%@ frames", zhHans: "%@ 帧", String(files.count))
+            } else if MascotFolderMapper.animatedExtensions.contains(
+                (files[0] as NSString).pathExtension.lowercased()) {
+                kind = L10n.text("Animated", zhHans: "动图")
+            } else {
+                kind = L10n.text("Still image", zhHans: "静态图")
             }
-            if editing.files[state] != nil { return L10n.text("Set separately", zhHans: "已单独设置") }
-            let source = MascotManifestEditor.effectiveSource(for: state, files: editing.files) ?? .idle
-            return L10n.format("Uses \"%@\"", zhHans: "沿用「%@」", Self.title(for: source))
+            return state == .idle ? L10n.text("Base", zhHans: "基础形象") + " · " + kind : kind
         }
         guard let art, let provider = art.provider else { return "" }
         if provider != state {
@@ -389,21 +522,48 @@ struct MascotSettingsSection: View {
 
     @ViewBuilder
     private func packGrid(title: String, packs: [MascotPackInfo], showsUpload: Bool) -> some View {
-        Text(title)
-            .font(Theme.font.themed(11, .semibold))
-            .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            Text(title)
+                .font(Theme.font.themed(11, .semibold))
+                .foregroundStyle(.secondary)
+            if showsUpload {
+                Spacer()
+                // Packs dropped into the folder by hand appear without reopening Settings
+                Button {
+                    library.refresh()
+                    syncSelection()
+                } label: {
+                    Label(L10n.text("Refresh", zhHans: "刷新"), systemImage: "arrow.clockwise")
+                        .font(Theme.font.themed(10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        }
         LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
             ForEach(packs) { info in
                 PackTile(
                     name: info.name,
                     image: library.thumbnails[info.id],
-                    isSelected: settings.mascotPack == info.id
+                    isSelected: settings.mascotPack == info.id,
+                    isBroken: info.isBroken
                 ) {
                     settings.mascotPack = info.id
                 }
             }
             if showsUpload {
-                UploadTile { upload() }
+                AddTile(
+                    icon: "plus", title: L10n.text("Upload image", zhHans: "上传图片"),
+                    help: L10n.text(
+                        "One image becomes the base look; every state starts from it",
+                        zhHans: "一张图作为基础形象，各状态先共用它")
+                ) { upload() }
+                AddTile(
+                    icon: "folder.badge.plus", title: L10n.text("Import folder", zhHans: "导入文件夹"),
+                    help: L10n.text(
+                        "A folder with one image or GIF per state, named after the state",
+                        zhHans: "一个文件夹，每个状态一张图或 GIF，按状态命名")
+                ) { importFolder() }
             }
         }
     }
@@ -429,6 +589,24 @@ struct MascotSettingsSection: View {
                 .controlSize(.small)
                 .frame(maxWidth: 160)
                 .onSubmit { library.rename(packID: editing.id, to: nameDraft) }
+            if editing.files.values.contains(where: { $0.count > 1 }) {
+                Text(L10n.text("Frame rate", zhHans: "帧率"))
+                    .font(Theme.font.themed(11))
+                    .padding(.leading, 8)
+                Picker("", selection: Binding(
+                    get: { editing.fps },
+                    set: { library.setFPS($0, packID: editing.id) })
+                ) {
+                    ForEach(MascotManifestEditor.fpsOptions, id: \.self) { fps in
+                        Text(L10n.format("%@ fps", zhHans: "%@ 帧/秒", String(Int(fps)))).tag(fps)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 96)
+                .help(L10n.text(
+                    "Playback speed of frame sequences in this companion",
+                    zhHans: "这个形象里帧序列的播放速度"))
+            }
             Spacer()
             SecondaryButton(
                 title: L10n.text("Delete companion", zhHans: "删除此形象"),
@@ -460,6 +638,20 @@ struct MascotSettingsSection: View {
         }
     }
 
+    private static func pickImages(message: String) -> [URL] {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = MascotImageImporter.allowedTypes
+        panel.message = message
+        guard panel.runModal() == .OK else { return [] }
+        // Frames play in file-name order (frame-2 before frame-10)
+        return panel.urls.sorted {
+            $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        }
+    }
+
     private static func pickImage(message: String) -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -476,6 +668,7 @@ private struct PackTile: View {
     let name: String
     let image: NSImage?
     let isSelected: Bool
+    var isBroken = false
     let action: () -> Void
 
     var body: some View {
@@ -484,7 +677,11 @@ private struct PackTile: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: Theme.radius.tile)
                         .fill(Theme.surfaceSecondary)
-                    if let image {
+                    if isBroken {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(Theme.font.themed(18))
+                            .foregroundStyle(.orange)
+                    } else if let image {
                         Image(nsImage: image)
                             .resizable()
                             .interpolation(.high)
@@ -513,8 +710,11 @@ private struct PackTile: View {
     }
 }
 
-/// The "Upload image" entry tile
-private struct UploadTile: View {
+/// A dashed "add" tile (upload one image / import a folder)
+private struct AddTile: View {
+    let icon: String
+    let title: String
+    let help: String
     let action: () -> Void
 
     var body: some View {
@@ -525,17 +725,19 @@ private struct UploadTile: View {
                         .strokeBorder(
                             Theme.hairline,
                             style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    Image(systemName: "plus")
+                    Image(systemName: icon)
                         .font(Theme.font.themed(18, .medium))
                         .foregroundStyle(.secondary)
                 }
                 .frame(height: 66)
-                Text(L10n.text("Upload image", zhHans: "上传图片"))
+                Text(title)
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(help)
     }
 }
