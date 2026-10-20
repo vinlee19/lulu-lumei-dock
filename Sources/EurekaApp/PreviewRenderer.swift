@@ -2,6 +2,7 @@ import AppKit
 import EurekaIngest
 import EurekaKit
 import EurekaStore
+import EurekaUsage
 import SwiftUI
 
 /// Offscreen-renders every Dynamic Island state to PNG: visual walkthroughs/self-checks without
@@ -731,6 +732,9 @@ enum PreviewRenderer {
         let range = (from: month.startDate, to: Date())
         usage.loadRecords(page: 1, pageSize: 50, source: nil, from: range.from, to: range.to)
         usage.loadModelTotals(from: range.from, to: range.to)
+        let previous = UsageComparison.previousRange(
+            from: range.from, to: range.to, period: .month)
+        usage.loadComparisonTotals(from: previous?.from, to: previous?.to)
         usage.loadProjectTotals(from: range.from, to: range.to)
         usage.loadToolCalls(source: nil, from: range.from, to: range.to)
         usage.loadTrend(from: range.from, to: range.to)
@@ -806,6 +810,16 @@ enum PreviewRenderer {
                 updateService: update, syncService: sync)
             snap("pages-settings-\(section)", view, height: 1200)
         }
+        // The companion card sits below the general page's fold; render it on its own, expanded
+        let mascotWasEnabled = settings.mascotEnabled
+        settings.mascotEnabled = true
+        snap("pages-settings-mascot",
+             ScrollView { MascotSettingsSection(settings: settings).padding(20) },
+             width: 780, height: 1300)
+        snap("pages-settings-mascot-dark",
+             ScrollView { MascotSettingsSection(settings: settings).padding(20) },
+             dark: true, width: 780, height: 1300)
+        settings.mascotEnabled = mascotWasEnabled  // don't leave render side effects behind
         snap("pages-settings-general-dark",
              SettingsView(
                 section: .constant(.general), settings: settings, installer: installer,

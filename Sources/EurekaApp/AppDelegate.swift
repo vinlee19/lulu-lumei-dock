@@ -115,11 +115,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mascot.applyPack(id: settings.mascotPack)
         mascot.start()
         mascotController = mascot
-        settings.$mascotEnabled
-            .sink { [weak mascot] on in mascot?.setVisible(on) }
-            .store(in: &cancellables)
         settings.$mascotPack
             .sink { [weak mascot] id in mascot?.applyPack(id: id) }
+            .store(in: &cancellables)
+        settings.$mascotSleepMinutes
+            .sink { [weak mascot] minutes in
+                mascot?.viewModel.idleSleepSeconds = minutes > 0 ? Double(minutes) * 60 : .infinity
+            }
+            .store(in: &cancellables)
+        settings.$mascotNightMode
+            .sink { [weak mascot] on in mascot?.viewModel.nightMode = on }
+            .store(in: &cancellables)
+        settings.$mascotBubbles
+            .sink { [weak mascot] on in mascot?.viewModel.showsBubbles = on }
+            .store(in: &cancellables)
+        // Size before visibility: the saved origin belongs to the scaled panel
+        settings.$mascotSize
+            .sink { [weak mascot] raw in mascot?.setSize(MascotSize.resolve(raw)) }
+            .store(in: &cancellables)
+        settings.$mascotEnabled
+            .sink { [weak mascot] on in mascot?.setVisible(on) }
             .store(in: &cancellables)
 
         // Appearance theme: apply at launch + follow Settings changes

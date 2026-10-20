@@ -124,9 +124,19 @@ final class MascotLibrary: ObservableObject {
         var images: [MascotState: NSImage]
     }
 
+    /// What the selected pack shows for one state (Settings state table, any pack kind)
+    struct StateArt: Equatable {
+        var thumbnail: NSImage?
+        /// Behavior variants the state rotates through (built-in packs have several)
+        var variantCount: Int
+        /// The state whose artwork is used; differs from the row's state when it falls back
+        var provider: MascotState?
+    }
+
     @Published private(set) var packs: [MascotPackInfo] = []
     @Published private(set) var thumbnails: [String: NSImage] = [:]
     @Published private(set) var editing: Editing?
+    @Published private(set) var stateArt: [MascotState: StateArt] = [:]
     @Published var lastError: String?
 
     var presetPacks: [MascotPackInfo] { packs.filter { $0.kind != .custom } }
@@ -149,6 +159,16 @@ final class MascotLibrary: ObservableObject {
     /// Called when the selection changes: an uploaded pack becomes editable; any other pack clears
     /// the editing area.
     func select(packID: String) {
+        let pack = MascotPackLoader.load(packID: packID)
+        var art: [MascotState: StateArt] = [:]
+        for state in MascotState.allCases {
+            let variants = pack.variants(for: state)
+            art[state] = StateArt(
+                thumbnail: variants.first.flatMap { Self.firstFrame(of: $0.animation) },
+                variantCount: variants.count,
+                provider: pack.providingState(for: state))
+        }
+        stateArt = art
         guard let dir = try? editableDirectory(packID),
               let data = MascotPackLoader.readManifest(in: dir)
         else {

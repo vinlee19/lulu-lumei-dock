@@ -49,6 +49,24 @@ func mascotStateTests(_ t: TestRunner) {
         try expectEqual(state, .sleeping)
     }
 
+    t.test("关闭深夜模式:深夜运行仍是 working、短空闲仍是 idle") {
+        let running = MascotBaseResolver.base(.init(
+            hasWaitingTask: false, hasRunningTask: true, idleSeconds: 0,
+            nightMode: false, now: at(hour: 2)))
+        try expectEqual(running, .working)
+        let idle = MascotBaseResolver.base(.init(
+            hasWaitingTask: false, hasRunningTask: false, idleSeconds: 5,
+            sleepThreshold: 60, nightMode: false, now: at(hour: 1)))
+        try expectEqual(idle, .idle)
+    }
+
+    t.test("入睡阈值为无穷时长时间空闲也不睡") {
+        let state = MascotBaseResolver.base(.init(
+            hasWaitingTask: false, hasRunningTask: false, idleSeconds: 86_400,
+            sleepThreshold: .infinity, nightMode: false, now: at(hour: 14)))
+        try expectEqual(state, .idle)
+    }
+
     t.test("缺图回退链:night→sleeping→idle、idle 到底") {
         try expectEqual(MascotState.night.fallback, .sleeping)
         try expectEqual(MascotState.sleeping.fallback, .idle)

@@ -51,7 +51,7 @@ struct MascotRootView: View {
     var onHide: () -> Void = {}
     var onOpenSettings: () -> Void = {}
 
-    private let cardSize: CGFloat = 132
+    private var cardSize: CGFloat { 132 * viewModel.cardScale }
 
     var body: some View {
         VStack(spacing: 5) {
@@ -68,7 +68,7 @@ struct MascotRootView: View {
         .animation(.easeInOut(duration: 0.25), value: viewModel.state)
         .contextMenu {
             Button(L10n.text("Open Settings", zhHans: "打开设置")) { onOpenSettings() }
-            Button(L10n.text("Hide Mascot", zhHans: "隐藏吉祥物")) { onHide() }
+            Button(L10n.text("Hide the companion", zhHans: "隐藏桌面伙伴")) { onHide() }
         }
         .environment(\.mascotAnimationsActive, animationRuntime.animationsActive)
         .environment(\.mascotAnimationEpoch, animationRuntime.epoch)

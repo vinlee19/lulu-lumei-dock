@@ -97,6 +97,20 @@ struct MascotPack {
         return []
     }
 
+    /// The state whose artwork `variants(for:)` ends up using (itself, or one up the fallback
+    /// chain); nil = the pack has nothing for it at all
+    func providingState(for state: MascotState) -> MascotState? {
+        var current = state
+        for _ in 0..<MascotState.allCases.count {
+            if let direct = variants[current], !direct.isEmpty { return current }
+            if states[current] != nil { return current }
+            let next = current.fallback
+            if next == current { break }
+            current = next
+        }
+        return nil
+    }
+
     func lookAnimation(direction: Int) -> MascotAnimation? {
         guard lookDirections.indices.contains(direction) else { return nil }
         return lookDirections[direction]
@@ -184,7 +198,7 @@ enum MascotPackLoader {
             Suggested size: square, long edge ≤ 512px. A transparent or solid background is fine (it sits in a rounded card).
             """,
             zhHans: """
-            Eureka 桌面吉祥物 · 自定义动画包
+            Eureka 桌面伙伴 · 自定义动画包
             ================================
 
             1. 在本文件夹(mascots/)下新建一个子文件夹,名字即包名,例如:my-lulu/

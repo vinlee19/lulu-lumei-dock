@@ -1,5 +1,36 @@
 import AppKit
+import EurekaKit
 import SwiftUI
+
+extension Notification.Name {
+    /// Settings "Preview" on a state row. object = `MascotState.rawValue`
+    static let eurekaPreviewMascotState = Notification.Name("eureka.previewMascotState")
+    /// Settings "Reset to the default position"
+    static let eurekaResetMascotPosition = Notification.Name("eureka.resetMascotPosition")
+}
+
+/// Companion size picked in Settings; scales the card and the panel together
+enum MascotSize: String, CaseIterable {
+    case small, medium, large
+
+    var scale: CGFloat {
+        switch self {
+        case .small: return 0.75
+        case .medium: return 1
+        case .large: return 1.3
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .small: return L10n.text("Small", zhHans: "小")
+        case .medium: return L10n.text("Medium", zhHans: "中")
+        case .large: return L10n.text("Large", zhHans: "大")
+        }
+    }
+
+    static func resolve(_ raw: String) -> MascotSize { MascotSize(rawValue: raw) ?? .medium }
+}
 
 /// Desktop mascot NSPanel controller: transparent floating window, background drag to move,
 /// position persistence, context menu. Visibility is driven by AppSettings.mascotEnabled (a
@@ -17,6 +48,8 @@ final class MascotPanelController {
 
     private let panel: NSPanel
     private var moveSettle: DispatchWorkItem?
+    /// Panel size at medium scale; the bubble needs the headroom above the card
+    private static let baseSize = NSSize(width: 180, height: 210)
     private var isProgrammaticMove = false
     private var pointerTimer: Timer?
     private var lastPointerLocation: NSPoint?
@@ -25,7 +58,7 @@ final class MascotPanelController {
     init() {
         viewModel = MascotViewModel(pack: MascotPackLoader.builtIn())
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 180, height: 210),
+            contentRect: NSRect(origin: .zero, size: Self.baseSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -60,6 +93,12 @@ final class MascotPanelController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(packFilesChanged(_:)),
             name: .eurekaMascotPackChanged, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(previewRequested(_:)),
+            name: .eurekaPreviewMascotState, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(resetPositionRequested),
+            name: .eurekaResetMascotPosition, object: nil)
         pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.updatePointerBehavior() }
@@ -79,6 +118,41 @@ final class MascotPanelController {
     func applyPack(id: String) {
         currentPackID = id
         viewModel.setPack(MascotPackLoader.load(packID: id))
+    }
+
+    /// Resizes the card and the panel; the right and bottom edges stay put so a companion parked
+    /// in a corner does not grow off screen
+    func setSize(_ size: MascotSize) {
+        viewModel.cardScale = size.scale
+        let newSize = NSSize(
+            width: Self.baseSize.width * size.scale, height: Self.baseSize.height * size.scale)
+        guard panel.frame.size != newSize else { return }
+        let old = panel.frame
+        setFrame(NSRect(
+            origin: NSPoint(x: old.maxX - newSize.width, y: old.minY), size: newSize))
+        guard panel.isVisible else { return }
+        // Keep a dragged position dragged; an untouched one re-docks to the corner
+        if MascotPositionStore.load() != nil {
+            MascotPositionStore.save(panel.frame.origin)
+        } else {
+            reposition()
+        }
+    }
+
+    @objc private func previewRequested(_ note: Notification) {
+        MainActor.assumeIsolated {
+            guard panel.isVisible,
+                  let raw = note.object as? String, let state = MascotState(rawValue: raw)
+            else { return }
+            viewModel.preview(state)
+        }
+    }
+
+    @objc private func resetPositionRequested() {
+        MainActor.assumeIsolated {
+            MascotPositionStore.clear()
+            if panel.isVisible { reposition() }
+        }
     }
 
     /// Reloads right after the Settings page swaps an image / renames the current mascot (the pack
@@ -101,7 +175,7 @@ final class MascotPanelController {
         let pointer = NSEvent.mouseLocation
         if let previous = lastPointerLocation {
             let movement = hypot(pointer.x - previous.x, pointer.y - previous.y)
-            if movement > 18, viewModel.state == .sleeping {
+            if movement > 18, viewModel.state == .sleeping, !viewModel.isPreviewing {
                 viewModel.wake()
             }
         }

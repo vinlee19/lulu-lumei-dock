@@ -150,6 +150,22 @@ final class AppSettings: ObservableObject {
     @Published var mascotPack: String {
         didSet { defaults.set(mascotPack, forKey: "mascotPack") }
     }
+    /// Idle minutes before the companion falls asleep; 0 = never
+    @Published var mascotSleepMinutes: Int {
+        didSet { defaults.set(mascotSleepMinutes, forKey: "mascotSleepMinutes") }
+    }
+    /// Late-night mode (23:00-06:00): drowsy while working, asleep when idle
+    @Published var mascotNightMode: Bool {
+        didSet { defaults.set(mascotNightMode, forKey: "mascotNightMode") }
+    }
+    /// Speech bubbles on finish / error / wellness nudges
+    @Published var mascotBubbles: Bool {
+        didSet { defaults.set(mascotBubbles, forKey: "mascotBubbles") }
+    }
+    /// Companion size (`MascotSize` raw value)
+    @Published var mascotSize: String {
+        didSet { defaults.set(mascotSize, forKey: "mascotSize") }
+    }
     /// Cloud backup (off by default, opt-in; secrets live in the Keychain, never in UserDefaults)
     @Published var cloudBackupEnabled: Bool {
         didSet { defaults.set(cloudBackupEnabled, forKey: "cloudBackupEnabled") }
@@ -248,6 +264,10 @@ final class AppSettings: ObservableObject {
         themeStyle = defaults.string(forKey: "themeStyle") ?? ThemeStyle.classic.rawValue
         mascotEnabled = defaults.bool(forKey: "mascotEnabled")
         mascotPack = defaults.string(forKey: "mascotPack") ?? "built-in"
+        mascotSleepMinutes = defaults.object(forKey: "mascotSleepMinutes") as? Int ?? 5
+        mascotNightMode = defaults.object(forKey: "mascotNightMode") as? Bool ?? true
+        mascotBubbles = defaults.object(forKey: "mascotBubbles") as? Bool ?? true
+        mascotSize = defaults.string(forKey: "mascotSize") ?? MascotSize.medium.rawValue
         cloudBackupEnabled = defaults.bool(forKey: "cloudBackupEnabled")
         storageProvider = defaults.string(forKey: "storageProvider") ?? "tencent-cos"
         cosRegion = defaults.string(forKey: "cosRegion") ?? ""

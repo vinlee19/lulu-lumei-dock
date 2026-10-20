@@ -21,7 +21,24 @@ final class MascotViewModel: ObservableObject {
     /// Current transition style (chosen on each change, read by the view)
     private(set) var transitionStyle: MascotTransition = .pop
 
-    var idleSleepSeconds: TimeInterval = 60
+    /// .infinity = never fall asleep from idleness
+    var idleSleepSeconds: TimeInterval = 300 {
+        didSet { if ticker != nil { recompute() } }
+    }
+    /// Off = late-night hours behave like daytime
+    var nightMode = true {
+        didSet { if ticker != nil { recompute() } }
+    }
+    /// Off = finish / error / wellness events still animate, but without a speech bubble
+    var showsBubbles = true
+    /// Card scale picked in Settings (1 = the original 132pt card)
+    @Published var cardScale: CGFloat = 1
+    /// A Settings preview is playing: pointer movement must not wake it out of "sleeping"
+    var isPreviewing: Bool {
+        guard previewing, let until = transientUntil else { return false }
+        return until > Date()
+    }
+    private var previewing = false
 
     private var baseState: MascotState = .idle
     private var transientState: MascotState?
@@ -102,6 +119,13 @@ final class MascotViewModel: ObservableObject {
         recompute()
     }
 
+    /// Settings "Preview": acts out one state on the real companion for a few seconds
+    func preview(_ state: MascotState) {
+        lastActiveAt = Date()
+        pushTransient(state, bubble: nil, seconds: 3)
+        previewing = true
+    }
+
     func showFinished(success: Bool) {
         pushTransient(success ? .success : .error,
                       bubble: success ? L10n.text("All done 🎉", zhHans: "搞定啦 🎉") : L10n.text("Something went wrong 😣", zhHans: "出错了 😣"), seconds: 2.5)
@@ -110,8 +134,7 @@ final class MascotViewModel: ObservableObject {
     /// Wellness nudge: reuses WellnessAdvisor's copy; late at night enters the drowsy state,
     /// otherwise the relax state
     func showNotice(_ headline: String) {
-        let hour = Calendar.current.component(.hour, from: Date())
-        let deepNight = hour >= 23 || hour < 6
+        let deepNight = nightMode && MascotBaseResolver.isDeepNight(Date())
         pushTransient(deepNight ? .night : .relax, bubble: headline, seconds: 6)
     }
 
@@ -141,9 +164,10 @@ final class MascotViewModel: ObservableObject {
 
     private func pushTransient(_ state: MascotState, bubble: String?, seconds: TimeInterval) {
         let replaySameState = self.state == state
+        previewing = false
         transientState = state
         transientUntil = Date().addingTimeInterval(seconds)
-        pendingBubble = bubble
+        pendingBubble = showsBubbles ? bubble : nil
         apply()
         // Repeated finishes/clicks also pick a different performance and retrigger the transition
         // and frame sequence.
@@ -164,6 +188,7 @@ final class MascotViewModel: ObservableObject {
             hasRunningTask: hasRunning,
             idleSeconds: (hasRunning || hasWaiting) ? 0 : idleSeconds,
             sleepThreshold: idleSleepSeconds,
+            nightMode: nightMode,
             now: Date()))
         apply()
     }
@@ -178,6 +203,7 @@ final class MascotViewModel: ObservableObject {
             transientState = nil
             transientUntil = nil
             pendingBubble = nil
+            previewing = false
             newState = baseState
             newBubble = nil
         }
