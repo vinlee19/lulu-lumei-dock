@@ -33,6 +33,8 @@ final class UsageService: ObservableObject {
     /// Current calendar month across every source (month card, budget alerts); refreshed on every
     /// scan, so budget alerts fire without the dashboard open
     @Published private(set) var monthOverview: MonthOverview?
+    /// Turns asked in the selected range/source (turn card)
+    @Published private(set) var turnSummary = TurnSummary()
 
     struct MonthOverview: Equatable {
         var monthToDate: Double
@@ -894,6 +896,16 @@ final class UsageService: ObservableObject {
             projected: MonthForecast.projected(
                 monthToDate: monthToDate, trailingSevenDays: trailing, now: now))
         publish { $0.monthOverview = overview }
+    }
+
+    /// Turn card: prompts asked in the range, with their evaluated duration / outcome
+    func loadTurnSummary(from: Date, to: Date, source: AgentSource?) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let rows = (try? store.prompts.turnRows(from: from, to: to, source: source)) ?? []
+            let summary = TurnSummary(rows: rows)
+            self.publish { $0.turnSummary = summary }
+        }
     }
 
     /// Cost split by token type for a set of aggregates (dashboard cost-structure card)

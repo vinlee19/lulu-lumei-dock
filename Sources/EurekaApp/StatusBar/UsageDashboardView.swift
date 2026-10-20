@@ -113,6 +113,10 @@ struct UsageDashboardView: View {
                         metricGrid
                         costStructureCard
                         cacheHitCard
+                        HStack(alignment: .top, spacing: 10) {
+                            turnCard
+                            concentrationCard
+                        }
                         trendCard
                         UsageHeatmapView(cells: usageService.heatmapCells)
                     case .log: requestLog
@@ -203,6 +207,7 @@ struct UsageDashboardView: View {
         usageService.loadTrend(from: range.from, to: range.to)
         usageService.loadSessionTotals(from: range.from, to: range.to, source: sourceFilter)
         usageService.loadHeatmap(from: range.from, to: range.to, source: sourceFilter)
+        usageService.loadTurnSummary(from: range.from, to: range.to, source: sourceFilter)
     }
 
     // MARK: - Skill/plugin stats
@@ -343,6 +348,18 @@ struct UsageDashboardView: View {
         .dashboardCard()
     }
 
+    /// Days whose total (in the selected metric) is at least 2× the median of the previous 7
+    /// active days; marked with an orange triangle and the multiple
+    private func spikeMarks(_ points: [UsageService.TrendPoint]) -> [(day: Date, total: Double, multiple: Double)] {
+        var totals: [Date: Double] = [:]
+        for point in points { totals[point.bucket, default: 0] += trendValue(point) }
+        let days = totals.keys.sorted()
+        let values = days.map { totals[$0] ?? 0 }
+        return UsageStats.spikes(values)
+            .sorted { $0.key < $1.key }
+            .map { (day: days[$0.key], total: values[$0.key], multiple: $0.value) }
+    }
+
     private func trendValue(_ point: UsageService.TrendPoint) -> Double {
         switch trendMetric {
         case .tokens: return Double(point.tokens)
@@ -390,11 +407,28 @@ struct UsageDashboardView: View {
             let axis = TrendAxis.layout(
                 rangeFrom: range.from, rangeTo: range.to,
                 firstBucket: points.map(\.bucket).min())
-            Chart(points) { point in
-                BarMark(
-                    x: .value(L10n.text("Time", zhHans: "时间"), point.bucket, unit: hourly ? .hour : .day),
-                    y: .value(trendMetric.title, trendValue(point)))
-                .foregroundStyle(by: .value(L10n.text("Source", zhHans: "来源"), point.source.displayName))
+            // Daily view only: an hour-by-hour baseline is too noisy to call anything a spike
+            let spikes = hourly ? [] : spikeMarks(points)
+            Chart {
+                ForEach(points) { point in
+                    BarMark(
+                        x: .value(L10n.text("Time", zhHans: "时间"), point.bucket, unit: hourly ? .hour : .day),
+                        y: .value(trendMetric.title, trendValue(point)))
+                    .foregroundStyle(by: .value(L10n.text("Source", zhHans: "来源"), point.source.displayName))
+                }
+                ForEach(spikes, id: \.day) { spike in
+                    PointMark(
+                        x: .value(L10n.text("Time", zhHans: "时间"), spike.day, unit: .day),
+                        y: .value(trendMetric.title, spike.total))
+                    .symbol(.triangle)
+                    .symbolSize(40)
+                    .foregroundStyle(.orange)
+                    .annotation(position: .top, spacing: 2) {
+                        Text(String(format: "%.1f×", spike.multiple))
+                            .font(Theme.font.themedMono(8.5, .semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
             .chartForegroundStyleScale(domain: sources.map(\.displayName),
                                        range: sources.map(brandColor))
@@ -705,6 +739,134 @@ struct UsageDashboardView: View {
             Spacer(minLength: 0)
         }
         .padding(Theme.spacing.card)
+        .dashboardCard()
+    }
+
+    // MARK: - Turns
+
+    /// Per-turn view: one asked prompt is one turn. Cost and tokens per turn only count the
+    /// sources that report prompts, so a source without prompt extraction can't inflate them.
+    @ViewBuilder
+    private var turnCard: some View {
+        let turns = usageService.turnSummary
+        let turnSources = Set(turns.bySource.keys)
+        let turnMetrics = usageService.metrics(
+            of: filteredModelTotals.filter { turnSources.contains($0.source) })
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L10n.text("Turns", zhHans: "轮次"))
+                    .font(Theme.font.themed(12, .semibold))
+                Spacer()
+                Text(L10n.format("%@ asked", zhHans: "共 %@ 轮", turns.turns.formatted(.number.grouping(.automatic))))
+                    .font(Theme.font.themedMono(11, .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            if turns.turns > 0 {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3),
+                          alignment: .leading, spacing: 8) {
+                    turnStat(
+                        L10n.text("Cost per turn", zhHans: "每轮成本"),
+                        turnMetrics.costUSD.map { costLabel($0 / Double(turns.turns)) } ?? "—",
+                        tint: Theme.cost)
+                    turnStat(
+                        L10n.text("Tokens per turn", zhHans: "每轮 Tokens"),
+                        formatTokens(turnMetrics.totalTokens / max(1, turns.turns)))
+                    turnStat(
+                        L10n.text("Requests per turn", zhHans: "每轮请求"),
+                        String(format: "%.1f", Double(turnMetrics.requests) / Double(turns.turns)))
+                        .help(Self.requestsHelp)
+                    turnStat(
+                        L10n.text("Median duration", zhHans: "耗时中位数"),
+                        turns.medianDuration.map(formatDuration) ?? "—")
+                    turnStat(
+                        L10n.text("Duration P90", zhHans: "耗时 P90"),
+                        turns.p90Duration.map(formatDuration) ?? "—")
+                        .help(L10n.text(
+                            "9 in 10 turns finish within this time",
+                            zhHans: "九成的轮次在这个时间内结束"))
+                    turnStat(
+                        L10n.text("Error / rework", zhHans: "出错 / 返工"),
+                        [turns.errorRate, turns.reworkRate]
+                            .map { $0.map { String(format: "%.1f%%", $0 * 100) } ?? "—" }
+                            .joined(separator: " / "))
+                        .help(L10n.text(
+                            "Error: the turn ended in an error. Rework: your next prompt corrected it (\"that's wrong\", \"redo\") or rephrased the same ask while struggling.",
+                            zhHans: "出错：这一轮以错误结束。返工：你的下一句是在纠正（“不对”“重来”），或在反复改写同一个问题。"))
+                }
+                Text(L10n.format(
+                    "Counted from your prompts: %@",
+                    zhHans: "按你的每次提问统计：%@",
+                    AgentSource.allCases.filter { turnSources.contains($0) }
+                        .map { "\($0.displayName) \(turns.bySource[$0] ?? 0)" }
+                        .joined(separator: " · ")))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(L10n.text("No prompts in this range", zhHans: "该时段没有可统计的提问"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(Theme.spacing.card)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .dashboardCard()
+    }
+
+    private func turnStat(_ label: String, _ value: String, tint: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(Theme.font.themedMono(13, .semibold))
+                .foregroundStyle(tint)
+        }
+    }
+
+    // MARK: - Concentration
+
+    /// How much of the range a handful of sessions account for; usage is usually very skewed, so
+    /// this points at the few sessions worth a look
+    @ViewBuilder
+    private var concentrationCard: some View {
+        let m = metrics
+        let sessions = usageService.sessionTotals
+        let tokenShare = UsageStats.topShare(
+            sessions.map { Double($0.tokens) }, top: 10, total: Double(m.totalTokens))
+        let costShare = m.costUSD.flatMap {
+            UsageStats.topShare(sessions.map { $0.costUSD ?? 0 }, top: 10, total: $0)
+        }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.text("Concentration", zhHans: "集中度"))
+                .font(Theme.font.themed(12, .semibold))
+            if let tokenShare, sessions.count > 1 {
+                Text(L10n.format(
+                    "The top %1$@ sessions use %2$@ of tokens",
+                    zhHans: "前 %1$@ 个会话用掉了 %2$@ 的 tokens",
+                    String(min(10, sessions.count)), String(format: "%.0f%%", tokenShare * 100)))
+                    .font(Theme.font.themed(11, .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let costShare {
+                    Text(L10n.format("and %@ of cost", zhHans: "以及 %@ 的成本",
+                                     String(format: "%.0f%%", costShare * 100)))
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                SecondaryButton(
+                    title: L10n.text("See the sessions", zhHans: "查看会话排行"),
+                    icon: "list.number", classic: .push
+                ) { subTab = .sessions }
+            } else {
+                Text(L10n.text("Not enough sessions in this range", zhHans: "该时段会话太少"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(Theme.spacing.card)
+        .frame(width: 220, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
         .dashboardCard()
     }
 

@@ -790,6 +790,7 @@ enum PreviewRenderer {
         usage.loadTrend(from: range.from, to: range.to)
         usage.loadSessionTotals(from: range.from, to: range.to, source: nil)
         usage.loadHeatmap(from: range.from, to: range.to, source: nil)
+        usage.loadTurnSummary(from: range.from, to: range.to, source: nil)
         usage.loadSkillStats()
         usage.loadMCPStats()
         usage.loadAgentStats()
