@@ -27,6 +27,9 @@ final class UsageService: ObservableObject {
     @Published private(set) var recordTotal = 0
     /// Model stats (full breakdown for the selected period/source)
     @Published private(set) var modelTotals: [UsageTotals] = []
+    /// Model stats of the comparison range (one period earlier, same elapsed time); nil = the
+    /// selected period has nothing to compare against ("All")
+    @Published private(set) var comparisonTotals: [UsageTotals]?
     /// Token/cost trend by (time bucket, source) over the selected range (for charts; short ranges
     /// switch to hourly granularity automatically)
     @Published private(set) var trend: [TrendPoint] = []
@@ -74,6 +77,7 @@ final class UsageService: ObservableObject {
         var id: String { name }
         var name: String
         var tokens: Int
+        var requests: Int
         var costUSD: Double?
     }
 
@@ -84,6 +88,7 @@ final class UsageService: ObservableObject {
         var bucket: Date
         var source: AgentSource
         var tokens: Int
+        var requests: Int
         var costUSD: Double
     }
 
@@ -403,13 +408,15 @@ final class UsageService: ObservableObject {
             formatter.locale = Locale(identifier: "en_US_POSIX")
             // (bucket string, source) → token/cost sums (rows are model-granular; cost is computed
             // per row, then accumulated)
-            var buckets: [String: [AgentSource: (tokens: Int, cost: Double)]] = [:]
+            var buckets: [String: [AgentSource: (tokens: Int, requests: Int, cost: Double)]] = [:]
             for row in rows {
                 let t = row.totals
                 let total = t.inputTokens + t.outputTokens
                     + t.cacheCreationTokens + t.cacheReadTokens
-                var entry = buckets[row.day, default: [:]][t.source] ?? (tokens: 0, cost: 0)
+                var entry = buckets[row.day, default: [:]][t.source]
+                    ?? (tokens: 0, requests: 0, cost: 0)
                 entry.tokens += total
+                entry.requests += t.requestCount
                 entry.cost += self.pricing.cost(of: t) ?? 0
                 buckets[row.day, default: [:]][t.source] = entry
             }
@@ -419,7 +426,7 @@ final class UsageService: ObservableObject {
                 for (source, entry) in bySource where entry.tokens > 0 {
                     points.append(TrendPoint(
                         bucket: bucket, source: source,
-                        tokens: entry.tokens, costUSD: entry.cost))
+                        tokens: entry.tokens, requests: entry.requests, costUSD: entry.cost))
                 }
             }
             points.sort { $0.bucket < $1.bucket }
@@ -688,27 +695,50 @@ final class UsageService: ObservableObject {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
             let rows = (try? store.usage.totalsByProject(from: from, to: to, source: source)) ?? []
-            var byProject: [String: (tokens: Int, cost: Double?)] = [:]
+            var byProject: [String: (tokens: Int, requests: Int, cost: Double?)] = [:]
             for (project, totals) in rows {
                 let name = project ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
                 let tokens = totals.inputTokens + totals.outputTokens
                     + totals.cacheCreationTokens + totals.cacheReadTokens
                 let cost = self.pricing.cost(of: totals)
-                var entry = byProject[name] ?? (0, nil)
+                var entry = byProject[name] ?? (0, 0, nil)
                 entry.tokens += tokens
+                entry.requests += totals.requestCount
                 if let cost { entry.cost = (entry.cost ?? 0) + cost }
                 byProject[name] = entry
             }
             let result = byProject
-                .map { ProjectTotal(name: $0.key, tokens: $0.value.tokens, costUSD: $0.value.cost) }
+                .map {
+                    ProjectTotal(
+                        name: $0.key, tokens: $0.value.tokens,
+                        requests: $0.value.requests, costUSD: $0.value.cost)
+                }
                 .sorted { $0.tokens > $1.tokens }
             self.publish { $0.projectTotals = result }
+        }
+    }
+
+    /// Comparison-range model stats (hero card deltas); nil range clears them
+    func loadComparisonTotals(from: Date?, to: Date?) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            guard let from, let to else {
+                self.publish { $0.comparisonTotals = nil }
+                return
+            }
+            let totals = (try? store.usage.totalsByModel(from: from, to: to)) ?? []
+            self.publish { $0.comparisonTotals = totals }
         }
     }
 
     /// Row cost conversion (for the model stats total row)
     func cost(of totals: UsageTotals) -> Double? {
         pricing.cost(of: totals)
+    }
+
+    /// Headline metrics of a set of aggregates, priced with the current table
+    func metrics(of totals: [UsageTotals]) -> UsageMetrics {
+        UsageMetrics(totals: totals, pricing: pricing)
     }
 
     /// Price provenance (hover on the dashboard's cost cell)

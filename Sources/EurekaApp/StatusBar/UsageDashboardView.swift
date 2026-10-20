@@ -75,11 +75,13 @@ struct UsageDashboardView: View {
 
     private enum TrendMetric: String, CaseIterable {
         case tokens = "Tokens"
+        case requests = "请求"
         case cost = "成本"
 
         var title: String {
             switch self {
             case .tokens: return "Tokens"
+            case .requests: return L10n.text("Requests", zhHans: "请求")
             case .cost: return L10n.text("Cost", zhHans: "成本")
             }
         }
@@ -162,18 +164,25 @@ struct UsageDashboardView: View {
     private var filteredModelTotals: [UsageTotals] {
         usageService.modelTotals.filter { sourceFilter == nil || $0.source == sourceFilter }
     }
-    private var totalInput: Int { filteredModelTotals.reduce(0) { $0 + $1.inputTokens } }
-    private var totalOutput: Int { filteredModelTotals.reduce(0) { $0 + $1.outputTokens } }
-    private var totalCacheWrite: Int { filteredModelTotals.reduce(0) { $0 + $1.cacheCreationTokens } }
-    private var totalCacheRead: Int { filteredModelTotals.reduce(0) { $0 + $1.cacheReadTokens } }
-    private var totalRequests: Int { filteredModelTotals.reduce(0) { $0 + $1.requestCount } }
-    private var totalTokens: Int { totalInput + totalOutput + totalCacheWrite + totalCacheRead }
-    private var totalCost: Double? {
-        let costs = filteredModelTotals.compactMap { usageService.cost(of: $0) }
-        return costs.isEmpty ? nil : costs.reduce(0, +)
+    private var metrics: UsageMetrics { usageService.metrics(of: filteredModelTotals) }
+    /// Same metrics over the comparison range; nil = no comparison for this period
+    private var previousMetrics: UsageMetrics? {
+        usageService.comparisonTotals.map { totals in
+            usageService.metrics(of: totals.filter { sourceFilter == nil || $0.source == sourceFilter })
+        }
     }
-    private var cacheHitRate: Double {
-        totalTokens > 0 ? Double(totalCacheRead) / Double(totalTokens) : 0
+
+    /// Comparison range for the hero card deltas: one period earlier over the same elapsed time
+    private func comparisonRange(_ range: (from: Date, to: Date)) -> (from: Date, to: Date)? {
+        let kind: UsageComparison.Period
+        switch period {
+        case .today: kind = .day
+        case .week: kind = .week
+        case .month: kind = .month
+        case .custom: kind = .span
+        case .all: return nil
+        }
+        return UsageComparison.previousRange(from: range.from, to: range.to, period: kind)
     }
 
     private func reload() {
@@ -182,6 +191,8 @@ struct UsageDashboardView: View {
             page: page, pageSize: pageSize, source: sourceFilter,
             from: range.from, to: range.to)
         usageService.loadModelTotals(from: range.from, to: range.to)
+        let previous = comparisonRange(range)
+        usageService.loadComparisonTotals(from: previous?.from, to: previous?.to)
         usageService.loadProjectTotals(from: range.from, to: range.to, source: sourceFilter)
         usageService.loadToolCalls(source: sourceFilter, from: range.from, to: range.to)
         usageService.loadTrend(from: range.from, to: range.to)
@@ -327,6 +338,33 @@ struct UsageDashboardView: View {
         .dashboardCard()
     }
 
+    private func trendValue(_ point: UsageService.TrendPoint) -> Double {
+        switch trendMetric {
+        case .tokens: return Double(point.tokens)
+        case .requests: return Double(point.requests)
+        case .cost: return point.costUSD
+        }
+    }
+
+    private func modelMetricValue(_ totals: UsageTotals, cost: Double) -> Double {
+        switch trendMetric {
+        case .tokens:
+            return Double(totals.inputTokens + totals.outputTokens
+                + totals.cacheCreationTokens + totals.cacheReadTokens)
+        case .requests: return Double(totals.requestCount)
+        case .cost: return cost
+        }
+    }
+
+    /// Axis / annotation label for a value of the selected trend metric
+    private func trendLabel(_ value: Double) -> String {
+        switch trendMetric {
+        case .tokens: return formatTokens(Int(value))
+        case .requests: return Int(value).formatted(.number.notation(.compactName))
+        case .cost: return costLabel(value)
+        }
+    }
+
     /// Cost axis/annotation format (small amounts keep 4 decimals so not everything shows $0.00)
     private func costLabel(_ usd: Double) -> String {
         usd >= 1 ? String(format: "$%.2f", usd) : String(format: "$%.4f", usd)
@@ -350,9 +388,7 @@ struct UsageDashboardView: View {
             Chart(points) { point in
                 BarMark(
                     x: .value(L10n.text("Time", zhHans: "时间"), point.bucket, unit: hourly ? .hour : .day),
-                    y: .value(
-                        trendMetric.title,
-                        trendMetric == .tokens ? Double(point.tokens) : point.costUSD))
+                    y: .value(trendMetric.title, trendValue(point)))
                 .foregroundStyle(by: .value(L10n.text("Source", zhHans: "来源"), point.source.displayName))
             }
             .chartForegroundStyleScale(domain: sources.map(\.displayName),
@@ -362,10 +398,8 @@ struct UsageDashboardView: View {
                 AxisMarks { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if trendMetric == .tokens, let tokens = value.as(Int.self) {
-                            Text(formatTokens(tokens))
-                        } else if trendMetric == .cost, let usd = value.as(Double.self) {
-                            Text(costLabel(usd))
+                        if let number = value.as(Double.self) {
+                            Text(trendLabel(number))
                         }
                     }
                 }
@@ -413,17 +447,14 @@ struct UsageDashboardView: View {
         let models = merged
             .map { totals, cost in
                 (totals,
-                 metricValue: trendMetric == .tokens
-                    ? Double(totals.inputTokens + totals.outputTokens
-                        + totals.cacheCreationTokens + totals.cacheReadTokens)
-                    : cost)
+                 metricValue: modelMetricValue(totals, cost: cost))
             }
             .sorted { $0.metricValue > $1.metricValue }
             .prefix(8)
         if models.isEmpty || models.allSatisfy({ $0.metricValue == 0 }) {
-            emptyChart(trendMetric == .tokens
-                ? L10n.text("No model usage in this range", zhHans: "该时段暂无模型用量")
-                : L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量"))
+            emptyChart(trendMetric == .cost
+                ? L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量")
+                : L10n.text("No model usage in this range", zhHans: "该时段暂无模型用量"))
         } else {
             Chart(Array(models.enumerated()), id: \.offset) { _, item in
                 BarMark(
@@ -431,9 +462,7 @@ struct UsageDashboardView: View {
                     y: .value(L10n.text("Model", zhHans: "模型"), item.0.model))
                 .foregroundStyle(brandColor(item.0.source))
                 .annotation(position: .trailing, alignment: .leading) {
-                    Text(trendMetric == .tokens
-                        ? formatTokens(Int(item.metricValue))
-                        : costLabel(item.metricValue))
+                    Text(trendLabel(item.metricValue))
                         .font(Theme.font.themedMono(8))
                         .foregroundStyle(.secondary)
                 }
@@ -443,8 +472,7 @@ struct UsageDashboardView: View {
                     AxisGridLine()
                     AxisValueLabel {
                         if let number = value.as(Double.self) {
-                            Text(trendMetric == .tokens
-                                ? formatTokens(Int(number)) : costLabel(number))
+                            Text(trendLabel(number))
                         }
                     }
                 }
@@ -527,7 +555,10 @@ struct UsageDashboardView: View {
 
     // MARK: - Hero card
 
+    @ViewBuilder
     private var heroCard: some View {
+        let m = metrics
+        let previous = previousMetrics
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: "bolt.fill")
                 .font(Theme.font.themed(18))
@@ -539,36 +570,34 @@ struct UsageDashboardView: View {
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(totalTokens.formatted(.number.grouping(.automatic)))
+                    Text(m.totalTokens.formatted(.number.grouping(.automatic)))
                         .font(Theme.font.themedMono(26, .bold))
-                    Text("≈ \(chineseUnit(totalTokens))")
+                    Text("≈ \(chineseUnit(m.totalTokens))")
                         .font(Theme.font.themed(11))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Color.primary.opacity(0.05)))
                 }
+                deltaLabel(
+                    current: Double(m.totalTokens), previous: previous.map { Double($0.totalTokens) },
+                    showsBaseline: true)
             }
             Spacer(minLength: 10)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(L10n.text("Requests", zhHans: "总请求数"))
-                            .font(Theme.font.themed(9.5))
-                            .foregroundStyle(.tertiary)
-                        Text("\(totalRequests)")
-                            .font(Theme.font.themedMono(14, .semibold))
-                    }
-                    Divider().frame(height: 26)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(L10n.text("Total cost", zhHans: "总成本"))
-                            .font(Theme.font.themed(9.5))
-                            .foregroundStyle(.tertiary)
-                        Text(totalCost.map { formatCost($0) } ?? "—")
-                            .font(Theme.font.themedMono(14, .semibold))
-                            .foregroundStyle(Theme.cost)
-                    }
-                }
+            HStack(spacing: 14) {
+                heroStat(
+                    L10n.text("Requests", zhHans: "总请求数"),
+                    value: m.requests.formatted(.number.grouping(.automatic)),
+                    delta: deltaLabel(
+                        current: Double(m.requests), previous: previous.map { Double($0.requests) }))
+                    .help(Self.requestsHelp)
+                Divider().frame(height: 40)
+                heroStat(
+                    L10n.text("Total cost", zhHans: "总成本"),
+                    value: m.costUSD.map { formatCost($0) } ?? "—",
+                    tint: Theme.cost,
+                    delta: deltaLabel(
+                        current: m.costUSD ?? 0, previous: previous.map { $0.costUSD ?? 0 }))
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: Theme.radius.container).fill(Theme.surfaceSecondary))
@@ -578,18 +607,85 @@ struct UsageDashboardView: View {
         .dashboardCard()
     }
 
-    // MARK: - Four tiles
+    /// What one "request" is: the unit differs per source, so the mixed total needs a caveat
+    private static var requestsHelp: String {
+        L10n.text(
+            "Rows in the usage ledger. For Claude, Codex and most agents one row is one API call; Grok records one row per whole turn, so a total across sources mixes both.",
+            zhHans: "用量账本的行数：Claude、Codex 等多数来源一行即一次 API 调用；Grok 一行是一整轮对话，跨来源合计时两种粒度会混在一起。")
+    }
 
-    private var metricGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            metricCard(L10n.text("New input", zhHans: "新增输入"), totalInput, icon: "arrow.down.to.line", tint: .blue)
-            metricCard(L10n.text("Output", zhHans: "输出"), totalOutput, icon: "arrow.up.to.line", tint: .purple)
-            metricCard(L10n.text("Cache write", zhHans: "缓存创建"), totalCacheWrite, icon: "externaldrive.badge.plus", tint: .orange)
-            metricCard(L10n.text("Cache read", zhHans: "缓存命中"), totalCacheRead, icon: "sparkles", tint: Theme.brandFg)
+    private func heroStat<Delta: View>(
+        _ label: String, value: String, tint: Color = .primary, delta: Delta
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(Theme.font.themedMono(18, .semibold))
+                .foregroundStyle(tint)
+            delta
         }
     }
 
-    private func metricCard(_ label: String, _ value: Int, icon: String, tint: Color) -> some View {
+    /// "↑12% vs yesterday so far". Neutral color on purpose: more usage is not a failure.
+    @ViewBuilder
+    private func deltaLabel(current: Double, previous: Double?, showsBaseline: Bool = false) -> some View {
+        if let previous {
+            let change = UsageComparison.change(current: current, previous: previous)
+            HStack(spacing: 3) {
+                if let change {
+                    Image(systemName: change >= 0 ? "arrow.up.right" : "arrow.down.right")
+                        .font(Theme.font.themed(8, .semibold))
+                    Text(String(format: "%.0f%%", abs(change) * 100))
+                        .font(Theme.font.themedMono(9.5, .medium))
+                } else {
+                    Text(L10n.text("No prior data", zhHans: "无对比数据"))
+                        .font(Theme.font.themed(9.5))
+                }
+                if showsBaseline {
+                    Text(comparisonTitle)
+                        .font(Theme.font.themed(9.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var comparisonTitle: String {
+        switch period {
+        case .today: return L10n.text("vs yesterday so far", zhHans: "对比昨日同时段")
+        case .week: return L10n.text("vs last week so far", zhHans: "对比上周同期")
+        case .month: return L10n.text("vs last month so far", zhHans: "对比上月同期")
+        case .custom: return L10n.text("vs the previous range", zhHans: "对比前一等长区间")
+        case .all: return ""
+        }
+    }
+
+    // MARK: - Tiles
+
+    private var metricGrid: some View {
+        let m = metrics
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            metricCard(L10n.text("New input", zhHans: "新增输入"), formatTokens(m.inputTokens), icon: "arrow.down.to.line", tint: .blue)
+            metricCard(L10n.text("Output", zhHans: "输出"), formatTokens(m.outputTokens), icon: "arrow.up.to.line", tint: .purple)
+            metricCard(L10n.text("Cache write", zhHans: "缓存创建"), formatTokens(m.cacheWriteTokens), icon: "externaldrive.badge.plus", tint: .orange)
+            metricCard(L10n.text("Cache read", zhHans: "缓存命中"), formatTokens(m.cacheReadTokens), icon: "sparkles", tint: Theme.brandFg)
+            metricCard(
+                L10n.text("Tokens per request", zhHans: "单次请求 Tokens"),
+                m.tokensPerRequest.map { formatTokens(Int($0.rounded())) } ?? "—",
+                icon: "divide", tint: .teal)
+                .help(Self.requestsHelp)
+            metricCard(
+                L10n.text("Cost per request", zhHans: "单次请求成本"),
+                m.costPerRequest.map { costLabel($0) } ?? "—",
+                icon: "dollarsign.circle", tint: Theme.cost)
+                .help(Self.requestsHelp)
+        }
+    }
+
+    private func metricCard(_ label: String, _ value: String, icon: String, tint: Color) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(Theme.font.themed(11))
@@ -598,7 +694,7 @@ struct UsageDashboardView: View {
                 Text(label)
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
-                Text(formatTokens(value))
+                Text(value)
                     .font(Theme.font.themedMono(14, .semibold))
             }
             Spacer(minLength: 0)
@@ -610,22 +706,36 @@ struct UsageDashboardView: View {
     // MARK: - Cache hit rate
 
     private var cacheHitCard: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let m = metrics
+        return VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(L10n.text("Cache hit rate", zhHans: "缓存命中率"))
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
+                    .help(L10n.text(
+                        "Cache reads ÷ (new input + cache write + cache read). Output is excluded because it is never cached.",
+                        zhHans: "缓存命中 ÷（新增输入 + 缓存创建 + 缓存命中）。输出不会被缓存，因此不计入分母。"))
                 Spacer()
-                Text(String(format: "%.1f%%", cacheHitRate * 100))
+                if let saved = m.cacheSavingsUSD, saved > 0 {
+                    Text(L10n.format("Saved ≈ %@", zhHans: "为你省下 ≈ %@", costLabel(saved)))
+                        .font(Theme.font.themedMono(10, .medium))
+                        .foregroundStyle(Theme.cost)
+                        .help(L10n.text(
+                            "What the cache reads would have cost as fresh input, minus what they did cost. Unpriced models and self-reported costs are left out.",
+                            zhHans: "这些缓存命中若按新增输入计价要多花的钱（输入价 − 缓存读价）。未定价模型和自报成本的来源不计入。"))
+                }
+                Text(String(format: "%.1f%%", m.cacheHitRate * 100))
                     .font(Theme.font.themedMono(11, .semibold))
                     .foregroundStyle(Theme.brandFg)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
-                    Capsule()
-                        .fill(Theme.barFill(Theme.brand, from: 0.6))
-                        .frame(width: max(4, proxy.size.width * cacheHitRate))
+                    if m.cacheHitRate > 0 {
+                        Capsule()
+                            .fill(Theme.barFill(Theme.brand, from: 0.6))
+                            .frame(width: max(4, proxy.size.width * m.cacheHitRate))
+                    }
                 }
             }
             .frame(height: 6)
@@ -1183,9 +1293,15 @@ struct UsageDashboardView: View {
                             .font(Theme.font.themed(11))
                             .lineLimit(1)
                         Spacer()
+                        Text(L10n.format("%@ req", zhHans: "%@ 次", line.requests.formatted(.number.grouping(.automatic))))
+                            .font(Theme.font.themedMono(10.5))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 70, alignment: .trailing)
+                            .help(Self.requestsHelp)
                         Text(formatTokens(line.tokens))
                             .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(.secondary)
+                            .frame(width: 62, alignment: .trailing)
                         Text(line.costUSD.map { costLabel($0) } ?? "—")
                             .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(Theme.cost)

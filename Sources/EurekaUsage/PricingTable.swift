@@ -135,6 +135,21 @@ public struct PricingTable: Sendable {
         return Self.cost(of: totals, price: price)
     }
 
+    /// USD the cache reads of one aggregate saved versus sending those tokens as fresh input; nil =
+    /// unpriced, or the cost is self-reported (Grok) so the per-token split is unknown
+    public func cacheSavings(of totals: UsageTotals) -> Double? {
+        guard totals.reportedCostUSD == nil,
+              let price = resolution(for: totals.model, provider: totals.provider).price
+        else { return nil }
+        return Self.cacheSavings(of: totals, price: price)
+    }
+
+    static func cacheSavings(of totals: UsageTotals, price: ModelPrice) -> Double? {
+        guard let inputPerM = price.inputPerM, price.outputPerM != nil else { return nil }
+        let cacheRead = price.cacheReadPerM ?? inputPerM * 0.1
+        return Double(totals.cacheReadTokens) * max(0, inputPerM - cacheRead) / 1_000_000
+    }
+
     static func cost(of totals: UsageTotals, price: ModelPrice) -> Double? {
         guard let inputPerM = price.inputPerM, let outputPerM = price.outputPerM else { return nil }
 
