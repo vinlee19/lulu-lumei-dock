@@ -224,7 +224,8 @@ struct MCPView: View {
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: ToolKind.mcp.icon,
                     totalCount: totalCount,
                     sources: availableSources,
-                    count: { count(for: $0) })
+                    count: { count(for: $0) },
+                    singleLine: true)
                 probeBar
                 if filteredEntries.isEmpty {
                     emptyState.padding(.top, 40)
@@ -250,26 +251,42 @@ struct MCPView: View {
                                     row(for: entry)
                                 } else {
                                     let expanded = expandedGroups.contains(group.key)
+                                    let primary = group.entries[0]
                                     KnowledgeGroupRow(
-                                        name: group.entries[0].name,
-                                        subtitle: group.entries[0].urlSummary ?? group.entries[0].commandSummary,
+                                        name: primary.name,
+                                        subtitle: primary.urlSummary ?? primary.commandSummary,
+                                        monogram: true,
+                                        chips: Array(Set(group.entries.compactMap(\.projectName))).sorted(),
                                         sources: group.entries.map(\.source),
-                                        expanded: expanded
-                                    ) {
-                                        if expanded {
-                                            expandedGroups.remove(group.key)
-                                        } else {
-                                            expandedGroups.insert(group.key)
-                                        }
-                                    }
+                                        expanded: expanded,
+                                        onToggle: {
+                                            if expanded {
+                                                expandedGroups.remove(group.key)
+                                            } else {
+                                                expandedGroups.insert(group.key)
+                                            }
+                                        },
+                                        trailing: {
+                                            // Tool cache and call stats are keyed by server name, so
+                                            // every copy shares the primary's numbers
+                                            MCPStatsTrailing(
+                                                toolInfo: toolInfo(for: primary),
+                                                callStat: callStat(for: primary),
+                                                envKeyCount: 0
+                                            ) {
+                                                CopiesEnabledLabel(
+                                                    enabled: group.entries.filter { $0.enabled != false }.count,
+                                                    total: group.entries.count)
+                                            }
+                                        })
                                     if expanded {
                                         ForEach(group.entries) { entry in
-                                            row(for: entry).padding(.leading, 20)
+                                            row(for: entry).padding(.leading, 22)
                                         }
                                     }
                                 }
                                 if index < groups.count - 1 {
-                                    Divider().opacity(0.4).padding(.leading, 50)
+                                    Divider().opacity(0.4).padding(.leading, 54)
                                 }
                             }
                         }
@@ -667,7 +684,7 @@ private struct MCPRow: View {
             onOpen: onOpen
         ) {
             HStack(spacing: 10) {
-                SourceLogoTile(source: entry.source, size: 28)
+                MonogramTile(name: entry.name, source: entry.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         // Health dot from the last probe (persisted snapshot; hidden when there is
@@ -689,6 +706,7 @@ private struct MCPRow: View {
                             .foregroundStyle(entry.enabled != false ? .primary : .secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .layoutPriority(1)
                         TagChip(entry.transport, neutral: true)
                         if let project = entry.projectName {
                             TagChip(project)
@@ -700,37 +718,58 @@ private struct MCPRow: View {
                     if let summary = entry.commandSummary ?? entry.urlSummary {
                         Text(summary)
                             .font(Theme.font.themed(10.5))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    if let summary = mcpCapabilitySummary(toolInfo) {
-                        Text(summary)
-                            .font(Theme.font.themedMono(10.5))
-                            .foregroundStyle(.tertiary)
-                    }
-                    if let callStat, callStat.calls > 0 {
-                        Text(L10n.format("%@ calls", zhHans: "%@ 次调用", String(callStat.calls)))
-                            .font(Theme.font.themedMono(10.5))
-                            .foregroundStyle(.tertiary)
-                    } else if toolInfo == nil, !entry.envKeys.isEmpty {
-                        Text(L10n.format("%@ secret keys", zhHans: "%@ 个密钥键", String(entry.envKeys.count)))
-                            .font(Theme.font.themedMono(10.5))
-                            .foregroundStyle(.tertiary)
-                    }
-                    if MCPService.supportsEnableToggle(entry.source) {
-                        MiniSwitch(isOn: entry.enabled ?? true) { onToggle() }
-                    }
+            }
+        } trailing: {
+            MCPStatsTrailing(toolInfo: toolInfo, callStat: callStat, envKeyCount: entry.envKeys.count) {
+                if MCPService.supportsEnableToggle(entry.source) {
+                    MiniSwitch(isOn: entry.enabled ?? true) { onToggle() }
                 }
-                .fixedSize()
             }
         } menu: {
             mcpEntryMenu(entry, service: service, onOpen: onOpen, onEdit: onEdit,
                          onDelete: onDelete)
+        }
+    }
+}
+
+/// Fixed-width trailing columns shared by single and folded MCP rows — capabilities, calls (or
+/// the env key count when nothing has been probed or called), control — so the switches line up
+/// down the list.
+private struct MCPStatsTrailing<Control: View>: View {
+    let toolInfo: MCPToolCacheEntry?
+    let callStat: UsageService.MCPServerCallStat?
+    let envKeyCount: Int
+    @ViewBuilder var control: () -> Control
+
+    private var usageText: String {
+        if let callStat, callStat.calls > 0 {
+            return L10n.format("%@ calls", zhHans: "%@ 次调用", String(callStat.calls))
+        }
+        if toolInfo == nil, envKeyCount > 0 {
+            return L10n.format("%@ secret keys", zhHans: "%@ 个密钥键", String(envKeyCount))
+        }
+        return ""
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(mcpCapabilitySummary(toolInfo) ?? "")
+                .font(Theme.font.themedMono(10.5)).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.tail)
+                .frame(width: 112, alignment: .trailing)
+            Text(usageText)
+                .font(Theme.font.themedMono(11, .semibold))
+                .foregroundStyle(callStat.map { $0.calls > 0 } == true ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
+                .lineLimit(1)
+                .frame(width: 84, alignment: .trailing)
+            control()
+                .frame(width: 52, alignment: .trailing)
         }
     }
 }
@@ -755,7 +794,7 @@ private struct MCPCard: View {
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 10) {
-                    SourceLogoTile(source: entry.source, size: 28)
+                    MonogramTile(name: entry.name, source: entry.source, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(entry.name)
                             .font(Theme.font.monoSkillName(13))

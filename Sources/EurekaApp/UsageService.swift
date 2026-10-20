@@ -281,6 +281,15 @@ final class UsageService: ObservableObject {
         self.timer = timer
     }
 
+    /// Opens the existing SQLite store on the service queue without starting background usage
+    /// scanners. Used by offscreen preview rendering to read persisted skill/MCP/agent stats.
+    func openStoreForPreview() {
+        queue.async { [weak self] in
+            guard let self, self.store == nil else { return }
+            self.store = try? EurekaStore(path: EurekaStore.defaultURL())
+        }
+    }
+
     /// Aggregates a weekly report ([weekStart, weekEnd)) and publishes it to weeklyReport when done
     func loadWeeklyReport(weekStart: Date, weekEnd: Date) {
         queue.async { [weak self] in

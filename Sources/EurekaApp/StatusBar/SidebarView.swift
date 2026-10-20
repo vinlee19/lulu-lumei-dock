@@ -1,7 +1,7 @@
 import EurekaKit
 import SwiftUI
 
-/// Main window's left navigation bar (macOS System Settings style: brand header + grouped items +
+/// Main window's left navigation bar (macOS System Settings style: search entry + grouped items +
 /// brand-colored selected capsule + bottom brand area).
 ///
 /// Extracted from `PopoverRootView` into its own view for two reasons:
@@ -10,8 +10,8 @@ import SwiftUI
 ///  2. `PopoverRootView` has 14 injected dependencies, while the sidebar only needs "current
 ///     selection + rate-limit badge + version".
 ///
-/// The brand mark appears only once, at the **bottom**. Previously there was an 18pt one at the top and a 13pt one at the bottom; in one
-/// 165pt-wide column the two brand tiles were redundant, and the bottom one was smaller than the neighboring nav icons' 20pt slot.
+/// The brand appears only once, at the **bottom**. The top used to repeat the wordmark; it is now
+/// the visible entry to ⌘K global search, which otherwise had no on-screen affordance at all.
 struct SidebarView: View {
     let selected: PopoverRootView.Tab
     /// Rate-limit badge (nil when there's no data)
@@ -22,6 +22,8 @@ struct SidebarView: View {
     let onSelect: (PopoverRootView.Tab) -> Void
     /// Click on the bottom brand area (jumps to "Settings → About"); renderers may omit it
     var onOpenAbout: (() -> Void)?
+    /// Click on the top search field (opens the ⌘K palette); renderers may omit it
+    var onOpenSearch: (() -> Void)?
 
     /// Fixed sidebar width. Usable row width = 165 − 8×2 (outer) − 8×2 (inside the button) = 133pt,
     /// the hard upper bound for enlarging any icon/label.
@@ -29,8 +31,10 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            header
-            Divider().padding(.vertical, 4).padding(.horizontal, 2)
+            // No divider under the field: its own outline already separates it from the groups,
+            // and the 9pt a divider costs keeps the column within the 512pt minimum height
+            searchField
+                .padding(.bottom, 2)
             // The item area must scroll. `MainWindowController` uses `hosting.sizingOptions = []`
             // -- overflowing content is **clipped** rather than growing the window, and
             // `window.minSize` 540 is the frame height including the title bar (the content area is
@@ -38,7 +42,7 @@ struct SidebarView: View {
             // so pt of slack at 512; one more group or a larger system font size would clip the
             // footer. Wrapped in a ScrollView nothing can be clipped no matter how many groups;
             // with slack the content naturally hugs the top.
-            ScrollView(.vertical, showsIndicators: false) {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(PopoverRootView.Tab.sidebarGroups.enumerated()), id: \.offset) {
                         _, group in
@@ -78,17 +82,44 @@ struct SidebarView: View {
         .background(Theme.surfaceSecondary)
     }
 
-    /// The top keeps only the wordmark (the brand tile is consolidated at the bottom, no longer two
-    /// per column)
-    private var header: some View {
-        HStack(spacing: 7) {
-            Text("lulu-lumei-dock")
-                .font(Theme.font.themed(12, .semibold))
-                .foregroundStyle(.primary)
-            Spacer(minLength: 0)
+    /// Search field look-alike: a button, not a text field. Typing happens in the palette itself,
+    /// so this only has to say "search lives here, ⌘K opens it".
+    private var searchField: some View {
+        Button {
+            onOpenSearch?()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(Theme.font.themed(10.5, .medium))
+                Text(L10n.text("Search", zhHans: "搜索"))
+                    .font(Theme.font.themed(11.5))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("⌘K")
+                    .font(Theme.font.themedMono(9.5, .medium))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .strokeBorder(Theme.hairline, lineWidth: 1))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            // 4 + no divider below keeps the field within the old wordmark + divider height, so the
+            // System group still fits at the 512pt minimum
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.sidebar)
+                    .fill(Theme.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.sidebar)
+                    .strokeBorder(
+                        Theme.controlOutline?.color ?? Theme.hairline,
+                        lineWidth: Theme.controlOutline?.width ?? 1))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.sidebar))
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 2)
+        .buttonStyle(.plain)
+        .help(L10n.text("Search everywhere (⌘K)", zhHans: "全局搜索（⌘K）"))
     }
 
     /// Bottom-left brand area: enlarged logo + name + version, the whole block clickable → Settings

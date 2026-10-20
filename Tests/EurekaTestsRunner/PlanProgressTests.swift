@@ -61,6 +61,12 @@ func planProgressTests(_ t: TestRunner) {
         try expectEqual(PlanParsing.summary("# T\n\n- **重点** 内容"), "重点 内容")
     }
 
+    t.test("summary：以冒号结尾的引导句接上下一行内容（含清单项）") {
+        try expectEqual(PlanParsing.summary("# T\n用户要两样东西：\n1. 功能建议"), "用户要两样东西： 1. 功能建议")
+        try expectEqual(PlanParsing.summary("# T\nGoal:\n- [ ] ship it"), "Goal: ship it")
+        try expectEqual(PlanParsing.summary("# T\n只有引导句："), "只有引导句：")
+    }
+
     t.test("firstStep：取首个清单步骤文字（去列表符/方框/修饰）") {
         let md = """
         # Codex 计划

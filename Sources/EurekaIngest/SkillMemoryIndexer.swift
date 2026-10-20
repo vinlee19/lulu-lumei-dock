@@ -1241,33 +1241,17 @@ public enum SkillMemoryIndexer {
 
     // MARK: - frontmatter parsing (pure functions, unit-test targets)
 
-    /// name / description from the file's leading `---` … `---` YAML block (simple key: value).
+    /// name / description from the file's leading `---` … `---` YAML block (simple key: value
+    /// plus `|` / `>` block scalars via `parseFrontmatterFields`).
     public static func parseFrontmatter(_ text: String) -> (name: String?, description: String?) {
-        let lines = text.components(separatedBy: "\n")
-        guard let first = lines.first,
-              first.trimmingCharacters(in: .whitespaces) == "---" else {
-            return (nil, nil)
-        }
-        var name: String?
-        var description: String?
-        for line in lines.dropFirst() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed == "---" { break }  // end of frontmatter
-            guard let colon = trimmed.firstIndex(of: ":") else { continue }
-            let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
-            var value = String(trimmed[trimmed.index(after: colon)...])
-                .trimmingCharacters(in: .whitespaces)
-            if value.count >= 2,
-               (value.first == "\"" && value.last == "\"")
-                || (value.first == "'" && value.last == "'") {
-                value = String(value.dropFirst().dropLast())
-            }
-            switch key {
-            case "name": name = value.isEmpty ? nil : value
-            case "description": description = value.isEmpty ? nil : value
-            default: break
-            }
-        }
+        let fields = parseFrontmatterFields(text)
+        guard !fields.isEmpty else { return (nil, nil) }
+        let name = fields["name"].flatMap { $0.isEmpty ? nil : $0 }
+        let rawDesc = fields["description"]?
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let description = rawDesc.flatMap { $0.isEmpty ? nil : $0 }
         return (name, description)
     }
 
