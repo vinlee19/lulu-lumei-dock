@@ -19,6 +19,21 @@ func skillMemoryIndexerTests(_ t: TestRunner) {
         try expectEqual(parsed.description, "Use when writing a commit")
     }
 
+    t.test("frontmatter description 为 | / > 块标量时取正文并折成一行，不返回字面 |") {
+        let text = """
+        ---
+        name: kimi-webbridge
+        description: |
+          Kimi WebBridge lets AI control
+          the user's real browser.
+        allowed-tools: Bash
+        ---
+        """
+        let parsed = SkillMemoryIndexer.parseFrontmatter(text)
+        try expectEqual(parsed.name, "kimi-webbridge")
+        try expectEqual(parsed.description, "Kimi WebBridge lets AI control the user's real browser.")
+    }
+
     t.test("无 frontmatter → name/description 皆 nil") {
         let parsed = SkillMemoryIndexer.parseFrontmatter("# 只是 markdown\n没有 yaml")
         try expect(parsed.name == nil && parsed.description == nil)
