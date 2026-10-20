@@ -8,7 +8,7 @@ import Foundation
 /// - `working.gif` / `working.png` - one file for a state (an animated GIF / APNG plays as is)
 /// - `working-1.png`, `working-2.png` - a frame sequence, ordered by the trailing number
 /// - `working/01.png`, `working/02.png` - a frame sequence in a subfolder named after the state
-/// Each state also answers to a few common aliases (`work`, `busy`, `done`, `sleep`, `工作`…).
+/// Each state also answers to a few common aliases (`work`, `busy`, `done`, `sleep`, plus Chinese names; see `aliasNames`).
 public enum MascotFolderMapper {
     public struct Result: Equatable, Sendable {
         /// State → files relative to the folder (one file, or frames in play order)
