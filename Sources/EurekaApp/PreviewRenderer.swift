@@ -312,16 +312,30 @@ enum PreviewRenderer {
     static func renderKnowledge(to directory: String, style: ThemeStyle = .classic) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        ThemeFonts.register()
+        _ = AppSettings()
+        let previousLang = L10n.current
+        L10n.current = .simplifiedChinese
         ThemeStyle.current = style
-        defer { ThemeStyle.current = .classic }
+        defer {
+            ThemeStyle.current = .classic
+            L10n.current = previousLang
+        }
 
         let plans = PlansService()
         let skillMemory = SkillMemoryService()
         let agents = AgentConfigService()
         let usage = UsageService()
+        usage.openStoreForPreview()
         plans.refresh(force: true)
         skillMemory.refresh()
         agents.refresh()
+        usage.loadSkillStats()
+        usage.loadMCPStats()
+        usage.loadAgentStats()
+        // The Skills overview card's "hits this week" reads the ranking; without it the preview
+        // always shows 0
+        usage.loadSkillRanking(from: UsageService.DashboardPeriod.week.startDate, to: Date())
 
         // Wait for all three scans to finish (the CLI has no main runloop → pump manually; the
         // first full session parse may take minutes, capped at 300s)
@@ -329,6 +343,7 @@ enum PreviewRenderer {
         while (plans.scanning || skillMemory.scanning || agents.scanning), Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         // Print memories by the counting rule: memoryTotal includes entries inside memory
         // libraries, memories is only standalone list entries — both numbers are needed, otherwise
         // you can't tell whether folding took effect
@@ -350,7 +365,7 @@ enum PreviewRenderer {
             // Lay a window background underneath: the page's surfaceSecondary is a translucent
             // overlay, so transparent PNG areas would be wrong without it
             let hosting = NSHostingView(rootView: ZStack {
-                Color(nsColor: .windowBackgroundColor)
+                style == .classic ? Color(nsColor: .windowBackgroundColor) : Theme.windowBackground
                 view
             })
             hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -373,6 +388,13 @@ enum PreviewRenderer {
         snap("knowledge-skills-list",
              SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
                              initialLayout: .list))
+        // Dark and minimum-width (840pt window − 165pt sidebar) variants of the list
+        snap("knowledge-skills-list-dark",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .list), dark: true)
+        snap("knowledge-skills-list-min",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .list), width: 675)
         snap("knowledge-skills-cards",
              SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
                              initialLayout: .cards))
@@ -453,6 +475,34 @@ enum PreviewRenderer {
         snap("knowledge-mcp-form-manual",
              MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(id: "new", mode: .form)))
         snap("knowledge-mcp-list-dark", MCPView(service: mcp, usageService: usage, initialLayout: .list), dark: true)
+
+        // Sessions wide/fullscreen + narrow preview to verify header toolbar alignment
+        let sessions = SessionBrowserService()
+        let settings = AppSettings()
+        L10n.current = .simplifiedChinese
+        ThemeStyle.current = style
+        sessions.refresh()
+        let sessionDeadline = Date().addingTimeInterval(60)
+        while sessions.scanning, Date() < sessionDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        let allSessions = sessions.flatSessions + sessions.groups.flatMap(\.sessions)
+        let targetSession = allSessions.prefix(200).first { !skillMemory.memories(relatedTo: $0.id).isEmpty }
+            ?? allSessions.first
+        if let targetSession {
+            sessions.select(targetSession)
+            let loadDeadline = Date().addingTimeInterval(30)
+            while sessions.transcriptLoading, Date() < loadDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        }
+        snap("knowledge-sessions-wide",
+             SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
+             width: 1512)
+        snap("knowledge-sessions-min",
+             SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
+             width: 675)
     }
 
     /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light
