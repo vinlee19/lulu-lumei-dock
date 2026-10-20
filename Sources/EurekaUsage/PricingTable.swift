@@ -151,6 +151,24 @@ public struct PricingTable: Sendable {
     }
 
     static func cost(of totals: UsageTotals, price: ModelPrice) -> Double? {
+        breakdown(of: totals, price: price)?.total
+    }
+
+    /// Where one aggregate's cost goes, by token type; a self-reported cost (Grok) has no split and
+    /// lands in `reported`. nil = unpriced.
+    public func costBreakdown(of totals: UsageTotals) -> CostBreakdown? {
+        if let reported = totals.reportedCostUSD {
+            var split = CostBreakdown()
+            split.reported = reported
+            return split
+        }
+        guard let price = resolution(for: totals.model, provider: totals.provider).price else {
+            return nil
+        }
+        return Self.breakdown(of: totals, price: price)
+    }
+
+    static func breakdown(of totals: UsageTotals, price: ModelPrice) -> CostBreakdown? {
         guard let inputPerM = price.inputPerM, let outputPerM = price.outputPerM else { return nil }
 
         // Missing cache prices are derived from the input price per Anthropic convention: read
@@ -162,12 +180,12 @@ public struct PricingTable: Sendable {
         let write1h = Double(totals.cacheCreation1hTokens)
         let write5m = Double(totals.cacheCreationTokens - totals.cacheCreation1hTokens)
 
-        let cost = Double(totals.inputTokens) * inputPerM
-            + Double(totals.outputTokens) * outputPerM
-            + Double(totals.cacheReadTokens) * cacheRead
-            + max(0, write5m) * cacheWrite5m
-            + write1h * cacheWrite1h
-        return cost / 1_000_000
+        var split = CostBreakdown()
+        split.input = Double(totals.inputTokens) * inputPerM / 1_000_000
+        split.output = Double(totals.outputTokens) * outputPerM / 1_000_000
+        split.cacheRead = Double(totals.cacheReadTokens) * cacheRead / 1_000_000
+        split.cacheWrite = (max(0, write5m) * cacheWrite5m + write1h * cacheWrite1h) / 1_000_000
+        return split
     }
 }
 

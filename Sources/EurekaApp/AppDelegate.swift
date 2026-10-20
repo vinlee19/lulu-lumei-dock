@@ -306,6 +306,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         wellnessMonitor = wellness
 
+        // Monthly budget: island card (+ system notification when enabled) once per threshold per
+        // month, checked on every usage scan
+        usageService.$monthOverview
+            .combineLatest(settings.$usageMonthlyBudget)
+            .sink { [weak self, weak island] overview, budget in
+                guard let self, let overview else { return }
+                guard let notice = BudgetAlertStore.check(
+                    spent: overview.monthToDate, budget: budget, projected: overview.projected)
+                else { return }
+                island?.viewModel.enqueueNotice(notice)
+                if self.settings.eventSystemNotifyEnabled {
+                    self.notificationService.postEvent(SystemEventNotification(
+                        identifier: "eureka-\(notice.id)", title: notice.headline,
+                        body: notice.body))
+                }
+            }
+            .store(in: &cancellables)
+
         // First launch: guide to the Settings page for one-click install (the window is already
         // shown, so only switch tabs here)
         if !UserDefaults.standard.bool(forKey: "didOnboard") {

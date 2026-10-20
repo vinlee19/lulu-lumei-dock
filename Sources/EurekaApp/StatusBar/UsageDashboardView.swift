@@ -12,6 +12,8 @@ struct UsageDashboardView: View {
     /// Session index: joins session names into the per-session ranking + resolves jump targets
     /// (instance shared with the Sessions tab)
     @ObservedObject var sessionBrowser: SessionBrowserService
+    /// Monthly budget and subscription prices (month card)
+    @ObservedObject var settings: AppSettings
 
     @State private var period: UsageService.DashboardPeriod = .today
     @State private var sourceFilter: AgentSource?  // nil = all
@@ -48,11 +50,12 @@ struct UsageDashboardView: View {
     /// Offscreen-render / preview injection: pick the initial period and sub-tab
     /// (same convention as `PlansView(initialLayout:)`).
     init(
-        usageService: UsageService, sessionBrowser: SessionBrowserService,
+        usageService: UsageService, sessionBrowser: SessionBrowserService, settings: AppSettings,
         initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .overview
     ) {
         self._usageService = ObservedObject(wrappedValue: usageService)
         self._sessionBrowser = ObservedObject(wrappedValue: sessionBrowser)
+        self._settings = ObservedObject(wrappedValue: settings)
         self._period = State(initialValue: initialPeriod)
         self._subTab = State(initialValue: initialSubTab)
     }
@@ -106,7 +109,9 @@ struct UsageDashboardView: View {
                     heroCard
                     switch subTab {
                     case .overview:
+                        UsageMonthCard(usageService: usageService, settings: settings)
                         metricGrid
+                        costStructureCard
                         cacheHitCard
                         trendCard
                         UsageHeatmapView(cells: usageService.heatmapCells)
@@ -698,6 +703,75 @@ struct UsageDashboardView: View {
                     .font(Theme.font.themedMono(14, .semibold))
             }
             Spacer(minLength: 0)
+        }
+        .padding(Theme.spacing.card)
+        .dashboardCard()
+    }
+
+    // MARK: - Cost structure
+
+    private static let costSegments: [(key: KeyPath<CostBreakdown, Double>, label: String, tint: Color)] = [
+        (\.input, L10n.text("New input", zhHans: "新增输入"), .blue),
+        (\.output, L10n.text("Output", zhHans: "输出"), .purple),
+        (\.cacheWrite, L10n.text("Cache write", zhHans: "缓存创建"), .orange),
+        (\.cacheRead, L10n.text("Cache read", zhHans: "缓存命中"), Theme.brand),
+        (\.reported, L10n.text("Self-reported", zhHans: "来源自报"), .gray),
+    ]
+
+    /// Where the money goes by token type. Cache reads dominate the token count, so the cost split
+    /// is what tells you whether output or cache writes are the real bill.
+    @ViewBuilder
+    private var costStructureCard: some View {
+        let split = usageService.costBreakdown(of: filteredModelTotals)
+        let total = split.total
+        let segments = Self.costSegments.filter { split[keyPath: $0.key] > 0 }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(L10n.text("Where the cost goes", zhHans: "成本构成"))
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if total > 0, metrics.totalTokens > 0 {
+                    let readTokenShare = Double(metrics.cacheReadTokens) / Double(metrics.totalTokens)
+                    Text(L10n.format(
+                        "Cache reads: %1$@ of tokens, %2$@ of cost",
+                        zhHans: "缓存命中占 %1$@ 的 tokens，只占 %2$@ 的成本",
+                        String(format: "%.0f%%", readTokenShare * 100),
+                        String(format: "%.0f%%", split.cacheRead / total * 100)))
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if total > 0 {
+                GeometryReader { proxy in
+                    HStack(spacing: 1) {
+                        ForEach(segments, id: \.label) { segment in
+                            Rectangle()
+                                .fill(segment.tint)
+                                .frame(width: max(2, (proxy.size.width - CGFloat(segments.count - 1))
+                                    * split[keyPath: segment.key] / total))
+                        }
+                    }
+                    .clipShape(Capsule())
+                }
+                .frame(height: 8)
+                HStack(spacing: 14) {
+                    ForEach(segments, id: \.label) { segment in
+                        HStack(spacing: 4) {
+                            Circle().fill(segment.tint).frame(width: 7, height: 7)
+                            Text(segment.label)
+                                .font(Theme.font.themed(10))
+                                .foregroundStyle(.secondary)
+                            Text("\(costLabel(split[keyPath: segment.key])) · \(String(format: "%.0f%%", split[keyPath: segment.key] / total * 100))")
+                                .font(Theme.font.themedMono(10, .medium))
+                        }
+                    }
+                }
+            } else {
+                Text(L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(Theme.spacing.card)
         .dashboardCard()

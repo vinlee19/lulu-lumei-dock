@@ -162,6 +162,14 @@ final class AppSettings: ObservableObject {
     @Published var mascotBubbles: Bool {
         didSet { defaults.set(mascotBubbles, forKey: "mascotBubbles") }
     }
+    /// Monthly budget in USD across every source (API-equivalent cost); 0 = no budget
+    @Published var usageMonthlyBudget: Double {
+        didSet { defaults.set(usageMonthlyBudget, forKey: "usageMonthlyBudget") }
+    }
+    /// Monthly subscription price per source (`AgentSource.rawValue` → USD), for payback
+    @Published var subscriptionPrices: [String: Double] {
+        didSet { defaults.set(subscriptionPrices, forKey: "subscriptionPrices") }
+    }
     /// Companion size (`MascotSize` raw value)
     @Published var mascotSize: String {
         didSet { defaults.set(mascotSize, forKey: "mascotSize") }
@@ -236,9 +244,12 @@ final class AppSettings: ObservableObject {
     @Published private(set) var launchAtLogin: Bool
     @Published private(set) var launchAtLoginHint: String?
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
-    init() {
+    /// `defaults` is injectable so offscreen renders can stage settings without touching the
+    /// user's real preferences
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         notifyCompletion = defaults.object(forKey: "notifyCompletion") as? Bool ?? true
         notifyWaiting = defaults.object(forKey: "notifyWaiting") as? Bool ?? true
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
@@ -268,6 +279,8 @@ final class AppSettings: ObservableObject {
         mascotNightMode = defaults.object(forKey: "mascotNightMode") as? Bool ?? true
         mascotBubbles = defaults.object(forKey: "mascotBubbles") as? Bool ?? true
         mascotSize = defaults.string(forKey: "mascotSize") ?? MascotSize.medium.rawValue
+        usageMonthlyBudget = defaults.object(forKey: "usageMonthlyBudget") as? Double ?? 0
+        subscriptionPrices = defaults.dictionary(forKey: "subscriptionPrices") as? [String: Double] ?? [:]
         cloudBackupEnabled = defaults.bool(forKey: "cloudBackupEnabled")
         storageProvider = defaults.string(forKey: "storageProvider") ?? "tencent-cos"
         cosRegion = defaults.string(forKey: "cosRegion") ?? ""

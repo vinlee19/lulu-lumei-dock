@@ -296,7 +296,8 @@ struct PopoverRootView: View {
         case .mcp:
             MCPView(service: mcpService, usageService: usageService)
         case .usage:
-            UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
+            UsageDashboardView(
+                usageService: usageService, sessionBrowser: sessionBrowser, settings: settings)
         case .limits:
             LimitsPanelView(service: limitsService, settings: settings)
         case .audit:

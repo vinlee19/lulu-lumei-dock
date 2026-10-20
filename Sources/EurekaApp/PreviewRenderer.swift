@@ -811,16 +811,32 @@ enum PreviewRenderer {
         ]
         for (tab, suffix) in subTabs {
             let view = UsageDashboardView(
-                usageService: usage, sessionBrowser: sessions,
+                usageService: usage, sessionBrowser: sessions, settings: settings,
                 initialPeriod: .month, initialSubTab: tab)
             snap("pages-usage-\(suffix)", view, width: 1270, height: 2000)
         }
+        // Month card with a budget and plans filled in, staged in a throwaway defaults suite
+        let planSuite = "eureka-render-plans"
+        if let planDefaults = UserDefaults(suiteName: planSuite) {
+            let style = ThemeStyle.current
+            let planSettings = AppSettings(defaults: planDefaults)
+            ThemeStyle.current = style  // AppSettings.init restates the persisted style
+            planSettings.usageMonthlyBudget = 1500
+            planSettings.subscriptionPrices = [
+                AgentSource.claude.rawValue: 200, AgentSource.codex.rawValue: 20,
+            ]
+            snap("pages-usage-overview-plans",
+                 UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+                                    settings: planSettings, initialPeriod: .month),
+                 width: 1270, height: 2200)
+            planDefaults.removePersistentDomain(forName: planSuite)
+        }
         snap("pages-usage-log-min",
-             UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                 initialPeriod: .month, initialSubTab: .log),
              width: 675, height: 1600)
         snap("pages-usage-log-dark",
-             UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                 initialPeriod: .month, initialSubTab: .log),
              dark: true, width: 1270, height: 2000)
         // Sidebar + usage page side by side (check type size / spacing across the divider)
@@ -830,7 +846,7 @@ enum PreviewRenderer {
                 historyBadge: "\(usage.recentHistory.count)", appVersion: "0.35.1",
                 onSelect: { _ in })
             Divider()
-            UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+            UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                initialPeriod: .month, initialSubTab: .models)
         }, width: SidebarView.width + 1 + 1270, height: 1400)
 

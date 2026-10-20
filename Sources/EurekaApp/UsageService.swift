@@ -30,6 +30,18 @@ final class UsageService: ObservableObject {
     /// Model stats of the comparison range (one period earlier, same elapsed time); nil = the
     /// selected period has nothing to compare against ("All")
     @Published private(set) var comparisonTotals: [UsageTotals]?
+    /// Current calendar month across every source (month card, budget alerts); refreshed on every
+    /// scan, so budget alerts fire without the dashboard open
+    @Published private(set) var monthOverview: MonthOverview?
+
+    struct MonthOverview: Equatable {
+        var monthToDate: Double
+        /// Cost of the last 7 days (the forecast's daily rate)
+        var trailingSevenDays: Double
+        /// Month-to-date API-equivalent cost per source (subscription payback)
+        var bySource: [AgentSource: Double]
+        var projected: Double?
+    }
     /// Token/cost trend by (time bucket, source) over the selected range (for charts; short ranges
     /// switch to hourly granularity automatically)
     @Published private(set) var trend: [TrendPoint] = []
@@ -858,10 +870,35 @@ final class UsageService: ObservableObject {
             // busy_timeout) recovers by the next pass, so the red text shouldn't linger.
             publish { $0.summary = summary; $0.lastError = nil }
             publishHistory(store: store)
+            publishMonthOverview(store: store)
         } catch {
             HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
             publish { $0.lastError = L10n.format("Scan failed: %@", zhHans: "扫描失败: %@", String(describing: error)) }
         }
+    }
+
+    private func publishMonthOverview(store: EurekaStore) {
+        let now = Date()
+        guard let month = Calendar.current.dateInterval(of: .month, for: now) else { return }
+        let monthRows = (try? store.usage.totalsByModel(from: month.start, to: now)) ?? []
+        let weekRows = (try? store.usage.totalsByModel(
+            from: now.addingTimeInterval(-7 * 86_400), to: now)) ?? []
+        var bySource: [AgentSource: Double] = [:]
+        for row in monthRows {
+            if let cost = pricing.cost(of: row) { bySource[row.source, default: 0] += cost }
+        }
+        let monthToDate = bySource.values.reduce(0, +)
+        let trailing = weekRows.compactMap { pricing.cost(of: $0) }.reduce(0, +)
+        let overview = MonthOverview(
+            monthToDate: monthToDate, trailingSevenDays: trailing, bySource: bySource,
+            projected: MonthForecast.projected(
+                monthToDate: monthToDate, trailingSevenDays: trailing, now: now))
+        publish { $0.monthOverview = overview }
+    }
+
+    /// Cost split by token type for a set of aggregates (dashboard cost-structure card)
+    func costBreakdown(of totals: [UsageTotals]) -> CostBreakdown {
+        CostBreakdown(totals: totals, pricing: pricing)
     }
 
     /// History page window: last 14 days, capped at 200 entries (replacing the old fixed 50)
