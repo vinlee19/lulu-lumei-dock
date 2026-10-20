@@ -2,8 +2,8 @@ import EurekaKit
 import EurekaUsage
 import SwiftUI
 
-/// Usage → Overview, "This month": month-end projection, the monthly budget (with the
-/// projection marked on the bar), and subscription payback per source. Always the whole calendar
+/// Usage → Overview, "This month": month-end projection, subscription payback per source, and
+/// the optional monthly budget (projection marked on the bar; hidden until one is set). Always the whole calendar
 /// month across every source, whatever the dashboard's period and filter are, because budgets and
 /// plans are monthly and account-wide.
 struct UsageMonthCard: View {
@@ -18,7 +18,7 @@ struct UsageMonthCard: View {
                     .font(Theme.font.themed(12, .semibold))
                 Spacer()
                 SecondaryButton(
-                    title: L10n.text("Budget & plans…", zhHans: "预算与套餐…"),
+                    title: L10n.text("Plans & budget…", zhHans: "套餐与预算…"),
                     icon: "slider.horizontal.3", classic: .push
                 ) { editing = true }
                 .popover(isPresented: $editing, arrowEdge: .bottom) {
@@ -27,8 +27,8 @@ struct UsageMonthCard: View {
             }
             if let overview = usageService.monthOverview {
                 forecastRow(overview)
-                budgetRow(overview)
                 paybackRows(overview)
+                budgetRow(overview)
             } else {
                 Text(L10n.text("Scanning…", zhHans: "正在统计…"))
                     .font(Theme.font.themed(10))
@@ -94,13 +94,9 @@ struct UsageMonthCard: View {
                 }
                 .frame(height: 8)
             }
-        } else {
-            Text(L10n.text(
-                "No monthly budget set. Set one to get an island alert at 80% and 100%.",
-                zhHans: "未设置月预算。设置后用到 80% 和 100% 时会在灵动岛提醒。"))
-                .font(Theme.font.themed(10))
-                .foregroundStyle(.tertiary)
         }
+        // No budget = nothing shown: most people are on a subscription, where an
+        // API-equivalent budget means little; it stays an opt-in under Budget & plans
     }
 
     @ViewBuilder
@@ -111,8 +107,8 @@ struct UsageMonthCard: View {
         }
         if plans.isEmpty {
             Text(L10n.text(
-                "On a subscription? Enter its monthly price under Budget & plans to see how many times over it pays for itself.",
-                zhHans: "用的是订阅套餐？在「预算与套餐」里填上月费，就能看到这个月相当于回本了几倍。"))
+                "Enter your plans' monthly prices under Plans & budget to see how many times over each one pays for itself.",
+                zhHans: "在「套餐与预算」里填上各套餐的月费，就能看到这个月每个套餐相当于回本了几倍。"))
                 .font(Theme.font.themed(10))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -155,7 +151,8 @@ struct UsageMonthCard: View {
     }
 }
 
-/// Popover: monthly budget and per-source subscription prices. Sources listed are the ones with
+/// Popover: per-source subscription prices first (most users are on one), then the optional
+/// monthly budget. Sources listed are the ones with
 /// spend this month plus any that already have a price.
 private struct UsagePlanEditor: View {
     @ObservedObject var settings: AppSettings
@@ -163,24 +160,6 @@ private struct UsagePlanEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L10n.text("Monthly budget", zhHans: "月预算"))
-                .font(Theme.font.themed(11, .semibold))
-            HStack {
-                Text("$")
-                TextField("0", value: $settings.usageMonthlyBudget, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 100)
-                Text(L10n.text("0 = off", zhHans: "0 = 不设"))
-                    .font(Theme.font.themed(10))
-                    .foregroundStyle(.tertiary)
-            }
-            Text(L10n.text(
-                "Compared with the API-equivalent cost of every source. Alerts at 80% and 100%, once each per month.",
-                zhHans: "与所有来源的 API 等价成本比较；用到 80% 和 100% 时各提醒一次（每月）。"))
-                .font(Theme.font.themed(9.5))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Divider()
             Text(L10n.text("Subscription price per month", zhHans: "订阅套餐月费"))
                 .font(Theme.font.themed(11, .semibold))
             ForEach(sources, id: \.self) { source in
@@ -197,6 +176,24 @@ private struct UsagePlanEditor: View {
             Text(L10n.text(
                 "e.g. Claude Max 100 / 200, ChatGPT Plus 20 / Pro 200. Leave 0 for pay-as-you-go.",
                 zhHans: "例如 Claude Max 填 100 / 200，ChatGPT Plus 填 20、Pro 填 200；按量付费的留 0。"))
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Text(L10n.text("Monthly budget (optional)", zhHans: "月预算（可选）"))
+                .font(Theme.font.themed(11, .semibold))
+            HStack {
+                Text("$")
+                TextField("0", value: $settings.usageMonthlyBudget, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
+                Text(L10n.text("0 = off", zhHans: "0 = 不设"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
+            Text(L10n.text(
+                "Mainly for pay-as-you-go. Compared with the API-equivalent cost of every source; alerts at 80% and 100%, once each per month.",
+                zhHans: "主要给按量付费用。与所有来源的 API 等价成本比较；用到 80% 和 100% 时各提醒一次（每月）。"))
                 .font(Theme.font.themed(9.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
