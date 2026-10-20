@@ -122,9 +122,15 @@ final class MascotViewModel: ObservableObject {
     /// Settings "Preview": acts out one state on the real companion for a few seconds
     func preview(_ state: MascotState) {
         lastActiveAt = Date()
-        pushTransient(state, bubble: nil, seconds: 3)
+        pushTransient(state, bubble: nil, seconds: Self.previewSeconds)
+        // Name the state even with bubbles off: the user asked to see this one
+        pendingBubble = L10n.format(
+            "Preview: %@", zhHans: "预览：%@", MascotSettingsSection.title(for: state))
+        apply()
         previewing = true
     }
+
+    static let previewSeconds: TimeInterval = 3
 
     func showFinished(success: Bool) {
         pushTransient(success ? .success : .error,

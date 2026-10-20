@@ -127,6 +127,9 @@ final class MascotLibrary: ObservableObject {
     /// What the selected pack shows for one state (Settings state table, any pack kind)
     struct StateArt: Equatable {
         var thumbnail: NSImage?
+        /// First variant's animation, played inline by the state-table preview
+        var animation: MascotAnimation?
+        var playback: MascotPlaybackMode = .loop
         /// Behavior variants the state rotates through (built-in packs have several)
         var variantCount: Int
         /// The state whose artwork is used; differs from the row's state when it falls back
@@ -165,6 +168,8 @@ final class MascotLibrary: ObservableObject {
             let variants = pack.variants(for: state)
             art[state] = StateArt(
                 thumbnail: variants.first.flatMap { Self.firstFrame(of: $0.animation) },
+                animation: variants.first?.animation,
+                playback: variants.first?.playback ?? .loop,
                 variantCount: variants.count,
                 provider: pack.providingState(for: state))
         }

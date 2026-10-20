@@ -14,6 +14,10 @@ struct MascotSettingsSection: View {
     @State private var nameDraft = ""
     @State private var confirmingDelete: MascotPackInfo?
     @State private var showsAdvanced = false
+    /// State whose row is playing its inline preview. The companion may sit on another display
+    /// (or behind a full-screen window), so Preview must also be visible right here.
+    @State private var previewing: MascotState?
+    @State private var previewToken = 0
 
     private let columns = [GridItem(.adaptive(minimum: 78, maximum: 96), spacing: 8)]
 
@@ -107,8 +111,8 @@ struct MascotSettingsSection: View {
         sectionHeader(
             L10n.text("States", zhHans: "状态"),
             detail: L10n.text(
-                "When each state shows and what it looks like. Preview plays it on the companion.",
-                zhHans: "每个状态何时出现、显示什么；点「预览」让桌面上的伙伴演一遍。"))
+                "When each state shows and what it looks like. Preview plays it here and on the companion.",
+                zhHans: "每个状态何时出现、显示什么；点「预览」在这里播放，桌面上的伙伴也会同步演一遍。"))
         let editing = library.editing.flatMap { $0.id == settings.mascotPack ? $0 : nil }
         ForEach(Self.stateGroups, id: \.title) { group in
             Text(group.title)
@@ -139,9 +143,12 @@ struct MascotSettingsSection: View {
     private func stateRow(_ state: MascotState, editing: MascotLibrary.Editing?) -> some View {
         let art = library.stateArt[state]
         let editable = editing != nil && MascotManifestEditor.editableStates.contains(state)
+        let isPreviewing = previewing == state
         return HStack(spacing: 8) {
             Group {
-                if let image = editing?.images[state] ?? art?.thumbnail {
+                if isPreviewing, let art {
+                    MascotAnimationView(animation: art.animation, playback: art.playback)
+                } else if let image = editing?.images[state] ?? art?.thumbnail {
                     Image(nsImage: image)
                         .resizable()
                         .interpolation(.high)
@@ -151,7 +158,8 @@ struct MascotSettingsSection: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .frame(width: 30, height: 30)
+            .frame(width: isPreviewing ? 72 : 30, height: isPreviewing ? 72 : 30)
+            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isPreviewing)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(Self.title(for: state))
@@ -167,10 +175,12 @@ struct MascotSettingsSection: View {
             }
             Spacer(minLength: 6)
             SecondaryButton(
-                title: L10n.text("Preview", zhHans: "预览"), icon: "play.fill", classic: .push
+                title: isPreviewing
+                    ? L10n.text("Playing…", zhHans: "播放中…")
+                    : L10n.text("Preview", zhHans: "预览"),
+                icon: "play.fill", classic: .push
             ) {
-                NotificationCenter.default.post(
-                    name: .eurekaPreviewMascotState, object: state.rawValue)
+                preview(state)
             }
             if editable, let editing {
                 SecondaryButton(title: L10n.text("Change…", zhHans: "更换…"), classic: .push) {
@@ -190,6 +200,17 @@ struct MascotSettingsSection: View {
             }
         }
         .padding(.vertical, 5)
+    }
+
+    /// Plays the state inline and on the live companion for the same few seconds
+    private func preview(_ state: MascotState) {
+        previewing = state
+        previewToken &+= 1
+        let token = previewToken
+        NotificationCenter.default.post(name: .eurekaPreviewMascotState, object: state.rawValue)
+        DispatchQueue.main.asyncAfter(deadline: .now() + MascotViewModel.previewSeconds) {
+            if previewToken == token { previewing = nil }
+        }
     }
 
     /// Where a state's art comes from: its own (with the variant count) or a fallback state

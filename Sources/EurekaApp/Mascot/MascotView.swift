@@ -109,16 +109,25 @@ struct MascotRootView: View {
             .animation(.spring(response: 0.36, dampingFraction: 0.6), value: viewModel.caption)
     }
 
-    @ViewBuilder
     private var mascot: some View {
-        switch viewModel.animation {
+        MascotAnimationView(animation: viewModel.animation, playback: viewModel.playbackMode)
+    }
+}
+
+/// Plays one mascot animation as-is: no motion, caption or bubble. Shared by the companion panel
+/// and the Settings state-table preview, so both always show the same frames.
+struct MascotAnimationView: View {
+    let animation: MascotAnimation?
+    var playback: MascotPlaybackMode = .loop
+
+    var body: some View {
+        switch animation {
         case .frames(let urls, let fps):
-            FrameAnimator(urls: urls, fps: fps, playback: viewModel.playbackMode)
+            FrameAnimator(urls: urls, fps: fps, playback: playback)
         case .animatedImage(let url):
             AnimatedImageView(url: url)
         case .spriteSequence(let sheet, let cells, let fps):
-            SpriteSequenceAnimator(
-                sheet: sheet, cells: cells, fps: fps, playback: viewModel.playbackMode)
+            SpriteSequenceAnimator(sheet: sheet, cells: cells, fps: fps, playback: playback)
         case .none:
             Image(systemName: "tortoise.fill")
                 .font(.system(size: 48))
