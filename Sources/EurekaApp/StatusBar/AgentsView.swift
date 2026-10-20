@@ -261,7 +261,8 @@ struct AgentsView: View {
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: "person.2.fill",
                     totalCount: totalCount,
                     sources: availableSources,
-                    count: { count(for: $0) })
+                    count: { count(for: $0) },
+                    singleLine: true)
                 if filteredItems.isEmpty {
                     emptyState.padding(.top, 40)
                 } else if layout == .cards {
@@ -280,7 +281,7 @@ struct AgentsView: View {
                                          onOpen: { open(item) }, onToggle: { toggle(item) },
                                          onDelete: { requestDelete(item) })
                                 if index < filteredItems.count - 1 {
-                                    Divider().opacity(0.4).padding(.leading, 50)
+                                    Divider().opacity(0.4).padding(.leading, 54)
                                 }
                             }
                         }
@@ -442,8 +443,8 @@ private func agentItemMenu(
     }
 }
 
-/// Subagent icon card: role avatar + name + role tag / source logo + toggle; description; model ·
-/// tool count · invocations
+/// Subagent icon card: name monogram (CLI as corner badge) + name + role tag + toggle;
+/// description; model · tool count · invocations
 private struct AgentCard: View {
     let item: AgentItem
     let service: AgentConfigService
@@ -458,7 +459,7 @@ private struct AgentCard: View {
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 10) {
-                    RoleAvatar(role: item.role, size: 28)
+                    MonogramTile(name: item.name, source: item.source, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.name)
                             .font(Theme.font.monoSkillName(13))
@@ -467,7 +468,6 @@ private struct AgentCard: View {
                             .help(item.name)
                         HStack(spacing: 5) {
                             RoleTag(role: item.role)
-                            SourceBadge(source: item.source, size: 12)
                             AgentScopeChips(item: item)
                         }
                     }
@@ -498,8 +498,8 @@ private struct AgentCard: View {
     }
 }
 
-/// Subagent list row: role avatar + name / role tag / built-in badge + description + model ·
-/// invocations + toggle
+/// Subagent list row: name monogram (CLI as corner badge) + name / role tag / built-in badge +
+/// description + fixed trailing columns: invocations · model · toggle
 private struct AgentRow: View {
     let item: AgentItem
     let service: AgentConfigService
@@ -513,38 +513,43 @@ private struct AgentRow: View {
             actions: agentItemActions(item, service: service, onDelete: onDelete), onOpen: onOpen
         ) {
             HStack(spacing: 10) {
-                RoleAvatar(role: item.role, size: 28)
+                MonogramTile(name: item.name, source: item.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(item.name)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
-                        SourceBadge(source: item.source, size: 12)
+                            .layoutPriority(1)
                         RoleTag(role: item.role)
                         AgentScopeChips(item: item)
                     }
                     if let desc = item.description, !desc.isEmpty {
-                        Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.tertiary).lineLimit(1)
+                        Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
-                trailing.fixedSize()
             }
+        } trailing: {
+            trailing
         } menu: {
             agentItemMenu(item, service: service, onOpen: onOpen, onToggle: onToggle, onDelete: onDelete)
         }
     }
 
+    /// Fixed-width columns (calls · model · control) so every row's switch lines up, whether or
+    /// not the agent has been called
     @ViewBuilder private var trailing: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
+            Text(item.calls.map { L10n.format("Called %@ times", zhHans: "调用 %@ 次", String($0)) } ?? "")
+                .font(Theme.font.themedMono(11, .semibold)).foregroundStyle(Theme.brandFg)
+                .lineLimit(1)
+                .frame(width: 96, alignment: .trailing)
             Text(item.model).font(Theme.font.themed(11)).foregroundStyle(.secondary)
-            if let calls = item.calls {
-                Text(L10n.format("Called %@ times", zhHans: "调用 %@ 次", String(calls)))
-                    .font(Theme.font.themedMono(10.5)).foregroundStyle(.tertiary)
-            }
+                .lineLimit(1).truncationMode(.middle)
+                .frame(width: 64, alignment: .trailing)
             AgentEnableControl(item: item, onToggle: onToggle)
+                .frame(width: 44, alignment: .trailing)
         }
     }
 }

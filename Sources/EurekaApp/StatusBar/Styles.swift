@@ -1340,47 +1340,67 @@ struct LuluLogoTile: View {
 
 // MARK: - Unified knowledge list row (shared by list mode, modeled on the Sessions page's SessionRow)
 
-/// Refined full-width row: content slot (logo at left + two lines of text + status at right) +
-/// actions that appear on hover; hover highlight + thin purple bar on the left edge; clicking the
-/// row opens detail; the context menu is passed in by callers per page. Recommended content layout:
-/// `HStack { icon; VStack{ title row; description row }; Spacer; trailing accessory }`.
-struct KnowledgeRow<Content: View, Menu: View>: View {
+/// Refined full-width row: content slot (logo at left + two lines of text) + an optional trailing
+/// accessory column (stats / switch) + actions that appear on hover; hover highlight + thin purple
+/// bar on the left edge; clicking the row opens detail; the context menu is passed in by callers per
+/// page. The hover actions float over the trailing edge of the *content* slot, never over the
+/// trailing accessory: an overlay on the whole row used to cover the row's `MiniSwitch`, so a click
+/// aimed at the switch landed on Delete / Finder instead. Rows whose accessory is interactive must
+/// therefore pass it through `trailing`, not inside `content`.
+struct KnowledgeRow<Content: View, Trailing: View, Menu: View>: View {
     var enabled = true
     var actions: [CardAction] = []
     let onOpen: () -> Void
     @ViewBuilder var content: () -> Content
+    @ViewBuilder var trailing: () -> Trailing
     @ViewBuilder var menu: () -> Menu
 
     @State private var hovering = false
 
     var body: some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .opacity(enabled ? 1 : 0.6)
-            .background(
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(hovering ? Theme.brandFill(0.06) : Color.clear)
-                    if hovering {
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(Theme.brand)
-                            .frame(width: 3)
-                            .padding(.vertical, 5)
-                    }
-                })
-            .overlay(alignment: .trailing) {
-                if hovering, !actions.isEmpty {
-                    KnowledgeCardActions(actions: actions)
-                        .padding(.trailing, 8)
-                        .transition(.opacity)
-                }
+        HStack(spacing: 8) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if hovering, !actions.isEmpty {
+                KnowledgeCardActions(actions: actions)
+                    .transition(.opacity)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { onOpen() }
-            .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
-            .contextMenu { menu() }
+            trailing().fixedSize()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .opacity(enabled ? 1 : 0.6)
+        .background(
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(hovering ? Theme.brandFill(0.06) : Color.clear)
+                if hovering {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Theme.brand)
+                        .frame(width: 3)
+                        .padding(.vertical, 5)
+                }
+            })
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        .contextMenu { menu() }
+    }
+}
+
+extension KnowledgeRow where Trailing == EmptyView {
+    /// Rows without a separate accessory column (or without hover actions to collide with it)
+    init(
+        enabled: Bool = true,
+        actions: [CardAction] = [],
+        onOpen: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder menu: @escaping () -> Menu
+    ) {
+        self.init(
+            enabled: enabled, actions: actions, onOpen: onOpen,
+            content: content, trailing: { EmptyView() }, menu: menu)
     }
 }
 
@@ -1526,6 +1546,8 @@ struct StatOverviewCard: View {
                     if let trailingNote {
                         Text(trailingNote).font(Theme.font.themedMono(11))
                             .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                 }
             }
@@ -1614,19 +1636,38 @@ struct SourceFilterBar: View {
     let totalCount: Int
     let sources: [AgentSource]
     let count: (AgentSource) -> Int
+    /// One horizontally scrolling line instead of wrapping: a page with a dozen sources would
+    /// otherwise spend three chip rows above the list
+    var singleLine = false
 
     var body: some View {
-        FlowLayout(spacing: 10, lineSpacing: 10) {
-            SourceFilterChip(
-                source: nil, allIcon: allIcon, label: allLabel,
-                count: totalCount, isSelected: selected == nil
-            ) { selected = nil }
-            ForEach(sources, id: \.self) { source in
-                SourceFilterChip(
-                    source: source, allIcon: allIcon, label: source.displayName,
-                    count: count(source), isSelected: selected == source
-                ) { selected = (selected == source ? nil : source) }
+        if singleLine {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { chips }
+                    // Room for the brutal chips' offset shadow, which the scroll view would clip;
+                    // the trailing inset lets the last chip scroll clear of the fade
+                    .padding(.bottom, 4).padding(.trailing, 28)
             }
+            // Fade the trailing edge so chips cut off by the window read as "scroll for more"
+            .mask(
+                LinearGradient(
+                    stops: [.init(color: .black, location: 0.94), .init(color: .clear, location: 1)],
+                    startPoint: .leading, endPoint: .trailing))
+        } else {
+            FlowLayout(spacing: 10, lineSpacing: 10) { chips }
+        }
+    }
+
+    @ViewBuilder private var chips: some View {
+        SourceFilterChip(
+            source: nil, allIcon: allIcon, label: allLabel,
+            count: totalCount, isSelected: selected == nil
+        ) { selected = nil }
+        ForEach(sources, id: \.self) { source in
+            SourceFilterChip(
+                source: source, allIcon: allIcon, label: source.displayName,
+                count: count(source), isSelected: selected == source
+            ) { selected = (selected == source ? nil : source) }
         }
     }
 }
@@ -1716,26 +1757,61 @@ struct TerminalBadge: View {
     }
 }
 
-/// Agents role tile: same tile spec as SourceLogoTile (purple-fill light-framed rounded square),
-/// with the content swapped for the role's single-character glyph (`AgentRole.glyph`). Tile shape /
-/// lines / colors are thus identical across the four pages; role colors stay only on RoleTag.
-struct RoleAvatar: View {
-    let role: AgentRole
+/// Name tile for knowledge items that carry no icon of their own (skills): the item's initials
+/// on the same tile as `SourceLogoTile`, with the install source as a corner badge.
+/// Rows become tellable apart by name at a glance without inventing a category the data does not
+/// have (a keyword-guessed category mislabels most items on any machine but the one it was tuned on).
+struct MonogramTile: View {
+    let name: String
+    var source: AgentSource?
     var size: CGFloat = 28
 
+    /// `writing-notion-docs` → `WN`, `research` → `Re`, a CJK name → its first character: the first letters of the
+    /// first two words, or the first two letters of a single word.
+    static func initials(of name: String) -> String {
+        let words = name.split { !$0.isLetter && !$0.isNumber }
+        guard let first = words.first, let lead = first.first else { return "?" }
+        if !lead.isASCII { return String(lead) }
+        if words.count >= 2, let second = words[1].first, second.isASCII {
+            return (String(lead) + String(second)).uppercased()
+        }
+        let pair = first.prefix(2)
+        return pair.prefix(1).uppercased() + pair.dropFirst().lowercased()
+    }
+
     var body: some View {
+        let hard = ThemeStyle.current.isHardEdged
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
             .fill(TileSpec.fill(Theme.brand))
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
-                        lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
+                        hard ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        lineWidth: hard ? Theme.cardBorderWidth : 0.5))
             .overlay(
-                Text(role.glyph)
-                    .font(.system(size: size * 0.42, weight: .semibold))
+                Text(Self.initials(of: name))
+                    .font(Theme.font.themedMono(size * 0.4, .bold))
                     .foregroundStyle(Theme.brandFg))
+            .overlay(alignment: .bottomTrailing) {
+                if let source {
+                    let badge = max(14, (size * 0.5).rounded())
+                    Circle()
+                        .fill(Theme.surface)
+                        .frame(width: badge, height: badge)
+                        .overlay(
+                            Circle().strokeBorder(
+                                hard ? Theme.cardBorder : Theme.hairline,
+                                lineWidth: hard ? 1.2 : 0.5))
+                        .overlay(SourceBadge(source: source, size: badge * 0.68))
+                        .offset(x: 4, y: 4)
+                }
+            }
+            // Reserve the badge's overhang even without one, so tiles with and without a badge
+            // (a folded row spanning several CLIs has none) keep the same column width
+            .padding(.trailing, 4)
+            .padding(.bottom, 4)
+            .help(source?.displayName ?? name)
     }
 }
 
