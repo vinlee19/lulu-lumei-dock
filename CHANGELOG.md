@@ -16,6 +16,12 @@ this project uses [Semantic Versioning](https://semver.org/).
   session's first turn can push the prompt and every `cwd`-bearing line out
   of the transcript tail within 300ms, so `cwd` is now backfilled from the
   next event instead of staying empty.
+- **Sessions with a huge first message get their name and project back.**
+  The session list reads the first 64KB of each Claude transcript; when the
+  first lines are huge (an automated review whose first prompt carries a
+  whole diff), that window held only half a line, so the session showed as
+  a bare id with no project. When the head yields neither a working
+  directory nor any name, the last 64KB is read as well.
 - **Archived or closed Claude sessions leave the island right away.** Without
   hooks, a session whose Claude process had exited (archived in Desktop,
   swept by Desktop's idle reaper, or a scheduled task that finished) stayed in

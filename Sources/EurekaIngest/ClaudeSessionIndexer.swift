@@ -95,8 +95,14 @@ public enum ClaudeSessionIndexer {
     /// ai-title → first real prompt. Desktop's first inline custom-title sits at a median offset of
     /// 189KB, so the 64KB head usually misses it and the sidecar goes first (one small read). The
     /// head is not widened to find titles — that would be 300 sessions × 64KB of JSON parsing.
+    ///
+    /// One exception reads the last `tailBytes` too: a head that yields neither cwd nor any name.
+    /// That happens when the first lines are huge (an automated review whose first prompt carries
+    /// a whole diff: a 59KB queue line, then a 59KB prompt line cut off by the window), and the
+    /// list showed a bare id with no project. Titles are rewritten as the session goes, and every
+    /// assistant line carries cwd, so the tail has both.
     static func headInfo(
-        fileURL: URL, headBytes: Int = 65536
+        fileURL: URL, headBytes: Int = 65536, tailBytes: Int = 65536
     ) -> (cwd: String?, name: String?, startedAt: Date?) {
         guard
             let handle = FileHandle(forReadingAtPath: fileURL.path),
@@ -133,6 +139,40 @@ public enum ClaudeSessionIndexer {
             // custom-title and ai-title never coexist in one file: either one is enough to stop
             if cwd != nil && startedAt != nil && (customTitle != nil || aiTitle != nil) { break }
         }
+        if cwd == nil || (customTitle == nil && aiTitle == nil && firstPrompt == nil) {
+            let tail = tailInfo(fileURL: fileURL, tailBytes: tailBytes)
+            cwd = cwd ?? tail.cwd
+            customTitle = customTitle ?? tail.customTitle
+            aiTitle = aiTitle ?? tail.aiTitle
+        }
         return (cwd, customTitle ?? aiTitle ?? firstPrompt, startedAt)
+    }
+
+    /// The last `tailBytes`: latest cwd and latest title of each kind (the first, possibly cut
+    /// off, line is skipped like any unparsable one)
+    private static func tailInfo(
+        fileURL: URL, tailBytes: Int
+    ) -> (cwd: String?, customTitle: String?, aiTitle: String?) {
+        guard let handle = FileHandle(forReadingAtPath: fileURL.path) else { return (nil, nil, nil) }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return (nil, nil, nil) }
+        let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+        guard (try? handle.seek(toOffset: start)) != nil,
+              let data = try? handle.readToEnd()
+        else { return (nil, nil, nil) }
+        var cwd: String?
+        var customTitle: String?
+        var aiTitle: String?
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            guard
+                let object = try? JSONSerialization.jsonObject(with: Data(line)),
+                let root = object as? [String: Any]
+            else { continue }
+            if let value = root["cwd"] as? String { cwd = value }
+            if let (isCustom, title) = ClaudeSessionTitle.line(root) {
+                if isCustom { customTitle = title } else { aiTitle = title }
+            }
+        }
+        return (cwd, customTitle, aiTitle)
     }
 }
