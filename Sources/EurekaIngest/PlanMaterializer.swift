@@ -181,6 +181,16 @@ public enum PlanMaterializer {
         var newState = CodexScanState()
         var changed = 0
         var expected = Set<String>()
+        var parsedSinceSave = 0
+        /// Saved every few parsed rollouts, merged over the old state for files not reached yet: a
+        /// first scan parses the whole history, and quitting midway used to throw all of it away
+        func saveProgress() {
+            var snapshot = oldState
+            snapshot.files.merge(newState.files) { _, new in new }
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+            try? data.write(to: stateURL, options: .atomic)
+        }
         for case let rel as String in enumerator {
             let name = (rel as NSString).lastPathComponent
             guard name.hasPrefix("rollout-"), name.hasSuffix(".jsonl") else { continue }
@@ -202,8 +212,14 @@ public enum PlanMaterializer {
                 continue
             }
 
-            guard let artifact = extractCodexPlan(
-                fileURL, stem: stem, threadNames: threadNames) else {
+            parsedSinceSave += 1
+            if parsedSinceSave >= 25 {
+                saveProgress()
+                parsedSinceSave = 0
+            }
+            guard let artifact = autoreleasepool(invoking: {
+                extractCodexPlan(fileURL, stem: stem, threadNames: threadNames)
+            }) else {
                 // Record the fingerprint even when there is no plan, so it is not re-parsed every
                 // cycle
                 newState.files[fileURL.path] = .init(
@@ -272,7 +288,7 @@ public enum PlanMaterializer {
         var finalPlan: String?
         var latestChecklist: [[String: Any]]?
 
-        forEachJSONLine(url) { root in
+        forEachJSONLine(url, onlyContaining: codexPlanMarkers) { root in
             let rootType = root["type"] as? String
             let payload = root["payload"] as? [String: Any] ?? [:]
             let payloadType = payload["type"] as? String
@@ -955,8 +971,21 @@ public enum PlanMaterializer {
     }
 
     /// Parses jsonl line by line (bad lines are skipped); body returning false stops early
-    private static func forEachJSONLine(_ url: URL, _ body: ([String: Any]) -> Bool) {
+    /// Every line `extractCodexPlan` acts on contains one of these: its session / title lines by
+    /// type name, and every plan shape (`update_plan`, `<proposed_plan>`, `"type":"plan"`) the word
+    /// plan. Other lines (tool output, ordinary replies: nearly all of a rollout) are skipped
+    /// without JSON parsing, which was the whole cost of a first Plans scan.
+    private static let codexPlanMarkers: [Data] = [
+        "session_meta", "user_message", "thread_name_updated", "plan",
+    ].map { Data($0.utf8) }
+
+    private static func forEachJSONLine(
+        _ url: URL, onlyContaining markers: [Data]? = nil, _ body: ([String: Any]) -> Bool
+    ) {
         CodexJSONLReader.forEachCompleteLine(url, includeTrailingLine: true) { line in
+            if let markers, !markers.contains(where: { line.range(of: $0) != nil }) {
+                return true
+            }
             guard let root = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
             else { return true }
             return body(root)

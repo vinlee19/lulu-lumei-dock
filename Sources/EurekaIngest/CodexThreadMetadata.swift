@@ -6,6 +6,10 @@ import Foundation
 /// to fit a fixed 16/64KB window. Returns the byte offset after the last complete newline, so
 /// callers can keep an unfinished half line for the next read.
 enum CodexJSONLReader {
+    /// Lines are sliced out by index and the buffer is compacted once per chunk. The previous
+    /// version re-copied the rest of the buffer after every line and re-searched long lines from
+    /// their start on every chunk, which measured ~3.4 MB/s; first-install Plans and session
+    /// discovery walk whole rollout histories through here.
     @discardableResult
     static func forEachCompleteLine(
         _ url: URL,
@@ -16,49 +20,69 @@ enum CodexJSONLReader {
         guard let handle = FileHandle(forReadingAtPath: url.path) else { return 0 }
         defer { try? handle.close() }
 
+        let newline = UInt8(ascii: "\n")
         var buffer = Data()
+        var lineStart = 0   // start of the pending line in buffer
+        var scanFrom = 0    // bytes before this have been searched for a newline already
         var consumed: UInt64 = 0
         var skippedBytes: UInt64 = 0
         var droppingOversizeLine = false
 
-        while let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+        func nextNewline(from start: Int) -> Int? {
+            guard start < buffer.count else { return nil }
+            return buffer.withUnsafeBytes { raw -> Int? in
+                guard let base = raw.baseAddress,
+                      let hit = memchr(base + start, Int32(newline), raw.count - start)
+                else { return nil }
+                return base.distance(to: UnsafeRawPointer(hit))
+            }
+        }
+
+        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
             buffer.append(chunk)
 
             if droppingOversizeLine {
-                guard let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) else {
+                guard let end = nextNewline(from: scanFrom) else {
                     skippedBytes += UInt64(buffer.count)
                     buffer.removeAll(keepingCapacity: true)
+                    scanFrom = 0
                     continue
                 }
-                let next = buffer.index(after: newline)
-                skippedBytes += UInt64(buffer.distance(from: buffer.startIndex, to: next))
+                skippedBytes += UInt64(end + 1)
                 consumed += skippedBytes
                 skippedBytes = 0
-                buffer = Data(buffer[next...])
+                lineStart = end + 1
+                scanFrom = lineStart
                 droppingOversizeLine = false
             }
 
-            while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                let line = Data(buffer[..<newline])
-                let next = buffer.index(after: newline)
-                let completeBytes = buffer.distance(from: buffer.startIndex, to: next)
-                consumed += UInt64(completeBytes)
-                buffer = Data(buffer[next...])
-
+            while let end = nextNewline(from: max(scanFrom, lineStart)) {
+                let line = Data(buffer[lineStart..<end])
+                consumed += UInt64(end + 1 - lineStart)
+                lineStart = end + 1
+                scanFrom = lineStart
                 if line.count <= maxLineBytes, !line.isEmpty, !body(line) {
                     return consumed
                 }
             }
+            scanFrom = buffer.count
 
+            // Compact once per chunk: keep only the pending partial line
+            if lineStart > 0 {
+                buffer.removeSubrange(0..<lineStart)
+                scanFrom -= lineStart
+                lineStart = 0
+            }
             if buffer.count > maxLineBytes {
                 skippedBytes = UInt64(buffer.count)
                 buffer.removeAll(keepingCapacity: true)
+                scanFrom = 0
                 droppingOversizeLine = true
             }
         }
         if includeTrailingLine, !droppingOversizeLine,
            !buffer.isEmpty, buffer.count <= maxLineBytes {
-            _ = body(buffer)
+            _ = body(Data(buffer))
             consumed += UInt64(buffer.count)
         }
         return consumed
