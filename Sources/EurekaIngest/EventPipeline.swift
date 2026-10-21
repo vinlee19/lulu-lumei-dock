@@ -2,7 +2,8 @@ import Foundation
 import EurekaKit
 
 /// Event pipeline: merges the spool (Claude hooks + Codex notify) and the Codex rollout tailer,
-/// applies dedup and enrichment (error sniffing / ai-title), then serializes into a single handler.
+/// applies dedup and enrichment (error sniffing / session title), then serializes into a single
+/// handler.
 public final class EventPipeline {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
     /// Audit side channel: operation events decoded from Claude PostToolUse hooks (bypass
@@ -192,7 +193,7 @@ public final class EventPipeline {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
-        watcher.start()
+        watcher.start(pollInterval: 2)
         claudeWatcher = watcher
     }
 
@@ -273,14 +274,14 @@ public final class EventPipeline {
             }
         }
 
-        // Claude "success" finish → sniff the tail: API errors upgrade to error; ai-title upgrades
-        // the title
+        // Claude "success" finish → sniff the tail: API errors upgrade to error; the session title
+        // (custom-title) upgrades the title
         if event.source == .claude,
            case .taskFinished(outcome: .success, let title, let detail) = event.kind,
            let transcriptPath = event.transcriptPath {
             let findings = ClaudeErrorSniffer.sniff(transcriptPath: transcriptPath)
             var enriched = event
-            let newTitle = findings.aiTitle ?? title
+            let newTitle = findings.sessionTitle ?? title
             if findings.isError {
                 enriched.kind = .taskFinished(
                     outcome: .error,
@@ -294,8 +295,8 @@ public final class EventPipeline {
         }
 
         // Claude heartbeat (throttled to 20s) / awaiting confirmation (immediate, when the user
-        // most needs to identify the session) → read the transcript tail: context usage + ai-title
-        // session name
+        // most needs to identify the session) → read the transcript tail: context usage + session
+        // name (custom-title)
         if event.source == .claude, let transcriptPath = event.transcriptPath {
             let now = Date()
             var shouldInspect = false
@@ -325,8 +326,8 @@ public final class EventPipeline {
                 }
                 // The title arrives before the waiting event, so the waiting card shows the session
                 // name right away
-                if let aiTitle = info.aiTitle {
-                    events.insert(extra(.titleUpdate(title: aiTitle)), at: 0)
+                if let title = info.sessionTitle {
+                    events.insert(extra(.titleUpdate(title: title)), at: 0)
                 }
                 if let percent = info.contextPercent {
                     events.append(extra(.contextUpdate(percent: percent)))

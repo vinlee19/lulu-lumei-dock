@@ -51,7 +51,7 @@ public struct TaskEvent: Equatable, Sendable {
         case compacting
         /// Session context-window usage update (0-100)
         case contextUpdate(percent: Double)
-        /// Task title upgrade (e.g. the transcript's ai-title, a better session name than the raw
+        /// Task title upgrade (e.g. the transcript's custom-title / ai-title, a better session name than the raw
         /// prompt)
         case titleUpdate(title: String)
         /// Subagent list snapshot update (from the Claude transcript watcher scanning the

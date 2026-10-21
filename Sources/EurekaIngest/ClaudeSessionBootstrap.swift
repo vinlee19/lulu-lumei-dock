@@ -60,9 +60,22 @@ public enum ClaudeSessionBootstrap {
         /// Outcome of the latest end marker (user interrupt → interrupted, anything else → success;
         /// API errors are escalated to error by EventPipeline's ClaudeErrorSniffer)
         public var turnEndOutcome: TaskOutcome?
+        /// Inline custom-title (Desktop auto-naming / `/rename`); when the tail has none this already
+        /// fell back to the sidecar `custom-title.json`
+        public var customTitle: String?
+        /// Legacy ai-title (not written since 2.1.27x; only old sessions have it)
         public var aiTitle: String?
         public var contextPercent: Double?
         public var earliestAt: Date?
+        /// The last line is `cost-state`: the final line a Claude process writes when it **exits**
+        /// (archive / Desktop's idle sweep / a scheduled task finishing). A fresh live session never
+        /// has it, but a **resumed** process writes one at startup too, so on its own it cannot
+        /// prove death: `ClaudeResumeProbe` must also find no live process carrying this id.
+        public var exitMarkerLast: Bool = false
+
+        /// Session name: the custom one (user / Desktop) wins over the auto-generated one (see
+        /// `ClaudeSessionTitle`)
+        public var sessionTitle: String? { customTitle ?? aiTitle }
 
         /// Task name: summarized after stripping injected blocks (e.g. background-task
         /// `<task-notification>` reports); stripped to empty → nil, and TaskStore keeps the
@@ -73,10 +86,16 @@ public enum ClaudeSessionBootstrap {
     }
 
     /// Live-state verdict for a single transcript (public for tests).
+    /// `isResumedAlive`: whether a live process carries this session id (defaults to the process
+    /// table; tests inject it).
     public static func inspectSession(
-        fileURL: URL, mtime: Date, tailBytes: Int = 262144
+        fileURL: URL, mtime: Date, tailBytes: Int = 262144,
+        isResumedAlive: (String) -> Bool = ClaudeResumeProbe.isAlive
     ) -> [TaskEvent] {
         guard let snapshot = classify(fileURL: fileURL, tailBytes: tailBytes) else { return [] }
+        // The writer has exited → don't register: otherwise archived / swept sessions would hang in
+        // the island's idle list for an hour
+        if snapshot.exitMarkerLast, !isResumedAlive(snapshot.sessionId) { return [] }
 
         func event(_ kind: TaskEvent.Kind, at date: Date) -> TaskEvent {
             TaskEvent(
@@ -95,8 +114,8 @@ public enum ClaudeSessionBootstrap {
         } else {
             events.append(event(.sessionStarted, at: mtime))
         }
-        if let aiTitle = snapshot.aiTitle {
-            events.append(event(.titleUpdate(title: aiTitle), at: mtime))
+        if let title = snapshot.sessionTitle {
+            events.append(event(.titleUpdate(title: title), at: mtime))
         }
         if let percent = snapshot.contextPercent {
             events.append(event(.contextUpdate(percent: percent), at: mtime))
@@ -122,6 +141,7 @@ public enum ClaudeSessionBootstrap {
 
         var sessionId: String?
         var cwd: String?
+        var customTitle: String?
         var aiTitle: String?
         var lastPromptAt: Date?
         var lastPromptText: String?
@@ -132,6 +152,8 @@ public enum ClaudeSessionBootstrap {
         /// criterion for the middle of a very long turn
         var hasMainChainActivity = false
         var earliestAt: Date?
+        /// Type of the last parsable line in the tail window (exit-marker check)
+        var lastType: String?
 
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard
@@ -139,6 +161,7 @@ public enum ClaudeSessionBootstrap {
                 let root = object as? [String: Any],
                 let type = root["type"] as? String
             else { continue }
+            lastType = type
             if sessionId == nil { sessionId = root["sessionId"] as? String }
             if cwd == nil { cwd = root["cwd"] as? String }
             let timestamp = (root["timestamp"] as? String).flatMap {
@@ -147,8 +170,11 @@ public enum ClaudeSessionBootstrap {
             if let timestamp, earliestAt == nil { earliestAt = timestamp }
 
             switch type {
-            case "ai-title":
-                aiTitle = root["aiTitle"] as? String
+            case "custom-title", "ai-title":
+                // Latest line of each kind wins (after /rename the new name comes later)
+                if let (isCustom, title) = ClaudeSessionTitle.line(root) {
+                    if isCustom { customTitle = title } else { aiTitle = title }
+                }
 
             case "user":
                 guard root["isMeta"] as? Bool != true,
@@ -206,6 +232,11 @@ public enum ClaudeSessionBootstrap {
         }
 
         guard let sessionId else { return nil }
+        // No inline custom-title in the tail (CLI session / pushed out by huge lines) → fall back to
+        // the sidecar, one small file read
+        if customTitle == nil {
+            customTitle = ClaudeSessionTitle.sidecar(transcriptURL: fileURL)
+        }
         let running: Bool
         if let promptAt = lastPromptAt {
             // Prompt visible with no end marker after it → in flight
@@ -227,9 +258,11 @@ public enum ClaudeSessionBootstrap {
             promptText: lastPromptText,
             turnEndAt: lastTurnEndAt,
             turnEndOutcome: lastTurnEndOutcome,
+            customTitle: customTitle,
             aiTitle: aiTitle,
             contextPercent: contextPercent,
-            earliestAt: earliestAt
+            earliestAt: earliestAt,
+            exitMarkerLast: lastType == "cost-state"
         )
     }
 

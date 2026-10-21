@@ -6,7 +6,8 @@ public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
     public var source: AgentSource
     public var id: String          // session uuid
     public var cwd: String?
-    /// ai-title / first-prompt summary; nil = only the short id can be shown
+    /// Session name (custom-title sidecar / inline → legacy ai-title → first-prompt summary); nil =
+    /// only the short id can be shown
     public var name: String?
     /// When the session was first active (transcript first-line timestamp); nil = no timestamp in
     /// the head
@@ -45,9 +46,9 @@ public struct AgentSessionInfo: Equatable, Sendable, Identifiable {
 }
 
 /// Scans ~/.claude/projects to build the session index:
-/// file = session (mtime = last active, size sortable), name extracted from the file's first 64KB
-/// (ai-title is generated after the first response, so it's usually in the head; a very long first
-/// turn falls back to the first prompt).
+/// file = session (mtime = last active, size sortable); cwd / start time come from the file's first
+/// 64KB, the name first from the sidecar `<id>/custom-title.json` (see `ClaudeSessionTitle`), with
+/// the head only as a fallback.
 public enum ClaudeSessionIndexer {
     public static func index(
         projectsRoot: URL,
@@ -89,8 +90,11 @@ public enum ClaudeSessionIndexer {
         }
     }
 
-    /// First 64KB: cwd + name (ai-title first, first real prompt as fallback) + session start time
-    /// (first-line timestamp)
+    /// First 64KB: cwd + name + session start time (first-line timestamp).
+    /// Name priority: sidecar `custom-title.json` → inline custom-title in the head → legacy
+    /// ai-title → first real prompt. Desktop's first inline custom-title sits at a median offset of
+    /// 189KB, so the 64KB head usually misses it and the sidecar goes first (one small read). The
+    /// head is not widened to find titles — that would be 300 sessions × 64KB of JSON parsing.
     static func headInfo(
         fileURL: URL, headBytes: Int = 65536
     ) -> (cwd: String?, name: String?, startedAt: Date?) {
@@ -101,6 +105,7 @@ public enum ClaudeSessionIndexer {
         try? handle.close()
 
         var cwd: String?
+        var customTitle = ClaudeSessionTitle.sidecar(transcriptURL: fileURL)
         var aiTitle: String?
         var firstPrompt: String?
         var startedAt: Date?
@@ -113,21 +118,21 @@ public enum ClaudeSessionIndexer {
             if startedAt == nil, let ts = root["timestamp"] as? String {
                 startedAt = ClaudeSessionFirstTimestamp.parse(ts)
             }
-            switch root["type"] as? String {
-            case "ai-title":
-                if aiTitle == nil { aiTitle = root["aiTitle"] as? String }
-            case "user":
-                guard firstPrompt == nil,
+            if let (isCustom, title) = ClaudeSessionTitle.line(root) {
+                // The inline custom-title carries the same value as the sidecar; without a sidecar
+                // it is the name
+                if isCustom { customTitle = customTitle ?? title }
+                else if aiTitle == nil { aiTitle = title }
+            } else if root["type"] as? String == "user",
+                      firstPrompt == nil,
                       root["isMeta"] as? Bool != true,
                       let message = root["message"] as? [String: Any],
-                      let content = message["content"] as? String
-                else { continue }
+                      let content = message["content"] as? String {
                 firstPrompt = summarizeTitle(content)
-            default:
-                break
             }
-            if cwd != nil && aiTitle != nil && startedAt != nil { break }
+            // custom-title and ai-title never coexist in one file: either one is enough to stop
+            if cwd != nil && startedAt != nil && (customTitle != nil || aiTitle != nil) { break }
         }
-        return (cwd, aiTitle ?? firstPrompt, startedAt)
+        return (cwd, customTitle ?? aiTitle ?? firstPrompt, startedAt)
     }
 }

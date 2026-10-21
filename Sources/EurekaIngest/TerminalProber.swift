@@ -194,4 +194,42 @@ public enum TerminalProber {
         let path = String(cString: buffer)
         return path.isEmpty ? nil : path
     }
+
+    /// Process argv (`KERN_PROCARGS2`); another user's process / an exited one → nil.
+    /// A resumed Claude session carries its id in argv (`--resume=<id>`), the only clue without hooks
+    /// for "which process belongs to which session".
+    public static func processArguments(_ pid: Int32) -> [String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, UInt32(mib.count), &buffer, &size, nil, 0) == 0 else { return nil }
+        return parseProcArgs(Data(buffer.prefix(size)))
+    }
+
+    /// `KERN_PROCARGS2` buffer layout: int32 argc | executable path \0 | alignment \0s | argc
+    /// NUL-terminated arguments | environment…
+    /// Pure parsing, unit-tested; only argc arguments are taken and the environment is never read
+    /// (it may hold credentials).
+    public static func parseProcArgs(_ data: Data) -> [String]? {
+        guard data.count > 4 else { return nil }
+        let argc = Int(data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: Int32.self) })
+        guard argc >= 0 else { return nil }
+        var index = data.startIndex + 4
+        while index < data.endIndex, data[index] != 0 { index += 1 }  // executable path
+        while index < data.endIndex, data[index] == 0 { index += 1 }  // alignment padding
+        var args: [String] = []
+        var current: [UInt8] = []
+        while index < data.endIndex, args.count < argc {
+            let byte = data[index]
+            if byte == 0 {
+                args.append(String(decoding: current, as: UTF8.self))
+                current.removeAll(keepingCapacity: true)
+            } else {
+                current.append(byte)
+            }
+            index += 1
+        }
+        return args
+    }
 }
