@@ -76,6 +76,12 @@ final class PromptsService: ObservableObject {
     /// extraction fingerprint.
     /// Silently skips when there is no session data (sessionBrowser hasn't finished scanning; the
     /// next scan completion triggers it again).
+    /// Sessions one pass parses, newest first. A first install has every session pending, each
+    /// parsed in full (transcript + turn graphs); one unbounded pass held a core for minutes and
+    /// was behind a measured 5.5 GB peak. The rest follow in chained passes a few seconds apart,
+    /// each publishing what is done so far.
+    static let extractionBatch = 60
+
     func refresh() {
         guard !scanning else { return }
         let sessions = Array(sessionBrowser.sessionsById.values)
@@ -96,10 +102,13 @@ final class PromptsService: ObservableObject {
             }
             let now = Date()
             let fingerprints = (try? store.prompts.extractionFingerprints()) ?? [:]
-            let pending = sessions.filter { session in
+            let allPending = sessions.filter { session in
                 guard let last = fingerprints[session.id] else { return true }
                 return session.lastActiveAt > last
             }
+            .sorted { $0.lastActiveAt > $1.lastActiveAt }
+            let pending = Array(allPending.prefix(Self.extractionBatch))
+            let remaining = allPending.count - pending.count
             var sessionMeta: [String: AgentSessionInfo] = [:]
             for session in sessions { sessionMeta[session.id] = session }
             if !pending.isEmpty {
@@ -163,6 +172,9 @@ final class PromptsService: ObservableObject {
                 self.scheduleRebuild(debounce: false)
                 self.scanning = false
                 self.scanPhase = nil
+                if remaining > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.refresh() }
+                }
             }
         }
     }

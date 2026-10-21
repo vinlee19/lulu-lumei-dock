@@ -401,37 +401,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Launch warm-ups. The light config scans start right away; the three heavy ones (skills +
+    /// memory, plans, sessions + prompts) each parse a whole history on a first install, and
+    /// started together a few seconds apart they saturated every core next to the usage backfill
+    /// and pushed memory into swap, stalling even the cursor. So they run one after another, and
+    /// the first waits for the usage pass to publish. Each wait has a ceiling, so a stalled step
+    /// never holds the rest back. Opening a page still loads it at once.
     private func warmUpKnowledgeScans() {
-        let steps: [(delay: TimeInterval, label: String, run: () -> Void)] = [
-            (0.8, "agents", { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 self.agentConfig.refresh()
                 // MCP indexing goes in the same batch as agents (both lightweight config-file
                 // scans, milliseconds)
                 self.mcpService.refresh()
                 self.usageService.loadAgentStats()
-            }),
-            (1.5, "skills+memory", { [weak self] in
-                guard let self else { return }
-                self.skillMemory.refresh()
-                self.usageService.loadSkillStats()
-                // Prewarm the stat card's "hits this week" too, otherwise the number only appears
-                // after opening the page
-                self.usageService.loadSkillRanking(
-                    source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
-            }),
-            (3.0, "plans", { [weak self] in self?.plans.refresh() }),
-            // The session index feeds the prompt library (the scanning -> false subscription picks
-            // up extraction automatically)
-            (4.0, "sessions+prompts", { [weak self] in self?.sessionBrowser.refresh() }),
-        ]
-        for step in steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + step.delay) { [weak self] in
-                MainActor.assumeIsolated {
-                    step.run()
-                    self?.logLine("知识库预热启动 \(step.label)")
-                }
+                self.logLine("知识库预热启动 agents")
             }
+        }
+        whenReady(usageService.$summary.map { $0 != nil }, within: 120, label: "skills+memory") {
+            [weak self] in
+            guard let self else { return }
+            self.skillMemory.refresh()
+            self.usageService.loadSkillStats()
+            // Prewarm the stat card's "hits this week" too, otherwise the number only appears
+            // after opening the page
+            self.usageService.loadSkillRanking(
+                source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
+            self.whenReady(self.skillMemory.$lastScanAt.map { $0 != nil }, within: 60, label: "plans") {
+                [weak self] in
+                guard let self else { return }
+                self.plans.refresh()
+                // The session index feeds the prompt library (the scanning -> false subscription
+                // picks up extraction automatically)
+                self.whenReady(
+                    self.plans.$lastScanAt.map { $0 != nil }, within: 60, label: "sessions+prompts"
+                ) { [weak self] in self?.sessionBrowser.refresh() }
+            }
+        }
+    }
+
+    /// Runs `body` once on the main thread when `ready` first emits true, or after `within`
+    /// seconds, whichever comes first
+    private func whenReady<P: Publisher>(
+        _ ready: P, within limit: TimeInterval, label: String, _ body: @escaping () -> Void
+    ) where P.Output == Bool, P.Failure == Never {
+        var fired = false
+        var token: AnyCancellable?
+        let fire: () -> Void = { [weak self] in
+            guard !fired else { return }
+            fired = true
+            token?.cancel()
+            body()
+            self?.logLine("知识库预热启动 \(label)")
+        }
+        token = ready.filter { $0 }.first()
+            .receive(on: DispatchQueue.main)
+            .sink { _ in MainActor.assumeIsolated { fire() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit) {
+            MainActor.assumeIsolated { fire() }
         }
     }
 

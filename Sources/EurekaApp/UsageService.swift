@@ -178,6 +178,15 @@ final class UsageService: ObservableObject {
     /// When indexing last ran (accessed only on queue). Starts at distantPast so the first pass
     /// after launch indexes.
     private var lastIndexRun = Date.distantPast
+    /// Sessions one index pass may rebuild (see `TranscriptSearchIndexer.indexOnce`)
+    static let indexBatch = 120
+    /// Discovery reused while a truncated first index is still being worked through (discovery
+    /// itself costs seconds; the backfill runs on every scan tick until it catches up)
+    private var indexBacklog: (sessions: [AgentSessionInfo], at: Date)?
+    /// A scan is already queued: `refreshNow` callers (window shown, tab opened, price change)
+    /// coalesce into it instead of stacking full passes in front of the dashboard's loads
+    private let scanQueuedLock = NSLock()
+    private var scanQueued = false
 
     // The members below are accessed only on queue
     private var store: EurekaStore?
@@ -280,6 +289,9 @@ final class UsageService: ObservableObject {
                     conversationsRoot: AntigravityPaths.conversationsRoot(), store: store,
                     cwdResolver: { AntigravityPaths.cwd(dbURL: $0) })
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
+                // First index pass ~90s after launch: the first seconds belong to the usage backfill
+                // and the pages the user opens, not to parsing every transcript for search
+                self.lastIndexRun = Date().addingTimeInterval(-Self.indexInterval + 90)
                 PricingCatalogStore.shared.loadIfNeeded(paths: .app)
                 self.scanAndPublish()
             } catch {
@@ -354,7 +366,17 @@ final class UsageService: ObservableObject {
 
     /// Proactively refreshes once when the popover opens
     func refreshNow() {
-        queue.async { [weak self] in self?.scanAndPublish() }
+        scanQueuedLock.lock()
+        defer { scanQueuedLock.unlock() }
+        guard !scanQueued else { return }
+        scanQueued = true
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.scanQueuedLock.lock()
+            self.scanQueued = false
+            self.scanQueuedLock.unlock()
+            self.scanAndPublish()
+        }
     }
 
     /// Scans every (source, model, provider) seen in the ledger and picks out unpriced and
@@ -860,23 +882,41 @@ final class UsageService: ObservableObject {
             }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
-            // Full-text indexing does **not run at usage's cadence**: see indexInterval.
-            if Date().timeIntervalSince(lastIndexRun) >= Self.indexInterval,
-               UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
-                lastIndexRun = Date()
-                searchIndexer?.indexOnce(sessions: AgentSessionDiscovery.forIndexing())
-            }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             // One successful pass clears the previous error: occasional lock contention (during
             // launch warm-up/large-file indexing, another connection's write transaction exceeds
             // busy_timeout) recovers by the next pass, so the red text shouldn't linger.
+            // Published before full-text indexing, which on a first install is the longest step
+            // and used to keep the dashboard on its spinner until it finished.
             publish { $0.summary = summary; $0.lastError = nil }
             publishHistory(store: store)
             publishMonthOverview(store: store)
+            indexIfDue()
         } catch {
             HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
             publish { $0.lastError = L10n.format("Scan failed: %@", zhHans: "扫描失败: %@", String(describing: error)) }
         }
+    }
+
+    /// Full-text indexing does **not run at usage's cadence** (see indexInterval), except while a
+    /// capped pass left a backlog: then every scan tick takes the next batch, newest sessions
+    /// first, reusing one discovery.
+    private func indexIfDue() {
+        guard UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true,
+              let searchIndexer
+        else { return }
+        let now = Date()
+        let catchingUp = indexBacklog != nil
+        guard catchingUp || now.timeIntervalSince(lastIndexRun) >= Self.indexInterval else { return }
+        lastIndexRun = now
+        let sessions: [AgentSessionInfo]
+        if let backlog = indexBacklog, now.timeIntervalSince(backlog.at) < 600 {
+            sessions = backlog.sessions
+        } else {
+            sessions = AgentSessionDiscovery.forIndexing()
+        }
+        searchIndexer.indexOnce(sessions: sessions, maxRebuilds: Self.indexBatch)
+        indexBacklog = searchIndexer.lastPassTruncated ? (sessions, indexBacklog?.at ?? now) : nil
     }
 
     private func publishMonthOverview(store: EurekaStore) {

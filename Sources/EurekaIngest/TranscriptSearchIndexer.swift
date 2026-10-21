@@ -12,6 +12,10 @@ public final class TranscriptSearchIndexer {
     static let maxDocChars = 8192
 
     private let store: EurekaStore
+    /// The last pass stopped at `maxRebuilds` with changed sessions left over (a first install
+    /// or a post-migration reindex); the caller should come back soon rather than at its usual
+    /// cadence
+    public private(set) var lastPassTruncated = false
 
     public init(store: EurekaStore) {
         self.store = store
@@ -27,8 +31,12 @@ public final class TranscriptSearchIndexer {
 
     /// One index pass over an injected session list (test entry point; production uses
     /// indexOnce())
+    /// `maxRebuilds` caps how many changed sessions one pass parses. A first install has every
+    /// session changed (thousands, each parsed in full), which used to hold the caller's queue for
+    /// minutes in one block; capped passes index the most recent sessions first and spread the
+    /// rest over later passes.
     @discardableResult
-    public func indexOnce(sessions: [AgentSessionInfo]) -> Int {
+    public func indexOnce(sessions: [AgentSessionInfo], maxRebuilds: Int = .max) -> Int {
         // Exclude SQLite-backed sources (opencode / hermes / cursor): this index is keyed by
         // transcriptPath (replaceDocs(path:) + prune(keeping:)), but all their sessions share one
         // .db path, so each session would overwrite the previous one's docs wholesale.
@@ -38,8 +46,13 @@ public final class TranscriptSearchIndexer {
         }
         guard let fingerprints = try? store.search.fileFingerprints() else { return 0 }
         var rebuilt = 0
+        lastPassTruncated = false
         let fm = FileManager.default
-        for session in supported {
+        for session in supported.sorted(by: { $0.lastActiveAt > $1.lastActiveAt }) {
+            if rebuilt >= maxRebuilds {
+                lastPassTruncated = true
+                break
+            }
             // One pool per session (return = continue): a full reindex (transcript_fts rebuilt
             // after a migration) parses every session back to back in one queue block, so parse
             // transients must be drained per session
