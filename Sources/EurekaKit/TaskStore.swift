@@ -25,12 +25,23 @@ public final class TaskStore {
     @discardableResult
     public func apply(_ event: TaskEvent) -> [TaskStoreEffect] {
         let key = AgentTask.key(source: event.source, sessionId: event.sessionId)
-        let effects = applyKind(event, key: key)
+        var effects = applyKind(event, key: key)
         // Backfill the "session first-start time" from any event onto the task (set only once)
         if let sessionStart = event.sessionStartedAt,
            var task = activeTasks[key], task.sessionStartedAt == nil {
             task.sessionStartedAt = sessionStart
             activeTasks[key] = task
+        }
+        // cwd is likewise set once and never overwritten: the first snapshot may land at the moment
+        // the tail window holds only metadata lines (Desktop's first turn injects 160KB-class
+        // attachment lines, pushing the prompt and every cwd-bearing line out of the 256KB tail
+        // within 300ms of the prompt), and without it the project name used as the task-name
+        // fallback stays empty forever. Refresh the UI once it lands: a heartbeat with unchanged
+        // state normally returns [], but the project name only becomes visible now.
+        if let cwd = event.cwd, var task = activeTasks[key], task.cwd == nil {
+            task.cwd = cwd
+            activeTasks[key] = task
+            if !effects.contains(.activeTasksChanged) { effects.append(.activeTasksChanged) }
         }
         // Terminal ownership, by contrast, is **updated every time** (not set once): after a
         // session is resumed in another terminal, jumping must land on the current one, not the

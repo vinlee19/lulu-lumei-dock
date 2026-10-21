@@ -3,17 +3,18 @@ import Foundation
 /// Transcript tail sniffing after a Stop event:
 /// - Last assistant is an API error line (model=="<synthetic>" / isApiErrorMessage) → escalate to
 ///   error
-/// - Also picks up the ai-title line to upgrade the task title
+/// - Also picks up the session name (custom-title line → sidecar → legacy ai-title, see
+///   `ClaudeSessionTitle`) to upgrade the task title
 public enum ClaudeErrorSniffer {
     public struct Findings: Equatable {
         public var isError = false
         public var errorDetail: String?
-        public var aiTitle: String?
+        public var sessionTitle: String?
 
-        public init(isError: Bool = false, errorDetail: String? = nil, aiTitle: String? = nil) {
+        public init(isError: Bool = false, errorDetail: String? = nil, sessionTitle: String? = nil) {
             self.isError = isError
             self.errorDetail = errorDetail
-            self.aiTitle = aiTitle
+            self.sessionTitle = sessionTitle
         }
     }
 
@@ -31,8 +32,10 @@ public enum ClaudeErrorSniffer {
 
         var findings = Findings()
         var sawLatestAssistant = false
-        // Back to front: the newest assistant line decides whether it errored; the newest ai-title
-        // becomes the title
+        var customTitle: String?
+        var aiTitle: String?
+        // Back to front: the newest assistant line decides whether it errored; the newest title
+        // line becomes the session name
         for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
             guard
                 let object = try? JSONSerialization.jsonObject(with: Data(line)),
@@ -40,8 +43,9 @@ public enum ClaudeErrorSniffer {
                 let type = root["type"] as? String
             else { continue }
 
-            if type == "ai-title", findings.aiTitle == nil {
-                findings.aiTitle = root["aiTitle"] as? String
+            if let (isCustom, title) = ClaudeSessionTitle.line(root) {
+                if isCustom { if customTitle == nil { customTitle = title } }
+                else if aiTitle == nil { aiTitle = title }
             }
 
             if type == "assistant", !sawLatestAssistant {
@@ -64,8 +68,11 @@ public enum ClaudeErrorSniffer {
                 }
             }
 
-            if sawLatestAssistant && findings.aiTitle != nil { break }
+            if sawLatestAssistant && (customTitle != nil || aiTitle != nil) { break }
         }
+        findings.sessionTitle = customTitle
+            ?? ClaudeSessionTitle.sidecar(transcriptPath: transcriptPath)
+            ?? aiTitle
         return findings
     }
 }

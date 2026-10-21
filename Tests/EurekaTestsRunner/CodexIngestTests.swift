@@ -441,6 +441,13 @@ func contextEstimatorTests(_ t: TestRunner) {
         try expect(abs(percent! - 1.14) < 0.01, "got \(percent!)")
     }
 
+    t.test("inspect：custom-title 作会话名（ai-title 已不再写），上下文占用照算") {
+        let info = ClaudeContextEstimator.inspect(
+            transcriptPath: try fixtureURL("claude-transcript-custom-title.jsonl").path)
+        try expectEqual(info.sessionTitle, "桌面端接入调研")
+        try expect(info.contextPercent != nil)
+    }
+
     t.test("ContextWindows：前缀匹配 + 覆盖优先 + 默认 200k") {
         try expectEqual(ContextWindows.window(forModel: "claude-fable-5"), 1_000_000)
         // Enterprise 1M as observed: opus-5 / opus-4-8 → 1M; older opus still uses the default
@@ -519,6 +526,21 @@ func contextEstimatorTests(_ t: TestRunner) {
     }
 }
 
+/// Writes `<id>/custom-title.json` next to a transcript (Claude Code's sidecar shape)
+private func writeSidecar(for transcript: URL, title: String) throws {
+    try writeSidecar(for: transcript, data: JSONSerialization.data(withJSONObject: ["customTitle": title]))
+}
+
+private func writeSidecar(for transcript: URL, raw: String) throws {
+    try writeSidecar(for: transcript, data: Data(raw.utf8))
+}
+
+private func writeSidecar(for transcript: URL, data: Data) throws {
+    let dir = transcript.deletingPathExtension()
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try data.write(to: dir.appendingPathComponent("custom-title.json"))
+}
+
 func sessionBootstrapTests(_ t: TestRunner) {
     t.suite("ClaudeSessionBootstrap")
     let mtime = Date()
@@ -539,6 +561,87 @@ func sessionBootstrapTests(_ t: TestRunner) {
         let kinds = events.map(\.kind)
         try expect(kinds.contains(.titleUpdate(title: "重构数据管道增量加载")), "ai-title 应跟上")
         try expect(kinds.contains { if case .contextUpdate = $0 { return true } else { return false } })
+    }
+
+    t.test("桌面端 custom-title：prompt 被挤出尾窗也拿得到会话名（ai-title 已不再写）") {
+        let url = try fixtureURL("claude-transcript-custom-title.jsonl")
+        // Tail window starts at the last-prompt line: the real prompt (the first cwd-bearing lines)
+        // has scrolled out, exactly what the file looks like 300ms after a Desktop prompt
+        let data = try Data(contentsOf: url)
+        guard let marker = data.range(of: Data("{\"type\":\"last-prompt\"".utf8)) else {
+            throw ExpectationError(description: "fixture 缺 last-prompt 行")
+        }
+        let tailBytes = data.count - marker.lowerBound
+        guard let snapshot = ClaudeSessionBootstrap.classify(fileURL: url, tailBytes: tailBytes) else {
+            throw ExpectationError(description: "classify 应有结果")
+        }
+        try expectEqual(snapshot.running, true)
+        try expectEqual(snapshot.promptText, nil, "prompt 不在尾窗")
+        try expectEqual(snapshot.customTitle, "桌面端接入调研")
+        try expectEqual(snapshot.aiTitle, nil)
+        try expectEqual(snapshot.sessionTitle, "桌面端接入调研")
+        try expectEqual(snapshot.cwd, "/Users/me/work/desk")
+
+        let events = ClaudeSessionBootstrap.inspectSession(
+            fileURL: url, mtime: mtime, tailBytes: tailBytes)
+        guard case .taskStarted(let title) = events.first?.kind else {
+            throw ExpectationError(description: "应为 taskStarted: \(events)")
+        }
+        try expectEqual(title, nil, "prompt 不在尾窗时开始事件无标题，靠 titleUpdate 补")
+        try expect(events.map(\.kind).contains(.titleUpdate(title: "桌面端接入调研")),
+                   "custom-title 应升级标题: \(events)")
+    }
+
+    t.test("sidecar custom-title.json：尾窗没有标题行时兜底，且压过老会话的 ai-title") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-sidecar-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-web")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+
+        // Desktop fixture: prompt / last-prompt only, no title line at all
+        let plain = dir.appendingPathComponent("eeee-5555.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-desktop.jsonl"), to: plain)
+        try expectEqual(ClaudeSessionBootstrap.classify(fileURL: plain)?.sessionTitle, nil)
+        try writeSidecar(for: plain, title: "  登录页排错  ")
+        try expectEqual(ClaudeSessionBootstrap.classify(fileURL: plain)?.sessionTitle, "登录页排错",
+                        "sidecar 兜底并去空白")
+
+        // Legacy session: inline ai-title + sidecar → the sidecar (chosen by the user) wins
+        let legacy = dir.appendingPathComponent("ffff-6666.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-running.jsonl"), to: legacy)
+        try expectEqual(ClaudeSessionBootstrap.classify(fileURL: legacy)?.sessionTitle, "重构数据管道增量加载")
+        try writeSidecar(for: legacy, title: "改名后的会话")
+        try expectEqual(ClaudeSessionBootstrap.classify(fileURL: legacy)?.sessionTitle, "改名后的会话")
+
+        // A broken / blank sidecar is harmless
+        try writeSidecar(for: plain, raw: "{not json")
+        try expectEqual(ClaudeSessionBootstrap.classify(fileURL: plain)?.sessionTitle, nil)
+        try writeSidecar(for: plain, title: "   ")
+        try expectEqual(ClaudeSessionBootstrap.classify(fileURL: plain)?.sessionTitle, nil)
+    }
+
+    t.test("进程退出标记：尾行 cost-state 且无续开进程 → 不登记；有续开进程 → 空闲登记；活会话没有标记") {
+        let url = try fixtureURL("claude-transcript-exited.jsonl")
+        guard let snapshot = ClaudeSessionBootstrap.classify(fileURL: url) else {
+            throw ExpectationError(description: "classify 应有结果")
+        }
+        try expectEqual(snapshot.exitMarkerLast, true)
+        try expectEqual(snapshot.running, false)
+        try expect(ClaudeSessionBootstrap.inspectSession(
+            fileURL: url, mtime: mtime, isResumedAlive: { _ in false }).isEmpty,
+            "进程已退出的会话不该登记")
+        let resumed = ClaudeSessionBootstrap.inspectSession(
+            fileURL: url, mtime: mtime, isResumedAlive: { _ in true })
+        guard case .sessionStarted = resumed.first?.kind else {
+            throw ExpectationError(description: "续开进程活着 → 空闲登记: \(resumed)")
+        }
+        // A fresh live session (mid tool_use) never writes cost-state
+        try expectEqual(
+            ClaudeSessionBootstrap.classify(
+                fileURL: try fixtureURL("claude-transcript-custom-title.jsonl"))?.exitMarkerLast,
+            false)
     }
 
     t.test("turn_duration 在 prompt 之后 → 重建为空闲") {
@@ -795,6 +898,181 @@ func transcriptWatcherTests(_ t: TestRunner) {
             $0.kind == .titleUpdate(title: "修复登录页 Safari 兼容性报错")
         }, "ai-title 应跟上")
     }
+
+    t.test("custom-title 会话：首扫即升级标题；改名后下一次写入跟上，没变不重发") {
+        let (root, file) = try makeSession("claude-transcript-custom-title.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root, liveResumedSessionIds: { [] }) {
+            event, _ in events.append(event)
+        }
+        watcher.scanOnce()
+        try expect(events.contains { $0.kind == .titleUpdate(title: "桌面端接入调研") },
+                   "custom-title 应升级标题: \(events)")
+
+        // Same name rewritten → no re-emit; /rename → the new name is emitted
+        events.removeAll()
+        try append("""
+        {"type":"custom-title","customTitle":"桌面端接入调研","sessionId":"fixture-custom-1"}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expect(!events.contains { if case .titleUpdate = $0.kind { return true } else { return false } },
+                   "标题没变不该重发: \(events)")
+        try append("""
+        {"type":"custom-title","customTitle":"桌面端接入可行性","sessionId":"fixture-custom-1"}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expect(events.contains { $0.kind == .titleUpdate(title: "桌面端接入可行性") },
+                   "改名应跟上: \(events)")
+    }
+
+    t.test("进程退出标记：运行中被归档 → sessionEnded，store 判中断；文件没变不重发；首见即退出不登记") {
+        // tool_use without a wrap-up = running
+        let (root, file) = try makeSession("claude-transcript-custom-title.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root, liveResumedSessionIds: { [] }) {
+            event, _ in events.append(event)
+        }
+        watcher.scanOnce()
+        let store = TaskStore()
+        events.forEach { store.apply($0) }
+        try expectEqual(store.sortedActiveTasks.count, 1, "首扫应登记运行中: \(events)")
+
+        // Archive: Desktop kills the process, which only manages to write cost-state before exiting
+        events.removeAll()
+        try append("""
+        {"type":"cost-state","sessionId":"fixture-custom-1","totalCostUSD":0.1}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expectEqual(events.map(\.kind), [.sessionEnded(reason: ClaudeTranscriptWatcher.exitReason)])
+        let effects = events.flatMap { store.apply($0) }
+        guard case .taskFinished(let finished)? = effects.first else {
+            throw ExpectationError(description: "跑着被杀应判中断: \(effects)")
+        }
+        try expectEqual(finished.outcome, .interrupted)
+        try expectEqual(finished.title, "桌面端接入调研")
+        try expect(store.activeTasks.isEmpty, "会话应从岛上移除")
+
+        // File unchanged → no re-emit
+        events.removeAll()
+        watcher.scanOnce()
+        try expect(events.isEmpty, "文件未变不该再发: \(events)")
+
+        // Already exited on first sight (an archived session inside the 30-minute window at app
+        // launch) → not registered
+        let dead = root.appendingPathComponent("-Users-me-work-web/dead.jsonl")
+        try FileManager.default.copyItem(at: fixtureURL("claude-transcript-exited.jsonl"), to: dead)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: dead.path)
+        events.removeAll()
+        watcher.scanOnce()
+        try expect(events.isEmpty, "首见即退出不该登记: \(events)")
+    }
+
+    t.test("进程退出标记：turn 收尾与归档落在同一次轮询 → 先正常完成再结束，不判中断") {
+        let (root, file) = try makeSession("claude-transcript-custom-title.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(projectsRoot: root, liveResumedSessionIds: { [] }) {
+            event, _ in events.append(event)
+        }
+        watcher.scanOnce()
+        let store = TaskStore()
+        events.forEach { store.apply($0) }
+        try expectEqual(store.sortedActiveTasks.count, 1)
+
+        // Within one poll interval: the model wraps up with end_turn and the user archives right
+        // after (observed: end_turn at 14:42:22, exit write at 14:42:27)
+        events.removeAll()
+        try append("""
+        {"parentUuid":"u-5004","isSidechain":false,"type":"assistant","uuid":"u-5005","timestamp":"2026-10-21T06:01:20.000Z","message":{"id":"msg_CUST2","model":"claude-opus-5-5","role":"assistant","stop_reason":"end_turn","type":"message","content":[{"type":"text","text":"完成"}]},"cwd":"/Users/me/work/desk","sessionId":"fixture-custom-1"}
+        {"type":"cost-state","sessionId":"fixture-custom-1","totalCostUSD":0.3}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expectEqual(events.map(\.kind), [
+            .taskFinished(outcome: .success, title: nil, detail: nil),
+            .sessionEnded(reason: ClaudeTranscriptWatcher.exitReason),
+        ])
+        let effects = events.flatMap { store.apply($0) }
+        let outcomes = effects.compactMap { effect -> TaskOutcome? in
+            if case .taskFinished(let finished) = effect { return finished.outcome } else { return nil }
+        }
+        try expectEqual(outcomes, [.success], "顺利完成的 turn 不该被判中断: \(effects)")
+        try expect(store.activeTasks.isEmpty)
+    }
+
+    t.test("进程退出标记：空闲会话被回收 → 静默移除；续开进程活着不算退出；收尾竞态复查；续开后新 turn 按首见重新登记") {
+        // end_turn already wrapped up = idle
+        let (root, file) = try makeSession("claude-transcript-desktop.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var alive = false
+        var events: [TaskEvent] = []
+        let watcher = ClaudeTranscriptWatcher(
+            projectsRoot: root, liveResumedSessionIds: { alive ? ["fixture-desktop-1"] : [] }
+        ) { event, _ in events.append(event) }
+        watcher.scanOnce()
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "首扫应登记空闲: \(events)")
+        }
+        let store = TaskStore()
+        events.forEach { store.apply($0) }
+        try expectEqual(store.sortedIdleTasks.count, 1)
+
+        // Desktop's idle sweep: the exiting process writes cost-state
+        events.removeAll()
+        try append("""
+        {"type":"cost-state","sessionId":"fixture-desktop-1","totalCostUSD":0.2}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expectEqual(events.map(\.kind), [.sessionEnded(reason: ClaudeTranscriptWatcher.exitReason)])
+        try expectEqual(events.flatMap { store.apply($0) }, [.activeTasksChanged], "空闲会话结束不出卡")
+        try expect(store.activeTasks.isEmpty)
+
+        // Resume: the starting process writes a cost-state line too, but a process with --resume is
+        // alive → not an exit; registered as idle like a first sight
+        alive = true
+        events.removeAll()
+        try append("""
+        {"type":"cost-state","sessionId":"fixture-desktop-1","totalCostUSD":0.2}
+
+        """, to: file)
+        watcher.scanOnce()
+        guard case .sessionStarted = events.first?.kind else {
+            throw ExpectationError(description: "续开的空闲会话应重新登记: \(events)")
+        }
+        events.forEach { store.apply($0) }
+        try expectEqual(store.sortedIdleTasks.count, 1)
+
+        // Teardown race: cost-state hits the disk first and the process exits two seconds later →
+        // the file never changes again; the throttled process re-check emits the end
+        alive = false
+        events.removeAll()
+        watcher.scanOnce()  // inside the re-check interval: nothing
+        try expect(events.isEmpty, "复查节流内不该发事件: \(events)")
+        watcher.scanOnce(now: Date().addingTimeInterval(ClaudeTranscriptWatcher.exitProbeInterval + 1))
+        try expectEqual(events.map(\.kind), [.sessionEnded(reason: ClaudeTranscriptWatcher.exitReason)])
+        events.forEach { store.apply($0) }
+        try expect(store.activeTasks.isEmpty, "进程没了应移除")
+        events.removeAll()
+        watcher.scanOnce(now: Date().addingTimeInterval(2 * ClaudeTranscriptWatcher.exitProbeInterval + 2))
+        try expect(events.isEmpty, "已结束不重发: \(events)")
+
+        // A new turn after resuming → running
+        events.removeAll()
+        try append("""
+        {"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"继续"},"uuid":"u-4101","timestamp":"2026-10-18T08:10:00.000Z","cwd":"/Users/me/work/web","sessionId":"fixture-desktop-1"}
+        {"parentUuid":"u-4101","isSidechain":false,"type":"assistant","uuid":"u-4102","timestamp":"2026-10-18T08:10:05.000Z","message":{"id":"msg_X","model":"claude-opus-5-5","role":"assistant","stop_reason":"tool_use","type":"message","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]},"cwd":"/Users/me/work/web","sessionId":"fixture-desktop-1"}
+
+        """, to: file)
+        watcher.scanOnce()
+        try expect(events.contains { $0.kind == .taskStarted(title: "继续") },
+                   "续开后新 turn 应登记运行: \(events)")
+    }
 }
 
 func sessionIndexerTests(_ t: TestRunner) {
@@ -835,6 +1113,35 @@ func sessionIndexerTests(_ t: TestRunner) {
         try expectEqual(sessions[1].cwd, "/Users/me/work/demo")
         try expect(sessions[0].sizeBytes > 0)
         try expectEqual(sessions[0].source, .claude)
+    }
+
+    t.test("索引：sidecar custom-title.json 优先；头部行内 custom-title 压过首条 prompt") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-index-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-desk")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+
+        // Prompt-only session + sidecar → named by the sidecar (Desktop's inline title usually sits
+        // past the 64KB head)
+        let sidecarOnly = dir.appendingPathComponent("aaaa-1111.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-api-error.jsonl"), to: sidecarOnly)
+        try writeSidecar(for: sidecarOnly, title: "日报筛选器")
+
+        // Inline custom-title in the head, no sidecar → named inline, not by the first prompt
+        let inline = dir.appendingPathComponent("bbbb-2222.jsonl")
+        try fm.copyItem(at: fixtureURL("claude-transcript-custom-title.jsonl"), to: inline)
+        for file in [sidecarOnly, inline] {
+            try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+        }
+
+        let byId = Dictionary(uniqueKeysWithValues:
+            ClaudeSessionIndexer.index(projectsRoot: root).map { ($0.id, $0) })
+        try expectEqual(byId["aaaa-1111"]?.name, "日报筛选器")
+        try expectEqual(byId["aaaa-1111"]?.cwd, "/Users/me/work/demo")
+        try expectEqual(byId["bbbb-2222"]?.name, "桌面端接入调研")
+        try expectEqual(byId["bbbb-2222"]?.cwd, "/Users/me/work/desk")
     }
 
     t.test("Codex 会话索引：session_meta 取 id/cwd，首条 user_message 命名") {
@@ -1042,7 +1349,14 @@ func errorSnifferTests(_ t: TestRunner) {
         let findings = ClaudeErrorSniffer.sniff(
             transcriptPath: try fixtureURL("claude-transcript-usage-dups.jsonl").path)
         try expectEqual(findings.isError, false)
-        try expectEqual(findings.aiTitle, "修复登录页 Safari 兼容性报错")
+        try expectEqual(findings.sessionTitle, "修复登录页 Safari 兼容性报错")
+    }
+
+    t.test("custom-title 会话 → 取 custom-title 作会话名") {
+        let findings = ClaudeErrorSniffer.sniff(
+            transcriptPath: try fixtureURL("claude-transcript-custom-title.jsonl").path)
+        try expectEqual(findings.isError, false)
+        try expectEqual(findings.sessionTitle, "桌面端接入调研")
     }
 
     t.test("文件不存在 → 安静返回默认") {

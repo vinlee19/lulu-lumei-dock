@@ -90,7 +90,26 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
     cache_read_input_tokens,cache_creation{ephemeral_1h_input_tokens,ephemeral_5m_input_tokens}}`、
     `message.model`、`requestId`、`sessionId`、`isSidechain`；**(requestId,message.id) 流式重复严重，
     必须跨文件持久化去重**（resume/fork 会把旧行复制进新文件）
-  - `{"type":"ai-title","aiTitle":"...","sessionId":"..."}` 现成任务标题
+  - 会话名：`{"type":"custom-title","customTitle":"...","sessionId":"..."}` 行内标题（桌面端自动命名 /
+    `/rename`，每次 API 请求前重写一行；2.1.266–2.1.304 本机 89 份桌面端 transcript 有 87 份，CLI 的 2 份都没有）
+    + sidecar `<会话 id>/custom-title.json`（`{"customTitle":"..."}`；首条行内标题的中位偏移 189KB，64KB 头窗多半
+    读不到，索引器靠它）。`{"type":"ai-title","aiTitle":"..."}` 是 2.1.27x 之前的老格式（近 7 天 91 份零命中），
+    只为老会话保留；优先级 行内 custom → sidecar → ai（`ClaudeSessionTitle`）。同批还写 `last-prompt` /
+    `agent-name`（后者 86/86 与 custom-title 同值）/ `atis-latch`，都不作标题源
+  - 桌面端首轮注入巨量 `attachment`（skills 列表等，单行可达 160KB）：prompt 写入 ~300ms 后文件就超过 256KB
+    尾窗，尾窗里可能既无真实 prompt 也无任何带 `cwd` 的行（只剩 `api-request-blob` / `last-prompt` /
+    `custom-title` 等元数据行）→ 首见快照标题与 cwd 皆空，二者都必须能由后续事件补上
+    （标题走 `titleUpdate`，cwd 由 `TaskStore.apply` 只补一次）
+  - 进程退出标记：`{"type":"cost-state","sessionId":"...","totalCostUSD":...,"modelUsage":{...}}` 是 Claude 进程
+    **退出**时写的最后一行（归档、桌面端空闲回收、定时任务跑完都是杀进程 → 本机三份被杀的会话各恰好 1 行且在尾行；
+    两份跑了几百行的活会话 0 行）。但**续开**（`--resume`）的进程启动时也写一条（一份续开 8 秒后尾行就是它），
+    所以判「进程已退出」= 尾行 cost-state **且** 进程表里没有 argv 带 `--resume=<id>` 的 claude 进程
+    （`ClaudeResumeProbe`）；新开的会话 argv 里没有 id，只能靠尾行。桌面端会话没有 SessionEnd hook 可用，
+    这是无 hook 时唯一的会话结束信号。2.1.304 二进制里写它的（`runTranscriptRecorder`）只有三处调用：
+    进程退出清理、resume / fork / rewind 启动、会话 handoff —— 没有周期性或 turn 级的写入，所以活会话中段不会出现。
+    cost-state 先于进程真正退出落盘（之后还要收 MCP 子进程、关 stdio，几百毫秒到两秒），尾行是它但续开进程仍在时
+    按「待复查」处理，文件不再变化后每 6s 复查一次进程（监视器 2s 一轮，进程表每轮最多惰性取一次）；turn 收尾与
+    归档可能落在同一次轮询里，先正常结 turn 再发结束，否则顺利完成的 turn 会被判中断
   - `{"type":"system","subtype":"turn_duration","durationMs":...}` 官方耗时（可校验 hook 配对计时）；
     **只有 CLI 入口写**，桌面端（`entrypoint: claude-desktop`，2.1.197–2.1.299 共 566 个样本）一行都没有
   - turn 结束标记（transcript 监视器无 hooks 时的唯一完成信号，任一出现在最后一个真实 prompt 之后即判空闲）：

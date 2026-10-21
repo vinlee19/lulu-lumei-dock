@@ -4,6 +4,28 @@ All notable changes to lulu-lumei-dock are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Claude Desktop sessions show their real title again.** Claude Code 2.1.27x
+  stopped writing `ai-title` lines and now records the session name as
+  `custom-title` lines plus a `custom-title.json` sidecar; the island, the
+  session browser and the finish cards read both (old `ai-title` transcripts
+  still work). The project name no longer goes missing either: a Desktop
+  session's first turn can push the prompt and every `cwd`-bearing line out
+  of the transcript tail within 300ms, so `cwd` is now backfilled from the
+  next event instead of staying empty.
+- **Archived or closed Claude sessions leave the island right away.** Without
+  hooks, a session whose Claude process had exited (archived in Desktop,
+  swept by Desktop's idle reaper, or a scheduled task that finished) stayed in
+  the idle list for an hour, or as a running ghost for four. The transcript
+  watcher now recognises the trailing `cost-state` line Claude writes on
+  exit, checks that no live process still carries the session id (resumed
+  processes write that line at startup too), finishes a just-completed turn
+  normally before ending the session, and polls every 2s instead of 5s. A
+  session archived mid-turn shows an interrupted card.
+
 ## [0.38.0] - 2026-10-19
 
 ### Added
@@ -2027,6 +2049,7 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.38.0...HEAD
 [0.38.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.38.0
 [0.37.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.37.0
 [0.36.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.36.0

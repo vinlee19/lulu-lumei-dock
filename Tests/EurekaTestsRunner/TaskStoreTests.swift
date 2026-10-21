@@ -184,6 +184,31 @@ func taskStoreTests(_ t: TestRunner) {
         try expectEqual(store.apply(event(.titleUpdate(title: "修复登录页报错"), at: 120)), [])
     }
 
+    t.test("cwd 只补一次：首见事件没带 cwd，后续任一事件带来就补上并刷新 UI") {
+        let store = TaskStore()
+        // Desktop's first turn: the tail holds only metadata lines → the first snapshot has neither a
+        // prompt nor a cwd (registered as idle)
+        store.apply(event(.sessionStarted, at: 100, cwd: nil))
+        try expectEqual(store.sortedIdleTasks[0].projectName, nil)
+        try expectEqual(
+            store.apply(event(.taskStarted(title: nil), at: 110, cwd: "/Users/me/work/demo")),
+            [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks[0].projectName, "demo")
+        // An existing cwd is never overwritten by a later one
+        store.apply(event(.activity(tool: nil), at: 120, cwd: "/Users/me/work/other"))
+        try expectEqual(store.sortedActiveTasks[0].cwd, "/Users/me/work/demo")
+
+        // A heartbeat with unchanged state normally returns []; backfilling cwd refreshes once (the
+        // project name only becomes visible now)
+        let midturn = TaskStore()
+        midturn.apply(event(.taskStarted(title: nil), at: 100, cwd: nil))
+        try expectEqual(
+            midturn.apply(event(.activity(tool: nil), at: 105, cwd: "/Users/me/work/demo")),
+            [.activeTasksChanged])
+        try expectEqual(midturn.sortedActiveTasks[0].projectName, "demo")
+        try expectEqual(midturn.apply(event(.activity(tool: nil), at: 106, cwd: "/Users/me/work/demo")), [])
+    }
+
     t.test("会话首启时间：任意事件补设一次，turn 重置不影响它") {
         let store = TaskStore()
         store.apply(event(.taskStarted(title: "第一轮"), at: 1000))

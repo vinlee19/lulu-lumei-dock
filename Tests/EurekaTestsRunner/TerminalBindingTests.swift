@@ -436,6 +436,35 @@ func terminalProberTests(_ t: TestRunner) {
         try expect(TerminalProber.ttyPath(of: 0) == nil)
     }
 
+    t.test("KERN_PROCARGS2 解析：argc + 可执行路径 + 填充 + 参数；环境变量永远不读；本进程 argv 对得上") {
+        var data = Data()
+        var argc = Int32(3)
+        data.append(Data(bytes: &argc, count: 4))
+        data.append(Data("/usr/bin/claude\0\0\0".utf8))
+        data.append(Data("claude\0--resume=abc\0-r\0HOME=/Users/me\0SECRET=x\0".utf8))
+        try expectEqual(TerminalProber.parseProcArgs(data), ["claude", "--resume=abc", "-r"])
+        try expectEqual(TerminalProber.parseProcArgs(Data([1, 0])), nil)
+        // Real syscall: this process's own argv
+        try expectEqual(
+            TerminalProber.processArguments(ProcessInfo.processInfo.processIdentifier),
+            CommandLine.arguments)
+        try expectEqual(TerminalProber.processArguments(Int32.max), nil)
+    }
+
+    t.test("ClaudeResumeProbe：argv 里的续开 id 三种写法；新开会话没有 id；不存在的会话无活进程") {
+        try expectEqual(ClaudeResumeProbe.resumedSessionId(in: [
+            "claude", "--output-format", "stream-json", "--resume=abc-123", "--verbose",
+        ]), "abc-123")
+        try expectEqual(ClaudeResumeProbe.resumedSessionId(in: ["claude", "--resume", "abc-123"]), "abc-123")
+        try expectEqual(ClaudeResumeProbe.resumedSessionId(in: ["claude", "-r", "abc-123"]), "abc-123")
+        try expectEqual(ClaudeResumeProbe.resumedSessionId(in: ["claude", "--resume"]), nil)
+        try expectEqual(ClaudeResumeProbe.resumedSessionId(in: ["claude", "--resume=", "-r", "--verbose"]), nil)
+        try expectEqual(ClaudeResumeProbe.resumedSessionId(in: ["claude", "--model=x", "--continue"]), nil)
+        try expectEqual(ClaudeResumeProbe.isAlive(sessionId: "no-such-session-\(UUID().uuidString)"), false)
+        try expectEqual(ClaudeResumeProbe.isAlive(sessionId: ""), false)
+        try expect(!ClaudeResumeProbe.liveResumedSessionIds().contains(""))
+    }
+
     t.test("进程原语对本进程可用（cwd / 可执行路径 / 进程表非空）") {
         let me = getpid()
         let cwd = try require(TerminalProber.processCWD(me))
