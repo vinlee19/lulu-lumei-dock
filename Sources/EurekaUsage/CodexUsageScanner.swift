@@ -11,6 +11,8 @@ import EurekaStore
 public final class CodexUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
     private let projectResolver = ProjectResolver()
 
     private static let isoFormatter: ISO8601DateFormatter = {
@@ -49,7 +51,12 @@ public final class CodexUsageScanner {
         for file in rolloutFiles() {
             // One pool per file: rollouts reach 70MB, and a full rescan without draining builds
             // GB-scale peaks
-            inserted += try autoreleasepool { try scanFile(file) }
+            inserted += try ScanSlices.drain(
+                path: file.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(file)
+            }
         }
         return inserted
     }
@@ -76,6 +83,7 @@ public final class CodexUsageScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         var records: [UsageRecord] = []
         var promptCount = 0

@@ -52,8 +52,28 @@ enum Schema {
     /// derived table rebuilt with a full rescan
     static let version: Int64 = 24
 
+    /// Every connection runs this on open, and on a fresh install seven open at once. Without a
+    /// lock, two could both read version 0 and the later one DROP the tables the first had
+    /// already started filling. So a pending migration runs inside a write transaction that
+    /// re-reads the version, and an up-to-date database only re-applies the idempotent part
+    /// (no `user_version` write, no write lock taken).
     static func migrate(_ db: SQLiteDB) throws {
-        let current = (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
+        let current = readVersion(db)
+        guard current < version else {
+            try apply(db, from: current)
+            return
+        }
+        try db.transaction {
+            // Another connection may have migrated while this one waited for the lock
+            try apply(db, from: readVersion(db))
+        }
+    }
+
+    private static func readVersion(_ db: SQLiteDB) -> Int64 {
+        (try? db.query("PRAGMA user_version") { $0.int(0) }.first) ?? 0
+    }
+
+    private static func apply(_ db: SQLiteDB, from current: Int64) throws {
         if current < version {
             // Every usage-derived table can be re-derived by rescanning local transcripts/rollouts
             // → schema changes just rebuild, and the next scan restores them (task_history /
@@ -366,7 +386,9 @@ enum Schema {
         // over the price table
         try addColumnIfMissing(db, table: "usage_records", column: "reported_cost_usd", type: "REAL")
 
-        try db.execute("PRAGMA user_version = \(version)")
+        if current != version {
+            try db.execute("PRAGMA user_version = \(version)")
+        }
     }
 
     /// Idempotent column add: ALTER only when table lacks the column; safe for both fresh and

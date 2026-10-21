@@ -84,8 +84,26 @@ public final class SQLiteDB {
         // avoids "database is locked".
         sqlite3_busy_timeout(db, Self.busyTimeoutMs)
         if !readOnly {
-            try execute("PRAGMA journal_mode=WAL")
+            try enableWAL()
             try execute("PRAGMA synchronous=NORMAL")
+        }
+    }
+
+    /// WAL is persistent in the file, so only a brand-new database needs switching. That switch
+    /// needs an exclusive lock and returns SQLITE_BUSY without consulting the busy timeout, which
+    /// on a fresh install (several services open the file at once) failed every opener but one.
+    private func enableWAL() throws {
+        let mode = try? query("PRAGMA journal_mode") { $0.text(0) }.first
+        if mode??.lowercased() == "wal" { return }
+        var attempt = 0
+        while true {
+            do {
+                try execute("PRAGMA journal_mode=WAL")
+                return
+            } catch let error as SQLiteError where error.code == SQLITE_BUSY && attempt < 100 {
+                attempt += 1
+                usleep(20_000)
+            }
         }
     }
 

@@ -19,6 +19,8 @@ public final class ClaudeTranscriptScanner {
 
     private let projectsRoot: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
     private let projectResolver = ProjectResolver()
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -54,7 +56,12 @@ public final class ClaudeTranscriptScanner {
                 // One pool per file: the bridged objects from per-line JSON parsing are
                 // autoreleased, and a full rescan (after a migration clears scan_files) without
                 // draining builds up GB-level peaks
-                inserted += try autoreleasepool { try scanFile(item) }
+                inserted += try ScanSlices.drain(
+                path: item.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(item)
+            }
             }
         }
         return inserted
@@ -71,6 +78,7 @@ public final class ClaudeTranscriptScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         // Merge within the batch: streaming duplicates of the same key have increasing output; keep
         // the max (final) value; count real user prompts along the way (conversation count, zero
