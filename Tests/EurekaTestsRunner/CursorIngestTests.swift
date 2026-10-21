@@ -888,6 +888,36 @@ private func cursorUsageScannerTests(_ t: TestRunner) {
         try expectEqual(try scanner.scanOnce(), 0, "重扫应幂等")
     }
 
+    t.test("数据库未变化时跳过整轮（不跑会话索引）；有新写入才重扫") {
+        let fixture = try CursorFixture()
+        defer { fixture.cleanUp() }
+        try fixture.addWorkspace(id: "ws1", folder: "/Users/me/work/alpha")
+        try fixture.addComposer(
+            id: "c1", workspaceId: "ws1", name: "会话", status: "completed",
+            bubbles: [.user("一"), .assistant("答一", input: 1_000, output: 10, model: "gpt-5")])
+        CursorWorkspaceIndex.resetCacheForTesting()
+
+        let store = try EurekaStore(path: fixture.root.appendingPathComponent("eureka.sqlite"))
+        var indexCalls = 0
+        let scanner = CursorUsageScanner(
+            dbPath: fixture.stateDB, store: store, workspaceStorageRoot: fixture.workspaceStorage,
+            sessions: { now in
+                indexCalls += 1
+                return fixture.index(now: now).map { ($0.id, $0.cwd, $0.lastActiveAt) }
+            })
+        try expectEqual(try scanner.scanOnce(), 1)
+        try expectEqual(try scanner.scanOnce(), 0)
+        try expectEqual(indexCalls, 1, "unchanged database must not re-run the session index")
+
+        // A new composer lands → the fingerprint changes → the next pass scans again
+        try fixture.addComposer(
+            id: "c2", workspaceId: "ws1", name: "会话二", status: "completed",
+            bubbles: [.user("二"), .assistant("答二", input: 2_000, output: 20, model: "gpt-5")])
+        CursorWorkspaceIndex.resetCacheForTesting()
+        try expectEqual(try scanner.scanOnce(), 1)
+        try expectEqual(indexCalls, 2)
+    }
+
     t.test("上下文变小 = 压缩重置，整份算新鲜输入；模型名带 cursor/ 前缀") {
         let fixture = try CursorFixture()
         defer { fixture.cleanUp() }

@@ -150,6 +150,9 @@ struct UsageDashboardView: View {
         .onChange(of: customFrom) { _, _ in if period == .custom { page = 1; reload() } }
         .onChange(of: customTo) { _, _ in if period == .custom { page = 1; reload() } }
         .onChange(of: usageService.pricingRevision) { _, _ in reload() }
+        // New data landed (the first-install backfill publishes interim summaries; later passes
+        // every 60s): reads run on their own connection, so refreshing the page is cheap
+        .onChange(of: usageService.summary?.generatedAt) { _, _ in reload() }
     }
 
     // MARK: - Range and data aggregation
