@@ -57,7 +57,7 @@ public final class ClaudeTranscriptScanner {
                 // autoreleased, and a full rescan (after a migration clears scan_files) without
                 // draining builds up GB-level peaks
                 inserted += try ScanSlices.drain(
-                path: item.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: item.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(item)

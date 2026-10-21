@@ -49,7 +49,7 @@ public final class ZcodeUsageScanner {
         var inserted = 0
         for file in rolloutFiles() {
             inserted += try ScanSlices.drain(
-                path: file.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(file)

@@ -20,6 +20,8 @@ import EurekaStore
 public final class QoderAuditScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
     private let pipeline: AuditPipeline
     private let staleThreshold: TimeInterval
 
@@ -46,7 +48,12 @@ public final class QoderAuditScanner {
     public func scanOnce(alertSink: ((RiskAlert) -> Void)? = nil) throws -> Int {
         var inserted = 0
         for file in sessionFiles() {
-            inserted += try scanFile(file, alertSink: alertSink)
+            inserted += try ScanSlices.drain(
+                stateKey: "audit://" + file.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(file, alertSink: alertSink)
+            }
         }
         return inserted
     }
@@ -100,7 +107,8 @@ public final class QoderAuditScanner {
             resolveOwnership(fileURL: url, into: &extra)
         }
         guard info.size > offset else { return 0 }
-        guard let chunk = Self.read(path: path, from: offset) else { return 0 }
+        guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         var inserted = 0
         var alerts: [RiskAlert] = []
@@ -169,26 +177,7 @@ public final class QoderAuditScanner {
         return "synth:" + hex.prefix(32)
     }
 
-    // MARK: - Incremental JSONL reading (EurekaUsage.JSONLinesReader is not visible across modules, so this carries its own)
-
-    private struct Chunk {
-        var lines: [Data]
-        var newOffset: UInt64
-    }
-
-    private static func read(path: String, from offset: UInt64) -> Chunk? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-        guard (try? handle.seek(toOffset: offset)) != nil,
-              let data = try? handle.readToEnd(), !data.isEmpty
-        else { return nil }
-        guard let lastNewline = data.lastIndex(of: UInt8(ascii: "\n")) else { return nil }
-        let complete = data[data.startIndex...lastNewline]
-        let lines = complete
-            .split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
-            .map { Data($0) }
-        return Chunk(lines: lines, newOffset: offset + UInt64(complete.count))
-    }
+    // MARK: - File info (JSONL reading is the shared EurekaStore.JSONLinesReader)
 
     private static func fileInfo(path: String) -> (inode: Int64, size: UInt64)? {
         var info = Darwin.stat()

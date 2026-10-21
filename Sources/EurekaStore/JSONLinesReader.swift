@@ -1,25 +1,25 @@
 import Foundation
-import EurekaStore
 
 /// Reads JSONL incrementally from an offset: consumes only complete lines, returns the new offset.
 /// Truncation / inode change is detected by the caller, which then passes offset=0 to reread.
+/// Shared by the usage scanners (EurekaUsage) and the audit scanners (EurekaIngest).
 ///
 /// Reads are capped at `maxBytes` of complete lines per call. A first scan meets transcripts of
 /// 150-220 MB; reading one whole and copying every line held 800 MB at peak, enough to push an
 /// 8-16 GB machine into swap on first launch. Callers loop until `reachedEnd`, saving the offset
 /// after each slice, which is the same as the file having grown in several appends - the case
 /// cross-batch dedup already handles.
-enum JSONLinesReader {
-    struct Chunk {
-        var lines: [Data]
-        var newOffset: UInt64
+public enum JSONLinesReader {
+    public struct Chunk {
+        public var lines: [Data]
+        public var newOffset: UInt64
         /// No complete line is left after `newOffset` (a trailing partial line may remain)
-        var reachedEnd: Bool
+        public var reachedEnd: Bool
     }
 
-    static let defaultMaxBytes = 16 << 20
+    public static let defaultMaxBytes = 16 << 20
 
-    static func read(path: String, from offset: UInt64, maxBytes: Int = defaultMaxBytes) -> Chunk? {
+    public static func read(path: String, from offset: UInt64, maxBytes: Int = defaultMaxBytes) -> Chunk? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd(), size > offset,
@@ -50,7 +50,7 @@ enum JSONLinesReader {
         return Chunk(lines: lines, newOffset: newOffset, reachedEnd: hitEOF || newOffset >= size)
     }
 
-    static func fileInfo(path: String) -> (inode: Int64, size: UInt64)? {
+    public static func fileInfo(path: String) -> (inode: Int64, size: UInt64)? {
         var info = Darwin.stat()
         // The C function of the same name is shadowed by the struct; use lstat
         // (transcripts/rollouts are not symlinks)
@@ -62,16 +62,18 @@ enum JSONLinesReader {
 /// Drives one file through `JSONLinesReader` slice by slice. Each slice runs in its own
 /// autorelease pool (per-line JSON parsing autoreleases bridged objects), and the loop stops as
 /// soon as a slice saves no progress, so a scanner that returns early can never spin.
-enum ScanSlices {
-    static func drain(
-        path: String, store: EurekaStore, hasMore: () -> Bool, scan: () throws -> Int
+public enum ScanSlices {
+    /// `stateKey` is the scan_files key the scanner saves its offset under (the transcript path,
+    /// or `audit://<path>` for the audit scanners)
+    public static func drain(
+        stateKey: String, store: EurekaStore, hasMore: () -> Bool, scan: () throws -> Int
     ) throws -> Int {
         var total = 0
         while true {
-            let before = try store.scanState.fileState(path: path)?.offset
+            let before = try store.scanState.fileState(path: stateKey)?.offset
             total += try autoreleasepool { try scan() }
             guard hasMore() else { return total }
-            let after = try store.scanState.fileState(path: path)?.offset
+            let after = try store.scanState.fileState(path: stateKey)?.offset
             guard let after, after != before else { return total }
         }
     }

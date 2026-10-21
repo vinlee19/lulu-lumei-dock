@@ -51,7 +51,7 @@ public final class GrokUsageScanner {
         var bumped = 0
         for file in eventFiles() {
             bumped += try ScanSlices.drain(
-                path: file.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(file)
@@ -59,7 +59,7 @@ public final class GrokUsageScanner {
             let updates = file.deletingLastPathComponent().appendingPathComponent("updates.jsonl")
             if FileManager.default.fileExists(atPath: updates.path) {
                 bumped += try ScanSlices.drain(
-                path: updates.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: updates.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanUpdates(updates)

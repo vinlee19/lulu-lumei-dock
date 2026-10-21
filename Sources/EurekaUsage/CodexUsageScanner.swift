@@ -52,7 +52,7 @@ public final class CodexUsageScanner {
             // One pool per file: rollouts reach 70MB, and a full rescan without draining builds
             // GB-scale peaks
             inserted += try ScanSlices.drain(
-                path: file.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(file)

@@ -46,7 +46,7 @@ public final class CodeBuddyUsageScanner {
         var inserted = 0
         for file in sessionFiles() {
             inserted += try ScanSlices.drain(
-                path: file.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(file)

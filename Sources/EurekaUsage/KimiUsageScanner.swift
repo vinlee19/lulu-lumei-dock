@@ -45,7 +45,7 @@ public final class KimiUsageScanner {
         var inserted = 0
         for file in wireFiles() {
             inserted += try ScanSlices.drain(
-                path: file.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(file)

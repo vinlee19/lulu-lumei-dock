@@ -40,7 +40,7 @@ public final class GeminiUsageScanner {
         var inserted = 0
         for (file, slug) in chatFiles() {
             inserted += try ScanSlices.drain(
-                path: file.path, store: store, hasMore: { hasMoreSlices }
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
             ) {
                 hasMoreSlices = false
                 return try scanFile(file, cwd: slugToProject[slug])
