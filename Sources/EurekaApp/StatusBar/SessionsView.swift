@@ -110,7 +110,7 @@ struct SessionsView: View {
             if let mode = SessionBrowserService.SortMode(rawValue: settings.sessionSortMode) {
                 service.sortMode = mode
             }
-            service.refresh()
+            service.refreshIfStale()
         }
         .onChange(of: settings.sessionRangeAll) { _, newValue in
             service.rangeAll = newValue

@@ -94,6 +94,9 @@ struct PlansView: View {
 
     @ViewBuilder
     private var content: some View {
+        // Filtered and sorted once per render: `filtered` used to be re-evaluated for every row
+        // (N rows × filter + sort of N), all on the main thread
+        let rows = filtered
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
@@ -104,20 +107,21 @@ struct PlansView: View {
                     sources: service.availableSources,
                     count: { service.count(for: $0) },
                     singleLine: true)
-                if filtered.isEmpty {
+                if rows.isEmpty {
                     emptyState.padding(.top, 40)
                 } else if layout == .cards {
                     LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
-                        ForEach(filtered) { plan in planCard(plan) }
+                        ForEach(rows) { plan in planCard(plan) }
                     }
                 } else {
                     KnowledgeListContainer {
-                        VStack(spacing: 0) {
-                            ForEach(Array(filtered.enumerated()), id: \.element.id) { index, plan in
+                        // Lazy: only the rows on screen are built
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, plan in
                                 PlanRow(
                                     plan: plan, service: service,
                                     onOpen: { open(plan) }, onDelete: { deleting = plan })
-                                if index < filtered.count - 1 {
+                                if index < rows.count - 1 {
                                     Divider().opacity(0.4).padding(.leading, 50)
                                 }
                             }
