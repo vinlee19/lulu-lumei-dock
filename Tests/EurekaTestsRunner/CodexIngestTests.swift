@@ -1078,6 +1078,42 @@ func transcriptWatcherTests(_ t: TestRunner) {
 func sessionIndexerTests(_ t: TestRunner) {
     t.suite("ClaudeSessionIndexer")
 
+    t.test("头部 64KB 被超长首行占满：从尾部补上 cwd 和标题") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eureka-index-\(UUID().uuidString)", isDirectory: true)
+        let dir = root.appendingPathComponent("-Users-me-work-demo")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Shape of an automated review session: a ~59KB queue line, then the first prompt (the
+        // only early line with cwd) running past the 64KB head; the title sits far down
+        let bulk = String(repeating: "x", count: 59_000)
+        func line(_ object: [String: Any]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        var lines = [
+            try line(["type": "queue-operation", "timestamp": "2026-10-21T13:16:40.296Z",
+                      "sessionId": "dddd-4444", "content": bulk]),
+            try line(["type": "user", "cwd": "/Users/me/work/demo", "sessionId": "dddd-4444",
+                      "timestamp": "2026-10-21T13:16:41.000Z",
+                      "message": ["role": "user", "content": "Review this change " + bulk]]),
+        ]
+        for index in 0..<40 {
+            lines.append(try line(["type": "attachment", "padding": String(repeating: "y", count: 4_000),
+                                   "index": index]))
+        }
+        lines.append(try line(["type": "ai-title", "aiTitle": "Launch warm-up changes",
+                               "sessionId": "dddd-4444"]))
+        lines.append(try line(["type": "assistant", "cwd": "/Users/me/work/demo",
+                               "sessionId": "dddd-4444", "message": ["role": "assistant"]]))
+        let file = dir.appendingPathComponent("dddd-4444.jsonl")
+        try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+
+        let sessions = ClaudeSessionIndexer.index(projectsRoot: root)
+        try expectEqual(sessions.count, 1)
+        try expectEqual(sessions.first?.cwd, "/Users/me/work/demo")
+        try expectEqual(sessions.first?.name, "Launch warm-up changes")
+    }
+
     t.test("索引：ai-title 命名优先，缺则退首条 prompt；时间窗过滤") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("eureka-index-\(UUID().uuidString)", isDirectory: true)
