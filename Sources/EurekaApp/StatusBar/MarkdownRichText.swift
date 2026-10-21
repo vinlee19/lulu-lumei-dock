@@ -14,7 +14,7 @@ struct MarkdownRichText: View {
     let fillWidth: Bool
 
     init(text: String, fillWidth: Bool = true) {
-        blocks = MarkdownBlockParser.parse(text)
+        blocks = MarkdownCache.blocks(text)
         self.fillWidth = fillWidth
     }
 
@@ -146,6 +146,10 @@ struct MarkdownRichText: View {
     /// Inline Markdown (bold/italic/inline code/links); falls back to plain text when parsing
     /// fails. Inline code → monospaced + faint-background chip; links → brand-color underline.
     static func inline(_ text: String) -> AttributedString {
+        MarkdownCache.inline(text) { buildInline(text) }
+    }
+
+    private static func buildInline(_ text: String) -> AttributedString {
         var attributed = (try? AttributedString(
             markdown: text,
             options: AttributedString.MarkdownParsingOptions(
@@ -204,5 +208,45 @@ struct CodeBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+    }
+}
+
+/// Parse results reused across renders. SwiftUI re-runs a row's `init` and body on every
+/// invalidation (a publish, a resize, a split-view drag), and a session detail page re-parsed
+/// every visible message's Markdown each time, on the main thread. Main-thread only, like the
+/// views that use it.
+private enum MarkdownCache {
+    private final class Box<Value> {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    private static let blockCache: NSCache<NSString, Box<[MarkdownBlock]>> = {
+        let cache = NSCache<NSString, Box<[MarkdownBlock]>>()
+        cache.totalCostLimit = 16 << 20
+        return cache
+    }()
+
+    private static let inlineCache: NSCache<NSString, Box<AttributedString>> = {
+        let cache = NSCache<NSString, Box<AttributedString>>()
+        cache.totalCostLimit = 16 << 20
+        return cache
+    }()
+
+    static func blocks(_ text: String) -> [MarkdownBlock] {
+        let key = text as NSString
+        if let hit = blockCache.object(forKey: key) { return hit.value }
+        let parsed = MarkdownBlockParser.parse(text)
+        blockCache.setObject(Box(parsed), forKey: key, cost: text.utf8.count)
+        return parsed
+    }
+
+    /// Keyed by style too: inline links take the theme's brand color
+    static func inline(_ text: String, build: () -> AttributedString) -> AttributedString {
+        let key = "\(ThemeStyle.current.rawValue)\u{1}\(text)" as NSString
+        if let hit = inlineCache.object(forKey: key) { return hit.value }
+        let built = build()
+        inlineCache.setObject(Box(built), forKey: key, cost: text.utf8.count)
+        return built
     }
 }

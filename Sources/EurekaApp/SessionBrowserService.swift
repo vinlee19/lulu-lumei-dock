@@ -93,6 +93,10 @@ final class SessionBrowserService: ObservableObject {
     /// Currently selected session (what the detail pane renders)
     @Published private(set) var selected: AgentSessionInfo?
     @Published private(set) var transcript: [TranscriptMessage] = []
+    /// Prompts the user actually typed (injected turns left out), computed once per load on the
+    /// queue: the detail page needs it four times per render (outline, counts, layout), and
+    /// filtering up to 20k messages each time ran on the main thread
+    @Published private(set) var transcriptUserMessages: [TranscriptMessage] = []
     @Published private(set) var transcriptTruncated = false
     @Published private(set) var transcriptLoading = false
     /// Context-usage breakdown by category for the current session (estimated async after
@@ -461,6 +465,7 @@ final class SessionBrowserService: ObservableObject {
     func select(_ session: AgentSessionInfo?) {
         selected = session
         transcript = []
+        transcriptUserMessages = []
         transcriptTruncated = false
         contextBreakdown = nil  // cleared on every session switch; filled back after estimation, checked by id
         guard let session else { return }
@@ -491,6 +496,9 @@ final class SessionBrowserService: ObservableObject {
         transcriptLoading = true
         queue.async(qos: .userInitiated) { [weak self] in
             let result = TranscriptReader.load(session: session, maxMessages: maxMessages)
+            let userMessages = result.messages.filter {
+                $0.role == .user && !PromptClassifier.isInjectedArtifact($0.text)
+            }
             self?.loadStoreIfNeeded()
             let terminalHistory = (try? self?.store?.sessionTerminals.bindings(
                 source: session.source, sessionId: session.id)) ?? []
@@ -535,6 +543,7 @@ final class SessionBrowserService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.selected?.id == session.id else { return }
                 self.transcript = result.messages
+                self.transcriptUserMessages = userMessages
                 self.transcriptTruncated = result.truncated
                 self.transcriptLoading = false
                 self.contextBreakdown = breakdown
