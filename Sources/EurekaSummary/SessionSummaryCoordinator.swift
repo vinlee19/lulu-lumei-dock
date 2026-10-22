@@ -117,6 +117,14 @@ public final class SessionSummaryCoordinator {
         storeQueue.sync { try? body(store) }
     }
 
+    /// Persists the person's decisions on a run's "worth keeping" candidates
+    @discardableResult
+    public func updateCandidateDecisions(
+        runId: String, decisions: [String: SummaryCandidateDecision]
+    ) -> Bool {
+        withStore { try $0.summaryRuns.updateCandidateDecisions(id: runId, decisions: decisions) } != nil
+    }
+
     /// Launch-time reconciliation; returns how many rows were marked interrupted
     @discardableResult
     public func reconcileOnLaunch() -> Int {

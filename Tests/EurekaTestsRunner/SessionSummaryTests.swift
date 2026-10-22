@@ -704,4 +704,41 @@ func sessionSummaryTests(_ t: TestRunner) {
         try expectEqual(run?.candidateDecisions["memory:水位表"]?.path, "/m/a.md")
         try expectEqual(run?.candidateDecisions["memory:水位表"]?.status, .saved)
     }
+
+    t.test("沉淀写入：项目记忆库按 Claude 格式落盘，追加 MEMORY.md，重名不覆盖") {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-home-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = try ClaudeProjectMemoryWriter.write(
+            title: "Watermark row", content: "Use one watermark row: \"fewer\" writes.",
+            kind: .project, originSessionId: "sess-1", projectPath: "/Users/a/repo_x",
+            now: now, claudeHome: home)
+        try expectEqual(first.deletingLastPathComponent().path,
+                        home.appendingPathComponent("projects/-Users-a-repo-x/memory").path)
+        try expectEqual(first.lastPathComponent, "project_watermark_row.md")
+        let text = try String(contentsOf: first, encoding: .utf8)
+        try expect(text.contains("description: \"Watermark row\""))
+        try expect(text.contains("  type: project"))
+        try expect(text.contains("  originSessionId: sess-1"))
+        try expect(text.hasSuffix("Use one watermark row: \"fewer\" writes.\n"))
+        let second = try ClaudeProjectMemoryWriter.write(
+            title: "Watermark row", content: "again", kind: .project, originSessionId: nil,
+            projectPath: "/Users/a/repo_x", now: now, claudeHome: home)
+        try expectEqual(second.lastPathComponent, "project_watermark_row_2.md")
+        let chinese = try ClaudeProjectMemoryWriter.write(
+            title: "先问再改", content: "改 schema 前先确认", kind: .feedback, originSessionId: nil,
+            projectPath: "/Users/a/repo_x", now: now, claudeHome: home)
+        try expect(chinese.lastPathComponent.hasPrefix("feedback_review_"))
+        let index = try String(
+            contentsOf: first.deletingLastPathComponent().appendingPathComponent("MEMORY.md"), encoding: .utf8)
+        try expectEqual(index.components(separatedBy: "\n- [").count - 1 + (index.hasPrefix("- [") ? 1 : 0), 3)
+        try expect(index.contains("- [先问再改](\(chinese.lastPathComponent)) — 改 schema 前先确认"))
+        do {
+            _ = try ClaudeProjectMemoryWriter.write(
+                title: "x", content: "y", kind: .project, originSessionId: nil, projectPath: nil,
+                claudeHome: home)
+            throw ExpectationError(description: "没有项目目录时应拒绝")
+        } catch ClaudeProjectMemoryWriter.WriteError.noProjectDirectory {}
+    }
 }
