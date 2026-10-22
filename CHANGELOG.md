@@ -6,9 +6,70 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-22
+
+### Added
+
+- **Usage forecasts and spending insight.** A this-month card (all sources)
+  shows what has been spent, a month-end projection from the trailing 7-day
+  rate and the daily average, and leads with subscription payback per source
+  (API-equivalent cost ÷ plan price). An optional monthly budget draws the
+  projection on its progress bar and raises an island card (plus a system
+  notification when enabled) at 80% and 100%, once per threshold per month.
+  New cards: cost structure by token type, turns (cost / tokens / requests
+  per asked prompt, median and P90 duration, error and rework rates) and
+  session concentration (share held by the top 10 sessions). The daily trend
+  marks spike days at 2x or more of the recent median.
+- **Requests as a first-class metric.** The hero card shows tokens, requests
+  and cost side by side, each with a change against the same elapsed span
+  one period earlier; the trend chart gains a Requests metric and the
+  project table a request column; new tiles show tokens and cost per
+  request, and the cache card reports the USD saved by cache reads.
+- **Desktop companion editor.** Settings → Desktop companion is split into
+  Look / States / Behavior / Advanced. A state table covers all ten states:
+  when each shows, where its art comes from, and a Preview that plays in
+  place. Import a whole pet folder (images named after states, frame
+  subfolders, or a `manifest.json`) with a report of what was bound; every
+  state accepts one image, a GIF / APNG or a still-frame sequence with its
+  own frame rate. New options: idle minutes before sleep (default 5),
+  late-night mode, speech bubbles, size and reset position. A pack that
+  fails to load shows why instead of silently falling back.
+- **Open a session from Task history.** History and running rows highlight
+  on hover and open their session on the Sessions tab.
+- **⌘K has a visible entry.** The top of the sidebar is now a search field
+  that opens the command palette.
+
+### Changed
+
+- **Knowledge pages are calmer and easier to scan.** Skills, Memory,
+  Instructions, Plans, Agents and MCP rows lead with the item's initials and
+  show the CLI as a corner badge, instead of the same CLI logo on every row.
+  Counts, times and switches sit in aligned columns, and usage bars share one
+  color. Same-name copies fold into one row with a "2 copies ▾" pill, combined
+  hits and an "x/y on" summary; each copy is still toggled on its own after
+  expanding. Source filters scroll on one line. Memory libraries show their
+  type make-up instead of an encoded path, and instruction files read
+  "project / FILE.md", naming their worktree when there is one.
+- **Session details give the transcript more room.** In wide windows the
+  title and every action share one row with the actions on the trailing
+  edge; the separate resume-command strip is gone (the copy button and the
+  list row offer it) and the stats sit inline.
+- **Faster, lighter first launch.** The first full usage scan reads
+  transcripts in 16 MB slices (peak memory 928 MB → 540 MB here, identical
+  ledger), the dashboard reads beside the scanner and shows partial numbers
+  while the first pass runs, warm-ups and full-text indexing are spread out,
+  idle Cursor databases and out-of-window session files are skipped, Codex
+  plan extraction streams without quadratic copies, and session details stop
+  re-parsing Markdown on every render.
+- Cache hit rate now divides by prompt-side tokens only, since output is
+  never cached.
+- The command palette highlights rows on hover and uses the hard offset
+  shadow in Neo-Brutalism.
+
 ### Fixed
 
-- **Claude Desktop sessions show their real title again.** Claude Code 2.1.27x
+- **Claude Desktop sessions show their real title again**
+  ([#21](https://github.com/vinlee19/lulu-lumei-dock/pull/21), @MT2-0901). Claude Code 2.1.27x
   stopped writing `ai-title` lines and now records the session name as
   `custom-title` lines plus a `custom-title.json` sidecar; the island, the
   session browser and the finish cards read both (old `ai-title` transcripts
@@ -16,13 +77,15 @@ this project uses [Semantic Versioning](https://semver.org/).
   session's first turn can push the prompt and every `cwd`-bearing line out
   of the transcript tail within 300ms, so `cwd` is now backfilled from the
   next event instead of staying empty.
-- **Sessions with a huge first message get their name and project back.**
+- **Sessions with a huge first message get their name and project back**
+  ([#22](https://github.com/vinlee19/lulu-lumei-dock/pull/22), @vinlee19).
   The session list reads the first 64KB of each Claude transcript; when the
   first lines are huge (an automated review whose first prompt carries a
   whole diff), that window held only half a line, so the session showed as
   a bare id with no project. When the head yields neither a working
   directory nor any name, the last 64KB is read as well.
-- **Archived or closed Claude sessions leave the island right away.** Without
+- **Archived or closed Claude sessions leave the island right away**
+  ([#21](https://github.com/vinlee19/lulu-lumei-dock/pull/21), @MT2-0901). Without
   hooks, a session whose Claude process had exited (archived in Desktop,
   swept by Desktop's idle reaper, or a scheduled task that finished) stayed in
   the idle list for an hour, or as a running ghost for four. The transcript
@@ -31,6 +94,12 @@ this project uses [Semantic Versioning](https://semver.org/).
   processes write that line at startup too), finishes a just-completed turn
   normally before ending the session, and polls every 2s instead of 5s. A
   session archived mid-turn shows an interrupted card.
+- **A fresh database survives several services opening it at once.**
+  Concurrent migrations could drop each other's tables ("no such table:
+  usage_records") and switching to WAL could fail with SQLITE_BUSY.
+- Skill descriptions written as a YAML `|` / `>` block show their text
+  instead of a lone "|"; plan summaries no longer stop at a lead-in that ends
+  in a colon.
 
 ## [0.38.0] - 2026-10-19
 
@@ -2055,7 +2124,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.39.0
 [0.38.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.38.0
 [0.37.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.37.0
 [0.36.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.36.0
