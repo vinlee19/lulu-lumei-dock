@@ -741,4 +741,11 @@ func sessionSummaryTests(_ t: TestRunner) {
             throw ExpectationError(description: "没有项目目录时应拒绝")
         } catch ClaudeProjectMemoryWriter.WriteError.noProjectDirectory {}
     }
+
+    t.test("复盘解析：去掉决定开头与图标重复的结论词") {
+        try expectEqual(SummaryDocument.droppingVerdictWord("rejected, one watermark row instead"), "one watermark row instead")
+        try expectEqual(SummaryDocument.droppingVerdictWord("否决，改成单行水位"), "改成单行水位")
+        try expectEqual(SummaryDocument.droppingVerdictWord("accepted"), "")
+        try expectEqual(SummaryDocument.droppingVerdictWord("用单行水位"), "用单行水位")
+    }
 }

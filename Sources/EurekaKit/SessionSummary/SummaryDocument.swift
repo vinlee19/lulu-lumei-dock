@@ -139,6 +139,22 @@ public enum SummaryDocument {
             || lower.contains("未说明") || lower.contains("没有说明") || lower.contains("未提及原因")
     }
 
+    /// Verdict words a decision may start with, in both languages
+    private static let verdictWords = [
+        "accepted", "adopted", "rejected", "declined", "modified", "overrode", "changed",
+        "采纳", "接受", "同意", "否决", "拒绝", "没有采纳", "未采纳", "修改", "调整", "部分采纳", "推翻",
+    ]
+
+    /// The decision without its leading verdict word and separator ("rejected, one row instead"
+    /// → "one row instead"); empty when the decision is only the verdict
+    public static func droppingVerdictWord(_ decision: String) -> String {
+        let lower = decision.lowercased()
+        guard let word = verdictWords.sorted(by: { $0.count > $1.count }).first(where: { lower.hasPrefix($0) })
+        else { return decision }
+        return String(decision.dropFirst(word.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ,，:：;；-—–。."))
+    }
+
     static func verdict(of decision: String) -> Choice.Verdict {
         let lower = decision.lowercased()
         if lower.hasPrefix("rejected") || lower.hasPrefix("declined") || decision.hasPrefix("否决")

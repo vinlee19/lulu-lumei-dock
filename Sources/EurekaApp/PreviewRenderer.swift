@@ -9,6 +9,9 @@ import SwiftUI
 /// Screen Recording permission.
 @MainActor
 enum PreviewRenderer {
+    /// Interface language forced by `--render-pages --lang` (nil = the app's setting)
+    nonisolated(unsafe) static var languageOverride: AppLanguage?
+
     static func renderAll(to directory: String) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -707,6 +710,8 @@ enum PreviewRenderer {
         }
 
         let settings = AppSettings()
+        // AppSettings applies the saved language; a --lang override wins over it
+        if let language = languageOverride { L10n.current = language }
         // AppSettings.init resets ThemeStyle.current from the persisted preference
         ThemeStyle.current = style
         let usage = UsageService()
