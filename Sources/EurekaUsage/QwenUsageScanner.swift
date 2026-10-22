@@ -14,6 +14,8 @@ import EurekaStore
 public final class QwenUsageScanner {
     private let projectsRoot: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
     private let projectResolver = ProjectResolver()
 
     /// Per-file private state (stored in scan_files.extra): session/project attribution
@@ -34,7 +36,12 @@ public final class QwenUsageScanner {
     public func scanOnce() throws -> Int {
         var inserted = 0
         for file in chatFiles() {
-            inserted += try scanFile(file)
+            inserted += try ScanSlices.drain(
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(file)
+            }
         }
         return inserted
     }
@@ -75,6 +82,7 @@ public final class QwenUsageScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         struct Candidate {
             var dedupKey: String

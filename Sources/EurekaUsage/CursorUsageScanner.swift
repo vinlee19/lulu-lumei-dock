@@ -59,6 +59,11 @@ public final class CursorUsageScanner {
     /// cannot reach `CursorSessionIndexer`): (composerId, cwd, lastActiveAt) triples.
     public typealias SessionRef = (id: String, cwd: String?, lastActiveAt: Date)
     private let sessions: (Date) -> [SessionRef]
+    /// Size + mtime of the database and its WAL at the last completed pass. Unchanged means no
+    /// composer can have new bubbles, so the pass skips the session index entirely: that index is
+    /// a `json_extract` walk over every composer row of a database that reaches 250 MB, and it
+    /// used to run every 60s even with Cursor closed.
+    private var lastFingerprint: String?
 
     public init(
         dbPath: URL,
@@ -81,12 +86,23 @@ public final class CursorUsageScanner {
         guard FileManager.default.fileExists(atPath: dbPath.path),
             let db = try? SQLiteDB(path: dbPath.path, readOnly: true)
         else { return 0 }
+        let fingerprint = Self.fingerprint(dbPath.path)
+        if fingerprint == lastFingerprint { return 0 }
         let inode = Self.fileInode(dbPath.path)
         var inserted = 0
         for session in sessions(now).prefix(maxSessions) {
-            inserted += try scan(session: session, db: db, inode: inode)
+            inserted += try autoreleasepool { try scan(session: session, db: db, inode: inode) }
         }
+        lastFingerprint = fingerprint
         return inserted
+    }
+
+    static func fingerprint(_ path: String) -> String {
+        [path, path + "-wal"].map { file -> String in
+            var info = Darwin.stat()
+            guard lstat(file, &info) == 0 else { return "-" }
+            return "\(info.st_size):\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)"
+        }.joined(separator: "|")
     }
 
     private func scan(session: SessionRef, db: SQLiteDB, inode: Int64) throws -> Int {

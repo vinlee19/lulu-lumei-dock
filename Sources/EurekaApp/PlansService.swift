@@ -27,7 +27,9 @@ final class PlansService: ObservableObject {
         didSet { rebuild() }
     }
 
-    private let queue = DispatchQueue(label: "com.vinlee.eureka.plans", qos: .userInitiated)
+    /// .utility: a first scan parses every Codex rollout and walks every repo's docs; it must
+    /// not compete with the UI on the performance cores
+    private let queue = DispatchQueue(label: "com.vinlee.eureka.plans", qos: .utility)
     private let resolver = ProjectResolver()
     private var all: [PlanMaterializer.PlanEntry] = []
 

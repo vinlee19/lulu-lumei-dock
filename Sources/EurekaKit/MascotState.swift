@@ -74,27 +74,39 @@ public enum MascotBaseResolver {
         public var hasRunningTask: Bool
         /// Seconds since last activity (0 when there are active tasks)
         public var idleSeconds: TimeInterval
+        /// .infinity = never fall asleep from idleness
         public var sleepThreshold: TimeInterval
+        /// Off = the late-night hours behave like daytime (no drowsy working, no forced sleep)
+        public var nightMode: Bool
         public var now: Date
 
         public init(
             hasWaitingTask: Bool, hasRunningTask: Bool,
-            idleSeconds: TimeInterval, sleepThreshold: TimeInterval = 60, now: Date
+            idleSeconds: TimeInterval, sleepThreshold: TimeInterval = 60,
+            nightMode: Bool = true, now: Date
         ) {
             self.hasWaitingTask = hasWaitingTask
             self.hasRunningTask = hasRunningTask
             self.idleSeconds = idleSeconds
             self.sleepThreshold = sleepThreshold
+            self.nightMode = nightMode
             self.now = now
         }
+    }
+
+    /// Late-night window shared by the night state and the companion settings copy
+    public static let nightHours = (start: 23, end: 6)
+
+    public static func isDeepNight(_ date: Date, calendar: Calendar = .current) -> Bool {
+        let hour = calendar.component(.hour, from: date)
+        return hour >= nightHours.start || hour < nightHours.end
     }
 
     /// Priority: waiting on you > (running late at night → sleepy / otherwise focused) > long
     /// idle or late night with no tasks → asleep > calm
     public static func base(_ input: Input, calendar: Calendar = .current) -> MascotState {
         if input.hasWaitingTask { return .waiting }
-        let hour = calendar.component(.hour, from: input.now)
-        let deepNight = hour >= 23 || hour < 6
+        let deepNight = input.nightMode && isDeepNight(input.now, calendar: calendar)
         if input.hasRunningTask {
             return deepNight ? .night : .working
         }

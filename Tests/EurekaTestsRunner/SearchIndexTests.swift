@@ -50,6 +50,29 @@ func searchIndexTests(_ t: TestRunner) {
         try expect(hits[0].text.contains("重构数据管道的增量加载逻辑"))
     }
 
+    t.test("分批索引：每轮最多重建 maxRebuilds 个，最新的先建，下一轮接着做") {
+        let dbPath = tempStorePath()
+        let files = try (0..<3).map { _ in try copyFixture("claude-transcript-running.jsonl") }
+        defer {
+            try? FileManager.default.removeItem(at: dbPath)
+            files.forEach { try? FileManager.default.removeItem(at: $0) }
+        }
+        let store = try EurekaStore(path: dbPath)
+        let indexer = TranscriptSearchIndexer(store: store)
+        let sessions = files.enumerated().map { index, file in
+            AgentSessionInfo(
+                source: .claude, id: "s\(index)", cwd: "/w/proj", name: nil, startedAt: nil,
+                lastActiveAt: Date(timeIntervalSince1970: 1000 + Double(index)),
+                sizeBytes: 0, transcriptPath: file.path)
+        }
+        try expectEqual(indexer.indexOnce(sessions: sessions, maxRebuilds: 2), 2)
+        try expect(indexer.lastPassTruncated, "a backlog remains")
+        let first = Set(try store.search.search("增量加载").map(\.sessionId))
+        try expectEqual(first, ["s1", "s2"])
+        try expectEqual(indexer.indexOnce(sessions: sessions, maxRebuilds: 2), 1)
+        try expect(!indexer.lastPassTruncated, "caught up")
+    }
+
     t.test("2 字符查询走 LIKE 退化仍可命中；<2 字符返回空") {
         let dbPath = tempStorePath()
         let file = try copyFixture("claude-transcript-running.jsonl")

@@ -94,6 +94,9 @@ struct PlansView: View {
 
     @ViewBuilder
     private var content: some View {
+        // Filtered and sorted once per render: `filtered` used to be re-evaluated for every row
+        // (N rows × filter + sort of N), all on the main thread
+        let rows = filtered
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
@@ -102,22 +105,24 @@ struct PlansView: View {
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: "list.bullet.clipboard.fill",
                     totalCount: service.totalCount,
                     sources: service.availableSources,
-                    count: { service.count(for: $0) })
-                if filtered.isEmpty {
+                    count: { service.count(for: $0) },
+                    singleLine: true)
+                if rows.isEmpty {
                     emptyState.padding(.top, 40)
                 } else if layout == .cards {
                     LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
-                        ForEach(filtered) { plan in planCard(plan) }
+                        ForEach(rows) { plan in planCard(plan) }
                     }
                 } else {
                     KnowledgeListContainer {
-                        VStack(spacing: 0) {
-                            ForEach(Array(filtered.enumerated()), id: \.element.id) { index, plan in
+                        // Lazy: only the rows on screen are built
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, plan in
                                 PlanRow(
                                     plan: plan, service: service,
                                     onOpen: { open(plan) }, onDelete: { deleting = plan })
-                                if index < filtered.count - 1 {
-                                    Divider().opacity(0.4).padding(.leading, 46)
+                                if index < rows.count - 1 {
+                                    Divider().opacity(0.4).padding(.leading, 50)
                                 }
                             }
                         }
@@ -228,8 +233,8 @@ private func planMenu(
     }
 }
 
-/// Plan icon card: same skeleton as the skill card: purple square logo + title + summary + status/
-/// project/time.
+/// Plan icon card: same skeleton as the skill card: title monogram (source as corner badge) +
+/// title + summary + status/project/time.
 /// No progress ring: the card face only says "what it is and what state it's in"; completion is
 /// left to the list view.
 private struct PlanCard: View {
@@ -245,7 +250,7 @@ private struct PlanCard: View {
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    SourceLogoTile(source: plan.source, size: 28)
+                    MonogramTile(name: plan.title, source: plan.source, size: 28)
                     // Plan titles are longer than skill names: allow 2 lines and always reserve the
                     // space (equal-height grid)
                     Text(plan.title)
@@ -277,8 +282,9 @@ private struct PlanCard: View {
     }
 }
 
-/// Plan list row: status dot + source logo + title/project·summary + status text + progress bar % +
-/// step count + time + size
+/// Plan list row: title monogram (source as corner badge) + title / project · summary + fixed
+/// trailing columns: status · checklist progress · steps · time · size, aligned down the list
+/// whether or not a plan has a checklist
 private struct PlanRow: View {
     let plan: PlanMaterializer.PlanEntry
     let service: PlansService
@@ -290,10 +296,7 @@ private struct PlanRow: View {
             actions: planActions(plan, service: service, onDelete: onDelete), onOpen: onOpen
         ) {
             HStack(spacing: 10) {
-                Circle().fill(planAccentColor(plan.status)).frame(width: 8, height: 8)
-                // Same square as the skill / memory / agent list rows (purple background, light
-                // border, 28pt)
-                SourceLogoTile(source: plan.source, size: 28)
+                MonogramTile(name: plan.title, source: plan.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plan.title)
                         .font(Theme.font.themed(13, .semibold))
@@ -301,42 +304,51 @@ private struct PlanRow: View {
                         .truncationMode(.tail)
                     HStack(spacing: 6) {
                         if let project = plan.project {
-                            Text(project).font(Theme.font.themed(10.5)).foregroundStyle(.secondary).lineLimit(1)
+                            Text(project).font(Theme.font.themed(10.5, .medium)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         if let summary = plan.summary {
                             Text(summary)
-                                .font(Theme.font.themed(10.5)).foregroundStyle(.tertiary)
+                                .font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
                                 .lineLimit(1).truncationMode(.tail)
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
-                trailing.fixedSize()
             }
+        } trailing: {
+            trailing
         } menu: {
             planMenu(plan, service: service, onOpen: onOpen, onDelete: onDelete)
         }
     }
 
     @ViewBuilder private var trailing: some View {
+        let checklist = plan.status == .document ? nil : plan.progress
         HStack(spacing: 10) {
             Text(plan.status.displayName)
                 .font(Theme.font.themed(11, .semibold))
                 .foregroundStyle(planAccentColor(plan.status))
-            if plan.status == .document {
-                Image(systemName: "doc.text").font(Theme.font.themed(11)).foregroundStyle(Theme.goldFg)
-            } else if let progress = plan.progress {
-                PlanProgressBar(progress: progress, width: 66)
-                Text("\(Int((progress * 100).rounded()))%")
-                    .font(Theme.font.themedMono(12, .semibold))
+                .lineLimit(1)
+                .frame(width: 40, alignment: .leading)
+            Group {
+                if let checklist {
+                    PlanProgressBar(progress: checklist, width: 60)
+                } else {
+                    Color.clear.frame(width: 60, height: 6)
+                }
             }
-            if plan.stepsTotal > 0 {
-                Text(L10n.format("%@ / %@ steps", zhHans: "%@ / %@ 步", String(plan.stepsDone), String(plan.stepsTotal)))
-                    .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
-            }
+            // Steps carry the progress on their own; a separate % column would mostly sit empty
+            // (most plans are documents without a checklist)
+            Text(plan.stepsTotal > 0
+                ? L10n.format("%@/%@ steps", zhHans: "%@/%@ 步", String(plan.stepsDone), String(plan.stepsTotal))
+                : "")
+                .font(Theme.font.themedMono(10.5, .medium)).foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 56, alignment: .trailing)
             Text(plan.modifiedAt, formatter: relativeFormatter)
                 .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(width: 58, alignment: .trailing)
             Text(formatBytes(plan.sizeBytes))
                 .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
                 .frame(width: 46, alignment: .trailing)

@@ -248,6 +248,9 @@ struct PopoverRootView: View {
                     navigation.tab = .settings
                     navigation.settingsSection = .about
                 }
+            },
+            onOpenSearch: {
+                withAnimation(.easeOut(duration: 0.12)) { paletteVisible = true }
             })
     }
 
@@ -265,6 +268,7 @@ struct PopoverRootView: View {
                 terminals: sessionBrowser.terminals,
                 onExport: { usageService.exportHistoryCSV() },
                 exportMessage: usageService.exportMessage,
+                onOpenSession: { NotificationCenter.default.post(name: .eurekaRevealSession, object: $0) },
                 settings: settings)
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings,
@@ -292,7 +296,8 @@ struct PopoverRootView: View {
         case .mcp:
             MCPView(service: mcpService, usageService: usageService)
         case .usage:
-            UsageDashboardView(usageService: usageService, sessionBrowser: sessionBrowser)
+            UsageDashboardView(
+                usageService: usageService, sessionBrowser: sessionBrowser, settings: settings)
         case .limits:
             LimitsPanelView(service: limitsService, settings: settings)
         case .audit:
@@ -326,13 +331,28 @@ func formatCost(_ usd: Double) -> String {
     usd < 0.01 && usd > 0 ? "<$0.01" : String(format: "$%.2f", usd)
 }
 
-/// Built per read so it follows the interface language (a `static let` would freeze the first
-/// language it saw, and a fixed zh_CN locale printed Chinese relative times in English UI).
+/// Follows the interface language (a `static let` would freeze the first language it saw, and a
+/// fixed zh_CN locale printed Chinese relative times in English UI). Cached per locale: every
+/// list row reads it, and building a formatter per read cost one allocation per visible row on
+/// each render.
 var relativeFormatter: RelativeDateTimeFormatter {
-    let formatter = RelativeDateTimeFormatter()
-    formatter.locale = L10n.current.locale
-    formatter.unitsStyle = .abbreviated
-    return formatter
+    RelativeFormatterCache.formatter(for: L10n.current.locale)
+}
+
+private enum RelativeFormatterCache {
+    private static let lock = NSLock()
+    private static var cached: (identifier: String, formatter: RelativeDateTimeFormatter)?
+
+    static func formatter(for locale: Locale) -> RelativeDateTimeFormatter {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached, cached.identifier == locale.identifier { return cached.formatter }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .abbreviated
+        cached = (locale.identifier, formatter)
+        return formatter
+    }
 }
 
 /// Relative time. Anything under 5 seconds either way (including the "in 0 sec" a clock

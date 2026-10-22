@@ -81,10 +81,18 @@ public enum AntigravityPaths {
     /// Raw-scans the session db (and its -wal) bytes for the workspace `file://` URI → local path.
     /// Antigravity stores workspace_uris in protobuf strings, whose values land in page data as
     /// plain ASCII.
+    /// Read in 1 MB chunks that overlap by 4 KB (a URI never straddles a boundary unseen), stopping
+    /// at the first hit: the whole file used to be loaded and copied into a byte array.
     public static func cwd(dbURL: URL) -> String? {
         for path in [dbURL.path, dbURL.path + "-wal"] {
-            guard let data = FileManager.default.contents(atPath: path) else { continue }
-            if let uri = findFileURI([UInt8](data)) { return uriToPath(uri) }
+            guard let handle = FileHandle(forReadingAtPath: path) else { continue }
+            defer { try? handle.close() }
+            var carry: [UInt8] = []
+            while let piece = try? handle.read(upToCount: 1 << 20), !piece.isEmpty {
+                let chunk = carry + [UInt8](piece)
+                if let uri = findFileURI(chunk) { return uriToPath(uri) }
+                carry = Array(chunk.suffix(4096))
+            }
         }
         return nil
     }

@@ -14,6 +14,8 @@ import EurekaStore
 public final class GrokUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -48,10 +50,20 @@ public final class GrokUsageScanner {
     public func scanOnce() throws -> Int {
         var bumped = 0
         for file in eventFiles() {
-            bumped += try scanFile(file)
+            bumped += try ScanSlices.drain(
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(file)
+            }
             let updates = file.deletingLastPathComponent().appendingPathComponent("updates.jsonl")
             if FileManager.default.fileExists(atPath: updates.path) {
-                bumped += try autoreleasepool { try scanUpdates(updates) }
+                bumped += try ScanSlices.drain(
+                stateKey: updates.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanUpdates(updates)
+            }
             }
         }
         return bumped
@@ -70,6 +82,7 @@ public final class GrokUsageScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         let sessionDir = url.deletingLastPathComponent()
         let sessionId = resolveSessionId(sessionDir: sessionDir)
@@ -177,6 +190,7 @@ public final class GrokUsageScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         var promptCount = 0
         var toolBumps: [String: Int] = [:]  // "day\u{1}name" → count

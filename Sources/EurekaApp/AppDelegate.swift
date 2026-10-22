@@ -115,11 +115,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mascot.applyPack(id: settings.mascotPack)
         mascot.start()
         mascotController = mascot
-        settings.$mascotEnabled
-            .sink { [weak mascot] on in mascot?.setVisible(on) }
-            .store(in: &cancellables)
         settings.$mascotPack
             .sink { [weak mascot] id in mascot?.applyPack(id: id) }
+            .store(in: &cancellables)
+        settings.$mascotSleepMinutes
+            .sink { [weak mascot] minutes in
+                mascot?.viewModel.idleSleepSeconds = minutes > 0 ? Double(minutes) * 60 : .infinity
+            }
+            .store(in: &cancellables)
+        settings.$mascotNightMode
+            .sink { [weak mascot] on in mascot?.viewModel.nightMode = on }
+            .store(in: &cancellables)
+        settings.$mascotBubbles
+            .sink { [weak mascot] on in mascot?.viewModel.showsBubbles = on }
+            .store(in: &cancellables)
+        // Size before visibility: the saved origin belongs to the scaled panel
+        settings.$mascotSize
+            .sink { [weak mascot] raw in mascot?.setSize(MascotSize.resolve(raw)) }
+            .store(in: &cancellables)
+        settings.$mascotEnabled
+            .sink { [weak mascot] on in mascot?.setVisible(on) }
             .store(in: &cancellables)
 
         // Appearance theme: apply at launch + follow Settings changes
@@ -291,6 +306,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         wellnessMonitor = wellness
 
+        // Monthly budget: island card (+ system notification when enabled) once per threshold per
+        // month, checked on every usage scan
+        usageService.$monthOverview
+            .combineLatest(settings.$usageMonthlyBudget)
+            .sink { [weak self, weak island] overview, budget in
+                guard let self, let overview else { return }
+                guard let notice = BudgetAlertStore.check(
+                    spent: overview.monthToDate, budget: budget, projected: overview.projected)
+                else { return }
+                island?.viewModel.enqueueNotice(notice)
+                if self.settings.eventSystemNotifyEnabled {
+                    self.notificationService.postEvent(SystemEventNotification(
+                        identifier: "eureka-\(notice.id)", title: notice.headline,
+                        body: notice.body))
+                }
+            }
+            .store(in: &cancellables)
+
         // First launch: guide to the Settings page for one-click install (the window is already
         // shown, so only switch tabs here)
         if !UserDefaults.standard.bool(forKey: "didOnboard") {
@@ -368,37 +401,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Launch warm-ups. The light config scans start right away; the three heavy ones (skills +
+    /// memory, plans, sessions + prompts) each parse a whole history on a first install, and
+    /// started together a few seconds apart they saturated every core next to the usage backfill
+    /// and pushed memory into swap, stalling even the cursor. So they run one after another, and
+    /// the first waits for the usage pass to publish. Each wait has a ceiling, so a stalled step
+    /// never holds the rest back. Opening a page still loads it at once.
     private func warmUpKnowledgeScans() {
-        let steps: [(delay: TimeInterval, label: String, run: () -> Void)] = [
-            (0.8, "agents", { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 self.agentConfig.refresh()
                 // MCP indexing goes in the same batch as agents (both lightweight config-file
                 // scans, milliseconds)
                 self.mcpService.refresh()
                 self.usageService.loadAgentStats()
-            }),
-            (1.5, "skills+memory", { [weak self] in
-                guard let self else { return }
-                self.skillMemory.refresh()
-                self.usageService.loadSkillStats()
-                // Prewarm the stat card's "hits this week" too, otherwise the number only appears
-                // after opening the page
-                self.usageService.loadSkillRanking(
-                    source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
-            }),
-            (3.0, "plans", { [weak self] in self?.plans.refresh() }),
-            // The session index feeds the prompt library (the scanning -> false subscription picks
-            // up extraction automatically)
-            (4.0, "sessions+prompts", { [weak self] in self?.sessionBrowser.refresh() }),
-        ]
-        for step in steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + step.delay) { [weak self] in
-                MainActor.assumeIsolated {
-                    step.run()
-                    self?.logLine("知识库预热启动 \(step.label)")
-                }
+                self.logLine("知识库预热启动 agents")
             }
+        }
+        whenReady(usageService.$summary.map { $0 != nil }, within: 120, label: "skills+memory") {
+            [weak self] in
+            guard let self else { return }
+            self.skillMemory.refresh()
+            self.usageService.loadSkillStats()
+            // Prewarm the stat card's "hits this week" too, otherwise the number only appears
+            // after opening the page
+            self.usageService.loadSkillRanking(
+                source: nil, from: UsageService.DashboardPeriod.week.startDate, to: Date())
+            self.whenReady(self.skillMemory.$lastScanAt.map { $0 != nil }, within: 60, label: "plans") {
+                [weak self] in
+                guard let self else { return }
+                self.plans.refresh()
+                // The session index feeds the prompt library (the scanning -> false subscription
+                // picks up extraction automatically)
+                self.whenReady(
+                    self.plans.$lastScanAt.map { $0 != nil }, within: 60, label: "sessions+prompts"
+                ) { [weak self] in self?.sessionBrowser.refresh() }
+            }
+        }
+    }
+
+    /// Runs `body` once on the main thread when `ready` first emits true, or after `within`
+    /// seconds, whichever comes first
+    private func whenReady<P: Publisher>(
+        _ ready: P, within limit: TimeInterval, label: String, _ body: @escaping () -> Void
+    ) where P.Output == Bool, P.Failure == Never {
+        var fired = false
+        var token: AnyCancellable?
+        let fire: () -> Void = { [weak self] in
+            guard !fired else { return }
+            fired = true
+            token?.cancel()
+            body()
+            self?.logLine("知识库预热启动 \(label)")
+        }
+        token = ready.filter { $0 }.first()
+            .receive(on: DispatchQueue.main)
+            .sink { _ in MainActor.assumeIsolated { fire() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit) {
+            MainActor.assumeIsolated { fire() }
         }
     }
 

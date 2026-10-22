@@ -14,6 +14,8 @@ public final class GeminiUsageScanner {
     private let tmpRoot: URL
     private let projectsFile: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
     private let projectResolver = ProjectResolver()
 
     /// Per-file private state (stored in scan_files.extra): session/project attribution (parsed
@@ -37,7 +39,12 @@ public final class GeminiUsageScanner {
         let slugToProject = loadSlugMap()
         var inserted = 0
         for (file, slug) in chatFiles() {
-            inserted += try scanFile(file, cwd: slugToProject[slug])
+            inserted += try ScanSlices.drain(
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(file, cwd: slugToProject[slug])
+            }
         }
         return inserted
     }
@@ -91,6 +98,7 @@ public final class GeminiUsageScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         struct Candidate {
             var dedupKey: String

@@ -12,6 +12,7 @@ struct CommandPaletteView: View {
     var onRevealMessage: ((String, Int) -> Void)? = nil
 
     @State private var selection = 0
+    @State private var hoveredIndex: Int?
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -37,9 +38,10 @@ struct CommandPaletteView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(service.hits.enumerated()), id: \.element.id) { idx, hit in
-                                row(hit, selected: idx == selection)
+                                row(hit, selected: idx == selection, hovered: idx == hoveredIndex)
                                     .id(idx)
                                     .onTapGesture { route(at: idx) }
+                                    .onHover { h in hoveredIndex = h ? idx : (hoveredIndex == idx ? nil : hoveredIndex) }
                             }
                         }
                         .padding(6)
@@ -62,8 +64,12 @@ struct CommandPaletteView: View {
                 .fill(Theme.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.radius.card)
-                        .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth)))
-        .shadow(color: .black.opacity(0.25), radius: 22, y: 8)
+                        .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
+                .themeCardShadow())
+        .shadow(
+            color: ThemeStyle.current.isHardEdged ? .clear : .black.opacity(0.25),
+            radius: ThemeStyle.current.isHardEdged ? 0 : 22,
+            y: ThemeStyle.current.isHardEdged ? 0 : 8)
         .onAppear { inputFocused = true }
         .onChange(of: service.hits) { _, _ in selection = 0 }
         .onKeyPress(.downArrow) {
@@ -75,7 +81,7 @@ struct CommandPaletteView: View {
         .onKeyPress(.escape) { onClose(); return .handled }
     }
 
-    private func row(_ hit: CommandPaletteService.Hit, selected: Bool) -> some View {
+    private func row(_ hit: CommandPaletteService.Hit, selected: Bool, hovered: Bool = false) -> some View {
         HStack(spacing: 8) {
             Text(hit.kind.label)
                 .font(Theme.font.themed(9, .medium))
@@ -97,7 +103,7 @@ struct CommandPaletteView: View {
         .padding(.horizontal, 8).padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: Theme.radius.tile)
-                .fill(selected ? Theme.brandFill(0.18) : .clear))
+                .fill(selected ? Theme.brandFill(0.18) : (hovered ? Theme.brandFill(0.08) : .clear)))
         // A solid leading bar marks the keyboard selection; the tint alone was too faint to find
         .overlay(alignment: .leading) {
             if selected {

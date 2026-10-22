@@ -54,24 +54,38 @@ public enum PlanParsing {
 
     /// One-line summary: the first body line that is not a heading (#) / quote (>) / divider / code
     /// fence / table / checklist item / blank, returned with common markdown decorations stripped
-    /// (truncation is left to the view).
+    /// (truncation is left to the view). When a lead-in line ends with a colon, the following
+    /// content line is appended so the summary does not stop on an incomplete intro.
     public static func summary(_ markdown: String) -> String? {
         var found: String?
+        var pendingIntro: String?
         markdown.enumerateLines { line, stop in
             let t = line.trimmingCharacters(in: .whitespaces)
             if t.isEmpty || t.hasPrefix("#") || t.hasPrefix(">") { return }
             if t.hasPrefix("---") || t.hasPrefix("```") || t.hasPrefix("|") { return }
-            if checkbox(t) != nil { return }
+            if let item = checkbox(t) {
+                if let intro = pendingIntro, !item.text.isEmpty {
+                    found = "\(intro) \(item.text)"
+                    stop = true
+                }
+                return
+            }
             let cleaned = t
                 .replacingOccurrences(of: "**", with: "")
                 .replacingOccurrences(of: "`", with: "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "-*+• "))
-            if !cleaned.isEmpty {
+            guard !cleaned.isEmpty else { return }
+            if let intro = pendingIntro {
+                found = "\(intro) \(cleaned)"
+                stop = true
+            } else if (cleaned.hasSuffix(":") || cleaned.hasSuffix("：")) && cleaned.count < 48 {
+                pendingIntro = cleaned
+            } else {
                 found = cleaned
                 stop = true
             }
         }
-        return found
+        return found ?? pendingIntro
     }
 
     /// Matches `- [x] …` / `* [ ] …` / `1. [~] …` and returns the box character and the step text

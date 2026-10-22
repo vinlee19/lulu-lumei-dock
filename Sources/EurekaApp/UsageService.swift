@@ -27,6 +27,23 @@ final class UsageService: ObservableObject {
     @Published private(set) var recordTotal = 0
     /// Model stats (full breakdown for the selected period/source)
     @Published private(set) var modelTotals: [UsageTotals] = []
+    /// Model stats of the comparison range (one period earlier, same elapsed time); nil = the
+    /// selected period has nothing to compare against ("All")
+    @Published private(set) var comparisonTotals: [UsageTotals]?
+    /// Current calendar month across every source (month card, budget alerts); refreshed on every
+    /// scan, so budget alerts fire without the dashboard open
+    @Published private(set) var monthOverview: MonthOverview?
+    /// Turns asked in the selected range/source (turn card)
+    @Published private(set) var turnSummary = TurnSummary()
+
+    struct MonthOverview: Equatable {
+        var monthToDate: Double
+        /// Cost of the last 7 days (the forecast's daily rate)
+        var trailingSevenDays: Double
+        /// Month-to-date API-equivalent cost per source (subscription payback)
+        var bySource: [AgentSource: Double]
+        var projected: Double?
+    }
     /// Token/cost trend by (time bucket, source) over the selected range (for charts; short ranges
     /// switch to hourly granularity automatically)
     @Published private(set) var trend: [TrendPoint] = []
@@ -74,6 +91,7 @@ final class UsageService: ObservableObject {
         var id: String { name }
         var name: String
         var tokens: Int
+        var requests: Int
         var costUSD: Double?
     }
 
@@ -84,6 +102,7 @@ final class UsageService: ObservableObject {
         var bucket: Date
         var source: AgentSource
         var tokens: Int
+        var requests: Int
         var costUSD: Double
     }
 
@@ -146,6 +165,20 @@ final class UsageService: ObservableObject {
     }
 
     private let queue = DispatchQueue(label: "com.vinlee.eureka.usage", qos: .utility)
+    /// Dashboard reads (every `load*` / `export*`) run on their own queue and connection. They
+    /// used to share `queue` with the scanner, so on a first install each page load waited
+    /// behind full scan passes; WAL lets this connection read while a scan writes.
+    private let readQueue = DispatchQueue(label: "com.vinlee.eureka.usage-read", qos: .userInitiated)
+    /// readQueue only
+    private var readStore: EurekaStore?
+    /// queue only: a summary has been published (until then the dashboard shows its spinner,
+    /// so the first pass publishes interim ones after its two biggest scanners)
+    private var publishedSummary = false
+
+    private func readerStore() -> EurekaStore? {
+        if readStore == nil { readStore = try? EurekaStore(path: EurekaStore.defaultURL()) }
+        return readStore
+    }
     private var timer: DispatchSourceTimer?
 
     /// Full-text indexing cadence, **independent of usage's 60s**.
@@ -159,6 +192,15 @@ final class UsageService: ObservableObject {
     /// When indexing last ran (accessed only on queue). Starts at distantPast so the first pass
     /// after launch indexes.
     private var lastIndexRun = Date.distantPast
+    /// Sessions one index pass may rebuild (see `TranscriptSearchIndexer.indexOnce`)
+    static let indexBatch = 120
+    /// Discovery reused while a truncated first index is still being worked through (discovery
+    /// itself costs seconds; the backfill runs on every scan tick until it catches up)
+    private var indexBacklog: (sessions: [AgentSessionInfo], at: Date)?
+    /// A scan is already queued: `refreshNow` callers (window shown, tab opened, price change)
+    /// coalesce into it instead of stacking full passes in front of the dashboard's loads
+    private let scanQueuedLock = NSLock()
+    private var scanQueued = false
 
     // The members below are accessed only on queue
     private var store: EurekaStore?
@@ -245,10 +287,11 @@ final class UsageService: ObservableObject {
                     sessions: { now in
                         // Full history: each composer has its own watermark, so revisiting old
                         // sessions costs almost nothing; truncating at 30 days would mean Cursor
-                        // usage older than a month never enters the ledger
+                        // usage older than a month never enters the ledger. 300 = what the scanner
+                        // reads (its maxSessions, newest first); asking for more was discarded.
                         CursorSessionIndexer.index(
                             window: CursorSessionIndexer.fullHistoryWindow,
-                            maxSessions: 2000, now: now)
+                            maxSessions: 300, now: now)
                             .map { ($0.id, $0.cwd, $0.lastActiveAt) }
                     })
                 // zcode: tokens are in the model_io lines of cli/rollout (including subagent
@@ -261,6 +304,9 @@ final class UsageService: ObservableObject {
                     conversationsRoot: AntigravityPaths.conversationsRoot(), store: store,
                     cwdResolver: { AntigravityPaths.cwd(dbURL: $0) })
                 self.searchIndexer = TranscriptSearchIndexer(store: store)
+                // First index pass ~90s after launch: the first seconds belong to the usage backfill
+                // and the pages the user opens, not to parsing every transcript for search
+                self.lastIndexRun = Date().addingTimeInterval(-Self.indexInterval + 90)
                 PricingCatalogStore.shared.loadIfNeeded(paths: .app)
                 self.scanAndPublish()
             } catch {
@@ -276,10 +322,19 @@ final class UsageService: ObservableObject {
         self.timer = timer
     }
 
+    /// Opens the existing SQLite store on the service queue without starting background usage
+    /// scanners. Used by offscreen preview rendering to read persisted skill/MCP/agent stats.
+    func openStoreForPreview() {
+        queue.async { [weak self] in
+            guard let self, self.store == nil else { return }
+            self.store = try? EurekaStore(path: EurekaStore.defaultURL())
+        }
+    }
+
     /// Aggregates a weekly report ([weekStart, weekEnd)) and publishes it to weeklyReport when done
     func loadWeeklyReport(weekStart: Date, weekEnd: Date) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let report = try? WeeklyReportBuilder.build(
                 store: store, pricing: self.pricing,
                 weekStart: weekStart, weekEnd: weekEnd)
@@ -326,14 +381,24 @@ final class UsageService: ObservableObject {
 
     /// Proactively refreshes once when the popover opens
     func refreshNow() {
-        queue.async { [weak self] in self?.scanAndPublish() }
+        scanQueuedLock.lock()
+        defer { scanQueuedLock.unlock() }
+        guard !scanQueued else { return }
+        scanQueued = true
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.scanQueuedLock.lock()
+            self.scanQueued = false
+            self.scanQueuedLock.unlock()
+            self.scanAndPublish()
+        }
     }
 
     /// Scans every (source, model, provider) seen in the ledger and picks out unpriced and
     /// estimated ones (called when the settings page opens)
     func loadPricingDiagnostics() {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let pricing = self.pricing
             let rows = ((try? store.usage.distinctModels()) ?? []).compactMap { totals -> PricingDiagnostic? in
                 let resolution = pricing.resolution(for: totals.model, provider: totals.provider)
@@ -362,8 +427,8 @@ final class UsageService: ObservableObject {
     func loadRecords(
         page: Int, pageSize: Int = 50, source: AgentSource?, from: Date, to: Date
     ) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             do {
                 let total = try store.usage.recordCount(from: from, to: to, source: source)
                 let rows = try store.usage.recentRecords(
@@ -392,8 +457,8 @@ final class UsageService: ObservableObject {
     /// chart's "by date", following the range). Ranges ≤48h (today/short custom) switch to hourly
     /// granularity; cost must be priced at model granularity before folding.
     func loadTrend(from: Date, to: Date) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let hourly = to.timeIntervalSince(from) <= 2 * 86400
             let granularity: UsageRepo.TrendGranularity = hourly ? .hour : .day
             let rows = (try? store.usage.dailyRows(
@@ -403,13 +468,15 @@ final class UsageService: ObservableObject {
             formatter.locale = Locale(identifier: "en_US_POSIX")
             // (bucket string, source) → token/cost sums (rows are model-granular; cost is computed
             // per row, then accumulated)
-            var buckets: [String: [AgentSource: (tokens: Int, cost: Double)]] = [:]
+            var buckets: [String: [AgentSource: (tokens: Int, requests: Int, cost: Double)]] = [:]
             for row in rows {
                 let t = row.totals
                 let total = t.inputTokens + t.outputTokens
                     + t.cacheCreationTokens + t.cacheReadTokens
-                var entry = buckets[row.day, default: [:]][t.source] ?? (tokens: 0, cost: 0)
+                var entry = buckets[row.day, default: [:]][t.source]
+                    ?? (tokens: 0, requests: 0, cost: 0)
                 entry.tokens += total
+                entry.requests += t.requestCount
                 entry.cost += self.pricing.cost(of: t) ?? 0
                 buckets[row.day, default: [:]][t.source] = entry
             }
@@ -419,7 +486,7 @@ final class UsageService: ObservableObject {
                 for (source, entry) in bySource where entry.tokens > 0 {
                     points.append(TrendPoint(
                         bucket: bucket, source: source,
-                        tokens: entry.tokens, costUSD: entry.cost))
+                        tokens: entry.tokens, requests: entry.requests, costUSD: entry.cost))
                 }
             }
             points.sort { $0.bucket < $1.bucket }
@@ -433,8 +500,8 @@ final class UsageService: ObservableObject {
     /// Per-session usage ranking (selected range/source; folded by sessionId, cost computed per
     /// model row, top 50 by tokens descending)
     func loadSessionTotals(from: Date, to: Date, source: AgentSource?) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let rows = (try? store.usage.totalsBySession(
                 from: from, to: to, source: source)) ?? []
             var bySession: [String: SessionTotal] = [:]
@@ -461,8 +528,8 @@ final class UsageService: ObservableObject {
 
     /// Active-hours heatmap (selected range/source, weekday × 24h in one SQL aggregation)
     func loadHeatmap(from: Date, to: Date, source: AgentSource?) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let cells = (try? store.usage.hourlyHeatmap(
                 from: from, to: to, source: source)) ?? []
             self.publish { $0.heatmapCells = cells }
@@ -471,8 +538,8 @@ final class UsageService: ObservableObject {
 
     /// Tool/skill/plugin call stats (selected range/source, count descending)
     func loadToolCalls(source: AgentSource?, from: Date, to: Date) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let totals = (try? store.toolCalls.totals(
                 from: from, to: to, source: source)) ?? []
             self.publish { $0.toolCallTotals = totals }
@@ -484,8 +551,8 @@ final class UsageService: ObservableObject {
     /// audit stream can never cover it), so rows are filled from its own `skills/.usage.json`
     /// counts; when a same-name audit row exists, the audit row wins.
     func loadSkillStats(source: AgentSource? = nil) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             var stats = (try? store.toolCalls.skillStats(source: source)) ?? []
             if source == nil || source == .hermes {
                 let counted = Set(stats.filter { $0.source == .hermes }.map(\.name))
@@ -507,8 +574,8 @@ final class UsageService: ObservableObject {
     /// shapes: codex/kimi `server.tool` (take the prefix before the first .), Claude
     /// `mcp__server__tool`.
     func loadMCPStats() {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let totals = (try? store.toolCalls.mcpNameTotals()) ?? []
             var stats: [String: MCPServerCallStat] = [:]
             for total in totals {
@@ -559,8 +626,8 @@ final class UsageService: ObservableObject {
         server: String, days: Int = 30,
         completion: @escaping (MCPServerActivity?) -> Void
     ) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else {
                 DispatchQueue.main.async { completion(nil) }
                 return
             }
@@ -594,8 +661,8 @@ final class UsageService: ObservableObject {
     /// All-time subagent call stats (Agents page "called N times"; kind='agent', total count
     /// descending)
     func loadAgentStats(source: AgentSource? = nil) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let stats = (try? store.toolCalls.agentStats(source: source)) ?? []
             self.publish { $0.agentStats = stats }
         }
@@ -604,8 +671,8 @@ final class UsageService: ObservableObject {
     /// Top skill ranking (Skills page analysis card): date window from the time period + source
     /// filter
     func loadSkillRanking(source: AgentSource? = nil, from: Date, to: Date) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let stats = (try? store.toolCalls.skillStats(
                 source: source, from: from, to: to)) ?? []
             self.publish { $0.skillRanking = stats }
@@ -618,8 +685,8 @@ final class UsageService: ObservableObject {
         source: AgentSource, name: String,
         completion: @escaping (Int?) -> Void
     ) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else {
                 DispatchQueue.main.async { completion(nil) }
                 return
             }
@@ -639,8 +706,8 @@ final class UsageService: ObservableObject {
         source: AgentSource, name: String, from: Date, to: Date,
         completion: @escaping ([SkillDayCount]) -> Void
     ) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else {
                 DispatchQueue.main.async { completion([]) }
                 return
             }
@@ -657,8 +724,8 @@ final class UsageService: ObservableObject {
         source: AgentSource, name: String, limit: Int = 8,
         completion: @escaping ([(sessionId: String, lastTs: Date, count: Int)]) -> Void
     ) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else {
                 DispatchQueue.main.async { completion([]) }
                 return
             }
@@ -671,8 +738,8 @@ final class UsageService: ObservableObject {
     /// Model stats (full breakdown for the selected range, by tokens descending) -- also the data
     /// source for the hero card/four tiles/hit rate
     func loadModelTotals(from: Date, to: Date) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let totals = (try? store.usage.totalsByModel(from: from, to: to)) ?? []
             let sorted = totals.sorted {
                 ($0.inputTokens + $0.outputTokens + $0.cacheReadTokens + $0.cacheCreationTokens)
@@ -685,30 +752,53 @@ final class UsageService: ObservableObject {
     /// Project table for the selected range: tokens + cost folded per project, tokens
     /// descending. `source` nil = every source.
     func loadProjectTotals(from: Date, to: Date, source: AgentSource? = nil) {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             let rows = (try? store.usage.totalsByProject(from: from, to: to, source: source)) ?? []
-            var byProject: [String: (tokens: Int, cost: Double?)] = [:]
+            var byProject: [String: (tokens: Int, requests: Int, cost: Double?)] = [:]
             for (project, totals) in rows {
                 let name = project ?? L10n.text("(Unknown project)", zhHans: "（未知项目）")
                 let tokens = totals.inputTokens + totals.outputTokens
                     + totals.cacheCreationTokens + totals.cacheReadTokens
                 let cost = self.pricing.cost(of: totals)
-                var entry = byProject[name] ?? (0, nil)
+                var entry = byProject[name] ?? (0, 0, nil)
                 entry.tokens += tokens
+                entry.requests += totals.requestCount
                 if let cost { entry.cost = (entry.cost ?? 0) + cost }
                 byProject[name] = entry
             }
             let result = byProject
-                .map { ProjectTotal(name: $0.key, tokens: $0.value.tokens, costUSD: $0.value.cost) }
+                .map {
+                    ProjectTotal(
+                        name: $0.key, tokens: $0.value.tokens,
+                        requests: $0.value.requests, costUSD: $0.value.cost)
+                }
                 .sorted { $0.tokens > $1.tokens }
             self.publish { $0.projectTotals = result }
+        }
+    }
+
+    /// Comparison-range model stats (hero card deltas); nil range clears them
+    func loadComparisonTotals(from: Date?, to: Date?) {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
+            guard let from, let to else {
+                self.publish { $0.comparisonTotals = nil }
+                return
+            }
+            let totals = (try? store.usage.totalsByModel(from: from, to: to)) ?? []
+            self.publish { $0.comparisonTotals = totals }
         }
     }
 
     /// Row cost conversion (for the model stats total row)
     func cost(of totals: UsageTotals) -> Double? {
         pricing.cost(of: totals)
+    }
+
+    /// Headline metrics of a set of aggregates, priced with the current table
+    func metrics(of totals: [UsageTotals]) -> UsageMetrics {
+        UsageMetrics(totals: totals, pricing: pricing)
     }
 
     /// Price provenance (hover on the dashboard's cost cell)
@@ -718,8 +808,8 @@ final class UsageService: ObservableObject {
 
     /// Exports the last 30 days of usage as CSV to ~/Downloads and reveals it in Finder
     func exportCSV() {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             do {
                 let now = Date()
                 let rows = try store.usage.dailyRows(
@@ -759,9 +849,11 @@ final class UsageService: ObservableObject {
             let claudeNew = try autoreleasepool { try claudeScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.claudeHealthName)
             if claudeNew > 0 { HealthRegistry.shared.event(Self.claudeHealthName) }
+            publishInterimSummary(store: store)
             let codexNew = try autoreleasepool { try codexScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.codexHealthName)
             if codexNew > 0 { HealthRegistry.shared.event(Self.codexHealthName) }
+            publishInterimSummary(store: store)
             let opencodeNew = try autoreleasepool { try opencodeScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.opencodeHealthName)
             if opencodeNew > 0 { HealthRegistry.shared.event(Self.opencodeHealthName) }
@@ -807,22 +899,84 @@ final class UsageService: ObservableObject {
             }
             try store.scanState.pruneDedupKeys(
                 before: Date().addingTimeInterval(-8 * 86400))
-            // Full-text indexing does **not run at usage's cadence**: see indexInterval.
-            if Date().timeIntervalSince(lastIndexRun) >= Self.indexInterval,
-               UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true {
-                lastIndexRun = Date()
-                searchIndexer?.indexOnce(sessions: AgentSessionDiscovery.forIndexing())
-            }
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             // One successful pass clears the previous error: occasional lock contention (during
             // launch warm-up/large-file indexing, another connection's write transaction exceeds
             // busy_timeout) recovers by the next pass, so the red text shouldn't linger.
+            // Published before full-text indexing, which on a first install is the longest step
+            // and used to keep the dashboard on its spinner until it finished.
             publish { $0.summary = summary; $0.lastError = nil }
+            publishedSummary = true
             publishHistory(store: store)
+            publishMonthOverview(store: store)
+            indexIfDue()
         } catch {
             HealthRegistry.shared.failure(Self.claudeHealthName, note: "\(error)")
             publish { $0.lastError = L10n.format("Scan failed: %@", zhHans: "扫描失败: %@", String(describing: error)) }
         }
+    }
+
+    /// First pass only: show what is counted so far instead of a spinner for the whole backfill
+    private func publishInterimSummary(store: EurekaStore) {
+        guard !publishedSummary,
+              let summary = try? UsageAggregator.summarize(store: store, pricing: pricing)
+        else { return }
+        publish { $0.summary = summary }
+    }
+
+    /// Full-text indexing does **not run at usage's cadence** (see indexInterval), except while a
+    /// capped pass left a backlog: then every scan tick takes the next batch, newest sessions
+    /// first, reusing one discovery.
+    private func indexIfDue() {
+        guard UserDefaults.standard.object(forKey: "fullTextSearchEnabled") as? Bool ?? true,
+              let searchIndexer
+        else { return }
+        let now = Date()
+        let catchingUp = indexBacklog != nil
+        guard catchingUp || now.timeIntervalSince(lastIndexRun) >= Self.indexInterval else { return }
+        lastIndexRun = now
+        let sessions: [AgentSessionInfo]
+        if let backlog = indexBacklog, now.timeIntervalSince(backlog.at) < 600 {
+            sessions = backlog.sessions
+        } else {
+            sessions = AgentSessionDiscovery.forIndexing()
+        }
+        searchIndexer.indexOnce(sessions: sessions, maxRebuilds: Self.indexBatch)
+        indexBacklog = searchIndexer.lastPassTruncated ? (sessions, indexBacklog?.at ?? now) : nil
+    }
+
+    private func publishMonthOverview(store: EurekaStore) {
+        let now = Date()
+        guard let month = Calendar.current.dateInterval(of: .month, for: now) else { return }
+        let monthRows = (try? store.usage.totalsByModel(from: month.start, to: now)) ?? []
+        let weekRows = (try? store.usage.totalsByModel(
+            from: now.addingTimeInterval(-7 * 86_400), to: now)) ?? []
+        var bySource: [AgentSource: Double] = [:]
+        for row in monthRows {
+            if let cost = pricing.cost(of: row) { bySource[row.source, default: 0] += cost }
+        }
+        let monthToDate = bySource.values.reduce(0, +)
+        let trailing = weekRows.compactMap { pricing.cost(of: $0) }.reduce(0, +)
+        let overview = MonthOverview(
+            monthToDate: monthToDate, trailingSevenDays: trailing, bySource: bySource,
+            projected: MonthForecast.projected(
+                monthToDate: monthToDate, trailingSevenDays: trailing, now: now))
+        publish { $0.monthOverview = overview }
+    }
+
+    /// Turn card: prompts asked in the range, with their evaluated duration / outcome
+    func loadTurnSummary(from: Date, to: Date, source: AgentSource?) {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
+            let rows = (try? store.prompts.turnRows(from: from, to: to, source: source)) ?? []
+            let summary = TurnSummary(rows: rows)
+            self.publish { $0.turnSummary = summary }
+        }
+    }
+
+    /// Cost split by token type for a set of aggregates (dashboard cost-structure card)
+    func costBreakdown(of totals: [UsageTotals]) -> CostBreakdown {
+        CostBreakdown(totals: totals, pricing: pricing)
     }
 
     /// History page window: last 14 days, capped at 200 entries (replacing the old fixed 50)
@@ -875,8 +1029,8 @@ final class UsageService: ObservableObject {
     /// it in Finder. Columns: outcome/title/source/project/start time/end time/duration/Tokens
     /// (same pattern as AuditService.exportCSV).
     func exportHistoryCSV() {
-        queue.async { [weak self] in
-            guard let self, let store = self.store else { return }
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
             do {
                 let since = Date().addingTimeInterval(-Self.historyWindow)
                 let tasks = try store.history.tasks(since: since, limit: Self.historyLimit)

@@ -27,6 +27,9 @@ struct HistoryView: View {
     /// export result is shown
     var onExport: () -> Void = {}
     var exportMessage: String?
+    /// Opens a session on the Sessions tab by id (nil = rows are not clickable). Injected rather
+    /// than posted from here so this view stays free of app-level routing.
+    var onOpenSession: ((String) -> Void)?
     @ObservedObject var settings: AppSettings
 
     @State private var showExportConfirm = false
@@ -134,18 +137,11 @@ struct HistoryView: View {
 
     var body: some View {
         if tasks.isEmpty && runningTasks.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "tray")
-                    .font(Theme.font.themed(28))
-                    .foregroundStyle(Theme.brandFg.opacity(0.45))
-                Text(L10n.text("No task history yet", zhHans: "还没有任务记录"))
-                    .font(Theme.font.themed(12))
-                    .foregroundStyle(.secondary)
-                Text(L10n.text("Try a claude / codex / grok task", zhHans: "跑一次 claude / codex / grok 任务试试"))
-                    .font(Theme.font.themed(11))
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            EmptyStateView(
+                icon: "tray",
+                title: L10n.text("No task history yet", zhHans: "还没有任务记录"),
+                hint: L10n.text("Try a claude / codex / grok task", zhHans: "跑一次 claude / codex / grok 任务试试"))
+                .frame(maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
                 header
@@ -167,6 +163,7 @@ struct HistoryView: View {
                                     task: task,
                                     terminal: terminals[AgentTask.key(
                                         source: task.source, sessionId: task.sessionId)])
+                                    .openableSessionRow(onOpenSession.map { open in { open(task.sessionId) } })
                                 Divider().padding(.leading, 44).opacity(0.5)
                             }
                         }
@@ -182,6 +179,7 @@ struct HistoryView: View {
                                         tokens: tokens[task.sessionId],
                                         terminal: terminals[AgentTask.key(
                                             source: task.source, sessionId: task.sessionId)])
+                                        .openableSessionRow(onOpenSession.map { open in { open(task.sessionId) } })
                                 case .utilities(let count):
                                     HarnessUtilityRow(
                                         count: count,
@@ -212,7 +210,7 @@ struct HistoryView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text(L10n.text("Task history", zhHans: "任务历史"))
-                .font(Theme.font.pageTitle)
+                .font(Theme.font.themed(15, .bold))
             Text(L10n.format("Across %@ sources · %@ sessions", zhHans: "跨 %@ 个来源 · 共 %@ 个会话", "\(Set(tasks.map(\.source)).count)", "\(userSessionCount)"))
                 .font(Theme.font.themed(11))
                 .foregroundStyle(.tertiary)
@@ -236,8 +234,8 @@ struct HistoryView: View {
                 showExportConfirm = true
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Task volume over the last 14 days (stacked by outcome)
@@ -286,17 +284,19 @@ struct HistoryView: View {
                             .font(Theme.font.caption)
                             .foregroundStyle(.tertiary)
                         Spacer(minLength: 8)
-                        // Legend totals: success N / failure N / interrupted N
+                        // Legend totals: success N / failure N / interrupted N (omit zero-count outcomes)
                         ForEach(TaskOutcome.allCases, id: \.self) { outcome in
                             let count = series.points.filter { $0.outcome == outcome }
                                 .reduce(0) { $0 + $1.count }
-                            HStack(spacing: 3) {
-                                Circle()
-                                    .fill(Theme.outcomeColor(outcome))
-                                    .frame(width: 6, height: 6)
-                                Text("\(outcome.label) \(count)")
-                                    .font(Theme.font.themedMono(9.5))
-                                    .foregroundStyle(.secondary)
+                            if count > 0 {
+                                HStack(spacing: 3) {
+                                    Circle()
+                                        .fill(Theme.outcomeColor(outcome))
+                                        .frame(width: 6, height: 6)
+                                    Text("\(outcome.label) \(count)")
+                                        .font(Theme.font.themedMono(9.5))
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -413,6 +413,37 @@ private struct RunningRow: View {
     }
 }
 
+// MARK: - Clickable row
+
+/// Hover highlight + click-to-open for a history / running row, the same affordance as the
+/// knowledge list rows (`KnowledgeRow`). Without an action the row stays static.
+private struct OpenableSessionRow: ViewModifier {
+    let onOpen: (() -> Void)?
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        if let onOpen {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(hovering ? Theme.brandFill(0.06) : Color.clear)
+                        .padding(.horizontal, 4))
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onOpen)
+                .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+                .help(L10n.text("Open this session", zhHans: "打开这个会话"))
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func openableSessionRow(_ onOpen: (() -> Void)?) -> some View {
+        modifier(OpenableSessionRow(onOpen: onOpen))
+    }
+}
+
 // MARK: - History row
 
 /// History row: one row = one session (per-turn records merged). Left: title + project / relative
@@ -480,21 +511,23 @@ private struct HistoryRow: View {
                 }
             }
             Spacer(minLength: 8)
-            // Right stats column: start time (emphasized) + total duration + total tokens
+            // Right stats column: start time (emphasized) + compact duration · tokens line
             VStack(alignment: .trailing, spacing: 2) {
                 if let start = task.sessionStartedAt {
                     Text(formatStartTime(start))
                         .font(Theme.font.themed(12, .semibold))
                         .foregroundStyle(.primary)
                 }
-                if let duration = task.totalDuration {
-                    Text(L10n.format("Duration %@", zhHans: "时长 %@", formatDuration(duration)))
-                        .font(Theme.font.themedMono(11))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    if let duration = task.totalDuration {
+                        Text(formatDuration(duration))
+                        Text("·").foregroundStyle(.tertiary)
+                    }
+                    Text("\(tokens.map(formatTokens) ?? "—") tok")
                 }
-                Text("Tokens \(tokens.map(formatTokens) ?? "—")")
-                    .font(Theme.font.themedMono(11))
-                    .foregroundStyle(.secondary)
+                .font(Theme.font.themedMono(10.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
             .padding(.top, 1)
         }

@@ -15,6 +15,14 @@ enum MascotImportError: LocalizedError {
     case notAnImage
     case writeFailed
     case notEditable
+    /// The chosen folder holds no image whose name or folder matches a state
+    case noImagesFound
+    /// More files than an import accepts
+    case tooManyFiles
+    /// Several files picked for one state, but one of them is a GIF / APNG
+    case mixedAnimatedFrames
+    /// A manifest.json in the folder that can't load (message lists the reasons)
+    case invalidManifest(String)
 
     var errorDescription: String? {
         switch self {
@@ -33,6 +41,22 @@ enum MascotImportError: LocalizedError {
             return L10n.text(
                 "This companion was not uploaded in the app; edit it in the animation-pack folder",
                 zhHans: "这个形象不是在界面上传的，请到动画包文件夹里手动修改")
+        case .noImagesFound:
+            return L10n.text(
+                "No images in this folder (PNG / JPG / WebP / HEIC / GIF / APNG)",
+                zhHans: "文件夹里没有可用的图片（PNG / JPG / WebP / HEIC / GIF / APNG）")
+        case .tooManyFiles:
+            return L10n.format(
+                "The folder has more than %@ images; split it up",
+                zhHans: "文件夹里的图片超过 %@ 张，请拆小一点", String(MascotFolderImporter.maxFiles))
+        case .mixedAnimatedFrames:
+            return L10n.text(
+                "Frames must be still images. Pick a GIF / APNG on its own.",
+                zhHans: "多选组成帧动画时只能用静态图；GIF / APNG 请单独选一个")
+        case .invalidManifest(let reason):
+            return L10n.format(
+                "The folder's manifest.json can't be used: %@",
+                zhHans: "文件夹里的 manifest.json 无法使用：%@", reason)
         }
     }
 }
@@ -47,7 +71,8 @@ enum MascotImageImporter {
 
     /// Imports one image into the pack directory and returns the written file name
     static func importImage(
-        from source: URL, into dir: URL, state: MascotState, removeBackground: Bool
+        from source: URL, into dir: URL, state: MascotState, frame: Int? = nil,
+        removeBackground: Bool
     ) throws -> String {
         let values = try? source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
         guard values?.isRegularFile == true, let size = values?.fileSize else {
@@ -66,7 +91,8 @@ enum MascotImageImporter {
         if CGImageSourceGetCount(imageSource) > 1,
            type == UTType.gif.identifier || type == UTType.png.identifier {
             let ext = type == UTType.gif.identifier ? "gif" : "apng"
-            let name = MascotUploadNaming.imageFileName(state: state, stamp: stamp, ext: ext)
+            let name = MascotUploadNaming.imageFileName(
+                state: state, stamp: stamp, frame: frame, ext: ext)
             do {
                 try FileManager.default.copyItem(at: source, to: dir.appendingPathComponent(name))
             } catch {
@@ -90,11 +116,18 @@ enum MascotImageImporter {
            let cut = MascotAssetPrep.removeBackground(image) {
             image = cut
         }
-        let name = MascotUploadNaming.imageFileName(state: state, stamp: stamp, ext: "png")
+        let name = MascotUploadNaming.imageFileName(
+            state: state, stamp: stamp, frame: frame, ext: "png")
         guard writePNG(image, to: dir.appendingPathComponent(name)) else {
             throw MascotImportError.writeFailed
         }
         return name
+    }
+
+    /// Whether a file is a multi-frame GIF / APNG (kept as one animation, never split into frames)
+    static func isAnimated(_ url: URL) -> Bool {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return false }
+        return CGImageSourceGetCount(source) > 1
     }
 
     private static func writePNG(_ image: CGImage, to url: URL) -> Bool {
@@ -117,16 +150,31 @@ final class MascotLibrary: ObservableObject {
     struct Editing: Equatable {
         var id: String
         var name: String
-        /// States with their own configured image → file name
-        var files: [MascotState: String]
+        /// States with their own art → file(s); several files are a frame sequence
+        var files: [MascotState: [String]]
+        /// Frame rate for frame sequences (manifest "fps")
+        var fps: Double
         /// The image each editable state actually shows (including ones reused along the fallback
         /// chain)
         var images: [MascotState: NSImage]
     }
 
+    /// What the selected pack shows for one state (Settings state table, any pack kind)
+    struct StateArt: Equatable {
+        var thumbnail: NSImage?
+        /// First variant's animation, played inline by the state-table preview
+        var animation: MascotAnimation?
+        var playback: MascotPlaybackMode = .loop
+        /// Behavior variants the state rotates through (built-in packs have several)
+        var variantCount: Int
+        /// The state whose artwork is used; differs from the row's state when it falls back
+        var provider: MascotState?
+    }
+
     @Published private(set) var packs: [MascotPackInfo] = []
     @Published private(set) var thumbnails: [String: NSImage] = [:]
     @Published private(set) var editing: Editing?
+    @Published private(set) var stateArt: [MascotState: StateArt] = [:]
     @Published var lastError: String?
 
     var presetPacks: [MascotPackInfo] { packs.filter { $0.kind != .custom } }
@@ -135,7 +183,8 @@ final class MascotLibrary: ObservableObject {
     func refresh() {
         packs = MascotPackLoader.availablePacks()
         var result: [String: NSImage] = [:]
-        for info in packs {
+        // A broken pack loads as the built-in pair; its tile must not pretend otherwise
+        for info in packs where !info.isBroken {
             let pack = MascotPackLoader.load(packID: info.id)
             let animation = pack.animation(for: .idle)
                 ?? pack.variants(for: .idle).first?.animation
@@ -149,17 +198,29 @@ final class MascotLibrary: ObservableObject {
     /// Called when the selection changes: an uploaded pack becomes editable; any other pack clears
     /// the editing area.
     func select(packID: String) {
+        let pack = MascotPackLoader.load(packID: packID)
+        var art: [MascotState: StateArt] = [:]
+        for state in MascotState.allCases {
+            let variants = pack.variants(for: state)
+            art[state] = StateArt(
+                thumbnail: variants.first.flatMap { Self.firstFrame(of: $0.animation) },
+                animation: variants.first?.animation,
+                playback: variants.first?.playback ?? .loop,
+                variantCount: variants.count,
+                provider: pack.providingState(for: state))
+        }
+        stateArt = art
         guard let dir = try? editableDirectory(packID),
               let data = MascotPackLoader.readManifest(in: dir)
         else {
             editing = nil
             return
         }
-        let files = MascotManifestEditor.stateFiles(data)
+        let files = MascotManifestEditor.stateSources(data)
         var images: [MascotState: NSImage] = [:]
         for state in MascotManifestEditor.editableStates {
             guard let source = MascotManifestEditor.effectiveSource(for: state, files: files),
-                  let file = files[source],
+                  let file = files[source]?.first,
                   let image = NSImage(contentsOf: dir.appendingPathComponent(file))
             else { continue }
             images[state] = image
@@ -168,6 +229,7 @@ final class MascotLibrary: ObservableObject {
             id: packID,
             name: MascotManifestEditor.name(data) ?? packID,
             files: files,
+            fps: MascotManifestEditor.fps(data),
             images: images)
     }
 
@@ -203,23 +265,56 @@ final class MascotLibrary: ObservableObject {
         }
     }
 
-    /// Swaps the image for one state on its own (for idle this replaces the base mascot)
-    func setImage(for state: MascotState, packID: String, from source: URL, removeBackground: Bool) {
+    /// Sets one state's art (for idle this replaces the base mascot): one file is used as is
+    /// (an animated GIF / APNG keeps playing), several still images become a frame sequence
+    func setImages(
+        for state: MascotState, packID: String, from sources: [URL], removeBackground: Bool
+    ) {
+        guard !sources.isEmpty else { return }
         perform(packID: packID) { dir, data in
-            let file = try MascotImageImporter.importImage(
-                from: source, into: dir, state: state, removeBackground: removeBackground)
-            let old = MascotManifestEditor.stateFiles(data)[state]
-            let updated = try MascotManifestEditor.settingState(state, file: file, in: data)
-            return (updated, old.map { [$0] } ?? [])
+            if sources.count > 1, sources.contains(where: MascotImageImporter.isAnimated) {
+                throw MascotImportError.mixedAnimatedFrames
+            }
+            let files = try sources.enumerated().map { index, source in
+                try MascotImageImporter.importImage(
+                    from: source, into: dir, state: state,
+                    frame: sources.count > 1 ? index + 1 : nil,
+                    removeBackground: removeBackground)
+            }
+            let old = MascotManifestEditor.stateSources(data)[state] ?? []
+            let updated = try MascotManifestEditor.settingState(state, files: files, in: data)
+            return (updated, old)
+        }
+    }
+
+    func setFPS(_ fps: Double, packID: String) {
+        perform(packID: packID) { _, data in
+            (try MascotManifestEditor.settingFPS(fps, in: data), [])
+        }
+    }
+
+    /// Imports a whole pet folder as a new companion (see `MascotFolderImporter`); selects nothing
+    /// by itself, the caller decides
+    func importFolder(_ folder: URL, removeBackground: Bool) -> MascotFolderImporter.Report? {
+        do {
+            let report = try MascotFolderImporter.importFolder(
+                folder, into: MascotPackLoader.customRoot(), removeBackground: removeBackground)
+            lastError = nil
+            refresh()
+            return report
+        } catch {
+            lastError = Self.message(for: error)
+            refresh()
+            return nil
         }
     }
 
     /// Clears a state's own image so it goes back to reusing one along the fallback chain
     func resetImage(for state: MascotState, packID: String) {
         perform(packID: packID) { _, data in
-            let old = MascotManifestEditor.stateFiles(data)[state]
-            let updated = try MascotManifestEditor.settingState(state, file: nil, in: data)
-            return (updated, old.map { [$0] } ?? [])
+            let old = MascotManifestEditor.stateSources(data)[state] ?? []
+            let updated = try MascotManifestEditor.settingState(state, files: nil, in: data)
+            return (updated, old)
         }
     }
 
@@ -261,7 +356,7 @@ final class MascotLibrary: ObservableObject {
             }
             let (updated, replaced) = try change(dir, data)
             try updated.write(to: dir.appendingPathComponent("manifest.json"), options: .atomic)
-            let stillUsed = Set(MascotManifestEditor.stateFiles(updated).values)
+            let stillUsed = MascotManifestEditor.referencedFiles(updated)
             // Only delete single-component file names inside the pack directory, so a manifest
             // hand-edited to ../ and the like can't escape it
             let stale = replaced.filter {

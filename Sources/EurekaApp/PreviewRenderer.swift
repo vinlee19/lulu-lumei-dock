@@ -2,6 +2,7 @@ import AppKit
 import EurekaIngest
 import EurekaKit
 import EurekaStore
+import EurekaUsage
 import SwiftUI
 
 /// Offscreen-renders every Dynamic Island state to PNG: visual walkthroughs/self-checks without
@@ -312,16 +313,30 @@ enum PreviewRenderer {
     static func renderKnowledge(to directory: String, style: ThemeStyle = .classic) {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        ThemeFonts.register()
+        _ = AppSettings()
+        let previousLang = L10n.current
+        L10n.current = .simplifiedChinese
         ThemeStyle.current = style
-        defer { ThemeStyle.current = .classic }
+        defer {
+            ThemeStyle.current = .classic
+            L10n.current = previousLang
+        }
 
         let plans = PlansService()
         let skillMemory = SkillMemoryService()
         let agents = AgentConfigService()
         let usage = UsageService()
+        usage.openStoreForPreview()
         plans.refresh(force: true)
         skillMemory.refresh()
         agents.refresh()
+        usage.loadSkillStats()
+        usage.loadMCPStats()
+        usage.loadAgentStats()
+        // The Skills overview card's "hits this week" reads the ranking; without it the preview
+        // always shows 0
+        usage.loadSkillRanking(from: UsageService.DashboardPeriod.week.startDate, to: Date())
 
         // Wait for all three scans to finish (the CLI has no main runloop → pump manually; the
         // first full session parse may take minutes, capped at 300s)
@@ -329,6 +344,7 @@ enum PreviewRenderer {
         while (plans.scanning || skillMemory.scanning || agents.scanning), Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
         // Print memories by the counting rule: memoryTotal includes entries inside memory
         // libraries, memories is only standalone list entries — both numbers are needed, otherwise
         // you can't tell whether folding took effect
@@ -350,7 +366,7 @@ enum PreviewRenderer {
             // Lay a window background underneath: the page's surfaceSecondary is a translucent
             // overlay, so transparent PNG areas would be wrong without it
             let hosting = NSHostingView(rootView: ZStack {
-                Color(nsColor: .windowBackgroundColor)
+                style == .classic ? Color(nsColor: .windowBackgroundColor) : Theme.windowBackground
                 view
             })
             hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -373,6 +389,13 @@ enum PreviewRenderer {
         snap("knowledge-skills-list",
              SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
                              initialLayout: .list))
+        // Dark and minimum-width (840pt window − 165pt sidebar) variants of the list
+        snap("knowledge-skills-list-dark",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .list), dark: true)
+        snap("knowledge-skills-list-min",
+             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
+                             initialLayout: .list), width: 675)
         snap("knowledge-skills-cards",
              SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
                              initialLayout: .cards))
@@ -453,6 +476,34 @@ enum PreviewRenderer {
         snap("knowledge-mcp-form-manual",
              MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(id: "new", mode: .form)))
         snap("knowledge-mcp-list-dark", MCPView(service: mcp, usageService: usage, initialLayout: .list), dark: true)
+
+        // Sessions wide/fullscreen + narrow preview to verify header toolbar alignment
+        let sessions = SessionBrowserService()
+        let settings = AppSettings()
+        L10n.current = .simplifiedChinese
+        ThemeStyle.current = style
+        sessions.refresh()
+        let sessionDeadline = Date().addingTimeInterval(60)
+        while sessions.scanning, Date() < sessionDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        let allSessions = sessions.flatSessions + sessions.groups.flatMap(\.sessions)
+        let targetSession = allSessions.prefix(200).first { !skillMemory.memories(relatedTo: $0.id).isEmpty }
+            ?? allSessions.first
+        if let targetSession {
+            sessions.select(targetSession)
+            let loadDeadline = Date().addingTimeInterval(30)
+            while sessions.transcriptLoading, Date() < loadDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        }
+        snap("knowledge-sessions-wide",
+             SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
+             width: 1512)
+        snap("knowledge-sessions-min",
+             SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
+             width: 675)
     }
 
     /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light
@@ -731,11 +782,15 @@ enum PreviewRenderer {
         let range = (from: month.startDate, to: Date())
         usage.loadRecords(page: 1, pageSize: 50, source: nil, from: range.from, to: range.to)
         usage.loadModelTotals(from: range.from, to: range.to)
+        let previous = UsageComparison.previousRange(
+            from: range.from, to: range.to, period: .month)
+        usage.loadComparisonTotals(from: previous?.from, to: previous?.to)
         usage.loadProjectTotals(from: range.from, to: range.to)
         usage.loadToolCalls(source: nil, from: range.from, to: range.to)
         usage.loadTrend(from: range.from, to: range.to)
         usage.loadSessionTotals(from: range.from, to: range.to, source: nil)
         usage.loadHeatmap(from: range.from, to: range.to, source: nil)
+        usage.loadTurnSummary(from: range.from, to: range.to, source: nil)
         usage.loadSkillStats()
         usage.loadMCPStats()
         usage.loadAgentStats()
@@ -757,16 +812,32 @@ enum PreviewRenderer {
         ]
         for (tab, suffix) in subTabs {
             let view = UsageDashboardView(
-                usageService: usage, sessionBrowser: sessions,
+                usageService: usage, sessionBrowser: sessions, settings: settings,
                 initialPeriod: .month, initialSubTab: tab)
             snap("pages-usage-\(suffix)", view, width: 1270, height: 2000)
         }
+        // Month card with a budget and plans filled in, staged in a throwaway defaults suite
+        let planSuite = "eureka-render-plans"
+        if let planDefaults = UserDefaults(suiteName: planSuite) {
+            let style = ThemeStyle.current
+            let planSettings = AppSettings(defaults: planDefaults)
+            ThemeStyle.current = style  // AppSettings.init restates the persisted style
+            planSettings.usageMonthlyBudget = 1500
+            planSettings.subscriptionPrices = [
+                AgentSource.claude.rawValue: 200, AgentSource.codex.rawValue: 20,
+            ]
+            snap("pages-usage-overview-plans",
+                 UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+                                    settings: planSettings, initialPeriod: .month),
+                 width: 1270, height: 2200)
+            planDefaults.removePersistentDomain(forName: planSuite)
+        }
         snap("pages-usage-log-min",
-             UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                 initialPeriod: .month, initialSubTab: .log),
              width: 675, height: 1600)
         snap("pages-usage-log-dark",
-             UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                 initialPeriod: .month, initialSubTab: .log),
              dark: true, width: 1270, height: 2000)
         // Sidebar + usage page side by side (check type size / spacing across the divider)
@@ -776,7 +847,7 @@ enum PreviewRenderer {
                 historyBadge: "\(usage.recentHistory.count)", appVersion: "0.35.1",
                 onSelect: { _ in })
             Divider()
-            UsageDashboardView(usageService: usage, sessionBrowser: sessions,
+            UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                initialPeriod: .month, initialSubTab: .models)
         }, width: SidebarView.width + 1 + 1270, height: 1400)
 
@@ -806,6 +877,28 @@ enum PreviewRenderer {
                 updateService: update, syncService: sync)
             snap("pages-settings-\(section)", view, height: 1200)
         }
+        // The companion card sits below the general page's fold; render it on its own, expanded
+        let mascotWasEnabled = settings.mascotEnabled
+        settings.mascotEnabled = true
+        snap("pages-settings-mascot",
+             ScrollView { MascotSettingsSection(settings: settings).padding(20) },
+             width: 780, height: 1300)
+        snap("pages-settings-mascot-dark",
+             ScrollView { MascotSettingsSection(settings: settings).padding(20) },
+             dark: true, width: 780, height: 1300)
+        snap("pages-settings-mascot-guide",
+             ScrollView { MascotMakingGuide().padding(20) }, width: 780, height: 900)
+        // With a custom pack on disk (point EUREKA_SPOOL_DIR at a scratch dir to stage one),
+        // render the editable state table too
+        let packWas = settings.mascotPack
+        for custom in MascotPackLoader.availablePacks() where custom.kind == .custom {
+            settings.mascotPack = custom.id
+            snap("pages-settings-mascot-custom-\(custom.id)",
+                 ScrollView { MascotSettingsSection(settings: settings).padding(20) },
+                 width: 780, height: 1500)
+        }
+        settings.mascotPack = packWas
+        settings.mascotEnabled = mascotWasEnabled  // don't leave render side effects behind
         snap("pages-settings-general-dark",
              SettingsView(
                 section: .constant(.general), settings: settings, installer: installer,

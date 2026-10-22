@@ -12,6 +12,8 @@ struct UsageDashboardView: View {
     /// Session index: joins session names into the per-session ranking + resolves jump targets
     /// (instance shared with the Sessions tab)
     @ObservedObject var sessionBrowser: SessionBrowserService
+    /// Monthly budget and subscription prices (month card)
+    @ObservedObject var settings: AppSettings
 
     @State private var period: UsageService.DashboardPeriod = .today
     @State private var sourceFilter: AgentSource?  // nil = all
@@ -48,11 +50,12 @@ struct UsageDashboardView: View {
     /// Offscreen-render / preview injection: pick the initial period and sub-tab
     /// (same convention as `PlansView(initialLayout:)`).
     init(
-        usageService: UsageService, sessionBrowser: SessionBrowserService,
+        usageService: UsageService, sessionBrowser: SessionBrowserService, settings: AppSettings,
         initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .overview
     ) {
         self._usageService = ObservedObject(wrappedValue: usageService)
         self._sessionBrowser = ObservedObject(wrappedValue: sessionBrowser)
+        self._settings = ObservedObject(wrappedValue: settings)
         self._period = State(initialValue: initialPeriod)
         self._subTab = State(initialValue: initialSubTab)
     }
@@ -75,11 +78,13 @@ struct UsageDashboardView: View {
 
     private enum TrendMetric: String, CaseIterable {
         case tokens = "Tokens"
+        case requests = "请求"
         case cost = "成本"
 
         var title: String {
             switch self {
             case .tokens: return "Tokens"
+            case .requests: return L10n.text("Requests", zhHans: "请求")
             case .cost: return L10n.text("Cost", zhHans: "成本")
             }
         }
@@ -104,8 +109,14 @@ struct UsageDashboardView: View {
                     heroCard
                     switch subTab {
                     case .overview:
+                        UsageMonthCard(usageService: usageService, settings: settings)
                         metricGrid
+                        costStructureCard
                         cacheHitCard
+                        HStack(alignment: .top, spacing: 10) {
+                            turnCard
+                            concentrationCard
+                        }
                         trendCard
                         UsageHeatmapView(cells: usageService.heatmapCells)
                     case .log: requestLog
@@ -139,6 +150,9 @@ struct UsageDashboardView: View {
         .onChange(of: customFrom) { _, _ in if period == .custom { page = 1; reload() } }
         .onChange(of: customTo) { _, _ in if period == .custom { page = 1; reload() } }
         .onChange(of: usageService.pricingRevision) { _, _ in reload() }
+        // New data landed (the first-install backfill publishes interim summaries; later passes
+        // every 60s): reads run on their own connection, so refreshing the page is cheap
+        .onChange(of: usageService.summary?.generatedAt) { _, _ in reload() }
     }
 
     // MARK: - Range and data aggregation
@@ -162,18 +176,25 @@ struct UsageDashboardView: View {
     private var filteredModelTotals: [UsageTotals] {
         usageService.modelTotals.filter { sourceFilter == nil || $0.source == sourceFilter }
     }
-    private var totalInput: Int { filteredModelTotals.reduce(0) { $0 + $1.inputTokens } }
-    private var totalOutput: Int { filteredModelTotals.reduce(0) { $0 + $1.outputTokens } }
-    private var totalCacheWrite: Int { filteredModelTotals.reduce(0) { $0 + $1.cacheCreationTokens } }
-    private var totalCacheRead: Int { filteredModelTotals.reduce(0) { $0 + $1.cacheReadTokens } }
-    private var totalRequests: Int { filteredModelTotals.reduce(0) { $0 + $1.requestCount } }
-    private var totalTokens: Int { totalInput + totalOutput + totalCacheWrite + totalCacheRead }
-    private var totalCost: Double? {
-        let costs = filteredModelTotals.compactMap { usageService.cost(of: $0) }
-        return costs.isEmpty ? nil : costs.reduce(0, +)
+    private var metrics: UsageMetrics { usageService.metrics(of: filteredModelTotals) }
+    /// Same metrics over the comparison range; nil = no comparison for this period
+    private var previousMetrics: UsageMetrics? {
+        usageService.comparisonTotals.map { totals in
+            usageService.metrics(of: totals.filter { sourceFilter == nil || $0.source == sourceFilter })
+        }
     }
-    private var cacheHitRate: Double {
-        totalTokens > 0 ? Double(totalCacheRead) / Double(totalTokens) : 0
+
+    /// Comparison range for the hero card deltas: one period earlier over the same elapsed time
+    private func comparisonRange(_ range: (from: Date, to: Date)) -> (from: Date, to: Date)? {
+        let kind: UsageComparison.Period
+        switch period {
+        case .today: kind = .day
+        case .week: kind = .week
+        case .month: kind = .month
+        case .custom: kind = .span
+        case .all: return nil
+        }
+        return UsageComparison.previousRange(from: range.from, to: range.to, period: kind)
     }
 
     private func reload() {
@@ -182,11 +203,14 @@ struct UsageDashboardView: View {
             page: page, pageSize: pageSize, source: sourceFilter,
             from: range.from, to: range.to)
         usageService.loadModelTotals(from: range.from, to: range.to)
+        let previous = comparisonRange(range)
+        usageService.loadComparisonTotals(from: previous?.from, to: previous?.to)
         usageService.loadProjectTotals(from: range.from, to: range.to, source: sourceFilter)
         usageService.loadToolCalls(source: sourceFilter, from: range.from, to: range.to)
         usageService.loadTrend(from: range.from, to: range.to)
         usageService.loadSessionTotals(from: range.from, to: range.to, source: sourceFilter)
         usageService.loadHeatmap(from: range.from, to: range.to, source: sourceFilter)
+        usageService.loadTurnSummary(from: range.from, to: range.to, source: sourceFilter)
     }
 
     // MARK: - Skill/plugin stats
@@ -327,6 +351,45 @@ struct UsageDashboardView: View {
         .dashboardCard()
     }
 
+    /// Days whose total (in the selected metric) is at least 2× the median of the previous 7
+    /// active days; marked with an orange triangle and the multiple
+    private func spikeMarks(_ points: [UsageService.TrendPoint]) -> [(day: Date, total: Double, multiple: Double)] {
+        var totals: [Date: Double] = [:]
+        for point in points { totals[point.bucket, default: 0] += trendValue(point) }
+        let days = totals.keys.sorted()
+        let values = days.map { totals[$0] ?? 0 }
+        return UsageStats.spikes(values)
+            .sorted { $0.key < $1.key }
+            .map { (day: days[$0.key], total: values[$0.key], multiple: $0.value) }
+    }
+
+    private func trendValue(_ point: UsageService.TrendPoint) -> Double {
+        switch trendMetric {
+        case .tokens: return Double(point.tokens)
+        case .requests: return Double(point.requests)
+        case .cost: return point.costUSD
+        }
+    }
+
+    private func modelMetricValue(_ totals: UsageTotals, cost: Double) -> Double {
+        switch trendMetric {
+        case .tokens:
+            return Double(totals.inputTokens + totals.outputTokens
+                + totals.cacheCreationTokens + totals.cacheReadTokens)
+        case .requests: return Double(totals.requestCount)
+        case .cost: return cost
+        }
+    }
+
+    /// Axis / annotation label for a value of the selected trend metric
+    private func trendLabel(_ value: Double) -> String {
+        switch trendMetric {
+        case .tokens: return formatTokens(Int(value))
+        case .requests: return Int(value).formatted(.number.notation(.compactName))
+        case .cost: return costLabel(value)
+        }
+    }
+
     /// Cost axis/annotation format (small amounts keep 4 decimals so not everything shows $0.00)
     private func costLabel(_ usd: Double) -> String {
         usd >= 1 ? String(format: "$%.2f", usd) : String(format: "$%.4f", usd)
@@ -347,13 +410,28 @@ struct UsageDashboardView: View {
             let axis = TrendAxis.layout(
                 rangeFrom: range.from, rangeTo: range.to,
                 firstBucket: points.map(\.bucket).min())
-            Chart(points) { point in
-                BarMark(
-                    x: .value(L10n.text("Time", zhHans: "时间"), point.bucket, unit: hourly ? .hour : .day),
-                    y: .value(
-                        trendMetric.title,
-                        trendMetric == .tokens ? Double(point.tokens) : point.costUSD))
-                .foregroundStyle(by: .value(L10n.text("Source", zhHans: "来源"), point.source.displayName))
+            // Daily view only: an hour-by-hour baseline is too noisy to call anything a spike
+            let spikes = hourly ? [] : spikeMarks(points)
+            Chart {
+                ForEach(points) { point in
+                    BarMark(
+                        x: .value(L10n.text("Time", zhHans: "时间"), point.bucket, unit: hourly ? .hour : .day),
+                        y: .value(trendMetric.title, trendValue(point)))
+                    .foregroundStyle(by: .value(L10n.text("Source", zhHans: "来源"), point.source.displayName))
+                }
+                ForEach(spikes, id: \.day) { spike in
+                    PointMark(
+                        x: .value(L10n.text("Time", zhHans: "时间"), spike.day, unit: .day),
+                        y: .value(trendMetric.title, spike.total))
+                    .symbol(.triangle)
+                    .symbolSize(40)
+                    .foregroundStyle(.orange)
+                    .annotation(position: .top, spacing: 2) {
+                        Text(String(format: "%.1f×", spike.multiple))
+                            .font(Theme.font.themedMono(8.5, .semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
             .chartForegroundStyleScale(domain: sources.map(\.displayName),
                                        range: sources.map(brandColor))
@@ -362,10 +440,8 @@ struct UsageDashboardView: View {
                 AxisMarks { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if trendMetric == .tokens, let tokens = value.as(Int.self) {
-                            Text(formatTokens(tokens))
-                        } else if trendMetric == .cost, let usd = value.as(Double.self) {
-                            Text(costLabel(usd))
+                        if let number = value.as(Double.self) {
+                            Text(trendLabel(number))
                         }
                     }
                 }
@@ -413,17 +489,14 @@ struct UsageDashboardView: View {
         let models = merged
             .map { totals, cost in
                 (totals,
-                 metricValue: trendMetric == .tokens
-                    ? Double(totals.inputTokens + totals.outputTokens
-                        + totals.cacheCreationTokens + totals.cacheReadTokens)
-                    : cost)
+                 metricValue: modelMetricValue(totals, cost: cost))
             }
             .sorted { $0.metricValue > $1.metricValue }
             .prefix(8)
         if models.isEmpty || models.allSatisfy({ $0.metricValue == 0 }) {
-            emptyChart(trendMetric == .tokens
-                ? L10n.text("No model usage in this range", zhHans: "该时段暂无模型用量")
-                : L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量"))
+            emptyChart(trendMetric == .cost
+                ? L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量")
+                : L10n.text("No model usage in this range", zhHans: "该时段暂无模型用量"))
         } else {
             Chart(Array(models.enumerated()), id: \.offset) { _, item in
                 BarMark(
@@ -431,9 +504,7 @@ struct UsageDashboardView: View {
                     y: .value(L10n.text("Model", zhHans: "模型"), item.0.model))
                 .foregroundStyle(brandColor(item.0.source))
                 .annotation(position: .trailing, alignment: .leading) {
-                    Text(trendMetric == .tokens
-                        ? formatTokens(Int(item.metricValue))
-                        : costLabel(item.metricValue))
+                    Text(trendLabel(item.metricValue))
                         .font(Theme.font.themedMono(8))
                         .foregroundStyle(.secondary)
                 }
@@ -443,8 +514,7 @@ struct UsageDashboardView: View {
                     AxisGridLine()
                     AxisValueLabel {
                         if let number = value.as(Double.self) {
-                            Text(trendMetric == .tokens
-                                ? formatTokens(Int(number)) : costLabel(number))
+                            Text(trendLabel(number))
                         }
                     }
                 }
@@ -527,7 +597,10 @@ struct UsageDashboardView: View {
 
     // MARK: - Hero card
 
+    @ViewBuilder
     private var heroCard: some View {
+        let m = metrics
+        let previous = previousMetrics
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: "bolt.fill")
                 .font(Theme.font.themed(18))
@@ -539,36 +612,34 @@ struct UsageDashboardView: View {
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(totalTokens.formatted(.number.grouping(.automatic)))
+                    Text(m.totalTokens.formatted(.number.grouping(.automatic)))
                         .font(Theme.font.themedMono(26, .bold))
-                    Text("≈ \(chineseUnit(totalTokens))")
+                    Text("≈ \(chineseUnit(m.totalTokens))")
                         .font(Theme.font.themed(11))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Color.primary.opacity(0.05)))
                 }
+                deltaLabel(
+                    current: Double(m.totalTokens), previous: previous.map { Double($0.totalTokens) },
+                    showsBaseline: true)
             }
             Spacer(minLength: 10)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(L10n.text("Requests", zhHans: "总请求数"))
-                            .font(Theme.font.themed(9.5))
-                            .foregroundStyle(.tertiary)
-                        Text("\(totalRequests)")
-                            .font(Theme.font.themedMono(14, .semibold))
-                    }
-                    Divider().frame(height: 26)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(L10n.text("Total cost", zhHans: "总成本"))
-                            .font(Theme.font.themed(9.5))
-                            .foregroundStyle(.tertiary)
-                        Text(totalCost.map { formatCost($0) } ?? "—")
-                            .font(Theme.font.themedMono(14, .semibold))
-                            .foregroundStyle(Theme.cost)
-                    }
-                }
+            HStack(spacing: 14) {
+                heroStat(
+                    L10n.text("Requests", zhHans: "总请求数"),
+                    value: m.requests.formatted(.number.grouping(.automatic)),
+                    delta: deltaLabel(
+                        current: Double(m.requests), previous: previous.map { Double($0.requests) }))
+                    .help(Self.requestsHelp)
+                Divider().frame(height: 40)
+                heroStat(
+                    L10n.text("Total cost", zhHans: "总成本"),
+                    value: m.costUSD.map { formatCost($0) } ?? "—",
+                    tint: Theme.cost,
+                    delta: deltaLabel(
+                        current: m.costUSD ?? 0, previous: previous.map { $0.costUSD ?? 0 }))
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: Theme.radius.container).fill(Theme.surfaceSecondary))
@@ -578,18 +649,85 @@ struct UsageDashboardView: View {
         .dashboardCard()
     }
 
-    // MARK: - Four tiles
+    /// What one "request" is: the unit differs per source, so the mixed total needs a caveat
+    private static var requestsHelp: String {
+        L10n.text(
+            "Rows in the usage ledger. For Claude, Codex and most agents one row is one API call; Grok records one row per whole turn, so a total across sources mixes both.",
+            zhHans: "用量账本的行数：Claude、Codex 等多数来源一行即一次 API 调用；Grok 一行是一整轮对话，跨来源合计时两种粒度会混在一起。")
+    }
 
-    private var metricGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            metricCard(L10n.text("New input", zhHans: "新增输入"), totalInput, icon: "arrow.down.to.line", tint: .blue)
-            metricCard(L10n.text("Output", zhHans: "输出"), totalOutput, icon: "arrow.up.to.line", tint: .purple)
-            metricCard(L10n.text("Cache write", zhHans: "缓存创建"), totalCacheWrite, icon: "externaldrive.badge.plus", tint: .orange)
-            metricCard(L10n.text("Cache read", zhHans: "缓存命中"), totalCacheRead, icon: "sparkles", tint: Theme.brandFg)
+    private func heroStat<Delta: View>(
+        _ label: String, value: String, tint: Color = .primary, delta: Delta
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(Theme.font.themedMono(18, .semibold))
+                .foregroundStyle(tint)
+            delta
         }
     }
 
-    private func metricCard(_ label: String, _ value: Int, icon: String, tint: Color) -> some View {
+    /// "↑12% vs yesterday so far". Neutral color on purpose: more usage is not a failure.
+    @ViewBuilder
+    private func deltaLabel(current: Double, previous: Double?, showsBaseline: Bool = false) -> some View {
+        if let previous {
+            let change = UsageComparison.change(current: current, previous: previous)
+            HStack(spacing: 3) {
+                if let change {
+                    Image(systemName: change >= 0 ? "arrow.up.right" : "arrow.down.right")
+                        .font(Theme.font.themed(8, .semibold))
+                    Text(String(format: "%.0f%%", abs(change) * 100))
+                        .font(Theme.font.themedMono(9.5, .medium))
+                } else {
+                    Text(L10n.text("No prior data", zhHans: "无对比数据"))
+                        .font(Theme.font.themed(9.5))
+                }
+                if showsBaseline {
+                    Text(comparisonTitle)
+                        .font(Theme.font.themed(9.5))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var comparisonTitle: String {
+        switch period {
+        case .today: return L10n.text("vs yesterday so far", zhHans: "对比昨日同时段")
+        case .week: return L10n.text("vs last week so far", zhHans: "对比上周同期")
+        case .month: return L10n.text("vs last month so far", zhHans: "对比上月同期")
+        case .custom: return L10n.text("vs the previous range", zhHans: "对比前一等长区间")
+        case .all: return ""
+        }
+    }
+
+    // MARK: - Tiles
+
+    private var metricGrid: some View {
+        let m = metrics
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            metricCard(L10n.text("New input", zhHans: "新增输入"), formatTokens(m.inputTokens), icon: "arrow.down.to.line", tint: .blue)
+            metricCard(L10n.text("Output", zhHans: "输出"), formatTokens(m.outputTokens), icon: "arrow.up.to.line", tint: .purple)
+            metricCard(L10n.text("Cache write", zhHans: "缓存创建"), formatTokens(m.cacheWriteTokens), icon: "externaldrive.badge.plus", tint: .orange)
+            metricCard(L10n.text("Cache read", zhHans: "缓存命中"), formatTokens(m.cacheReadTokens), icon: "sparkles", tint: Theme.brandFg)
+            metricCard(
+                L10n.text("Tokens per request", zhHans: "单次请求 Tokens"),
+                m.tokensPerRequest.map { formatTokens(Int($0.rounded())) } ?? "—",
+                icon: "divide", tint: .teal)
+                .help(Self.requestsHelp)
+            metricCard(
+                L10n.text("Cost per request", zhHans: "单次请求成本"),
+                m.costPerRequest.map { costLabel($0) } ?? "—",
+                icon: "dollarsign.circle", tint: Theme.cost)
+                .help(Self.requestsHelp)
+        }
+    }
+
+    private func metricCard(_ label: String, _ value: String, icon: String, tint: Color) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(Theme.font.themed(11))
@@ -598,7 +736,7 @@ struct UsageDashboardView: View {
                 Text(label)
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
-                Text(formatTokens(value))
+                Text(value)
                     .font(Theme.font.themedMono(14, .semibold))
             }
             Spacer(minLength: 0)
@@ -607,25 +745,236 @@ struct UsageDashboardView: View {
         .dashboardCard()
     }
 
+    // MARK: - Turns
+
+    /// Per-turn view: one asked prompt is one turn. Cost and tokens per turn only count the
+    /// sources that report prompts, so a source without prompt extraction can't inflate them.
+    @ViewBuilder
+    private var turnCard: some View {
+        let turns = usageService.turnSummary
+        let turnSources = Set(turns.bySource.keys)
+        let turnMetrics = usageService.metrics(
+            of: filteredModelTotals.filter { turnSources.contains($0.source) })
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L10n.text("Turns", zhHans: "轮次"))
+                    .font(Theme.font.themed(12, .semibold))
+                Spacer()
+                Text(L10n.format("%@ asked", zhHans: "共 %@ 轮", turns.turns.formatted(.number.grouping(.automatic))))
+                    .font(Theme.font.themedMono(11, .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            if turns.turns > 0 {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3),
+                          alignment: .leading, spacing: 8) {
+                    turnStat(
+                        L10n.text("Cost per turn", zhHans: "每轮成本"),
+                        turnMetrics.costUSD.map { costLabel($0 / Double(turns.turns)) } ?? "—",
+                        tint: Theme.cost)
+                    turnStat(
+                        L10n.text("Tokens per turn", zhHans: "每轮 Tokens"),
+                        formatTokens(turnMetrics.totalTokens / max(1, turns.turns)))
+                    turnStat(
+                        L10n.text("Requests per turn", zhHans: "每轮请求"),
+                        String(format: "%.1f", Double(turnMetrics.requests) / Double(turns.turns)))
+                        .help(Self.requestsHelp)
+                    turnStat(
+                        L10n.text("Median duration", zhHans: "耗时中位数"),
+                        turns.medianDuration.map(formatDuration) ?? "—")
+                    turnStat(
+                        L10n.text("Duration P90", zhHans: "耗时 P90"),
+                        turns.p90Duration.map(formatDuration) ?? "—")
+                        .help(L10n.text(
+                            "9 in 10 turns finish within this time",
+                            zhHans: "九成的轮次在这个时间内结束"))
+                    turnStat(
+                        L10n.text("Error / rework", zhHans: "出错 / 返工"),
+                        [turns.errorRate, turns.reworkRate]
+                            .map { $0.map { String(format: "%.1f%%", $0 * 100) } ?? "—" }
+                            .joined(separator: " / "))
+                        .help(L10n.text(
+                            "Error: the turn ended in an error. Rework: your next prompt corrected it (\"that's wrong\", \"redo\") or rephrased the same ask while struggling.",
+                            zhHans: "出错：这一轮以错误结束。返工：你的下一句是在纠正（“不对”“重来”），或在反复改写同一个问题。"))
+                }
+                Text(L10n.format(
+                    "Counted from your prompts: %@",
+                    zhHans: "按你的每次提问统计：%@",
+                    AgentSource.allCases.filter { turnSources.contains($0) }
+                        .map { "\($0.displayName) \(turns.bySource[$0] ?? 0)" }
+                        .joined(separator: " · ")))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(L10n.text("No prompts in this range", zhHans: "该时段没有可统计的提问"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(Theme.spacing.card)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .dashboardCard()
+    }
+
+    private func turnStat(_ label: String, _ value: String, tint: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(Theme.font.themedMono(13, .semibold))
+                .foregroundStyle(tint)
+        }
+    }
+
+    // MARK: - Concentration
+
+    /// How much of the range a handful of sessions account for; usage is usually very skewed, so
+    /// this points at the few sessions worth a look
+    @ViewBuilder
+    private var concentrationCard: some View {
+        let m = metrics
+        let sessions = usageService.sessionTotals
+        let tokenShare = UsageStats.topShare(
+            sessions.map { Double($0.tokens) }, top: 10, total: Double(m.totalTokens))
+        let costShare = m.costUSD.flatMap {
+            UsageStats.topShare(sessions.map { $0.costUSD ?? 0 }, top: 10, total: $0)
+        }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.text("Concentration", zhHans: "集中度"))
+                .font(Theme.font.themed(12, .semibold))
+            if let tokenShare, sessions.count > 1 {
+                Text(L10n.format(
+                    "The top %1$@ sessions use %2$@ of tokens",
+                    zhHans: "前 %1$@ 个会话用掉了 %2$@ 的 tokens",
+                    String(min(10, sessions.count)), String(format: "%.0f%%", tokenShare * 100)))
+                    .font(Theme.font.themed(11, .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let costShare {
+                    Text(L10n.format("and %@ of cost", zhHans: "以及 %@ 的成本",
+                                     String(format: "%.0f%%", costShare * 100)))
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                SecondaryButton(
+                    title: L10n.text("See the sessions", zhHans: "查看会话排行"),
+                    icon: "list.number", classic: .push
+                ) { subTab = .sessions }
+            } else {
+                Text(L10n.text("Not enough sessions in this range", zhHans: "该时段会话太少"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(Theme.spacing.card)
+        .frame(width: 220, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .dashboardCard()
+    }
+
+    // MARK: - Cost structure
+
+    private static let costSegments: [(key: KeyPath<CostBreakdown, Double>, label: String, tint: Color)] = [
+        (\.input, L10n.text("New input", zhHans: "新增输入"), .blue),
+        (\.output, L10n.text("Output", zhHans: "输出"), .purple),
+        (\.cacheWrite, L10n.text("Cache write", zhHans: "缓存创建"), .orange),
+        (\.cacheRead, L10n.text("Cache read", zhHans: "缓存命中"), Theme.brand),
+        (\.reported, L10n.text("Self-reported", zhHans: "来源自报"), .gray),
+    ]
+
+    /// Where the money goes by token type. Cache reads dominate the token count, so the cost split
+    /// is what tells you whether output or cache writes are the real bill.
+    @ViewBuilder
+    private var costStructureCard: some View {
+        let split = usageService.costBreakdown(of: filteredModelTotals)
+        let total = split.total
+        let segments = Self.costSegments.filter { split[keyPath: $0.key] > 0 }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(L10n.text("Where the cost goes", zhHans: "成本构成"))
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if total > 0, metrics.totalTokens > 0 {
+                    let readTokenShare = Double(metrics.cacheReadTokens) / Double(metrics.totalTokens)
+                    Text(L10n.format(
+                        "Cache reads: %1$@ of tokens, %2$@ of cost",
+                        zhHans: "缓存命中占 %1$@ 的 tokens，只占 %2$@ 的成本",
+                        String(format: "%.0f%%", readTokenShare * 100),
+                        String(format: "%.0f%%", split.cacheRead / total * 100)))
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if total > 0 {
+                GeometryReader { proxy in
+                    HStack(spacing: 1) {
+                        ForEach(segments, id: \.label) { segment in
+                            Rectangle()
+                                .fill(segment.tint)
+                                .frame(width: max(2, (proxy.size.width - CGFloat(segments.count - 1))
+                                    * split[keyPath: segment.key] / total))
+                        }
+                    }
+                    .clipShape(Capsule())
+                }
+                .frame(height: 8)
+                HStack(spacing: 14) {
+                    ForEach(segments, id: \.label) { segment in
+                        HStack(spacing: 4) {
+                            Circle().fill(segment.tint).frame(width: 7, height: 7)
+                            Text(segment.label)
+                                .font(Theme.font.themed(10))
+                                .foregroundStyle(.secondary)
+                            Text("\(costLabel(split[keyPath: segment.key])) · \(String(format: "%.0f%%", split[keyPath: segment.key] / total * 100))")
+                                .font(Theme.font.themedMono(10, .medium))
+                        }
+                    }
+                }
+            } else {
+                Text(L10n.text("No priced usage in this range", zhHans: "该时段暂无可计价用量"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(Theme.spacing.card)
+        .dashboardCard()
+    }
+
     // MARK: - Cache hit rate
 
     private var cacheHitCard: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let m = metrics
+        return VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(L10n.text("Cache hit rate", zhHans: "缓存命中率"))
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
+                    .help(L10n.text(
+                        "Cache reads ÷ (new input + cache write + cache read). Output is excluded because it is never cached.",
+                        zhHans: "缓存命中 ÷（新增输入 + 缓存创建 + 缓存命中）。输出不会被缓存，因此不计入分母。"))
                 Spacer()
-                Text(String(format: "%.1f%%", cacheHitRate * 100))
+                if let saved = m.cacheSavingsUSD, saved > 0 {
+                    Text(L10n.format("Saved ≈ %@", zhHans: "为你省下 ≈ %@", costLabel(saved)))
+                        .font(Theme.font.themedMono(10, .medium))
+                        .foregroundStyle(Theme.cost)
+                        .help(L10n.text(
+                            "What the cache reads would have cost as fresh input, minus what they did cost. Unpriced models and self-reported costs are left out.",
+                            zhHans: "这些缓存命中若按新增输入计价要多花的钱（输入价 − 缓存读价）。未定价模型和自报成本的来源不计入。"))
+                }
+                Text(String(format: "%.1f%%", m.cacheHitRate * 100))
                     .font(Theme.font.themedMono(11, .semibold))
                     .foregroundStyle(Theme.brandFg)
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
-                    Capsule()
-                        .fill(Theme.barFill(Theme.brand, from: 0.6))
-                        .frame(width: max(4, proxy.size.width * cacheHitRate))
+                    if m.cacheHitRate > 0 {
+                        Capsule()
+                            .fill(Theme.barFill(Theme.brand, from: 0.6))
+                            .frame(width: max(4, proxy.size.width * m.cacheHitRate))
+                    }
                 }
             }
             .frame(height: 6)
@@ -1183,9 +1532,15 @@ struct UsageDashboardView: View {
                             .font(Theme.font.themed(11))
                             .lineLimit(1)
                         Spacer()
+                        Text(L10n.format("%@ req", zhHans: "%@ 次", line.requests.formatted(.number.grouping(.automatic))))
+                            .font(Theme.font.themedMono(10.5))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 70, alignment: .trailing)
+                            .help(Self.requestsHelp)
                         Text(formatTokens(line.tokens))
                             .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(.secondary)
+                            .frame(width: 62, alignment: .trailing)
                         Text(line.costUSD.map { costLabel($0) } ?? "—")
                             .font(Theme.font.themedMono(10.5))
                             .foregroundStyle(Theme.cost)

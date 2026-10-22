@@ -222,6 +222,53 @@ public final class PromptsRepo {
         return WeeklyPromptStats(askedCount: asked, bySource: bySource, topReused: reused)
     }
 
+    /// One asked prompt (= one turn) for the usage dashboard's turn card, with its evaluation
+    /// when there is one
+    public struct TurnRow: Equatable, Sendable {
+        public var source: AgentSource
+        /// Seconds from the prompt to the turn's end; nil = not evaluated or no end seen
+        public var duration: Double?
+        /// prompt_eval.outcome ("clean" / "error"); nil = not evaluated
+        public var outcome: String?
+        /// The next prompt corrected or struggled to rephrase this one; nil = not evaluated
+        public var rework: Bool?
+
+        public init(source: AgentSource, duration: Double?, outcome: String?, rework: Bool?) {
+            self.source = source
+            self.duration = duration
+            self.outcome = outcome
+            self.rework = rework
+        }
+    }
+
+    /// Turns asked in [from, to), same counting rules as `weeklyStats` (ask time falls back to
+    /// first_seen, injected / slash-command noise and removed rows excluded). Reformulation 1 is
+    /// "struggle" (`PromptFollowupSignal.Reformulation`); "explore" is not rework.
+    public func turnRows(from: Date, to: Date, source: AgentSource? = nil) throws -> [TurnRow] {
+        var conditions = [
+            "COALESCE(p.timestamp, p.first_seen) >= ?", "COALESCE(p.timestamp, p.first_seen) < ?",
+            "p.hidden_at IS NULL", "p.text NOT LIKE '<%'", "SUBSTR(p.text, 1, 1) != '/'",
+        ]
+        var bindings: [SQLiteValue] = [.date(from), .date(to)]
+        if let source {
+            conditions.append("p.source = ?")
+            bindings.append(.text(source.rawValue))
+        }
+        return try db.query("""
+        SELECT p.source, e.duration, e.outcome,
+               CASE WHEN e.prompt_id IS NULL THEN NULL
+                    ELSE (e.corrective != 0 OR e.reformulated = 1) END
+        FROM prompts p LEFT JOIN prompt_eval e ON e.prompt_id = p.id
+        WHERE \(conditions.joined(separator: " AND "))
+        """, bindings) { row in
+            TurnRow(
+                source: AgentSource(rawValue: row.text(0) ?? "") ?? .claude,
+                duration: row.isNull(1) ? nil : row.real(1),
+                outcome: row.text(2),
+                rework: row.isNull(3) ? nil : row.int(3) != 0)
+        }
+    }
+
     // MARK: - Row mapping
 
     private static func mapRow(_ row: SQLiteRow) -> PromptEntry {

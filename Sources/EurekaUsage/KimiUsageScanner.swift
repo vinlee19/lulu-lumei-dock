@@ -13,6 +13,8 @@ import EurekaStore
 public final class KimiUsageScanner {
     private let sessionsRoot: URL
     private let store: EurekaStore
+    /// The last slice read left more of the file unread (see `ScanSlices`)
+    private var hasMoreSlices = false
     private let projectResolver = ProjectResolver()
 
     private static let dayFormatter: DateFormatter = {
@@ -42,7 +44,12 @@ public final class KimiUsageScanner {
     public func scanOnce() throws -> Int {
         var inserted = 0
         for file in wireFiles() {
-            inserted += try scanFile(file)
+            inserted += try ScanSlices.drain(
+                stateKey: file.path, store: store, hasMore: { hasMoreSlices }
+            ) {
+                hasMoreSlices = false
+                return try scanFile(file)
+            }
         }
         return inserted
     }
@@ -93,6 +100,7 @@ public final class KimiUsageScanner {
         }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
+        hasMoreSlices = !chunk.reachedEnd
 
         var records: [UsageRecord] = []
         var promptCount = 0

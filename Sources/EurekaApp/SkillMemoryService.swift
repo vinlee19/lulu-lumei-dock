@@ -44,7 +44,9 @@ final class SkillMemoryService: ObservableObject {
         didSet { rebuild() }
     }
 
-    private let queue = DispatchQueue(label: "com.vinlee.eureka.skillmemory", qos: .userInitiated)
+    /// .utility: repo discovery plus a walk of every skill / memory / instruction file; it must
+    /// not compete with the UI on the performance cores
+    private let queue = DispatchQueue(label: "com.vinlee.eureka.skillmemory", qos: .utility)
     private let resolver = ProjectResolver()
     private var allSkills: [SkillEntry] = []
     private var allMemories: [MemoryEntry] = []

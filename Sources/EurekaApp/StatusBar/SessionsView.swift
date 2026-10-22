@@ -110,7 +110,7 @@ struct SessionsView: View {
             if let mode = SessionBrowserService.SortMode(rawValue: settings.sessionSortMode) {
                 service.sortMode = mode
             }
-            service.refresh()
+            service.refreshIfStale()
         }
         .onChange(of: settings.sessionRangeAll) { _, newValue in
             service.rangeAll = newValue
@@ -189,13 +189,36 @@ struct SessionsView: View {
             .animation(.easeOut(duration: 0.15), value: service.scanning)
 
             // Two rows from the shared kit. The list opens at 300pt, so the search field gets a
-            // row to itself (one row squeezed it to ~100pt and cut the placeholder); the source
-            // picker and the two round tool buttons share the row below.
+            // row to itself; the source picker, compact time-range toggle, and the two round tool
+            // buttons share the row below so we save a full vertical tray row.
             VStack(spacing: 6) {
                 SearchField(placeholder: L10n.text("Search sessions / projects / id", zhHans: "搜索会话 / 项目 / id"), text: $service.searchText, maxWidth: nil)
                 HStack(spacing: 6) {
                     sourcePickerButton
-                    Spacer(minLength: 6)
+                    Spacer(minLength: 4)
+                    CapsuleTabTray {
+                        CapsuleTabButton(
+                            title: L10n.text("30d", zhHans: "30 天"),
+                            fillWidth: false,
+                            isSelected: !settings.sessionRangeAll
+                        ) {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                settings.sessionRangeAll = false
+                            }
+                        }
+                        .help(L10n.text("Last 30 days", zhHans: "近 30 天"))
+                        CapsuleTabButton(
+                            title: L10n.text("All", zhHans: "全部"),
+                            fillWidth: false,
+                            isSelected: settings.sessionRangeAll
+                        ) {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                settings.sessionRangeAll = true
+                            }
+                        }
+                        .help(L10n.text("All time", zhHans: "全部时间"))
+                    }
+                    .accessibilityLabel(L10n.text("Session time range", zhHans: "会话时间范围"))
                     RoundGlyphButton(
                         icon: "checkmark", active: multiSelect,
                         help: multiSelect ? L10n.text("Exit multi-select", zhHans: "退出多选") : L10n.text("Multi-select (batch delete)", zhHans: "多选模式（批量删除）")
@@ -208,30 +231,6 @@ struct SessionsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-
-            // Time range (last 30 days / all time); capsule tabs in the same style as the sort
-            // modes below, selected = purple fill + white text
-            CapsuleTabTray {
-                CapsuleTabButton(
-                    title: L10n.text("Last 30 days", zhHans: "近 30 天"), icon: "clock",
-                    isSelected: !settings.sessionRangeAll
-                ) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        settings.sessionRangeAll = false
-                    }
-                }
-                CapsuleTabButton(
-                    title: L10n.text("All time", zhHans: "全部时间"), icon: "infinity",
-                    isSelected: settings.sessionRangeAll
-                ) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        settings.sessionRangeAll = true
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 4)
-            .accessibilityLabel(L10n.text("Session time range", zhHans: "会话时间范围"))
 
             // Sort / view (first three modes are flat lists, "Project" groups by project); capsule
             // tabs, selected = purple fill + white text
@@ -258,21 +257,16 @@ struct SessionsView: View {
                             .font(Theme.font.themed(10))
                             .foregroundStyle(.tertiary)
                     } else {
-                        Image(systemName: "archivebox")
-                            .font(Theme.font.themed(26))
-                            .foregroundStyle(Theme.brandFg.opacity(0.4))
-                        Text(service.isSearching
-                            ? L10n.text("No matching sessions", zhHans: "没有匹配的会话")
-                            : (settings.sessionRangeAll
-                                ? L10n.text("No sessions", zhHans: "没有会话")
-                                : L10n.text("No sessions in the last 30 days", zhHans: "近 30 天没有会话")))
-                            .font(Theme.font.themed(12))
-                            .foregroundStyle(.secondary)
-                        if !service.isSearching && !settings.sessionRangeAll {
-                            Text(L10n.text("Older records are under All time", zhHans: "更早的记录在「全部时间」里"))
-                                .font(Theme.font.themed(10))
-                                .foregroundStyle(.tertiary)
-                        }
+                        EmptyStateView(
+                            icon: "archivebox",
+                            title: service.isSearching
+                                ? L10n.text("No matching sessions", zhHans: "没有匹配的会话")
+                                : (settings.sessionRangeAll
+                                    ? L10n.text("No sessions", zhHans: "没有会话")
+                                    : L10n.text("No sessions in the last 30 days", zhHans: "近 30 天没有会话")),
+                            hint: !service.isSearching && !settings.sessionRangeAll
+                                ? L10n.text("Older records are under All time", zhHans: "更早的记录在「全部时间」里")
+                                : nil)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -402,9 +396,12 @@ struct SessionsView: View {
         .padding(8)
         .frame(width: 210)
         .background(
-            LinearGradient(
-                colors: [Theme.brand.opacity(0.06), Theme.gold.opacity(0.05)],
-                startPoint: .topLeading, endPoint: .bottomTrailing))
+            ThemeStyle.current.isHardEdged
+                ? AnyShapeStyle(Theme.surface)
+                : AnyShapeStyle(
+                    LinearGradient(
+                        colors: [Theme.brand.opacity(0.06), Theme.gold.opacity(0.05)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)))
     }
 
     private func sourcePickerRow(
@@ -419,13 +416,13 @@ struct SessionsView: View {
                 if let source {
                     SourceBadge(source: source, size: 14)
                 } else {
-                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(Theme.brand.gradient)
+                    RoundedRectangle(cornerRadius: ThemeStyle.current.isHardEdged ? 0 : 3.5, style: .continuous)
+                        .fill(ThemeStyle.current.isHardEdged ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.brand.gradient))
                         .frame(width: 14, height: 14)
                         .overlay(
                             Image(systemName: "line.3.horizontal.decrease")
                                 .font(Theme.font.themed(7, .semibold))
-                                .foregroundStyle(.white))
+                                .foregroundStyle(Theme.onBrand))
                 }
                 Text(name)
                     .font(Theme.font.themed(11, selected ? .semibold : .regular))

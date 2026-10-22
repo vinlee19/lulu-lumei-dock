@@ -24,6 +24,13 @@ public enum CodeBuddySessionIndexer {
                 at: projectDir,
                 includingPropertiesForKeys: [.fileSizeKey])) ?? []
             for file in files where file.pathExtension.lowercased() == "jsonl" {
+                // The last write bounds the activity (no line can be newer than the file's
+                // mtime), so files outside the window are skipped before reading them; reading
+                // every file ever was most of a first install's discovery cost
+                if let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate, now.timeIntervalSince(mtime) >= window {
+                    continue
+                }
                 guard let info = sessionInfo(file: file),
                       now.timeIntervalSince(info.lastActiveAt) < window
                 else { continue }

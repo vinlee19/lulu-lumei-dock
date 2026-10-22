@@ -77,32 +77,31 @@ struct SessionDetailView: View {
     var body: some View {
         Group {
             if let session = service.selected {
-                VStack(spacing: 0) {
-                    header(session)
-                    overviewCard(session)
-                    detailTabBar(session)
-                    if detailTab == .summary {
-                        Divider()
-                        SessionSummaryPane(summaries: summaries, session: session) { id in
-                            jumpToCitedMessage(id)
-                        }
-                    } else {
-                        // Context usage card: not rendered when nil (trae/antigravity/not computed
-                        // yet); .id resets the collapsed state on session switch (same guard idea
-                        // as artifactsExpanded)
-                        if let breakdown = service.contextBreakdown {
-                            ContextUsageCard(breakdown: breakdown)
-                                .id(session.id)
-                        }
-                        searchBar
-                        Divider()
-                        // The outline pane uses HSplitView: the divider is draggable to resize
-                        // (same interaction as the left session list), minWidth keeps timestamps
-                        // intact at the narrowest, maxWidth stops it from swallowing the transcript
-                        // The width is read in the same layout pass, so the outline is already
-                        // gone on the first frame of a narrow window
-                        GeometryReader { proxy in
-                            let fits = proxy.size.width >= Self.tocMinDetailWidth
+                GeometryReader { outerProxy in
+                    let paneWidth = outerProxy.size.width
+                    let fits = paneWidth >= Self.tocMinDetailWidth
+                    VStack(spacing: 0) {
+                        header(session, width: paneWidth)
+                        overviewCard(session)
+                        detailTabBar(session)
+                        if detailTab == .summary {
+                            Divider()
+                            SessionSummaryPane(summaries: summaries, session: session) { id in
+                                jumpToCitedMessage(id)
+                            }
+                        } else {
+                            // Context usage card: not rendered when nil (trae/antigravity/not computed
+                            // yet); .id resets the collapsed state on session switch (same guard idea
+                            // as artifactsExpanded)
+                            if let breakdown = service.contextBreakdown {
+                                ContextUsageCard(breakdown: breakdown)
+                                    .id(session.id)
+                            }
+                            searchBar
+                            Divider()
+                            // The outline pane uses HSplitView: the divider is draggable to resize
+                            // (same interaction as the left session list), minWidth keeps timestamps
+                            // intact at the narrowest, maxWidth stops it from swallowing the transcript
                             HSplitView {
                                 transcriptPane(session)
                                     .frame(maxWidth: .infinity)
@@ -113,6 +112,7 @@ struct SessionDetailView: View {
                             }
                         }
                     }
+                    .frame(width: paneWidth, height: outerProxy.size.height)
                 }
                 .background(GeometryReader { proxy in
                     Color.clear.preference(key: DetailWidthKey.self, value: proxy.size.width)
@@ -131,15 +131,10 @@ struct SessionDetailView: View {
                     Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
                 }
             } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "bubble.left.and.text.bubble.right")
-                        .font(Theme.font.themed(32))
-                        .foregroundStyle(Theme.brandFg.opacity(0.4))
-                    Text(L10n.text("Select a session on the left to read the conversation", zhHans: "选择左侧会话查看对话记录"))
-                        .font(Theme.font.themed(12))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(
+                    icon: "bubble.left.and.text.bubble.right",
+                    title: L10n.text("Select a session on the left to read the conversation", zhHans: "选择左侧会话查看对话记录"))
+                    .frame(maxHeight: .infinity)
             }
         }
         // Attached to the Group: switches routed via "clear selection" also clear trail expansion
@@ -180,7 +175,7 @@ struct SessionDetailView: View {
     /// Prompts the user actually typed: injected turns (task notifications, relayed session
     /// messages, command output) are left out of the outline and the prompt count
     private var userMessages: [TranscriptMessage] {
-        service.transcript.filter { $0.role == .user && !PromptClassifier.isInjectedArtifact($0.text) }
+        service.transcriptUserMessages
     }
 
     /// Message stream filtered by role (search doesn't filter, it only highlights + jumps)
@@ -288,6 +283,26 @@ struct SessionDetailView: View {
         }
     }
 
+    /// Copies the resume command. It used to sit in its own labelled strip under the header, a
+    /// full row above the transcript for something the session list row and this button already
+    /// offer; the command itself is in the tooltip.
+    private func copyResumeButton(_ session: AgentSessionInfo) -> some View {
+        CardActionButton(
+            icon: copiedCommand ? "checkmark" : "doc.on.doc",
+            color: copiedCommand ? Theme.enabledGreen : .secondary,
+            size: 26,
+            help: copiedCommand
+                ? L10n.text("Copied", zhHans: "已复制")
+                : L10n.text("Copy resume command", zhHans: "复制恢复命令") + "\n" + service.resumeCommand(for: session)
+        ) {
+            service.copyResumeCommand(session)
+            copiedCommand = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                copiedCommand = false
+            }
+        }
+    }
+
     private func deleteHelp(_ session: AgentSessionInfo) -> String {
         session.source.supportsSessionDeletion
             ? L10n.text("Moves to the Trash and can be restored", zhHans: "移入废纸篓，可恢复")
@@ -296,13 +311,6 @@ struct SessionDetailView: View {
 
     @ViewBuilder
     private func fullActions(_ session: AgentSessionInfo) -> some View {
-        SecondaryButton(
-            title: L10n.text("Delete Session", zhHans: "删除会话"), icon: "trash", destructive: true,
-            help: deleteHelp(session)
-        ) {
-            confirmingDelete = true
-        }
-        .disabled(!session.source.supportsSessionDeletion)
         MenuButton(title: L10n.text("Export", zhHans: "导出"), icon: "square.and.arrow.up", help: L10n.text("Export the conversation", zhHans: "导出对话记录")) {
             Button(L10n.text("Copy as Markdown", zhHans: "复制为 Markdown")) { copyMarkdown(session) }
             Button(L10n.text("Export as .md File…", zhHans: "导出为 .md 文件…")) { exportMarkdown(session) }
@@ -315,6 +323,13 @@ struct SessionDetailView: View {
                 onOpenLineage(.list)
             }
         }
+        SecondaryButton(
+            title: L10n.text("Delete Session", zhHans: "删除会话"), icon: "trash", destructive: true,
+            help: deleteHelp(session)
+        ) {
+            confirmingDelete = true
+        }
+        .disabled(!session.source.supportsSessionDeletion)
     }
 
     /// Narrow-window form of `fullActions`: the same actions in one menu
@@ -334,32 +349,63 @@ struct SessionDetailView: View {
         }
     }
 
-    private func header(_ session: AgentSessionInfo) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            // The title gets its own row so a long prompt title can use two full lines instead
-            // of fighting the buttons for width
-            HStack(spacing: 8) {
-                SourceBadge(source: session.source, size: 14)
-                Text(session.displayName)
-                    .font(Theme.font.themed(13, .semibold))
-                    .lineLimit(2)
-                    .help(session.displayName)
-                Spacer(minLength: 0)
+    private var tocToggleButton: some View {
+        CardActionButton(
+            icon: "list.bullet.rectangle", size: 26,
+            help: tocVisible ? L10n.text("Hide the conversation outline", zhHans: "隐藏对话目录") : L10n.text("Show the conversation outline", zhHans: "显示对话目录")
+        ) {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if tocFits { showTOC.toggle() } else { tocShownWhenNarrow.toggle() }
             }
-            HStack(spacing: 8) {
-                // Every action when they fit; otherwise Resume stays and the rest move into More
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { resumeButton(session); fullActions(session) }
-                    HStack(spacing: 8) { resumeButton(session); moreMenu(session) }
-                }
-                Spacer(minLength: 0)
-                CardActionButton(
-                    icon: "list.bullet.rectangle", size: 26,
-                    help: tocVisible ? L10n.text("Hide the conversation outline", zhHans: "隐藏对话目录") : L10n.text("Show the conversation outline", zhHans: "显示对话目录")
-                ) {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if tocFits { showTOC.toggle() } else { tocShownWhenNarrow.toggle() }
+        }
+    }
+
+    @ViewBuilder
+    private func titleRow(_ session: AgentSessionInfo) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            SourceBadge(source: session.source, size: 14)
+                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] - 2 }
+            Text(session.displayName)
+                .font(Theme.font.themed(13, .semibold))
+                .lineLimit(2)
+                .help(session.displayName)
+        }
+    }
+
+    private func header(_ session: AgentSessionInfo, width: CGFloat) -> some View {
+        let wideHeader = width >= 720
+        let history = service.terminalHistory(for: session)
+        return VStack(alignment: .leading, spacing: 7) {
+            if wideHeader {
+                // Wide / fullscreen layout: title on the left, all session actions anchored to the
+                // right edge so Export / Turn Lineage / Delete / Outline sit cleanly along the border.
+                HStack(alignment: .top, spacing: 14) {
+                    titleRow(session)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 8) {
+                        resumeButton(session)
+                        copyResumeButton(session)
+                        fullActions(session)
+                        tocToggleButton
                     }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+            } else {
+                // Narrow window layout: title gets its own full-width row, while secondary actions
+                // stay anchored to the right border alongside the outline toggle.
+                HStack(spacing: 8) {
+                    titleRow(session)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    resumeButton(session)
+                    copyResumeButton(session)
+                    Spacer(minLength: 8)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { fullActions(session) }
+                        moreMenu(session)
+                    }
+                    tocToggleButton
                 }
             }
             if let note = exportNote {
@@ -367,7 +413,7 @@ struct SessionDetailView: View {
                     .font(Theme.font.themed(9.5))
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 if let started = session.startedAt {
                     metaItem("clock", started.formatted(.dateTime.month().day().hour().minute().locale(L10n.current.locale)))
                 }
@@ -380,78 +426,51 @@ struct SessionDetailView: View {
                     metaItem("doc.text",
                              URL(fileURLWithPath: session.transcriptPath).lastPathComponent)
                 }
+                if history.count == 1, let single = history.first {
+                    Text("·")
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(.quaternary)
+                    terminalEntryView(single)
+                }
                 Spacer(minLength: 0)
             }
-            terminalHistoryRow(session)
-            artifactsRow(session)
-            // Resume command: a labelled code strip in the kit's tertiary surface with the
-            // themed mono face and a CardActionButton, instead of a bare grey pill
-            HStack(spacing: 8) {
-                Image(systemName: "terminal")
-                    .font(Theme.font.themed(10, .semibold))
-                    .foregroundStyle(Theme.brandFg)
-                Text(L10n.text("Resume command", zhHans: "恢复命令"))
-                    .font(Theme.font.themed(10.5, .medium))
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                Text(service.resumeCommand(for: session))
-                    .font(Theme.font.themedMono(10.5))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                Spacer(minLength: 4)
-                CardActionButton(
-                    icon: copiedCommand ? "checkmark" : "doc.on.doc",
-                    color: copiedCommand ? Theme.enabledGreen : .secondary,
-                    size: 22, help: copiedCommand ? L10n.text("Copied", zhHans: "已复制") : L10n.text("Copy resume command", zhHans: "复制恢复命令")
-                ) {
-                    service.copyResumeCommand(session)
-                    copiedCommand = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                        copiedCommand = false
-                    }
-                }
+            if history.count > 1 {
+                terminalHistoryRow(history)
             }
-            .padding(.leading, 10)
-            .padding(.trailing, 6)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .fill(Theme.surfaceTertiary))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
+            artifactsRow(session)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
     }
 
-    /// Terminal ownership: which terminals this session has run in. Resuming in another terminal
-    /// adds an entry, each with a jump button (greyed out if that terminal has exited). With no
-    /// entries the row is omitted.
+    private func terminalEntryView(
+        _ entry: (binding: TerminalBinding, firstSeen: Date, lastSeen: Date)
+    ) -> some View {
+        HStack(spacing: 5) {
+            TerminalBadge(
+                binding: entry.binding,
+                isRunning: TerminalActivator.isRunning(entry.binding))
+            Text(relativeFormatter.localizedString(
+                for: entry.lastSeen, relativeTo: Date()))
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize()
+            jumpButton(entry.binding)
+        }
+    }
+
+    /// Multi-terminal history row when a session has been resumed across more than one terminal.
     @ViewBuilder
-    private func terminalHistoryRow(_ session: AgentSessionInfo) -> some View {
-        let history = service.terminalHistory(for: session)
-        if !history.isEmpty {
-            VStack(alignment: .leading, spacing: 3) {
-                if history.count > 1 {
-                    Text(L10n.format("Ran in %@ terminals", zhHans: "曾在 %@ 个终端运行", String(history.count)))
-                        .font(Theme.font.themed(9.5))
-                        .foregroundStyle(.tertiary)
-                }
+    private func terminalHistoryRow(
+        _ history: [(binding: TerminalBinding, firstSeen: Date, lastSeen: Date)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(L10n.format("Ran in %@ terminals", zhHans: "曾在 %@ 个终端运行", String(history.count)))
+                .font(Theme.font.themed(9.5))
+                .foregroundStyle(.tertiary)
+            FlowLayout(spacing: 12, lineSpacing: 4) {
                 ForEach(Array(history.enumerated()), id: \.offset) { _, entry in
-                    HStack(spacing: 6) {
-                        TerminalBadge(
-                            binding: entry.binding,
-                            isRunning: TerminalActivator.isRunning(entry.binding))
-                        Text(relativeFormatter.localizedString(
-                            for: entry.lastSeen, relativeTo: Date()))
-                            .font(Theme.font.themed(9.5))
-                            .foregroundStyle(.tertiary)
-                        Spacer(minLength: 0)
-                        jumpButton(entry.binding)
-                    }
+                    terminalEntryView(entry)
                 }
             }
         }
@@ -575,7 +594,7 @@ struct SessionDetailView: View {
     private func overviewCard(_ session: AgentSessionInfo) -> some View {
         let cost = service.costs[session.id]
         // Wraps onto a second line in a narrow pane instead of squeezing labels and values
-        FlowLayout(spacing: 24, lineSpacing: 8) {
+        FlowLayout(spacing: 16, lineSpacing: 4) {
             overviewStat(L10n.text("Messages", zhHans: "消息"), "\(service.transcript.count)")
             overviewStat(L10n.text("Prompts", zhHans: "提问"), "\(userMessages.count)")
             if let cost {
@@ -590,21 +609,21 @@ struct SessionDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
-        .padding(.top, 2)
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
     }
 
-    /// One stat: label above a large mono number. 9.5pt tertiary labels with 11pt values were
-    /// the least legible line on the page; this reads at a glance without a card around it.
+    /// One stat: label and value on one baseline. Stacked label-over-15pt-number stats cost a
+    /// ~40pt band above the transcript; inline at 13pt they stay legible (9.5pt labels with 11pt
+    /// values were not) in less than half the height.
     private func overviewStat(_ label: String, _ value: String, color: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(label)
                 .font(Theme.font.themed(10.5, .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .fixedSize()
             Text(value)
-                .font(Theme.font.themedMono(15, .semibold))
+                .font(Theme.font.themedMono(13, .semibold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .fixedSize()

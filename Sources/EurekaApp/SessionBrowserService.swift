@@ -93,14 +93,23 @@ final class SessionBrowserService: ObservableObject {
     /// Currently selected session (what the detail pane renders)
     @Published private(set) var selected: AgentSessionInfo?
     @Published private(set) var transcript: [TranscriptMessage] = []
+    /// Prompts the user actually typed (injected turns left out), computed once per load on the
+    /// queue: the detail page needs it four times per render (outline, counts, layout), and
+    /// filtering up to 20k messages each time ran on the main thread
+    @Published private(set) var transcriptUserMessages: [TranscriptMessage] = []
     @Published private(set) var transcriptTruncated = false
     @Published private(set) var transcriptLoading = false
     /// Context-usage breakdown by category for the current session (estimated async after
     /// the transcript loads; always nil for trae/antigravity)
     @Published private(set) var contextBreakdown: ContextBreakdown?
     @Published var sortMode: SortMode = .time {
-        didSet { rebuild() }
+        didSet { if sortMode != oldValue { rebuild() } }
     }
+    /// Terminal history of the open session, read on the queue with its transcript (the detail
+    /// header used to query SQLite on the main thread on every render)
+    @Published private(set) var openTerminalHistory: (
+        sessionId: String, entries: [(binding: TerminalBinding, firstSeen: Date, lastSeen: Date)]
+    )?
     @Published var searchText = "" {
         didSet {
             rebuild()
@@ -118,10 +127,16 @@ final class SessionBrowserService: ObservableObject {
     }
     /// Time range: false = last 30 days (default); true = all time (re-indexes)
     @Published var rangeAll = false {
-        didSet { refresh() }
+        // Only a real change rescans: the Sessions tab assigns this on every appear
+        didSet { if rangeAll != oldValue { refresh() } }
     }
+    /// When the last index scan finished (opening the tab within a minute reuses it)
+    private var lastIndexedAt: Date?
 
-    private let queue = DispatchQueue(label: "com.vinlee.eureka.sessions", qos: .userInitiated)
+    /// .utility: the index scan walks every agent's history and must not compete with the UI on
+    /// the performance cores; opening a transcript enqueues at .userInitiated (see
+    /// loadTranscript), which boosts the queue while the user waits
+    private let queue = DispatchQueue(label: "com.vinlee.eureka.sessions", qos: .utility)
     private let resolver = ProjectResolver()
     private var sessions: [AgentSessionInfo] = []
     /// Session id waiting to be revealed (recorded while the index isn't ready, consumed
@@ -147,6 +162,15 @@ final class SessionBrowserService: ObservableObject {
         storeLoaded = true
         store = try? EurekaStore(path: EurekaStore.defaultURL())
         PricingCatalogStore.shared.loadIfNeeded(paths: .app)
+    }
+
+    /// Tab-open refresh: skipped while a scan runs or one finished within `maxAge`. Every open used
+    /// to queue a full re-index of every agent (twice, via `rangeAll`), the heaviest thing the
+    /// Sessions tab does.
+    func refreshIfStale(maxAge: TimeInterval = 60) {
+        if scanning { return }
+        if let lastIndexedAt, Date().timeIntervalSince(lastIndexedAt) < maxAge { return }
+        refresh()
     }
 
     func refresh() {
@@ -241,6 +265,7 @@ final class SessionBrowserService: ObservableObject {
                 self.promptCounts = prompts
                 self.terminals = terminals
                 self.scanning = false
+                self.lastIndexedAt = Date()
                 self.rebuild()
                 // Consume a pending reveal once the index is ready (the usage "by session" ranking
                 // may be clicked before it's built)
@@ -440,6 +465,7 @@ final class SessionBrowserService: ObservableObject {
     func select(_ session: AgentSessionInfo?) {
         selected = session
         transcript = []
+        transcriptUserMessages = []
         transcriptTruncated = false
         contextBreakdown = nil  // cleared on every session switch; filled back after estimation, checked by id
         guard let session else { return }
@@ -468,8 +494,14 @@ final class SessionBrowserService: ObservableObject {
         maxMessages: Int = TranscriptReader.defaultMaxMessages
     ) {
         transcriptLoading = true
-        queue.async { [weak self] in
+        queue.async(qos: .userInitiated) { [weak self] in
             let result = TranscriptReader.load(session: session, maxMessages: maxMessages)
+            let userMessages = result.messages.filter {
+                $0.role == .user && !PromptClassifier.isInjectedArtifact($0.text)
+            }
+            self?.loadStoreIfNeeded()
+            let terminalHistory = (try? self?.store?.sessionTerminals.bindings(
+                source: session.source, sessionId: session.id)) ?? []
             // Context-usage estimate: trae/antigravity have no readable message bodies, so nil
             var breakdown: ContextBreakdown?
             if session.source != .trae && session.source != .antigravity {
@@ -511,9 +543,11 @@ final class SessionBrowserService: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.selected?.id == session.id else { return }
                 self.transcript = result.messages
+                self.transcriptUserMessages = userMessages
                 self.transcriptTruncated = result.truncated
                 self.transcriptLoading = false
                 self.contextBreakdown = breakdown
+                self.openTerminalHistory = (session.id, terminalHistory)
             }
         }
     }
@@ -527,13 +561,13 @@ final class SessionBrowserService: ObservableObject {
     }
 
     /// **All** terminal bindings for a session (for the detail page's "ran in N terminals").
-    /// Queried once, on demand, when the detail opens; the list needs only the latest one, not
-    /// history.
+    /// Loaded with the transcript (see `openTerminalHistory`); the list needs only the latest
+    /// binding, not history.
     func terminalHistory(
         for session: AgentSessionInfo
     ) -> [(binding: TerminalBinding, firstSeen: Date, lastSeen: Date)] {
-        (try? store?.sessionTerminals.bindings(
-            source: session.source, sessionId: session.id)) ?? []
+        guard let open = openTerminalHistory, open.sessionId == session.id else { return [] }
+        return open.entries
     }
 
     func resumeCommand(for session: AgentSessionInfo) -> String {

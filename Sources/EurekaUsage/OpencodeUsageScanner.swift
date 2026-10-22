@@ -36,21 +36,57 @@ public final class OpencodeUsageScanner {
         // and rescans
         let inode = fileInode(path)
         let saved = try store.scanState.fileState(path: path)
-        let watermark: Int64 = (saved?.inode == inode ? saved?.offset : nil) ?? 0
+        var watermark: Int64 = (saved?.inode == inode ? saved?.offset : nil) ?? 0
+        let nowMs = now.timeIntervalSince1970 * 1000
 
+        // Paged: a first scan starts at rowid 0, and one query used to pull every message's JSON
+        // (a 200 MB database here) into memory at once. Each page saves its watermark.
+        var inserted = 0
+        while true {
+            let page = try autoreleasepool {
+                try scanMessagePage(db: db, path: path, inode: inode, after: watermark, nowMs: nowMs)
+            }
+            inserted += page.inserted
+            guard page.more, page.watermark > watermark else { break }
+            watermark = page.watermark
+        }
+        try backfillProviders(db: db, inode: inode)
+        try scanPartsForTools(db: db, inode: inode)
+        try recordPromptCounts(db: db)
+        while true {
+            let page = try autoreleasepool {
+                try scanSessionMessages(db: db, inode: inode, nowMs: nowMs)
+            }
+            inserted += page.inserted
+            guard page.more else { break }
+        }
+        try recordV2PromptCounts(db: db)
+        return inserted
+    }
+
+    /// Rows per page when walking a message table by rowid
+    static let pageSize = 500
+
+    /// One page of the 1.x message table. `more` = the page was full and not stopped by an
+    /// in-progress turn, so the caller should read the next one.
+    private func scanMessagePage(
+        db: SQLiteDB, path: String, inode: Int64, after watermark: Int64, nowMs: Double
+    ) throws -> (inserted: Int, watermark: Int64, more: Bool) {
         let rows = try db.query("""
             SELECT m.rowid, m.session_id, m.time_updated, m.data, s.directory
             FROM message m LEFT JOIN session s ON s.id = m.session_id
             WHERE m.rowid > ?
             ORDER BY m.rowid ASC
-            """, [.int(watermark)]) { row -> (Int64, String?, Double, Data?, String?) in
+            LIMIT ?
+            """, [.int(watermark), .int(Int64(Self.pageSize))]) {
+            row -> (Int64, String?, Double, Data?, String?) in
             (row.int(0), row.text(1), row.real(2),
              row.text(3).flatMap { $0.data(using: .utf8) }, row.text(4))
         }
 
-        let nowMs = now.timeIntervalSince1970 * 1000
         var records: [UsageRecord] = []
         var newWatermark = watermark
+        var stoppedEarly = false
         loop: for (rowid, sessionId, timeUpdated, dataBytes, directory) in rows {
             guard let dataBytes,
                   let object = try? JSONSerialization.jsonObject(with: dataBytes),
@@ -62,7 +98,10 @@ public final class OpencodeUsageScanner {
                 let time = data["time"] as? [String: Any]
                 let completed = time?["completed"] != nil
                 let stale = timeUpdated < nowMs - staleAfterMs
-                if !completed && !stale { break loop }  // In-progress turn: stop here and rescan next time
+                if !completed && !stale {  // In-progress turn: stop here and rescan next time
+                    stoppedEarly = true
+                    break loop
+                }
                 if let record = usageRecord(data: data, sessionId: sessionId, directory: directory) {
                     records.append(record)
                 }
@@ -70,19 +109,12 @@ public final class OpencodeUsageScanner {
             newWatermark = rowid
         }
 
-        var inserted = 0
         try store.scanState.transaction {
             try store.usage.insert(records)
             try store.scanState.setFileState(
                 path: path, .init(inode: inode, offset: newWatermark, extra: nil))
-            inserted = records.count
         }
-        try backfillProviders(db: db, inode: inode)
-        try scanPartsForTools(db: db, inode: inode)
-        try recordPromptCounts(db: db)
-        inserted += try scanSessionMessages(db: db, inode: inode, nowMs: nowMs)
-        try recordV2PromptCounts(db: db)
-        return inserted
+        return (records.count, newWatermark, rows.count == Self.pageSize && !stoppedEarly)
     }
 
     // MARK: - opencode 2.x: session_message table
@@ -95,7 +127,10 @@ public final class OpencodeUsageScanner {
     /// original ids; their usage was already counted via the message table path → exclude row by
     /// row by message id. Not by session: new messages continued in a migrated session exist only
     /// in the 2.x table and must be counted as usual
-    private func scanSessionMessages(db: SQLiteDB, inode: Int64, nowMs: Double) throws -> Int {
+    /// One page (`pageSize` rows) per call; `more` = read the next page
+    private func scanSessionMessages(
+        db: SQLiteDB, inode: Int64, nowMs: Double
+    ) throws -> (inserted: Int, more: Bool) {
         let key = dbPath.path + "#v2"
         let saved = try store.scanState.fileState(path: key)
         let watermark: Int64 = (saved?.inode == inode ? saved?.offset : nil) ?? 0
@@ -106,15 +141,18 @@ public final class OpencodeUsageScanner {
             FROM session_message m LEFT JOIN session_v2 s ON s.id = m.session_id
             WHERE m.rowid > ? AND m.type = 'assistant' \(notCopiedFromV1)
             ORDER BY m.rowid ASC
-            """, [.int(watermark)]) { row -> (Int64, String?, Double, Data?, String?) in
+            LIMIT ?
+            """, [.int(watermark), .int(Int64(Self.pageSize))]) {
+            row -> (Int64, String?, Double, Data?, String?) in
             (row.int(0), row.text(1), row.real(2),
              row.text(3).flatMap { $0.data(using: .utf8) }, row.text(4))
         }) ?? []
-        guard !rows.isEmpty else { return 0 }
+        guard !rows.isEmpty else { return (0, false) }
 
         var records: [UsageRecord] = []
         var toolBumps: [String: Int] = [:]   // "day\u{1}tool" → count
         var newWatermark = watermark
+        var stoppedEarly = false
         loop: for (rowid, sessionId, timeUpdated, dataBytes, directory) in rows {
             guard let dataBytes,
                   let object = try? JSONSerialization.jsonObject(with: dataBytes),
@@ -125,7 +163,10 @@ public final class OpencodeUsageScanner {
             let time = data["time"] as? [String: Any]
             let completed = time?["completed"] != nil
             let stale = timeUpdated < nowMs - staleAfterMs
-            if !completed && !stale { break loop }  // In-progress turn: stop here and rescan next time
+            if !completed && !stale {  // In-progress turn: stop here and rescan next time
+                stoppedEarly = true
+                break loop
+            }
             let model = data["model"] as? [String: Any]
             var flattened = data
             flattened["modelID"] = model?["id"]
@@ -155,7 +196,8 @@ public final class OpencodeUsageScanner {
             try store.scanState.setFileState(
                 path: key, .init(inode: inode, offset: newWatermark, extra: nil))
         }
-        return records.count
+        let full = rows.count == Self.pageSize && !stoppedEarly
+        return (records.count, full && newWatermark > watermark)
     }
 
     /// 2.x per-session user prompt counts. A migrated session's session_message is a superset of

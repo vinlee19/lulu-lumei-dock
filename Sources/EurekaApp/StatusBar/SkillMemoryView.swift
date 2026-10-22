@@ -262,7 +262,8 @@ struct SkillMemoryView: View {
                     allIcon: allSourcesIcon,
                     totalCount: totalCount,
                     sources: sourcesByCount,
-                    count: { count(for: $0) })
+                    count: { count(for: $0) },
+                    singleLine: true)
                 body(for: mode)
                 if let error = service.lastError {
                     Text(error).font(Theme.font.themed(10)).foregroundStyle(.orange)
@@ -291,14 +292,15 @@ struct SkillMemoryView: View {
                     }
                 }
             } else {
-                let groups = groupSkills(ctx.items)
+                let ranked = rankedSkillGroups(groupSkills(ctx.items), stats: ctx.stats)
+                let groups = ranked.groups
                 KnowledgeListContainer {
                     VStack(spacing: 0) {
                         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                             if group.skills.count == 1, let skill = group.skills.first {
                                 SkillListRow(
                                     skill: skill, service: service,
-                                    stat: ctx.stats[skill.id], maxHit: ctx.maxHit,
+                                    stat: ctx.stats[skill.id], maxHit: ranked.maxHit,
                                     onOpen: { openSkillDetail(skill) },
                                     onDelete: { deleting = .skill(skill) })
                             } else {
@@ -306,20 +308,32 @@ struct SkillMemoryView: View {
                                 KnowledgeGroupRow(
                                     name: group.name,
                                     subtitle: group.skills.first?.description,
+                                    monogram: true,
+                                    chips: group.projectNames,
                                     sources: group.skills.map(\.source),
-                                    expanded: expanded
-                                ) {
-                                    if expanded {
-                                        expandedSkillGroups.remove(group.id)
-                                    } else {
-                                        expandedSkillGroups.insert(group.id)
-                                    }
-                                }
+                                    expanded: expanded,
+                                    onToggle: {
+                                        if expanded {
+                                            expandedSkillGroups.remove(group.id)
+                                        } else {
+                                            expandedSkillGroups.insert(group.id)
+                                        }
+                                    },
+                                    trailing: {
+                                        SkillStatsTrailing(
+                                            stat: aggregatedSkillStat(group.skills, stats: ctx.stats),
+                                            maxHit: ranked.maxHit
+                                        ) {
+                                            CopiesEnabledLabel(
+                                                enabled: group.skills.filter(\.enabled).count,
+                                                total: group.skills.count)
+                                        }
+                                    })
                                 if expanded {
                                     ForEach(group.skills) { skill in
                                         SkillListRow(
                                             skill: skill, service: service,
-                                            stat: ctx.stats[skill.id], maxHit: ctx.maxHit,
+                                            stat: ctx.stats[skill.id], maxHit: ranked.maxHit,
                                             onOpen: { openSkillDetail(skill) },
                                             onDelete: { deleting = .skill(skill) })
                                             .padding(.leading, 20)
@@ -327,7 +341,7 @@ struct SkillMemoryView: View {
                                 }
                             }
                             if index < groups.count - 1 {
-                                Divider().opacity(0.4).padding(.leading, 50)
+                                Divider().opacity(0.4).padding(.leading, 54)
                             }
                         }
                     }
@@ -343,7 +357,7 @@ struct SkillMemoryView: View {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
                     ForEach(items) { memory in
                         MemoryCard(
-                            memory: memory, service: service,
+                            memory: memory, service: service, isInstruction: true,
                             onOpen: { openMemory(memory) },
                             onDelete: { deleting = .memory(memory) })
                     }
@@ -355,9 +369,10 @@ struct SkillMemoryView: View {
                             MemoryListRow(
                                 memory: memory, service: service,
                                 onOpen: { openMemory(memory) },
-                                onDelete: { deleting = .memory(memory) })
+                                onDelete: { deleting = .memory(memory) },
+                                isInstruction: true)
                             if index < items.count - 1 {
-                                Divider().opacity(0.4).padding(.leading, 50)
+                                Divider().opacity(0.4).padding(.leading, 54)
                             }
                         }
                     }
@@ -389,7 +404,7 @@ struct SkillMemoryView: View {
                         // click in to see entries
                         ForEach(libraries) { library in
                             MemoryLibraryRow(library: library, onOpen: { open(library) })
-                            Divider().opacity(0.4).padding(.leading, 50)
+                            Divider().opacity(0.4).padding(.leading, 54)
                         }
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, memory in
                             MemoryListRow(
@@ -397,7 +412,7 @@ struct SkillMemoryView: View {
                                 onOpen: { openMemory(memory) },
                                 onDelete: { deleting = .memory(memory) })
                             if index < items.count - 1 {
-                                Divider().opacity(0.4).padding(.leading, 50)
+                                Divider().opacity(0.4).padding(.leading, 54)
                             }
                         }
                     }
@@ -589,6 +604,37 @@ struct SkillMemoryView: View {
             }
         }
         return groups
+    }
+
+    /// Orders folded groups by their combined hits (a skill installed in four CLIs ranks by all
+    /// four, not by whichever copy came first) and returns the bar scale for that basis. Ties keep
+    /// the incoming order.
+    private func rankedSkillGroups(
+        _ groups: [SkillInstallGroup],
+        stats: [SkillEntry.ID: ToolCallsRepo.SkillUsageStat]
+    ) -> (groups: [SkillInstallGroup], maxHit: Int) {
+        let hits = groups.map { aggregatedSkillStat($0.skills, stats: stats)?.count ?? 0 }
+        let order = groups.indices.sorted { hits[$0] != hits[$1] ? hits[$0] > hits[$1] : $0 < $1 }
+        return (order.map { groups[$0] }, max(1, hits.max() ?? 1))
+    }
+
+    /// Combined hit stats of same-name copies. Stats are keyed by (CLI, name), so two copies in
+    /// the same CLI (a global and a project one) share one stat and must be counted once.
+    private func aggregatedSkillStat(
+        _ skills: [SkillEntry],
+        stats: [SkillEntry.ID: ToolCallsRepo.SkillUsageStat]
+    ) -> ToolCallsRepo.SkillUsageStat? {
+        var seen = Set<AgentSource>()
+        let distinct = skills.compactMap { skill -> ToolCallsRepo.SkillUsageStat? in
+            guard let stat = stats[skill.id], seen.insert(skill.source).inserted else { return nil }
+            return stat
+        }
+        guard let first = distinct.first else { return nil }
+        return ToolCallsRepo.SkillUsageStat(
+            source: first.source, name: first.name,
+            count: distinct.reduce(0) { $0 + $1.count },
+            lastTs: distinct.compactMap(\.lastTs).max(),
+            tokens: distinct.reduce(0) { $0 + $1.tokens })
     }
 
     /// Memories: source filter + global first, then modification time descending
@@ -785,7 +831,7 @@ private struct SkillCard: View {
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    SourceLogoTile(source: skill.source, size: 28)
+                    MonogramTile(name: skill.name, source: skill.source, size: 28)
                     Text(skill.name)
                         .font(Theme.font.monoSkillName(13))
                         .foregroundStyle(skill.enabled ? .primary : .secondary)
@@ -826,11 +872,17 @@ private struct SkillInstallGroup: Identifiable {
     var id: String { name.lowercased() }
     var name: String
     var skills: [SkillEntry]
+
+    /// Projects of the project-scoped copies, so folding never hides that one copy is project-level
+    var projectNames: [String] {
+        var seen = Set<String>()
+        return skills.compactMap(\.scope.projectName).filter { seen.insert($0).inserted }
+    }
 }
 
 
-/// Skill list row: logo + two-line name/description + usage bar · hit count + last used + enable
-/// toggle; actions appear on hover
+/// Skill list row: name monogram (install CLI as corner badge) + two-line name/description +
+/// the shared stats columns ending in the enable switch; actions appear on hover
 private struct SkillListRow: View {
     let skill: SkillEntry
     let service: SkillMemoryService
@@ -846,46 +898,69 @@ private struct SkillListRow: View {
             onOpen: onOpen
         ) {
             HStack(spacing: 10) {
-                SourceLogoTile(source: skill.source, size: 28)
+                MonogramTile(name: skill.name, source: skill.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(skill.name)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .foregroundStyle(skill.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
+                            .layoutPriority(1)
                         if let project = skill.scope.projectName { TagChip(project) }
                     }
                     if let desc = skill.description, !desc.isEmpty {
-                        Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.tertiary).lineLimit(1)
+                        Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
-                trailing.fixedSize()
+            }
+        } trailing: {
+            SkillStatsTrailing(stat: stat, maxHit: maxHit) {
+                MiniSwitch(isOn: skill.enabled) { service.setSkillEnabled(skill, !skill.enabled) }
             }
         } menu: {
             skillContextMenu(skill, service: service, onOpen: onOpen, onDelete: onDelete)
         }
     }
+}
 
-    @ViewBuilder private var trailing: some View {
+/// Fixed-width trailing columns shared by single and folded skill rows — usage bar, hit count,
+/// last used, control — so every column lines up down the list whether or not a row has hits.
+/// One color for every bar and count: the bar's length is the only thing that should differ.
+private struct SkillStatsTrailing<Control: View>: View {
+    let stat: ToolCallsRepo.SkillUsageStat?
+    let maxHit: Int
+    @ViewBuilder var control: () -> Control
+
+    private static var barWidth: CGFloat { 60 }
+
+    var body: some View {
+        let hits = stat?.count ?? 0
         HStack(spacing: 10) {
-            if let stat, stat.count > 0 {
-                Capsule().fill(Theme.hairline)
-                    .frame(width: 72, height: 6)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(Theme.brand)
-                            .frame(width: max(4, 72 * CGFloat(stat.count) / CGFloat(maxHit)), height: 6)
-                    }
-                Text(L10n.format("%@ times", zhHans: "%@ 次", String(stat.count)))
-                    .font(Theme.font.themedMono(12, .semibold))
-                    .foregroundStyle(Theme.brandFg)
+            Group {
+                if hits > 0 {
+                    Capsule().fill(Theme.hairline)
+                        .frame(width: Self.barWidth, height: 6)
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(Theme.brand)
+                                .frame(
+                                    width: max(4, Self.barWidth * min(1, CGFloat(hits) / CGFloat(maxHit))),
+                                    height: 6)
+                        }
+                } else {
+                    Color.clear.frame(width: Self.barWidth, height: 6)
+                }
             }
-            if let last = stat?.lastTs {
-                Text(relativeFormatter.localizedString(for: last, relativeTo: Date()))
-                    .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
-            }
-            MiniSwitch(isOn: skill.enabled) { service.setSkillEnabled(skill, !skill.enabled) }
+            Text(hits > 0 ? L10n.format("%@ times", zhHans: "%@ 次", String(hits)) : "")
+                .font(Theme.font.themedMono(12, .semibold))
+                .foregroundStyle(Theme.brandFg)
+                .frame(width: 52, alignment: .trailing)
+            Text(stat?.lastTs.map { relativeFormatter.localizedString(for: $0, relativeTo: Date()) } ?? "")
+                .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(width: 58, alignment: .trailing)
+            control()
+                .frame(width: 52, alignment: .trailing)
         }
     }
 }
@@ -1003,10 +1078,71 @@ private func typeColor(_ type: MemoryType) -> Color {
     }
 }
 
+/// Row title for a memory or instruction file. Instruction files are a dozen `AGENTS.md` /
+/// `CLAUDE.md` that only differ by project, so the project leads; library entries drop the
+/// `project_` / `feedback_` … file-name prefix their type chip already says.
+private func memoryDisplayTitle(_ memory: MemoryEntry, isInstruction: Bool) -> String {
+    if isInstruction {
+        let file = URL(fileURLWithPath: memory.path).lastPathComponent
+        return memory.projectName.map { "\($0) / \(file)" } ?? file
+    }
+    guard memory.libraryKey != nil, memory.memoryType != .other else { return memory.title }
+    let prefix = memory.memoryType.rawValue + "_"
+    guard memory.title.lowercased().hasPrefix(prefix), memory.title.count > prefix.count else {
+        return memory.title
+    }
+    return String(memory.title.dropFirst(prefix.count))
+}
+
+/// What the monogram spells: the project for project-level instruction files (their file names
+/// are all alike), the entry's own name otherwise
+private func memoryTileName(_ memory: MemoryEntry, isInstruction: Bool) -> String {
+    isInstruction ? (memory.projectName ?? memory.title) : memoryDisplayTitle(memory, isInstruction: false)
+}
+
+/// `.claude/worktrees/<name>/…` → `<name>`: worktree copies of a repo's instruction files would
+/// otherwise look identical to the main checkout's
+private func worktreeName(_ path: String) -> String? {
+    guard let range = path.range(of: "/.claude/worktrees/") else { return nil }
+    return path[range.upperBound...].split(separator: "/").first.map(String.init)
+}
+
 // MARK: - Memory library (a project's memory/ directory folded into one row)
 
-/// Memory library list row: project name + entry count + directory + jumpable session count + size
-/// · last updated + chevron
+/// A library's make-up by memory type ("Working style 46 · Project 64 · Reference 7"), which says
+/// more about it than the lossy-encoded directory; falls back to the directory when the library
+/// has no typed entries
+private struct MemoryLibraryTypeSummary: View {
+    let library: MemoryLibrary
+
+    var body: some View {
+        let parts = MemoryType.allCases.compactMap { type -> (MemoryType, Int)? in
+            guard let n = library.typeBreakdown[type], n > 0 else { return nil }
+            return (type, n)
+        }
+        if parts.isEmpty {
+            Text(abbreviateHome(library.directory))
+                .font(Theme.font.monoSkillName(10, weight: .regular))
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+        } else {
+            HStack(spacing: 10) {
+                ForEach(parts, id: \.0) { type, count in
+                    HStack(spacing: 4) {
+                        Circle().fill(typeColor(type)).frame(width: 6, height: 6)
+                        Text("\(type.label) \(count)")
+                            .font(Theme.font.themed(10.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .lineLimit(1)
+        }
+    }
+}
+
+/// Memory library list row: project monogram + project name + entry count + type make-up +
+/// fixed trailing meta (sessions · size · time) + chevron
 private struct MemoryLibraryRow: View {
     let library: MemoryLibrary
     let onOpen: () -> Void
@@ -1014,12 +1150,13 @@ private struct MemoryLibraryRow: View {
     var body: some View {
         KnowledgeRow(onOpen: onOpen) {
             HStack(spacing: 10) {
-                SourceLogoTile(source: library.source, size: 28)
+                MonogramTile(name: library.projectName, source: library.source, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(L10n.format("%@ memory library", zhHans: "%@ 记忆库", library.projectName))
+                        Text(library.projectName)
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .lineLimit(1).truncationMode(.middle)
+                            .layoutPriority(1)
                         // 0 entries = only a MEMORY.md (Qwen creates an empty index first); say so
                         // instead of showing a 0
                         if library.count == 0 {
@@ -1034,24 +1171,20 @@ private struct MemoryLibraryRow: View {
                             TagChip(L10n.format("%@ not indexed", zhHans: "%@ 条未收录", String(library.unindexedEntries.count)), tint: Theme.gold)
                         }
                     }
-                    Text(abbreviateHome(library.directory))
-                        .font(Theme.font.monoSkillName(10, weight: .regular))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1).truncationMode(.middle)
+                    MemoryLibraryTypeSummary(library: library)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    MemoryLibraryMeta(library: library)
-                    Image(systemName: "chevron.right")
-                        .font(Theme.font.themed(9, .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .fixedSize()
             }
             // Same-name libraries from different sources (Claude and Qwen both have
-            // aftership-semantic-layer) are told apart by logo and path
+            // aftership-semantic-layer) are told apart by the corner badge and the path
             .help(abbreviateHome(library.directory))
+        } trailing: {
+            HStack(spacing: 10) {
+                MemoryLibraryMeta(library: library)
+                Image(systemName: "chevron.right")
+                    .font(Theme.font.themed(9, .semibold))
+                    .foregroundStyle(.tertiary)
+            }
         } menu: {
             Button(L10n.text("View memory library", zhHans: "查看记忆库")) { onOpen() }
         }
@@ -1067,7 +1200,7 @@ private struct MemoryLibraryCard: View {
         KnowledgeCard(minHeight: 78, onOpen: onOpen) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    SourceLogoTile(source: library.source, size: 28)
+                    MonogramTile(name: library.projectName, source: library.source, size: 28)
                     Text(library.projectName)
                         .font(Theme.font.monoSkillName(13))
                         .lineLimit(1).truncationMode(.middle)
@@ -1079,10 +1212,8 @@ private struct MemoryLibraryCard: View {
                         TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), tint: Theme.brand)
                     }
                 }
-                Text(abbreviateHome(library.directory))
-                    .font(Theme.font.monoSkillName(10.5, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2).truncationMode(.middle)
+                MemoryLibraryTypeSummary(library: library)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
                     Text(L10n.text("Memory library", zhHans: "记忆库")).font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
@@ -1090,46 +1221,55 @@ private struct MemoryLibraryCard: View {
                     MemoryLibraryMeta(library: library)
                 }
             }
+            .help(abbreviateHome(library.directory))
         } menu: {
             Button(L10n.text("View memory library", zhHans: "查看记忆库")) { onOpen() }
         }
     }
 }
 
-/// Library trailing meta: jumpable session count + size · last updated (shared by row and card,
-/// same basis)
+/// Library trailing meta: jumpable session count + size · last updated in fixed-width columns
+/// (shared by row and card, same basis)
 private struct MemoryLibraryMeta: View {
     let library: MemoryLibrary
 
     var body: some View {
         HStack(spacing: 8) {
-            if library.linkedSessionCount > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(Theme.font.themed(8.5))
-                    Text("\(library.linkedSessionCount)")
-                        .font(Theme.font.themedMono(9.5, .semibold))
+            Group {
+                if library.linkedSessionCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(Theme.font.themed(8.5))
+                        Text("\(library.linkedSessionCount)")
+                            .font(Theme.font.themedMono(9.5, .semibold))
+                    }
+                    .foregroundStyle(Theme.goldFg)
+                    .help(L10n.format(
+                        "%@ source sessions still have transcripts you can open",
+                        zhHans: "%@ 个来源会话的记录还在，可以点开",
+                        String(library.linkedSessionCount)))
+                } else {
+                    Color.clear.frame(height: 1)
                 }
-                .foregroundStyle(Theme.goldFg)
-                .help(L10n.format(
-                    "%@ source sessions still have transcripts you can open",
-                    zhHans: "%@ 个来源会话的记录还在，可以点开",
-                    String(library.linkedSessionCount)))
             }
+            .frame(width: 30, alignment: .trailing)
             Text(formatBytes(library.sizeBytes))
                 .font(Theme.font.themedMono(9.5)).foregroundStyle(.tertiary)
-            Text("·").font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
+                .frame(width: 46, alignment: .trailing)
             Text(library.latestModifiedAt, formatter: relativeFormatter)
                 .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(width: 58, alignment: .trailing)
         }
     }
 }
 
-/// Memory icon card: left color spine (global purple / project gold) + logo + name + scope badge +
-/// path + project chip + size · time
+/// Memory / instruction icon card: monogram + title + scope badge + summary or path + type /
+/// project chips + size · time
 private struct MemoryCard: View {
     let memory: MemoryEntry
     let service: SkillMemoryService
+    var isInstruction = false
     let onOpen: () -> Void
     let onDelete: () -> Void
 
@@ -1145,13 +1285,16 @@ private struct MemoryCard: View {
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    SourceLogoTile(source: memory.source, size: 28)
+                    MonogramTile(
+                        name: memoryTileName(memory, isInstruction: isInstruction),
+                        source: memory.source, size: 28)
                     // The title is the entry's own name (frontmatter name / file name). Using the
                     // scope would give dozens of memories in the same project identical titles down
                     // the column.
-                    Text(memory.title)
+                    Text(memoryDisplayTitle(memory, isInstruction: isInstruction))
                         .font(Theme.font.monoSkillName(13))
                         .lineLimit(1).truncationMode(.middle)
+                        .help(memory.title)
                     Spacer(minLength: 4)
                     ScopeBadge(isGlobal: isGlobal)
                 }
@@ -1163,7 +1306,8 @@ private struct MemoryCard: View {
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
                     memoryTypeChip(memory)
-                    if let project = memory.projectName { TagChip(project) }
+                    if !isInstruction, let project = memory.projectName { TagChip(project) }
+                    if let worktree = worktreeName(memory.path) { TagChip("worktree · \(worktree)", neutral: true) }
                     if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     Spacer(minLength: 0)
                     Text(formatBytes(memory.sizeBytes))
@@ -1179,17 +1323,18 @@ private struct MemoryCard: View {
     }
 }
 
-/// Memory list row: logo + name/scope badge + path + project chip + size · time; actions appear on
-/// hover (no toggle)
+/// Memory / instruction list row: monogram + title with scope / type / project chips + summary or
+/// path + fixed size · time columns; actions appear on hover (no toggle)
 private struct MemoryListRow: View {
     let memory: MemoryEntry
     let service: SkillMemoryService
     let onOpen: () -> Void
     let onDelete: () -> Void
     /// The memory library page passes false: every entry in a library belongs to the same project,
-    /// already named in the title; repeating the "Project" badge + project name on each row would
-    /// waste most of the row width
+    /// already named in the title; repeating the "Project" badge + project name (and the source
+    /// badge) on each row would waste most of the row width
     var showsScope = true
+    var isInstruction = false
 
     private var isGlobal: Bool { memory.projectName == nil }
 
@@ -1198,38 +1343,42 @@ private struct MemoryListRow: View {
             actions: memoryActions(memory, service: service, onDelete: onDelete), onOpen: onOpen
         ) {
             HStack(spacing: 10) {
-                SourceLogoTile(source: memory.source, size: 28)
+                MonogramTile(
+                    name: memoryTileName(memory, isInstruction: isInstruction),
+                    source: showsScope ? memory.source : nil, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(memory.title)
+                        Text(memoryDisplayTitle(memory, isInstruction: isInstruction))
                             .font(Theme.font.monoSkillName(13, weight: .medium))
                             .lineLimit(1).truncationMode(.middle)
+                            .layoutPriority(1)
+                            .help(memory.title)
                         if showsScope { ScopeBadge(isGlobal: isGlobal) }
                         memoryTypeChip(memory)
+                        if showsScope, !isInstruction, let project = memory.projectName { TagChip(project) }
+                        if let worktree = worktreeName(memory.path) { TagChip("worktree · \(worktree)", neutral: true) }
                         if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     }
                     Text(memory.summary ?? abbreviateHome(memory.path))
                         .font(memory.summary == nil
-                            ? Theme.font.monoSkillName(10, weight: .regular) : Theme.font.themed(10))
-                        .foregroundStyle(.tertiary)
+                            ? Theme.font.monoSkillName(10, weight: .regular) : Theme.font.themed(10.5))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
-                trailing.fixedSize()
+            }
+        } trailing: {
+            HStack(spacing: 10) {
+                Text(formatBytes(memory.sizeBytes))
+                    .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
+                    .frame(width: 46, alignment: .trailing)
+                Text(memory.modifiedAt, formatter: relativeFormatter)
+                    .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .frame(width: 58, alignment: .trailing)
             }
         } menu: {
             memoryContextMenu(memory, service: service, onOpen: onOpen, onDelete: onDelete)
-        }
-    }
-
-    @ViewBuilder private var trailing: some View {
-        HStack(spacing: 10) {
-            if showsScope, let project = memory.projectName { TagChip(project) }
-            Text(formatBytes(memory.sizeBytes))
-                .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
-            Text(memory.modifiedAt, formatter: relativeFormatter)
-                .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
         }
     }
 }
@@ -1659,7 +1808,7 @@ private struct MemoryLibraryView: View {
                             onDelete: { onDelete(memory) },
                             showsScope: false)
                         if index < rows.count - 1 {
-                            Divider().opacity(0.4).padding(.leading, 50)
+                            Divider().opacity(0.4).padding(.leading, 54)
                         }
                     }
                 }
