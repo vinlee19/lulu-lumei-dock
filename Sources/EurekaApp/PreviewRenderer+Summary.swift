@@ -85,6 +85,24 @@ extension PreviewRenderer {
         let empty = SessionSummaryService(defaults: defaults)
         empty.seedForPreview(availability: availability, preferred: nil)
         snap("pages-session-summary-empty", page(empty), false, 1270, 980)
+
+        // Popover contents can't be captured offscreen as popovers; render them on their own
+        let pickers = SessionSummaryService(defaults: defaults)
+        pickers.seedForPreview(
+            availability: availability, preferred: .claude,
+            modelOptions: [.codex: [
+                SummaryModelOption(value: "gpt-6.1-sol", label: "GPT-6.1-Sol", isDefault: true),
+                SummaryModelOption(value: "gpt-6-astra", label: "GPT-6-Astra"),
+                SummaryModelOption(value: "gpt-5.6-terra", label: "GPT-5.6-Terra"),
+            ]])
+        let popovers = AnyView(
+            HStack(alignment: .top, spacing: 24) {
+                SummaryExecutorPicker(summaries: pickers) { _ in }
+                SummaryModelList(summaries: pickers, kind: .codex)
+            }
+            .padding(20))
+        snap("pages-session-summary-pickers", popovers, false, 680, 360)
+        snap("pages-session-summary-pickers-dark", popovers, true, 680, 360)
         defaults.removePersistentDomain(forName: "com.vinlee.eureka.summary-preview")
     }
 

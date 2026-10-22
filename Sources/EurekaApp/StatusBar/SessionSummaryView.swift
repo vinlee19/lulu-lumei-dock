@@ -232,8 +232,12 @@ struct SessionSummaryPane: View {
                     summaries.summarize(session, with: run.executor)
                 }
                 .disabled(summaries.availability[run.executor]?.isAvailable != true)
-                MenuButton(title: L10n.text("Use another CLI", zhHans: "换一个 CLI"), icon: "arrow.triangle.branch") {
-                    SummaryExecutorMenuItems(summaries: summaries, session: session)
+                SummaryExecutorPickerButton(
+                    summaries: summaries,
+                    title: L10n.text("Use another CLI", zhHans: "换一个 CLI"),
+                    icon: "arrow.triangle.branch"
+                ) { kind in
+                    summaries.summarize(session, with: kind)
                 }
                 if let draft = run.draft {
                     SecondaryButton(
@@ -388,15 +392,7 @@ struct SessionSummaryPane: View {
                     .lineLimit(2)
             }
             Spacer(minLength: 6)
-            TextField(
-                L10n.text("Model (optional)", zhHans: "模型（可选）"),
-                text: Binding(
-                    get: { summaries.models[kind] ?? "" },
-                    set: { summaries.models[kind] = $0 }))
-                .textFieldStyle(.roundedBorder)
-                .font(Theme.font.themedMono(10.5))
-                .frame(width: 150)
-                .help(L10n.text("Passed to the CLI as --model; leave empty for its default", zhHans: "作为 --model 传给 CLI；留空则用它的默认模型"))
+            SummaryModelField(summaries: summaries, kind: kind)
             SecondaryButton(title: L10n.text("Summarize", zhHans: "总结"), icon: "sparkles") {
                 summaries.summarize(session, with: kind)
             }

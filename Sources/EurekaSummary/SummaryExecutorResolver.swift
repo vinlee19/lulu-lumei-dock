@@ -130,7 +130,7 @@ public final class SummaryExecutorResolver {
     }
 
     /// Short-lived probe with a 15 s cap; stdout and stderr are merged into the output
-    static func runProbe(
+    public static func runProbe(
         executable: String, arguments: [String], environment: [String: String]
     ) -> (status: Int32, output: String)? {
         let process = Process()

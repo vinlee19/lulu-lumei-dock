@@ -570,4 +570,53 @@ func sessionSummaryTests(_ t: TestRunner) {
         try expectEqual(probed, 0)
         try expect(CodexSummaryAdapter(mcpServerNames: ["notion", "infra-mcp"]).isolationProblem == nil)
     }
+
+    t.test("模型候选：Codex 缓存按 priority 取 list 项并标出 config 默认") {
+        let cache = """
+        {"models": [
+          {"slug": "gpt-b", "display_name": "GPT-B", "visibility": "list", "priority": 2},
+          {"slug": "gpt-hidden", "display_name": "Hidden", "visibility": "hide", "priority": 0},
+          {"slug": "gpt-a", "display_name": "gpt-a", "visibility": "list", "priority": 1}
+        ]}
+        """
+        let options = SummaryModelCatalog.codexModels(cacheJSON: Data(cache.utf8), defaultModel: "gpt-b")
+        try expectEqual(options.map(\.value), ["gpt-a", "gpt-b"])
+        try expectEqual(options.map(\.label), [nil, "GPT-B"])
+        try expectEqual(options.map(\.isDefault), [false, true])
+        // A default the cache doesn't list still shows, first
+        let extra = SummaryModelCatalog.codexModels(cacheJSON: Data(cache.utf8), defaultModel: "o9")
+        try expectEqual(extra.first, SummaryModelOption(value: "o9", isDefault: true))
+        // Unreadable cache: only the default
+        try expectEqual(SummaryModelCatalog.codexModels(cacheJSON: Data("x".utf8), defaultModel: nil), [])
+    }
+
+    t.test("模型候选：config.toml 只认顶层 model，不读表里的同名键") {
+        try expectEqual(SummaryModelCatalog.codexDefaultModel(
+            configTOML: "# c\nmodel_reasoning_effort = \"high\"\nmodel = \"gpt-6.1-sol\"\n[profiles.x]\nmodel = \"o3\""),
+            "gpt-6.1-sol")
+        try expectEqual(SummaryModelCatalog.codexDefaultModel(
+            configTOML: "approval = \"never\"\n[profiles.x]\nmodel = \"o3\""), nil)
+    }
+
+    t.test("模型候选：opencode models 只取 provider/model 行并去重") {
+        let output = "Warning: cache refreshed\n\nopencode/claude-sonnet-5\nopenai/gpt-6\nopencode/claude-sonnet-5\n/bad\nbad/\nnot a model\n"
+        try expectEqual(
+            SummaryModelCatalog.opencodeModels(output: output).map(\.value),
+            ["opencode/claude-sonnet-5", "openai/gpt-6"])
+    }
+
+    t.test("模型候选：Claude 用 --help 写明的别名，OpenCode 经探针运行 models") {
+        let claude = ResolvedExecutor(kind: .claude, path: "/bin/claude", version: nil, environment: [:])
+        try expectEqual(
+            SummaryModelCatalog.load(for: claude, codexConfigURL: nil, probe: { _, _, _ in nil }).map(\.value),
+            ["fable", "opus", "sonnet"])
+        var seenArgs: [String] = []
+        let opencode = ResolvedExecutor(kind: .opencode, path: "/bin/opencode", version: nil, environment: [:])
+        let options = SummaryModelCatalog.load(for: opencode, codexConfigURL: nil, probe: { _, args, _ in
+            seenArgs = args
+            return (0, "a/b\n")
+        })
+        try expectEqual(seenArgs, ["models"])
+        try expectEqual(options.map(\.value), ["a/b"])
+    }
 }

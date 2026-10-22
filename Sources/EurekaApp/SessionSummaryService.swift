@@ -58,6 +58,10 @@ final class SessionSummaryService: ObservableObject {
         }
     }
 
+    /// Model suggestions per executor, loaded on demand (`loadModelOptions`)
+    @Published private(set) var modelOptions: [SummaryExecutorKind: [SummaryModelOption]] = [:]
+    @Published private(set) var loadingModels: Set<SummaryExecutorKind> = []
+
     private static let executorKey = "sessionSummaryExecutor"
     private static let modelsKey = "sessionSummaryModels"
     private let defaults: UserDefaults
@@ -138,7 +142,24 @@ final class SessionSummaryService: ObservableObject {
 
     func refreshExecutors() {
         resolver.invalidate()
+        modelOptions = [:]
         queue.async { [weak self] in self?.probeExecutors() }
+    }
+
+    /// Fetches an executor's model suggestions once (until the CLIs are re-checked). Runs off the
+    /// service queue: `opencode models` can take ~11 s and must not hold up a summary start.
+    func loadModelOptions(for kind: SummaryExecutorKind) {
+        guard modelOptions[kind] == nil, !loadingModels.contains(kind),
+              let executor = availability[kind]?.executor else { return }
+        loadingModels.insert(kind)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let options = SummaryModelCatalog.load(
+                for: executor, codexConfigURL: MCPConfigIndexer.globalConfigURL(for: .codex))
+            DispatchQueue.main.async {
+                self?.modelOptions[kind] = options
+                self?.loadingModels.remove(kind)
+            }
+        }
     }
 
     /// Call on `queue`
@@ -313,8 +334,10 @@ final class SessionSummaryService: ObservableObject {
     func seedForPreview(
         availability: [SummaryExecutorAvailability], live: [SummaryLiveState] = [],
         completed: [SummaryRunRecord] = [], lastFinished: [SummaryRunRecord] = [],
-        freshness: [String: Freshness] = [:], preferred: SummaryExecutorKind?
+        freshness: [String: Freshness] = [:], preferred: SummaryExecutorKind?,
+        modelOptions: [SummaryExecutorKind: [SummaryModelOption]] = [:]
     ) {
+        self.modelOptions = modelOptions
         self.availability = Dictionary(uniqueKeysWithValues: availability.map { ($0.kind, $0) })
         self.live = Dictionary(uniqueKeysWithValues: live.map { ($0.sessionKey, $0) })
         self.completed = Dictionary(uniqueKeysWithValues: completed.map { ($0.sessionKey, $0) })
