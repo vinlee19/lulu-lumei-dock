@@ -6,6 +6,16 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Open the session from the island.** Finished and waiting cards carry an
+  "Open in …" / "Switch to …" button with the target app's icon. Claude
+  Desktop and Codex Desktop sessions open directly at that session; terminal
+  and IDE sessions bring the host app to the front. The card only grows a
+  button when there is somewhere to go, and clicking it dismisses the card
+  (a finished card counts as read). The task list's trailing jump badge uses
+  the same targets, so desktop-app sessions open directly from there too.
+
 ## [0.39.0] - 2026-10-22
 
 ### Added

@@ -42,6 +42,20 @@ final class IslandViewModel: ObservableObject {
     /// Island toggle button callback (AppDelegate wires it to AppSettings)
     var onToggleTimeMode: (@MainActor () -> Void)?
 
+    /// Direct session links (found by SessionAppLinkCache, pushed in by AppDelegate): session key →
+    /// link
+    @Published private(set) var appLinks: [String: SessionAppLink] = [:]
+    /// "Open session" button on the current finished / waiting card; nil = no button, and the card
+    /// height follows it
+    @Published private(set) var cardJump: SessionJumpOption?
+    /// Jump target → button. Preview rendering swaps in a fixed result so it doesn't depend on which
+    /// apps are installed
+    var jumpOptionResolver: @MainActor (SessionJumpTarget) -> SessionJumpOption? = {
+        SessionJumper.option(for: $0)
+    }
+    /// Performs the jump (AppDelegate wires it to SessionJumper.perform)
+    var onOpenSession: (@MainActor (SessionJumpTarget) -> Void)?
+
     /// Layout for the current screen (scaled proportionally as the screen changes)
     var layout: IslandGeometry.Layout { IslandGeometry.layout(for: screen) }
     /// UI scale factor for the current screen (fonts / padding / badges; pill height is pinned by
@@ -109,6 +123,13 @@ final class IslandViewModel: ObservableObject {
             expandedSubagentTaskId = nil
         }
         refresh()
+        // The terminal binding may have been probed after the card was queued
+        syncCardJump()
+    }
+
+    func updateAppLinks(_ links: [String: SessionAppLink]) {
+        appLinks = links
+        syncCardJump()
     }
 
     func enqueueFinished(_ task: FinishedTask) {
@@ -258,6 +279,61 @@ final class IslandViewModel: ObservableObject {
         refresh(collapseTaskList: true)
     }
 
+    // MARK: - Open session
+
+    /// A session's "open session" button (the task list's trailing badge uses it too); nil when
+    /// there is nowhere to go
+    func jumpOption(for task: AgentTask) -> SessionJumpOption? {
+        jumpOption(source: task.source, sessionId: task.sessionId, terminal: task.terminal)
+    }
+
+    private func jumpOption(
+        source: AgentSource, sessionId: String, terminal: TerminalBinding?
+    ) -> SessionJumpOption? {
+        let link = appLinks[AgentTask.key(source: source, sessionId: sessionId)]
+        guard let target = SessionJumpTarget.resolve(terminal: terminal, link: link) else {
+            return nil
+        }
+        return jumpOptionResolver(target)
+    }
+
+    /// "Open session" on a card: jumping there counts as seen (a finished card leaves no unread
+    /// mark), then the next card shows
+    func openSessionFromCard() {
+        guard case .card(let card) = display, let jump = cardJump else { return }
+        onOpenSession?(jump.target)
+        if case .finished(let task) = card {
+            unreadFinished.markRead(task)
+        }
+        advanceCard()
+    }
+
+    /// Trailing badge in the task list: jump only, the list stays open
+    func openSession(_ option: SessionJumpOption) {
+        onOpenSession?(option.target)
+    }
+
+    /// The card holds a snapshot taken when it was queued; the terminal binding may have been
+    /// probed later, so prefer the session's current value
+    private func syncCardJump() {
+        let session: (source: AgentSource, sessionId: String, terminal: TerminalBinding?)?
+        switch display {
+        case .card(.finished(let task)): session = (task.source, task.sessionId, task.terminal)
+        case .card(.waiting(let task)): session = (task.source, task.sessionId, task.terminal)
+        default: session = nil
+        }
+        let jump = session.flatMap { session -> SessionJumpOption? in
+            let key = AgentTask.key(source: session.source, sessionId: session.sessionId)
+            let live = activeTasks.first { $0.id == key } ?? idleTasks.first { $0.id == key }
+            return jumpOption(
+                source: session.source, sessionId: session.sessionId,
+                terminal: live?.terminal ?? session.terminal)
+        }
+        guard cardJump != jump else { return }
+        cardJump = jump
+        logCardJump(jump)
+    }
+
     /// Expand/collapse a task's subagent box inline (called by the inner button in the task list)
     func toggleSubagentExpansion(_ taskId: String) {
         expandedSubagentTaskId = (expandedSubagentTaskId == taskId) ? nil : taskId
@@ -323,7 +399,8 @@ final class IslandViewModel: ObservableObject {
                 topInset: questionTopInset)
             return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         case .card:
-            return layout.expandedCardSize
+            let height = IslandGeometry.expandedCardHeight(hasAction: cardJump != nil)
+            return CGSize(width: layout.expandedCardSize.width, height: height * uiScale)
         case .taskList:
             let height = IslandGeometry.taskListHeight(
                 activeCount: activeTasks.count, idleCount: idleTasks.count,
@@ -436,6 +513,7 @@ final class IslandViewModel: ObservableObject {
         // stale expanded state
         if case .taskList = new {} else { expandedSubagentTaskId = nil }
         display = new
+        syncCardJump()
         syncQuestionDraft()
         logIsland(new)
         onDisplayChange?(new)
@@ -499,6 +577,19 @@ final class IslandViewModel: ObservableObject {
         case .taskList: name = "taskList"
         }
         print("[eureka] island=\(name)")
+        fflush(stdout)
+    }
+
+    /// e2e observability: where the card's "open session" button goes
+    private func logCardJump(_ jump: SessionJumpOption?) {
+        let target: String
+        switch jump?.target {
+        case .appLink(.claudeDesktop(let localSessionId))?: target = "claude-desktop(\(localSessionId))"
+        case .appLink(.codexDesktop(let threadId))?: target = "codex-desktop(\(threadId))"
+        case .hostApp(let binding)?: target = "host-app(\(binding.bundleId ?? binding.app ?? "?"))"
+        case nil: target = "none"
+        }
+        print("[eureka] island-jump=\(target) \(jump?.title ?? "")")
         fflush(stdout)
     }
 }

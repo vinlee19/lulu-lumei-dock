@@ -22,6 +22,8 @@ struct IslandRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.38, dampingFraction: 0.8), value: viewModel.display)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isFloating)
+        // When the session link arrives after the card is up, the card grows and the button fades in
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: viewModel.cardJump)
         // Rebuild the whole island on language change so already-projected copy picks up the new
         // language
         .id(viewModel.language)
@@ -92,7 +94,9 @@ struct IslandRootView: View {
                     onDismiss: { viewModel.dismissQuestion() })
             }
         case .card(let card):
-            ExpandedCardView(card: card, queuedCount: viewModel.queuedCount, scale: scale)
+            ExpandedCardView(
+                card: card, queuedCount: viewModel.queuedCount, scale: scale,
+                jump: viewModel.cardJump, onJump: { viewModel.openSessionFromCard() })
         case .taskList:
             TaskListCardView(
                 tasks: viewModel.activeTasks,
@@ -102,7 +106,9 @@ struct IslandRootView: View {
                 centerGap: viewModel.pillCenterGap,
                 expandedTaskId: viewModel.expandedSubagentTaskId,
                 onToggleTimeMode: { viewModel.onToggleTimeMode?() },
-                onToggleSubagents: { viewModel.toggleSubagentExpansion($0) }
+                onToggleSubagents: { viewModel.toggleSubagentExpansion($0) },
+                jumpOption: { viewModel.jumpOption(for: $0) },
+                onJump: { viewModel.openSession($0) }
             )
         }
     }
@@ -780,11 +786,15 @@ struct SourceLabelBadge: View {
 
 
 /// Expanded card: finished / error / interrupted / awaiting confirmation.
-/// φ golden-ratio vertical layout: icon + source label on top, text centered below.
+/// φ golden-ratio vertical layout: icon + source label on top, text centered below; an "open
+/// session" button at the bottom when the session can be reached.
 struct ExpandedCardView: View {
     let card: IslandState.Card
     let queuedCount: Int
     var scale: CGFloat = 1
+    /// "Open session" button; nil = no button (IslandViewModel sizes the card from the same value)
+    var jump: SessionJumpOption? = nil
+    var onJump: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 7 * scale) {
@@ -819,6 +829,13 @@ struct ExpandedCardView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .multilineTextAlignment(.center)
                     .lineLimit(1)
+            }
+
+            if let jump {
+                OpenSessionButton(option: jump, scale: scale, action: onJump)
+                    // The VStack already adds 7; top up to actionGap
+                    .padding(.top, (IslandGeometry.ExpandedCard.actionGap - 7) * scale)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -951,6 +968,60 @@ struct ExpandedCardView: View {
     }
 }
 
+/// "Open session" capsule at the bottom of a card: target app icon + action + outbound arrow.
+///
+/// Follows the button language of the expanded Dynamic Island on iOS: neutral translucent white
+/// fill, no stroke, semibold label, shrinks and dims while pressed. The icon is the target app's
+/// own icon, so where the click goes reads at a glance.
+/// The inner Button consumes the click, so it never triggers the card's tap-to-dismiss.
+struct OpenSessionButton: View {
+    let option: SessionJumpOption
+    var scale: CGFloat = 1
+    let action: () -> Void
+
+    private typealias M = IslandGeometry.ExpandedCard
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6 * scale) {
+                if let appURL = option.appURL {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: appURL.path))
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 18 * scale, height: 18 * scale)
+                }
+                Text(option.title)
+                    .font(.system(size: 12.5 * scale, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 9.5 * scale, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            // The icon sits in the capsule's round end: less leading than trailing padding keeps
+            // it concentric with the arc
+            .padding(.leading, (option.appURL == nil ? 14 : 7) * scale)
+            .padding(.trailing, 13 * scale)
+            .frame(height: M.actionHeight * scale)
+            .background(Capsule().fill(Color.white.opacity(0.14)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(IslandPressButtonStyle())
+        .help(option.title)
+    }
+}
+
+/// Press feedback for island buttons: shrink and dim while pressed, spring back on release (the
+/// same feel as system buttons)
+struct IslandPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
 /// Task identity: title → project name → short session id, so the session is always recognizable
 func taskDisplayName(_ task: AgentTask) -> String {
     task.title ?? task.projectName ?? L10n.format("Session %@", zhHans: "会话 %@", String(task.sessionId.prefix(8)))
@@ -969,6 +1040,9 @@ struct TaskListCardView: View {
     var expandedTaskId: String? = nil
     var onToggleTimeMode: () -> Void = {}
     var onToggleSubagents: (String) -> Void = { _ in }
+    /// Trailing "open session" badge, same targets as the card button; nil = no badge on that row
+    var jumpOption: (AgentTask) -> SessionJumpOption? = { _ in nil }
+    var onJump: (SessionJumpOption) -> Void = { _ in }
 
     /// Row heights/spacing shared with `IslandGeometry.taskListHeight`
     private typealias M = IslandGeometry.TaskList
@@ -1122,10 +1196,10 @@ struct TaskListCardView: View {
                 activityLine(task)
             }
             Spacer(minLength: 6 * scale)
-            // Jump to the session's terminal (only shown when the terminal is known and still
-            // running)
-            if let terminal = task.terminal, TerminalActivator.isRunning(terminal) {
-                terminalJumpButton(terminal)
+            // Open the session: desktop-app sessions open directly, terminal / IDE sessions switch
+            // to the host app (hidden when there is nowhere to go)
+            if let jump = jumpOption(task) {
+                jumpBadge(jump)
             }
             // Subagent count badge (click to expand/collapse; hidden with no subagents)
             if !task.subagents.isEmpty {
@@ -1279,11 +1353,11 @@ struct TaskListCardView: View {
             .fixedSize()
     }
 
-    /// Trailing jump badge: brings the session's terminal app to the front (inner button consumes
-    /// the click, so the island doesn't expand/collapse). Only activates the app, does not select
-    /// the tab -- see TerminalActivator for the trade-off.
-    private func terminalJumpButton(_ terminal: TerminalBinding) -> some View {
-        Button(action: { TerminalActivator.activate(terminal) }) {
+    /// Trailing jump badge (inner button consumes the click, so the island doesn't
+    /// expand/collapse). Terminals are only activated, the tab is not selected -- see
+    /// TerminalActivator for the trade-off.
+    private func jumpBadge(_ option: SessionJumpOption) -> some View {
+        Button(action: { onJump(option) }) {
             Image(systemName: "arrow.up.forward.app")
                 .font(.system(size: 9.5 * scale, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
@@ -1292,7 +1366,7 @@ struct TaskListCardView: View {
                 .background(Capsule().fill(Color.white.opacity(0.1)))
         }
         .buttonStyle(.plain)
-        .help(L10n.format("Switch to %@", zhHans: "切到 %@", String(terminal.displayName)))
+        .help(option.title)
     }
 
     /// Trailing subagent badge: chevron + count, click to expand/collapse (inner button consumes

@@ -15,7 +15,7 @@ enum TerminalActivator {
     /// Whether the binding's terminal app is currently running. Used to grey out the jump button
     /// instead of having it do nothing when clicked.
     static func isRunning(_ binding: TerminalBinding) -> Bool {
-        resolve(binding) != nil
+        runningApplication(binding) != nil
     }
 
     /// Whether the terminal **app** this session runs in is currently frontmost.
@@ -40,14 +40,14 @@ enum TerminalActivator {
     /// the caller shows a hint accordingly.
     @discardableResult
     static func activate(_ binding: TerminalBinding) -> Bool {
-        guard let app = resolve(binding) else { return false }
+        guard let app = runningApplication(binding) else { return false }
         if app.isHidden { app.unhide() }
         return app.activate(options: [])
     }
 
     /// Finds the running terminal app from the binding. Prefers bundle id (exact), falling back to
     /// TERM_PROGRAM name matching.
-    private static func resolve(_ binding: TerminalBinding) -> NSRunningApplication? {
+    static func runningApplication(_ binding: TerminalBinding) -> NSRunningApplication? {
         let running = NSWorkspace.shared.runningApplications
         if let bundleId = binding.bundleId, !bundleId.isEmpty {
             // Bundle id is exact and reliable: use it on a hit, with no further fallback (Warp's

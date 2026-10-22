@@ -137,6 +137,23 @@ public enum IslandGeometry {
         public static let bottomPadding: CGFloat = 10
     }
 
+    /// The "open session" button at the bottom of finished / waiting cards (1.0× baseline, not
+    /// multiplied by scale). `ExpandedCardView` lays out with these values and `expandedCardHeight`
+    /// grows the card by the same set -- nothing else in the card moves, so the icon still sits
+    /// below the notch.
+    public enum ExpandedCard {
+        /// Gap between the button and the subtitle above it
+        public static let actionGap: CGFloat = 12
+        public static let actionHeight: CGFloat = 30
+    }
+
+    /// Finished / waiting card height (1.0× baseline): one button row taller when it carries the
+    /// "open session" button
+    public static func expandedCardHeight(hasAction: Bool) -> CGFloat {
+        let base = Layout.standard.expandedCardSize.height
+        return hasAction ? base + ExpandedCard.actionGap + ExpandedCard.actionHeight : base
+    }
+
     /// Row heights and spacing of the question card (1.0× baseline, not multiplied by scale).
     /// `QuestionCardView` lays out with these values, and `questionCardHeight` computes the height
     /// from the same set.
