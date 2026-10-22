@@ -95,14 +95,24 @@ public enum ClaudeSubagentScanner {
 
     // MARK: - Parsing
 
-    /// tool_use_id → is_error for every tool_result in the parent transcript's tail window
+    /// tool_use_id → is_error for every finished subagent in the parent transcript's tail window.
+    /// A background agent's tool_result only acknowledges the launch (`async_launched`); it
+    /// finishes with the `<task-notification>` naming its tool_use_id (status other than
+    /// "completed" → failed).
     private static func toolResults(in url: URL, tailBytes: Int) -> [String: Bool] {
         guard let data = tail(of: url, bytes: tailBytes) else { return [:] }
         var map: [String: Bool] = [:]
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard
                 let root = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                root["type"] as? String == "user",
+                let type = root["type"] as? String
+            else { continue }
+            for report in ClaudeBackgroundTasks.reports(root, type: type) {
+                if let toolUseId = report.toolUseId { map[toolUseId] = report.status != "completed" }
+            }
+            guard
+                type == "user",
+                ClaudeBackgroundTasks.launchedId(root, type: type) == nil,
                 let message = root["message"] as? [String: Any],
                 let content = message["content"] as? [[String: Any]]
             else { continue }
