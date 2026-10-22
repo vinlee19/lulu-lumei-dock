@@ -13,12 +13,15 @@ public struct SessionSummaryEngine {
         public var model: String?
         public var workingDirectory: String
         public var language: AppLanguage
+        public var template: SummaryTemplateSpec
 
         public init(
             snapshot: SummarySnapshot, header: SummaryTemplate.SessionHeader,
             executor: ResolvedExecutor, adapter: SummaryExecutorAdapter, model: String?,
-            workingDirectory: String, language: AppLanguage
+            workingDirectory: String, language: AppLanguage,
+            template: SummaryTemplateSpec = .collabReview
         ) {
+            self.template = template
             self.snapshot = snapshot
             self.header = header
             self.executor = executor
@@ -121,7 +124,8 @@ public struct SessionSummaryEngine {
         let total = plan.chunks.count
         if total <= 1 {
             let prompt = SummaryTemplate.singlePassPrompt(
-                header: input.header, messages: input.snapshot.messages, language: input.language)
+                header: input.header, messages: input.snapshot.messages, language: input.language,
+                template: input.template)
             let result = invoke(prompt, stage: .summarizing, done: 0, total: 1)
             guard case .success(let text) = result.outcome else {
                 return finish(result.outcome, markdown: result.text)
@@ -134,7 +138,8 @@ public struct SessionSummaryEngine {
         for chunk in plan.chunks {
             let prompt = SummaryTemplate.chunkPrompt(
                 header: input.header, chunk: chunk, chunkCount: total,
-                totalMessages: input.snapshot.messages.count, language: input.language)
+                totalMessages: input.snapshot.messages.count, language: input.language,
+                template: input.template)
             let result = invoke(prompt, stage: .summarizing, done: chunk.index, total: total)
             guard case .success(let text) = result.outcome else {
                 return finish(result.outcome, markdown: Self.draft(notes: notes, partial: result.text, total: total))
@@ -152,7 +157,7 @@ public struct SessionSummaryEngine {
                 let prompt = SummaryTemplate.mergePrompt(
                     header: input.header, notes: group,
                     totalMessages: input.snapshot.messages.count, final: final,
-                    language: input.language)
+                    language: input.language, template: input.template)
                 let result = invoke(prompt, stage: .merging, done: total, total: total)
                 guard case .success(let text) = result.outcome else {
                     return finish(result.outcome, markdown: Self.draft(notes: notes, partial: result.text, total: total))
