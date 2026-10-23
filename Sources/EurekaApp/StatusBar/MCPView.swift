@@ -625,7 +625,7 @@ struct MCPIconTile: View {
                         lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Image(systemName: ToolKind.mcp.icon)
-                    .font(.system(size: size * 0.42, weight: .medium))
+                    .font(Theme.font.themed(size * 0.42, .medium))
                     .foregroundStyle(Theme.brandFg))
     }
 }

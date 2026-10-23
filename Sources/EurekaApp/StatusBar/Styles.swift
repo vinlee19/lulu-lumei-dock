@@ -844,7 +844,7 @@ struct CardActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: size * 0.44, weight: .medium))
+                .font(Theme.font.themed(size * 0.44, .medium))
                 .foregroundStyle(color)
                 .frame(width: size, height: size)
                 .background(

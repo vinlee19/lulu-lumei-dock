@@ -605,6 +605,15 @@ enum Theme {
                 ? ThemeFonts.mono(size, weight: weight)
                 : .system(size: size, weight: weight).monospacedDigit()
         }
+
+        /// Fully monospaced text (paths, commands, raw content): classic / palettes =
+        /// SF Mono via the monospaced design; brutal = Space Mono. Replaces inline
+        /// `.system(size:).monospaced()` so brutal's font reaches code-like text too.
+        static func code(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+            ThemeStyle.current.isHardEdged
+                ? ThemeFonts.mono(size, weight: weight)
+                : .system(size: size, weight: weight, design: .monospaced)
+        }
     }
 
     // MARK: - Private helpers

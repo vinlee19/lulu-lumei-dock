@@ -370,7 +370,7 @@ private struct PlanIconTile: View {
                     .strokeBorder(TileSpec.border(Theme.gold), lineWidth: 0.5))
             .overlay(
                 Image(systemName: kind == .projectDocument ? "folder.fill" : "doc.text")
-                    .font(.system(size: size * 0.42))
+                    .font(Theme.font.themed(size * 0.42))
                     .foregroundStyle(Theme.goldFg))
     }
 }
