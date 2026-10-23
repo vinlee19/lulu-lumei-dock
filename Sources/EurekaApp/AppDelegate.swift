@@ -65,6 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SessionSummaryService.shared.shutdown()
     }
 
+    /// `EUREKA_SANDBOX=1`: a second copy running beside the installed app on a private
+    /// data root (see Scripts/run-sandbox.sh). It skips the two launch-time steps that
+    /// reach outside that root: Sparkle update checks and the installed-hook refresh.
+    static let isSandboxed = ProcessInfo.processInfo.environment["EUREKA_SANDBOX"] == "1"
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The brutal theme's fonts (Space Grotesk/Mono) must be registered before any UI renders
         ThemeFonts.register()
@@ -87,7 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Only enabled in a real .app; runs one background check right after launch, honoring
         // Sparkle's own preferences.
-        updateService.start()
+        // A sandboxed trial copy (Scripts/run-sandbox.sh) never checks for updates:
+        // Sparkle would offer to replace the trial bundle with the latest release.
+        if !Self.isSandboxed { updateService.start() }
 
         // Main window: reuses PopoverRootView's 6 tabs and shares services with the menu bar
         let window = MainWindowController(
@@ -373,7 +380,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         warmUpKnowledgeScans()
-        syncInstalledHooksIfAllowed()
+        // The sandbox runs on its own data root, so the installed hooks (which point at
+        // the real relay path) would read as drifted; never let a trial copy touch them.
+        if !Self.isSandboxed { syncInstalledHooksIfAllowed() }
         startTerminalProbing()
 
         render()
