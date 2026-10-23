@@ -11,6 +11,9 @@ final class PopoverNavigation: ObservableObject {
     /// sidebar's bottom brand area must jump straight to Settings → About, and cross-page jumps are
     /// this class's job anyway.
     @Published var settingsSection: SettingsView.SettingsSection = .general
+    /// The knowledge type the hub last showed. The sidebar has one "Knowledge" entry;
+    /// clicking it returns here instead of always landing on Skills.
+    @Published var lastKnowledgeTab: PopoverRootView.Tab = .skills
 }
 
 struct PopoverRootView: View {
@@ -64,13 +67,13 @@ struct PopoverRootView: View {
             switch self {
             case .history: return L10n.text("History", zhHans: "历史")
             case .sessions: return L10n.text("Sessions", zhHans: "会话")
-            case .skills: return "Skills"
-            case .memory: return "Memory"
+            case .skills: return L10n.text("Skills", zhHans: "技能")
+            case .memory: return L10n.text("Memory", zhHans: "记忆")
             case .instructions: return L10n.text("Instructions", zhHans: "指令")
-            case .plans: return "Plans"
-            case .agents: return "Agents"
+            case .plans: return L10n.text("Plans", zhHans: "计划")
+            case .agents: return L10n.text("Agents", zhHans: "子代理")
             case .mcp: return "MCP"
-            case .prompts: return "Prompts"
+            case .prompts: return L10n.text("Prompts", zhHans: "提示词")
             case .usage: return L10n.text("Usage", zhHans: "用量")
             case .limits: return L10n.text("Limits", zhHans: "限额")
             case .audit: return L10n.text("Audit", zhHans: "审计")
@@ -101,6 +104,14 @@ struct PopoverRootView: View {
         /// squares); the selected item is emphasized by a purple capsule
         var tileColor: Color? { nil }
 
+        static let knowledgeTabs: [Tab] = [.skills, .memory, .instructions, .plans, .agents, .mcp, .prompts]
+        var isKnowledge: Bool { Self.knowledgeTabs.contains(self) }
+        var sidebarAnchor: Tab { isKnowledge ? .skills : self }
+        var sidebarTitle: String {
+            self == .skills ? L10n.text("Knowledge", zhHans: "知识库") : title
+        }
+        var sidebarIcon: String { self == .skills ? "books.vertical.fill" : icon }
+
         /// Sidebar groups (label + items). **Every tab must belong to a group**: `.settings` used
         /// to be in no group, hand-placed at the bottom after a `Spacer`, styled exactly like
         /// grouped items but with no separator, so it read like a stray orphan. It now belongs to
@@ -109,8 +120,8 @@ struct PopoverRootView: View {
         static var sidebarGroups: [(label: String, tabs: [Tab])] {
             [
                 (L10n.text("Activity", zhHans: "活动"), [.history, .sessions]),
-                (L10n.text("Knowledge", zhHans: "知识库"),
-                 [.skills, .memory, .instructions, .plans, .agents, .mcp, .prompts]),
+                // One entry for the hub (anchor `.skills`); the type switcher lives on the page.
+                (L10n.text("Knowledge", zhHans: "知识库"), [.skills]),
                 (L10n.text("Security", zhHans: "安全"), [.audit]),
                 (L10n.text("Usage", zhHans: "用量"), [.usage, .limits]),
                 (L10n.text("System", zhHans: "系统"), [.settings]),
@@ -157,6 +168,9 @@ struct PopoverRootView: View {
         .id("\(settings.themeStyle)|\(settings.appLanguage)")
         // Usage "by session" ranking → Sessions tab with the session selected (select is
         // idempotent, assuming a single instance; AppDelegate creates only one PopoverRootView)
+        .onChange(of: navigation.tab) { _, tab in
+            if tab.isKnowledge { navigation.lastKnowledgeTab = tab }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealSession)) { note in
             guard let sessionId = note.object as? String else { return }
             withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -239,8 +253,9 @@ struct PopoverRootView: View {
                 // to a single reveal lifecycle
                 skillMemoryService.focusPath = nil
                 plansService.focusPath = nil
+                let target = tab == .skills ? navigation.lastKnowledgeTab : tab
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                    navigation.tab = tab
+                    navigation.tab = target
                 }
             },
             onOpenAbout: {
@@ -273,28 +288,13 @@ struct PopoverRootView: View {
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings,
                          skillMemory: skillMemoryService, plans: plansService)
-        case .skills:
-            SkillMemoryView(
-                service: skillMemoryService, mode: .skills, usageService: usageService,
-                sessionBrowser: sessionBrowser)
-        case .memory:
-            SkillMemoryView(
-                service: skillMemoryService, mode: .memory, usageService: usageService,
-                sessionBrowser: sessionBrowser)
-        case .instructions:
-            SkillMemoryView(
-                service: skillMemoryService, mode: .instructions, usageService: usageService,
-                sessionBrowser: sessionBrowser)
-        case .plans:
-            PlansView(service: plansService)
-        case .prompts:
-            PromptsView(
-                service: promptsService, sessionBrowser: sessionBrowser,
-                skillMemory: skillMemoryService)
-        case .agents:
-            AgentsView(service: agentConfigService, usageService: usageService)
-        case .mcp:
-            MCPView(service: mcpService, usageService: usageService)
+        case .skills, .memory, .instructions, .plans, .agents, .mcp, .prompts:
+            KnowledgeHubView(
+                navigation: navigation,
+                skillMemoryService: skillMemoryService, usageService: usageService,
+                sessionBrowser: sessionBrowser, plansService: plansService,
+                promptsService: promptsService, agentConfigService: agentConfigService,
+                mcpService: mcpService)
         case .usage:
             UsageDashboardView(
                 usageService: usageService, sessionBrowser: sessionBrowser, settings: settings)
