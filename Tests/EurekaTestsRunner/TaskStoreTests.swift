@@ -20,6 +20,13 @@ private func finishedTask(in effects: [TaskStoreEffect]) throws -> FinishedTask 
     throw ExpectationError(description: "effects 中没有 taskFinished: \(effects)")
 }
 
+private func firstActive(_ store: TaskStore) throws -> AgentTask {
+    guard let task = store.sortedActiveTasks.first else {
+        throw ExpectationError(description: "没有运行中的任务")
+    }
+    return task
+}
+
 func taskStoreTests(_ t: TestRunner) {
     t.suite("TaskStore")
 
@@ -500,5 +507,60 @@ func taskStoreTests(_ t: TestRunner) {
         store.apply(event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 160))
         try expect(
             store.sortedIdleTasks.first?.subagents.isEmpty ?? false, "收尾后应清空子 agent")
+    }
+
+    t.test("等待后台任务：不出完成卡、保持运行；回报轮里清零；全部回报后的收尾才出一张卡") {
+        let store = TaskStore()
+        store.apply(event(.taskStarted(title: "复核归因"), at: 100))
+        store.apply(event(.toolPending(tool: "Agent", detail: "复核 A 组"), at: 110))
+
+        // The main agent ends its turn while two background agents run
+        try expectEqual(
+            store.apply(event(.awaitingBackgroundTasks(count: 2), at: 150)), [.activeTasksChanged])
+        var task = try firstActive(store)
+        try expectEqual(task.phase, .running)
+        try expectEqual(task.awaitingBackgroundTasks, 2)
+        try expectEqual(task.currentActivity, nil, "收尾后不该还显示上一个工具")
+        try expectEqual(task.currentToolDetail, nil)
+        try expectEqual(task.startedAt, ts(100))
+        // Repeats (hook Stop and the transcript watcher both report it) change nothing
+        try expectEqual(store.apply(event(.awaitingBackgroundTasks(count: 2), at: 151)), [])
+
+        // The first report starts a turn: the main agent works again
+        store.apply(event(.taskStarted(title: nil), at: 900))
+        task = try firstActive(store)
+        try expectEqual(task.awaitingBackgroundTasks, 0)
+        try expectEqual(task.title, "复核归因", "回报轮没有标题，沿用原任务名")
+        try expectEqual(task.startedAt, ts(100), "回报轮不重新计时")
+        try expectEqual(
+            store.apply(event(.awaitingBackgroundTasks(count: 1), at: 950)), [.activeTasksChanged])
+        store.apply(event(.activity(tool: "Read"), at: 960))
+        try expectEqual(try firstActive(store).awaitingBackgroundTasks, 0,
+                        "主 agent 又动起来就清零")
+        store.apply(event(.awaitingBackgroundTasks(count: 1), at: 970))
+
+        // The last report's turn ends with nothing outstanding: exactly one card for the whole job
+        let effects = store.apply(
+            event(.taskFinished(outcome: .success, title: nil, detail: nil), at: 1200))
+        let finished = try finishedTask(in: effects)
+        try expectEqual(finished.startedAt, ts(100))
+        try expectEqual(finished.title, "复核归因")
+        try expectEqual(store.sortedIdleTasks.first?.awaitingBackgroundTasks, 0)
+    }
+
+    t.test("等待后台任务：未知会话登记为运行；空闲会话转运行；等待中被关会话判中断") {
+        let store = TaskStore()
+        try expectEqual(
+            store.apply(event(.awaitingBackgroundTasks(count: 3), session: "late", at: 100)),
+            [.activeTasksChanged])
+        try expectEqual(store.sortedActiveTasks.first?.awaitingBackgroundTasks, 3)
+
+        store.apply(event(.sessionStarted, session: "quiet", at: 100))
+        store.apply(event(.awaitingBackgroundTasks(count: 1), session: "quiet", at: 120))
+        try expectEqual(store.sortedActiveTasks.count, 2)
+
+        let effects = store.apply(
+            event(.sessionEnded(reason: "进程已退出"), session: "late", at: 200))
+        try expectEqual(try finishedTask(in: effects).outcome, .interrupted)
     }
 }

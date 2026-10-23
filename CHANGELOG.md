@@ -6,6 +6,18 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **No finished card while a Claude session waits on background agents.** When
+  the main agent launched background agents or workflows and ended its turn,
+  Claude's `Stop` looked like a finished task and the island showed a finished
+  card, then another one after every agent reported back. The session now
+  stays running with "Waiting for N background tasks", and one finished card
+  appears when the turn after the last report ends. Background agents shown
+  under a session no longer count as completed the moment they launch.
+  Background shell commands are not waited on: they include long-running
+  servers that never report back.
+
 ## [0.39.0] - 2026-10-22
 
 ### Added
