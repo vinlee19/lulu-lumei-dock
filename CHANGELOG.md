@@ -6,19 +6,56 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-23
+
 ### Added
 
-- **Open the session from the island.** Finished and waiting cards carry an
+- **Open the session from the island**
+  ([#24](https://github.com/vinlee19/lulu-lumei-dock/pull/24), @MT2-0901). Finished and waiting cards carry an
   "Open in …" / "Switch to …" button with the target app's icon. Claude
   Desktop and Codex Desktop sessions open directly at that session; terminal
   and IDE sessions bring the host app to the front. The card only grows a
   button when there is somewhere to go, and clicking it dismisses the card
   (a finished card counts as read). The task list's trailing jump badge uses
   the same targets, so desktop-app sessions open directly from there too.
+- **Session reviews instead of summaries** (@vinlee19). The AI Summary tab
+  now writes a review from your side of the collaboration with the default
+  "My collaboration review" template: a short TL;DR, what you learned, the
+  design calls you made and why, every choice you made on the AI's proposals
+  (accepted / rejected / changed, and the reason — or plainly "not stated",
+  never an invented one), how the approach evolved, and open risks. The page
+  lays these out as cards and a timeline; how the summary was made moved
+  behind an info button.
+- **Keep what you learned, one item at a time.** A review ends with "worth
+  keeping" candidates (project knowledge, or rules for how the AI should work
+  with you). Edit, save, copy or dismiss each one in place; saved items go into
+  the project's Claude memory library (in Claude's own format, linked back to
+  the session, indexed in MEMORY.md), so Claude reads them the next time you
+  work in that project. Nothing is written without a click.
+- **Selectable, editable summary templates.** Built-ins: My collaboration
+  review, Handoff (the previous layout) and Brief. Copy one to make your own:
+  rename it, reorder or rewrite its sections and add focus instructions. The
+  safety rules (the conversation is data, citations must exist, nothing is
+  made up) always apply. Each saved summary records which template made it.
+- **Model suggestions for summary executors.** The model field lists the
+  names each CLI offers — Claude Code's aliases, Codex's own model cache with
+  its configured default marked, and `opencode models` — and still takes any
+  name.
+
+### Changed
+
+- The summary executor picker, the first-use button and "Use another CLI" open
+  a themed panel instead of a system menu, showing each CLI's version and why
+  an unavailable one can't run; executor versions are shown as small text.
+- The summary prompt carries the session's prompts, tokens, cost and duration,
+  so statements about effort rest on numbers.
+- The Sessions tab opens on the most recent session instead of an empty
+  detail pane; with no sessions at all the list takes the whole width.
 
 ### Fixed
 
-- **No finished card while a Claude session waits on background agents.** When
+- **No finished card while a Claude session waits on background agents**
+  ([#23](https://github.com/vinlee19/lulu-lumei-dock/pull/23), @MT2-0901). When
   the main agent launched background agents or workflows and ended its turn,
   Claude's `Stop` looked like a finished task and the island showed a finished
   card, then another one after every agent reported back. The session now
@@ -2146,7 +2183,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.40.0
 [0.39.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.39.0
 [0.38.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.38.0
 [0.37.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.37.0
