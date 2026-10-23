@@ -6,6 +6,28 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Open the session from the island.** Finished and waiting cards carry an
+  "Open in …" / "Switch to …" button with the target app's icon. Claude
+  Desktop and Codex Desktop sessions open directly at that session; terminal
+  and IDE sessions bring the host app to the front. The card only grows a
+  button when there is somewhere to go, and clicking it dismisses the card
+  (a finished card counts as read). The task list's trailing jump badge uses
+  the same targets, so desktop-app sessions open directly from there too.
+
+### Fixed
+
+- **No finished card while a Claude session waits on background agents.** When
+  the main agent launched background agents or workflows and ended its turn,
+  Claude's `Stop` looked like a finished task and the island showed a finished
+  card, then another one after every agent reported back. The session now
+  stays running with "Waiting for N background tasks", and one finished card
+  appears when the turn after the last report ends. Background agents shown
+  under a session no longer count as completed the moment they launch.
+  Background shell commands are not waited on: they include long-running
+  servers that never report back.
+
 ## [0.39.0] - 2026-10-22
 
 ### Added

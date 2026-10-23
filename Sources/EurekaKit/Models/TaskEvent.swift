@@ -57,6 +57,11 @@ public struct TaskEvent: Equatable, Sendable {
         /// Subagent list snapshot update (from the Claude transcript watcher scanning the
         /// subagents/ dir)
         case subagentsUpdated([SubagentInfo])
+        /// The turn ended, but `count` background tasks it launched are still running and each
+        /// one's report starts another turn by itself, so the work is not finished: the task stays
+        /// running and no finished card is shown. A Claude `Stop` / `end_turn` becomes this when
+        /// the transcript still has unreported background agents (see `ClaudeBackgroundTasks`).
+        case awaitingBackgroundTasks(count: Int)
         case sessionStarted
         case sessionEnded(reason: String?)
     }

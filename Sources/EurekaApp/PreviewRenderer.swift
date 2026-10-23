@@ -58,10 +58,40 @@ enum PreviewRenderer {
             startedAt: now.addingTimeInterval(-95), finishedAt: now, outcome: .error,
             detail: L10n.text("API Error: 403 Request not allowed", zhHans: "API 错误：403 请求不被允许"))
 
+        // "Open session" button: the preview does not require the target app to be running; icon
+        // and name come straight from the .app installed on this Mac (text only when it isn't)
+        let previewJump: @MainActor (SessionJumpTarget) -> SessionJumpOption? = { target in
+            switch target {
+            case .appLink(let link):
+                return SessionJumpOption(
+                    target: target, appName: "Claude",
+                    appURL: NSWorkspace.shared.urlForApplication(withBundleIdentifier: link.bundleId))
+            case .hostApp(let binding):
+                let appURL = NSWorkspace.shared.urlForApplication(
+                    withBundleIdentifier: binding.bundleId ?? "")
+                return SessionJumpOption(
+                    target: target,
+                    appName: appURL.map { FileManager.default.displayName(atPath: $0.path) }
+                        ?? binding.terminalName,
+                    appURL: appURL)
+            }
+        }
+
         func snapshot(_ name: String, screen: IslandGeometry.ScreenInfo, configure: (IslandViewModel) -> Void) {
             let vm = IslandViewModel()
+            vm.jumpOptionResolver = previewJump
             vm.updateScreen(screen)
             configure(vm)
+            if case .card(let card) = vm.display, vm.questionDraft == nil {
+                // Content (with its padding) against the card height: a taller card must still keep
+                // the icon below the notch
+                let view = ExpandedCardView(
+                    card: card, queuedCount: vm.queuedCount, scale: vm.uiScale, jump: vm.cardJump)
+                let measured = NSHostingView(rootView: view.frame(width: vm.contentSize.width))
+                    .fittingSize.height
+                let iconTop = (vm.contentSize.height - measured) / 2 + 12 * vm.uiScale
+                print("expanded card \(name): content \(measured) / card \(vm.contentSize.height), icon top \(iconTop), notch \(screen.safeAreaTopInset)")
+            }
             if vm.display == .taskList {
                 // Layout height must match IslandGeometry.taskListHeight: too small clips content,
                 // too large leaves empty space at the card bottom
@@ -110,6 +140,16 @@ enum PreviewRenderer {
         }
         snapshot("4-card-finished", screen: notched) {
             $0.updateActiveTasks([running2])
+            $0.enqueueFinished(finished)
+        }
+        // "Open session": a Claude Desktop session opens directly (notched / no-notch screen)
+        let finishedKey = AgentTask.key(source: finished.source, sessionId: finished.sessionId)
+        snapshot("4b-card-finished-open", screen: notched) {
+            $0.updateAppLinks([finishedKey: .claudeDesktop(localSessionId: "local_preview")])
+            $0.enqueueFinished(finished)
+        }
+        snapshot("4c-card-finished-open-plain", screen: plain) {
+            $0.updateAppLinks([finishedKey: .claudeDesktop(localSessionId: "local_preview")])
             $0.enqueueFinished(finished)
         }
         snapshot("5-card-error", screen: notched) {
@@ -192,6 +232,15 @@ enum PreviewRenderer {
         snapshot("6-card-waiting", screen: notched) {
             $0.updateActiveTasks([waitingTask])
             $0.enqueueWaiting(waitingTask)
+        }
+        // "Open session": a session in a terminal only switches to the terminal app (the system
+        // Terminal, present on every Mac)
+        var waitingInTerminal = waitingTask
+        waitingInTerminal.terminal = TerminalBinding(
+            app: "Apple_Terminal", bundleId: "com.apple.Terminal", tty: "/dev/ttys004")
+        snapshot("6b-card-waiting-open", screen: notched) {
+            $0.updateActiveTasks([waitingInTerminal])
+            $0.enqueueWaiting(waitingInTerminal)
         }
         snapshot("7-card-queued", screen: notched) {
             $0.enqueueFinished(finished)

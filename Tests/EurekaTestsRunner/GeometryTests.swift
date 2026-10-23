@@ -182,6 +182,19 @@ func geometryTests(_ t: TestRunner) {
             "进行中最多 4 行，多出的算一行「…等 N 个」")
     }
 
+    t.test("完成卡 / 等待卡：带「打开会话」按钮时加高一个按钮区，大屏放大后仍放得进 panel") {
+        typealias M = IslandGeometry.ExpandedCard
+        let base = IslandGeometry.Layout.standard.expandedCardSize.height
+        try expectEqual(IslandGeometry.expandedCardHeight(hasAction: false), base, "不带按钮保持原尺寸")
+        try expectEqual(
+            IslandGeometry.expandedCardHeight(hasAction: true), base + M.actionGap + M.actionHeight)
+        // Card and panel scale together, so comparing the 1.0x baseline is enough; the top still
+        // has to leave room for the notch / menu bar
+        let tallest = IslandGeometry.expandedCardHeight(hasAction: true)
+        try expect(tallest + 44 <= IslandGeometry.Layout.standard.panelSize.height,
+                   "带按钮的卡 \(tallest) 放不进 panel")
+    }
+
     t.test("提问卡：选项封顶 4 行，问题区按 1–2 行定高，让开刘海后最高的卡仍放得进 panel") {
         typealias M = IslandGeometry.QuestionCard
         let four = IslandGeometry.questionCardHeight(optionCount: 4, questionLines: 2, topInset: 0)

@@ -1,0 +1,2 @@
+{"timestamp":"2026-09-07T03:02:31.000Z","type":"session_meta","payload":{"id":"0199aaaa-0000-7000-8000-000000000002","timestamp":"2026-09-07T03:02:31.000Z","cwd":"/Users/me/work/pipeline","originator":"codex_cli_rs","cli_version":"0.40.0","source":"cli"}}
+{"timestamp":"2026-09-07T03:02:33.000Z","type":"event_msg","payload":{"type":"user_message","message":"迁移旧数据管道"}}
