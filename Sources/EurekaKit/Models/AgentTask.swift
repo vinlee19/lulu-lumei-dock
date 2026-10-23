@@ -38,6 +38,9 @@ public struct AgentTask: Equatable, Sendable, Identifiable {
     public var isCompacting = false
     /// Claude subagents spawned this turn (empty if none; always empty for Codex)
     public var subagents: [SubagentInfo] = []
+    /// The main agent ended its turn and is waiting on this many background tasks (0 = it is not
+    /// waiting on any). Cleared as soon as the main agent works again or the task finishes.
+    public var awaitingBackgroundTasks = 0
 
     public var id: String { Self.key(source: source, sessionId: sessionId) }
 

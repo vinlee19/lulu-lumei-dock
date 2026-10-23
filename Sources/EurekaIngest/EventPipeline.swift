@@ -231,6 +231,45 @@ public final class EventPipeline {
         }
     }
 
+    /// A Claude "success" finish, checked against the transcript tail (public for tests):
+    /// - an API error line upgrades it to an error finish with the error text
+    /// - background agents / workflows that have not reported back turn it into
+    ///   `awaitingBackgroundTasks`: Stop fires the same way when the main agent ends its turn to
+    ///   wait for them, and each report starts another turn, so the work is not finished yet. They
+    ///   are counted over the background window directly: Stop means the turn has ended even if
+    ///   its end_turn line is not on disk yet.
+    /// - the session name (custom-title) upgrades the title; a deferred finish carries it as a
+    ///   separate `titleUpdate`
+    public static func enrichClaudeFinish(_ event: TaskEvent) -> [TaskEvent] {
+        guard case .taskFinished(outcome: .success, let title, let detail) = event.kind,
+              let transcriptPath = event.transcriptPath
+        else { return [event] }
+        let findings = ClaudeErrorSniffer.sniff(transcriptPath: transcriptPath)
+        let newTitle = findings.sessionTitle ?? title
+        var enriched = event
+        if findings.isError {
+            enriched.kind = .taskFinished(
+                outcome: .error,
+                title: newTitle,
+                detail: findings.errorDetail ?? detail
+            )
+            return [enriched]
+        }
+        let awaiting = ClaudeBackgroundTasks.scan(
+            fileURL: URL(fileURLWithPath: transcriptPath)).pendingCount
+        if awaiting > 0 {
+            enriched.kind = .awaitingBackgroundTasks(count: awaiting)
+            guard let newTitle, newTitle != title else { return [enriched] }
+            var titled = event
+            titled.kind = .titleUpdate(title: newTitle)
+            return [titled, enriched]
+        }
+        if newTitle != title {
+            enriched.kind = .taskFinished(outcome: .success, title: newTitle, detail: detail)
+        }
+        return [enriched]
+    }
+
     private func enrich(_ event: TaskEvent) -> [TaskEvent] {
         var events = [event]
 
@@ -274,24 +313,9 @@ public final class EventPipeline {
             }
         }
 
-        // Claude "success" finish → sniff the tail: API errors upgrade to error; the session title
-        // (custom-title) upgrades the title
-        if event.source == .claude,
-           case .taskFinished(outcome: .success, let title, let detail) = event.kind,
-           let transcriptPath = event.transcriptPath {
-            let findings = ClaudeErrorSniffer.sniff(transcriptPath: transcriptPath)
-            var enriched = event
-            let newTitle = findings.sessionTitle ?? title
-            if findings.isError {
-                enriched.kind = .taskFinished(
-                    outcome: .error,
-                    title: newTitle,
-                    detail: findings.errorDetail ?? detail
-                )
-            } else if newTitle != title {
-                enriched.kind = .taskFinished(outcome: .success, title: newTitle, detail: detail)
-            }
-            events[0] = enriched
+        // Claude "success" finish → sniff the tail (see `enrichClaudeFinish`)
+        if event.source == .claude, case .taskFinished(outcome: .success, _, _) = event.kind {
+            events = Self.enrichClaudeFinish(event)
         }
 
         // Claude heartbeat (throttled to 20s) / awaiting confirmation (immediate, when the user

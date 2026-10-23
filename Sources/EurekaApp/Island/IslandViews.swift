@@ -1263,8 +1263,8 @@ struct TaskListCardView: View {
         .frame(width: 15 * scale)
     }
 
-    /// Second line under the title: compacting context / current tool (takes no line if neither,
-    /// title vertically centered)
+    /// Second line under the title: compacting context / waiting on background tasks / current
+    /// tool (takes no line if none, title vertically centered)
     @ViewBuilder
     private func activityLine(_ task: AgentTask) -> some View {
         if task.isCompacting {
@@ -1272,6 +1272,16 @@ struct TaskListCardView: View {
             Text(L10n.text("Compacting context", zhHans: "压缩上下文"))
                 .font(.system(size: 10 * scale))
                 .foregroundStyle(Theme.gold.opacity(0.85))
+                .lineLimit(1)
+        } else if task.awaitingBackgroundTasks > 0 {
+            // The turn ended but the session keeps going once the background tasks report back
+            Text(task.awaitingBackgroundTasks == 1
+                ? L10n.text("Waiting for 1 background task", zhHans: "等待 1 个后台任务")
+                : L10n.format(
+                    "Waiting for %d background tasks", zhHans: "等待 %d 个后台任务",
+                    task.awaitingBackgroundTasks))
+                .font(.system(size: 10 * scale))
+                .foregroundStyle(.white.opacity(0.45))
                 .lineLimit(1)
         } else if let activity = task.currentActivity {
             // Show the target too when there is one: "Edit main.swift" is far more useful than just

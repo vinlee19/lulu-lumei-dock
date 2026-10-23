@@ -547,7 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isStale {
             switch event.kind {
             case .activity, .waiting, .sessionStarted, .contextUpdate, .titleUpdate,
-                 .subagentsUpdated, .toolPending, .compacting:
+                 .subagentsUpdated, .toolPending, .compacting, .awaitingBackgroundTasks:
                 // toolPending / compacting are also "liveness signals": a "about to run Bash" from
                 // a few minutes ago doesn't mean it is still running, and accepting it would create
                 // a ghost session

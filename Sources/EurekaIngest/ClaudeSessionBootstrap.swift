@@ -72,6 +72,22 @@ public enum ClaudeSessionBootstrap {
         /// has it, but a **resumed** process writes one at startup too, so on its own it cannot
         /// prove death: `ClaudeResumeProbe` must also find no live process carrying this id.
         public var exitMarkerLast: Bool = false
+        /// Background agents / workflows that have not reported back (see `ClaudeBackgroundTasks`;
+        /// counted over its larger window once the turn has ended). Each report starts another
+        /// turn by itself, so a turn that ends while this is non-zero has not finished the work.
+        public var pendingBackgroundTasks: Int = 0
+        /// With `exitMarkerLast`: background tasks still running when the process exited (they die
+        /// with it, so the session ends interrupted rather than finished)
+        public var abandonedBackgroundTasks: Int = 0
+        /// Time of the last prompt the user typed, skipping `<task-notification>` prompts: where a
+        /// chain of turns driven by background reports began
+        public var userPromptAt: Date?
+
+        /// The turn has ended, but background tasks it launched will start another one: the
+        /// session is still working. An interrupted turn finishes as usual.
+        public var awaitingBackgroundTasks: Int {
+            running || turnEndOutcome == .interrupted ? 0 : pendingBackgroundTasks
+        }
 
         /// Session name: the custom one (user / Desktop) wins over the auto-generated one (see
         /// `ClaudeSessionTitle`)
@@ -104,13 +120,18 @@ public enum ClaudeSessionBootstrap {
         }
 
         var events: [TaskEvent] = []
-        if snapshot.running {
+        let awaiting = snapshot.awaitingBackgroundTasks
+        if snapshot.running || awaiting > 0 {
             let title = snapshot.promptTitle
             // Start time: prompt time → earliest time in the tail window (at least never
             // underestimates the duration) → mtime
             events.append(event(
                 .taskStarted(title: title),
                 at: snapshot.promptAt ?? snapshot.earliestAt ?? mtime))
+            if awaiting > 0 {
+                events.append(event(
+                    .awaitingBackgroundTasks(count: awaiting), at: snapshot.turnEndAt ?? mtime))
+            }
         } else {
             events.append(event(.sessionStarted, at: mtime))
         }
@@ -154,6 +175,10 @@ public enum ClaudeSessionBootstrap {
         var earliestAt: Date?
         /// Type of the last parsable line in the tail window (exit-marker check)
         var lastType: String?
+        var backgroundTasks = ClaudeBackgroundTasks()
+        var lastUserPromptAt: Date?
+        /// Last background report queued for delivery (`queue-operation` enqueue)
+        var lastQueuedReportAt: Date?
 
         for line in data.split(separator: UInt8(ascii: "\n")) {
             guard
@@ -168,8 +193,14 @@ public enum ClaudeSessionBootstrap {
                 isoFormatter.date(from: $0) ?? ISO8601DateFormatter().date(from: $0)
             }
             if let timestamp, earliestAt == nil { earliestAt = timestamp }
+            backgroundTasks.observe(root, type: type)
 
             switch type {
+            case "queue-operation":
+                if !ClaudeBackgroundTasks.reports(root, type: type).isEmpty {
+                    lastQueuedReportAt = timestamp ?? lastQueuedReportAt
+                }
+
             case "custom-title", "ai-title":
                 // Latest line of each kind wins (after /rename the new name comes later)
                 if let (isCustom, title) = ClaudeSessionTitle.line(root) {
@@ -184,6 +215,7 @@ public enum ClaudeSessionBootstrap {
                 if let content = message["content"] as? String {
                     lastPromptAt = timestamp
                     lastPromptText = content
+                    if !content.hasPrefix("<task-notification>") { lastUserPromptAt = timestamp }
                 } else if isInterruptMarker(message["content"]) {
                     // User pressed Esc to interrupt: no end_turn / Stop will follow
                     lastTurnEndAt = timestamp ?? lastTurnEndAt
@@ -237,7 +269,7 @@ public enum ClaudeSessionBootstrap {
         if customTitle == nil {
             customTitle = ClaudeSessionTitle.sidecar(transcriptURL: fileURL)
         }
-        let running: Bool
+        var running: Bool
         if let promptAt = lastPromptAt {
             // Prompt visible with no end marker after it → in flight
             running = lastTurnEndAt.map { $0 < promptAt } ?? true
@@ -249,6 +281,16 @@ public enum ClaudeSessionBootstrap {
             // window and it is full of execution traces → in flight
             running = hasMainChainActivity
         }
+        // A background report queued after the turn ended starts the next turn: Claude Code writes
+        // the enqueue ~30ms before that turn's prompt line, and a poll landing in between must not
+        // take the gap for a finished turn
+        if !running, let queuedAt = lastQueuedReportAt,
+           queuedAt > (lastTurnEndAt ?? .distantPast), queuedAt > (lastPromptAt ?? .distantPast) {
+            running = true
+        }
+        // Once the turn has ended the count decides between waiting and finishing, so it is read
+        // over the larger background window; mid-turn the tail window is enough
+        let background = running ? backgroundTasks : ClaudeBackgroundTasks.scan(fileURL: fileURL)
 
         return Snapshot(
             sessionId: sessionId,
@@ -262,7 +304,10 @@ public enum ClaudeSessionBootstrap {
             aiTitle: aiTitle,
             contextPercent: contextPercent,
             earliestAt: earliestAt,
-            exitMarkerLast: lastType == "cost-state"
+            exitMarkerLast: lastType == "cost-state",
+            pendingBackgroundTasks: background.pendingCount,
+            abandonedBackgroundTasks: lastType == "cost-state" ? background.abandonedAtExit : 0,
+            userPromptAt: lastUserPromptAt
         )
     }
 

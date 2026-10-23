@@ -89,6 +89,7 @@ public final class TaskStore {
                 // Another submit in the same session (follow-up steering / reply after waiting for
                 // input / new turn after idle)
                 task.lastActivityAt = event.timestamp
+                task.awaitingBackgroundTasks = 0
                 if task.title == nil { task.title = title }
                 if case .idle = task.phase {
                     // New turn after idle: timing restarts now, and the new prompt becomes the new
@@ -140,6 +141,7 @@ public final class TaskStore {
                 task.phase = .idle
                 task.lastActivityAt = event.timestamp
                 task.currentActivity = nil
+                task.awaitingBackgroundTasks = 0
                 task.subagents = []  // Subagents belong to this turn; clear them on finish
                 if task.title == nil { task.title = title }
                 activeTasks[key] = task
@@ -153,6 +155,7 @@ public final class TaskStore {
             if var task = activeTasks[key] {
                 task.phase = .waiting(reason, since: event.timestamp)
                 task.lastActivityAt = event.timestamp
+                task.awaitingBackgroundTasks = 0
                 activeTasks[key] = task
                 return [.taskWaiting(task), .activeTasksChanged]
             }
@@ -205,6 +208,10 @@ public final class TaskStore {
                 task.isCompacting = false  // Tool activity means compaction has finished
                 if effects.isEmpty { effects.append(.activeTasksChanged) }
             }
+            if task.awaitingBackgroundTasks > 0 {
+                task.awaitingBackgroundTasks = 0  // The main agent is working again
+                if effects.isEmpty { effects.append(.activeTasksChanged) }
+            }
             activeTasks[key] = task
             return effects
 
@@ -232,6 +239,7 @@ public final class TaskStore {
             task.currentActivity = tool
             task.currentToolDetail = detail
             task.isCompacting = false
+            task.awaitingBackgroundTasks = 0
             activeTasks[key] = task
             return [.activeTasksChanged]
 
@@ -265,6 +273,35 @@ public final class TaskStore {
             guard task.subagents != subagents else { return [] }
             task.subagents = subagents
             task.lastActivityAt = event.timestamp
+            activeTasks[key] = task
+            return [.activeTasksChanged]
+
+        case .awaitingBackgroundTasks(let count):
+            guard var task = activeTasks[key] else {
+                // Discovered while waiting (app launched after the turn ended): register as running
+                var task = AgentTask(
+                    source: event.source,
+                    sessionId: event.sessionId,
+                    cwd: event.cwd,
+                    startedAt: event.timestamp,
+                    phase: .running
+                )
+                task.awaitingBackgroundTasks = count
+                activeTasks[key] = task
+                return [.activeTasksChanged]
+            }
+            // The turn ended but its background tasks will start another one: keep the task
+            // running (timer, capsule count) instead of finishing it, and drop the stale tool line
+            if case .running = task.phase, task.awaitingBackgroundTasks == count,
+               task.currentActivity == nil {
+                return []
+            }
+            task.phase = .running
+            task.lastActivityAt = event.timestamp
+            task.currentActivity = nil
+            task.currentToolDetail = nil
+            task.isCompacting = false
+            task.awaitingBackgroundTasks = count
             activeTasks[key] = task
             return [.activeTasksChanged]
 

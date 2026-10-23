@@ -22,7 +22,10 @@ public final class ClaudeTranscriptWatcher {
         var mtime: Date
         var sessionId: String
         var cwd: String?
+        /// Busy: a turn is in flight, or the last one ended while waiting on background tasks
         var running: Bool
+        /// Background-task count last reported with `awaitingBackgroundTasks` (0 = not waiting)
+        var awaiting = 0
         /// The writer was judged to have exited (sessionEnded emitted); a further write means a
         /// resume, handled as first sight
         var ended = false
@@ -173,7 +176,11 @@ public final class ClaudeTranscriptWatcher {
                 // as interrupted), then emit sessionEnded (an idle session is removed silently, a
                 // running one counts as interrupted). Already exited on first sight → don't register.
                 if let previous, !previous.ended {
-                    if previous.running, !snapshot.running { emitFinished() }
+                    // Background tasks still unreported die with the process: no finish here, the
+                    // sessionEnded below marks the still-busy task interrupted
+                    let abandoned = snapshot.turnEndOutcome == .interrupted
+                        ? 0 : snapshot.abandonedBackgroundTasks
+                    if previous.running, !snapshot.running, abandoned == 0 { emitFinished() }
                     emit(.sessionEnded(reason: Self.exitReason), at: mtime)
                 }
                 states[path] = FileState(
@@ -189,6 +196,7 @@ public final class ClaudeTranscriptWatcher {
         if previous?.ended == true { previous = nil }
 
         let wasRunning = previous?.running
+        let awaiting = snapshot.awaitingBackgroundTasks
         if snapshot.running {
             if wasRunning == true {
                 // State unchanged: keep the task alive (prevents a false 4h reap)
@@ -197,6 +205,17 @@ public final class ClaudeTranscriptWatcher {
                 // Running on first sight / new turn started after idle
                 emit(.taskStarted(title: snapshot.promptTitle),
                      at: snapshot.promptAt ?? snapshot.earliestAt ?? mtime)
+            }
+        } else if awaiting > 0 {
+            // The turn ended while background tasks it launched are still running; each report
+            // starts another turn, so the work is not finished and no finish is emitted yet
+            if wasRunning != true {
+                // First sight, or a turn shorter than one poll: register the start first
+                emit(.taskStarted(title: snapshot.promptTitle),
+                     at: snapshot.promptAt ?? snapshot.earliestAt ?? mtime)
+            }
+            if wasRunning != true || awaiting != previous?.awaiting {
+                emit(.awaitingBackgroundTasks(count: awaiting), at: snapshot.turnEndAt ?? mtime)
             }
         } else if wasRunning == nil {
             emit(.sessionStarted, at: mtime)
@@ -223,15 +242,18 @@ public final class ClaudeTranscriptWatcher {
             emit(.contextUpdate(percent: percent), at: mtime)
         }
 
-        // Subagent live state: scanned only while running (subagents/ accumulates across turns, so
+        // Subagent live state: scanned only while busy (subagents/ accumulates across turns, so
         // it is trimmed to this turn by prompt time) and emitted only when the list changes; the
-        // cache is cleared when the turn ends so the next turn emits afresh.
+        // cache is cleared when the turn ends so the next turn emits afresh. While background
+        // agents are outstanding the window opens at the prompt the user typed: the turns started
+        // by their reports must keep showing the agents still running.
         var subagents: [SubagentInfo] = []
-        if snapshot.running {
+        if snapshot.running || awaiting > 0 {
             subagents = ClaudeSubagentScanner.scan(
                 sessionDir: file.deletingPathExtension(),
                 parentTranscript: file,
-                turnStartedAt: snapshot.promptAt)
+                turnStartedAt: snapshot.pendingBackgroundTasks > 0
+                    ? snapshot.userPromptAt ?? snapshot.promptAt : snapshot.promptAt)
             if subagents != (previous?.lastSubagents ?? []) {
                 emit(.subagentsUpdated(subagents), at: mtime)
             }
@@ -239,7 +261,8 @@ public final class ClaudeTranscriptWatcher {
 
         states[path] = FileState(
             mtime: mtime, sessionId: snapshot.sessionId, cwd: snapshot.cwd,
-            running: snapshot.running,
+            running: snapshot.running || awaiting > 0,
+            awaiting: awaiting,
             exitPending: exitPending, lastProbeAt: now,
             promptAt: snapshot.promptAt,
             knownTitle: snapshot.sessionTitle ?? previous?.knownTitle,
