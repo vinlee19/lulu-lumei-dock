@@ -438,23 +438,17 @@ enum PreviewRenderer {
         snap("knowledge-plans-list", PlansView(service: plans, initialLayout: .list))
         snap("knowledge-plans-cards", PlansView(service: plans, initialLayout: .cards))
         snap("knowledge-plans-cards-wide", PlansView(service: plans, initialLayout: .cards), width: 1270)
-        snap("knowledge-skills-list",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list))
-        // Dark and minimum-width (840pt window − 165pt sidebar) variants of the list
-        snap("knowledge-skills-list-dark",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list), dark: true)
-        snap("knowledge-skills-list-min",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list), width: 675)
-        snap("knowledge-skills-cards",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .cards))
-        snap("knowledge-skills-cards-wide",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .cards),
+        // Skills shell: narrow (list only), narrow with the detail pushed, the minimum
+        // window width, the wide split, and the wide split in dark mode.
+        snap("knowledge-skills", SkillsSplitView(service: skillMemory, usageService: usage))
+        snap("knowledge-skills-detail",
+             SkillsSplitView(service: skillMemory, usageService: usage, initialPushDetail: true))
+        snap("knowledge-skills-min", SkillsSplitView(service: skillMemory, usageService: usage),
+             width: 675)
+        snap("knowledge-skills-wide", SkillsSplitView(service: skillMemory, usageService: usage),
              width: 1270)
+        snap("knowledge-skills-wide-dark", SkillsSplitView(service: skillMemory, usageService: usage),
+             dark: true, width: 1270)
         snap("knowledge-memory-list",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLayout: .list))
@@ -488,9 +482,8 @@ enum PreviewRenderer {
         // Search state: hit-count capsule + round clear button (the focus gradient ring needs real
         // keyboard focus, impossible offscreen)
         skillMemory.searchText = "arkcli"
-        snap("knowledge-skills-search",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list))
+        snap("knowledge-skills-search", SkillsSplitView(service: skillMemory, usageService: usage),
+             width: 1270)
         skillMemory.searchText = ""
         snap("knowledge-agents-list",
              AgentsView(service: agents, usageService: usage, initialLayout: .list))
@@ -556,6 +549,25 @@ enum PreviewRenderer {
         snap("knowledge-sessions-min",
              SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
              width: 675)
+
+        // The whole hub as the window shows it: sidebar (one "Knowledge" entry) + type
+        // switcher + the Skills shell. Services not scanned above are constructed idle;
+        // their counts read 0 in the switcher, which is fine for a layout check.
+        let navigation = PopoverNavigation()
+        navigation.tab = .skills
+        let hub = HStack(spacing: 0) {
+            SidebarView(selected: .skills, limitsBadge: ("67%", Theme.gold),
+                        historyBadge: "1.2k", appVersion: "dev", onSelect: { _ in })
+            Divider()
+            KnowledgeHubView(
+                navigation: navigation, skillMemoryService: skillMemory, usageService: usage,
+                sessionBrowser: sessions, plansService: plans,
+                promptsService: PromptsService(sessionBrowser: sessions),
+                agentConfigService: agents, mcpService: mcp)
+        }
+        snap("knowledge-hub", hub, width: 1270)
+        snap("knowledge-hub-min", hub, width: 840)
+        snap("knowledge-hub-dark", hub, dark: true, width: 1270)
     }
 
     /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light
