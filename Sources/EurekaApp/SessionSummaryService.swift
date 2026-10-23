@@ -58,7 +58,22 @@ final class SessionSummaryService: ObservableObject {
         }
     }
 
+    /// Templates the person made (built-ins come from `SummaryTemplateSpec.builtIns`)
+    @Published private(set) var customTemplates: [SummaryTemplateSpec] = []
+    /// Template used for the next run
+    @Published var selectedTemplateId: String {
+        didSet { defaults.set(selectedTemplateId, forKey: Self.templateKey) }
+    }
+    /// Objective numbers about a session for the prompt header (prompts, tokens, cost, duration),
+    /// supplied by the session browser that knows them
+    var factsProvider: ((AgentSessionInfo) -> [String])?
+
+    /// Model suggestions per executor, loaded on demand (`loadModelOptions`)
+    @Published private(set) var modelOptions: [SummaryExecutorKind: [SummaryModelOption]] = [:]
+    @Published private(set) var loadingModels: Set<SummaryExecutorKind> = []
+
     private static let executorKey = "sessionSummaryExecutor"
+    private static let templateKey = "sessionSummaryTemplate"
     private static let modelsKey = "sessionSummaryModels"
     private let defaults: UserDefaults
     private let resolver = SummaryExecutorResolver()
@@ -71,10 +86,129 @@ final class SessionSummaryService: ObservableObject {
         self.defaults = defaults
         preferredExecutor = defaults.string(forKey: Self.executorKey)
             .flatMap(SummaryExecutorKind.init(rawValue:))
+        selectedTemplateId = defaults.string(forKey: Self.templateKey) ?? SummaryTemplateSpec.defaultId
         let stored = defaults.dictionary(forKey: Self.modelsKey) as? [String: String] ?? [:]
         models = Dictionary(uniqueKeysWithValues: stored.compactMap { key, value in
             SummaryExecutorKind(rawValue: key).map { ($0, value) }
         })
+        customTemplates = Self.loadTemplates()
+    }
+
+    // MARK: - Templates
+
+    /// Built-ins first, then the person's own
+    var templates: [SummaryTemplateSpec] { SummaryTemplateSpec.builtIns + customTemplates }
+
+    /// The selected template; falls back to the default when it was deleted
+    var selectedTemplate: SummaryTemplateSpec {
+        templates.first { $0.id == selectedTemplateId } ?? SummaryTemplateSpec.collabReview
+    }
+
+    func template(id: String?) -> SummaryTemplateSpec? {
+        guard let id else { return nil }
+        return templates.first { $0.id == id }
+    }
+
+    /// Adds or replaces a custom template (built-ins are copied first, never edited)
+    func saveTemplate(_ template: SummaryTemplateSpec) {
+        guard !template.isBuiltIn else { return }
+        if let index = customTemplates.firstIndex(where: { $0.id == template.id }) {
+            customTemplates[index] = template
+        } else {
+            customTemplates.append(template)
+        }
+        persistTemplates()
+    }
+
+    func deleteTemplate(id: String) {
+        customTemplates.removeAll { $0.id == id }
+        if selectedTemplateId == id { selectedTemplateId = SummaryTemplateSpec.defaultId }
+        persistTemplates()
+    }
+
+    /// `summary-templates.json` beside the database (Application Support/Eureka)
+    private static var templatesURL: URL {
+        EurekaStore.defaultURL().deletingLastPathComponent().appendingPathComponent("summary-templates.json")
+    }
+
+    private static func loadTemplates() -> [SummaryTemplateSpec] {
+        guard let data = try? Data(contentsOf: templatesURL),
+              let list = try? JSONDecoder().decode([SummaryTemplateSpec].self, from: data) else { return [] }
+        return list.filter { !$0.isBuiltIn }
+    }
+
+    private func persistTemplates() {
+        let list = customTemplates
+        queue.async {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard let data = try? encoder.encode(list) else { return }
+            try? FileManager.default.createDirectory(
+                at: Self.templatesURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: Self.templatesURL, options: .atomic)
+        }
+    }
+
+    // MARK: - Worth keeping
+
+    /// Saves a (possibly edited) candidate into the project's Claude memory library and records
+    /// it on the run. Returns the file, or an error message for the UI.
+    func saveCandidate(
+        _ candidate: SummaryDocument.Candidate, title: String, content: String,
+        run: SummaryRunRecord, session: AgentSessionInfo
+    ) -> Result<URL, SaveFailure> {
+        let file: URL
+        do {
+            file = try ClaudeProjectMemoryWriter.write(
+                title: title, content: content,
+                kind: candidate.kind == .rule ? .feedback : .project,
+                originSessionId: session.id, projectPath: session.cwd)
+        } catch ClaudeProjectMemoryWriter.WriteError.noProjectDirectory {
+            return .failure(SaveFailure(message: L10n.text(
+                "This session has no project directory, so there is no memory library to save into.",
+                zhHans: "这个会话没有项目目录，找不到可以写入的记忆库。")))
+        } catch ClaudeProjectMemoryWriter.WriteError.emptyContent {
+            return .failure(SaveFailure(message: L10n.text("The content is empty.", zhHans: "内容是空的。")))
+        } catch {
+            return .failure(SaveFailure(message: error.localizedDescription))
+        }
+        record(.init(status: .saved, path: file.path, decidedAt: Date()), for: candidate, run: run)
+        return .success(file)
+    }
+
+    func dismissCandidate(_ candidate: SummaryDocument.Candidate, run: SummaryRunRecord) {
+        record(.init(status: .dismissed, decidedAt: Date()), for: candidate, run: run)
+    }
+
+    /// Undo a dismissal (a saved file stays where it is; it is managed on the Memory page)
+    func restoreCandidate(_ candidate: SummaryDocument.Candidate, run: SummaryRunRecord) {
+        var decisions = completed[run.sessionKey]?.candidateDecisions ?? run.candidateDecisions
+        guard decisions[candidate.id]?.status == .dismissed else { return }
+        decisions[candidate.id] = nil
+        apply(decisions, to: run)
+    }
+
+    struct SaveFailure: Error {
+        var message: String
+    }
+
+    private func record(
+        _ decision: SummaryCandidateDecision, for candidate: SummaryDocument.Candidate,
+        run: SummaryRunRecord
+    ) {
+        var decisions = completed[run.sessionKey]?.candidateDecisions ?? run.candidateDecisions
+        decisions[candidate.id] = decision
+        apply(decisions, to: run)
+    }
+
+    private func apply(_ decisions: [String: SummaryCandidateDecision], to run: SummaryRunRecord) {
+        if completed[run.sessionKey]?.id == run.id {
+            completed[run.sessionKey]?.candidateDecisions = decisions
+        }
+        let runId = run.id
+        queue.async { [weak self] in
+            self?.coordinator?.updateCandidateDecisions(runId: runId, decisions: decisions)
+        }
     }
 
     // MARK: - Lifecycle
@@ -138,7 +272,24 @@ final class SessionSummaryService: ObservableObject {
 
     func refreshExecutors() {
         resolver.invalidate()
+        modelOptions = [:]
         queue.async { [weak self] in self?.probeExecutors() }
+    }
+
+    /// Fetches an executor's model suggestions once (until the CLIs are re-checked). Runs off the
+    /// service queue: `opencode models` can take ~11 s and must not hold up a summary start.
+    func loadModelOptions(for kind: SummaryExecutorKind) {
+        guard modelOptions[kind] == nil, !loadingModels.contains(kind),
+              let executor = availability[kind]?.executor else { return }
+        loadingModels.insert(kind)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let options = SummaryModelCatalog.load(
+                for: executor, codexConfigURL: MCPConfigIndexer.globalConfigURL(for: .codex))
+            DispatchQueue.main.async {
+                self?.modelOptions[kind] = options
+                self?.loadingModels.remove(kind)
+            }
+        }
     }
 
     /// Call on `queue`
@@ -223,9 +374,9 @@ final class SessionSummaryService: ObservableObject {
             header: SummaryTemplate.SessionHeader(
                 title: session.displayName, sourceName: session.source.displayName,
                 project: session.cwd, startedAt: session.startedAt,
-                lastActiveAt: session.lastActiveAt),
+                lastActiveAt: session.lastActiveAt, facts: factsProvider?(session) ?? []),
             executor: executor, model: (model?.isEmpty ?? true) ? nil : model,
-            language: L10n.current)
+            language: L10n.current, template: selectedTemplate)
         let result = coordinator.request(request)
         revealSummary(for: session)
         return result
@@ -285,7 +436,8 @@ final class SessionSummaryService: ObservableObject {
                 + (record.coverage.chunkCount > 1
                     ? " · " + L10n.format("%@ parts", zhHans: "%@ 段", String(record.coverage.chunkCount)) : ""),
             "- \(L10n.text("Generated", zhHans: "生成时间")): \(formatter.string(from: record.finishedAt ?? record.updatedAt))",
-            "- \(L10n.text("Template", zhHans: "模板")): v\(record.templateVersion)",
+            "- \(L10n.text("Template", zhHans: "模板")): "
+                + (record.templateName.map { "\($0) · " } ?? "") + "v\(record.templateVersion)",
             "",
         ]
         lines.append(record.markdown ?? "")
@@ -313,8 +465,10 @@ final class SessionSummaryService: ObservableObject {
     func seedForPreview(
         availability: [SummaryExecutorAvailability], live: [SummaryLiveState] = [],
         completed: [SummaryRunRecord] = [], lastFinished: [SummaryRunRecord] = [],
-        freshness: [String: Freshness] = [:], preferred: SummaryExecutorKind?
+        freshness: [String: Freshness] = [:], preferred: SummaryExecutorKind?,
+        modelOptions: [SummaryExecutorKind: [SummaryModelOption]] = [:]
     ) {
+        self.modelOptions = modelOptions
         self.availability = Dictionary(uniqueKeysWithValues: availability.map { ($0.kind, $0) })
         self.live = Dictionary(uniqueKeysWithValues: live.map { ($0.sessionKey, $0) })
         self.completed = Dictionary(uniqueKeysWithValues: completed.map { ($0.sessionKey, $0) })

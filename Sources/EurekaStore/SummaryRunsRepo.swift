@@ -44,7 +44,8 @@ public final class SummaryRunsRepo {
     private static let columns = """
         id, source, session_id, status, executor, executor_version, model, template_version,
         language, fingerprint, coverage, started_at, updated_at, finished_at, markdown,
-        error_kind, error_message, input_tokens, output_tokens
+        error_kind, error_message, input_tokens, output_tokens, template_id, template_name,
+        candidate_state
         """
 
     /// Insert or fully replace one run
@@ -53,7 +54,7 @@ public final class SummaryRunsRepo {
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         try db.run("""
             INSERT OR REPLACE INTO summary_runs (\(Self.columns))
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, [
             .text(run.id), .text(run.source.rawValue), .text(run.sessionId),
             .text(run.status.rawValue), .text(run.executor.rawValue),
@@ -64,7 +65,23 @@ public final class SummaryRunsRepo {
             .string(run.errorMessage.map { Self.bounded($0) }),
             run.inputTokens.map { .int(Int64($0)) } ?? .null,
             run.outputTokens.map { .int(Int64($0)) } ?? .null,
+            .string(run.templateId), .string(run.templateName),
+            .string(Self.encodeDecisions(run.candidateDecisions)),
         ])
+    }
+
+    /// Records the person's per-item decisions on a run's "worth keeping" candidates
+    public func updateCandidateDecisions(
+        id: String, decisions: [String: SummaryCandidateDecision]
+    ) throws {
+        try db.run(
+            "UPDATE summary_runs SET candidate_state = ? WHERE id = ?",
+            [.string(Self.encodeDecisions(decisions)), .text(id)])
+    }
+
+    private static func encodeDecisions(_ decisions: [String: SummaryCandidateDecision]) -> String? {
+        guard !decisions.isEmpty, let data = try? JSONEncoder().encode(decisions) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Lightweight stage update while a run progresses (no rewrite of the output columns)
@@ -157,6 +174,8 @@ public final class SummaryRunsRepo {
             executorVersion: row.text(5),
             model: row.text(6),
             templateVersion: Int(row.int(7)),
+            templateId: row.text(19),
+            templateName: row.text(20),
             language: row.text(8) ?? "en",
             fingerprint: row.text(9) ?? "",
             coverage: coverage,
@@ -167,6 +186,10 @@ public final class SummaryRunsRepo {
             errorKind: row.text(15).flatMap(SummaryFailureKind.init(rawValue:)),
             errorMessage: row.text(16),
             inputTokens: row.isNull(17) ? nil : Int(row.int(17)),
-            outputTokens: row.isNull(18) ? nil : Int(row.int(18)))
+            outputTokens: row.isNull(18) ? nil : Int(row.int(18)),
+            candidateDecisions: row.text(21)
+                .flatMap { $0.data(using: .utf8) }
+                .flatMap { try? JSONDecoder().decode([String: SummaryCandidateDecision].self, from: $0) }
+                ?? [:])
     }
 }

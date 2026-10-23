@@ -85,12 +85,9 @@ struct SessionSummaryPane: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            PaneHeader(icon: "sparkles", title: L10n.text("AI Summary", zhHans: "AI 总结")) {
-                if let live {
-                    CountChip(live.stage.label)
-                } else if saved != nil, case .stale = summaries.freshness[key] {
-                    CountChip(L10n.text("Outdated", zhHans: "已过期"))
-                }
+            SummaryTemplateChip(summaries: summaries)
+            if live == nil, saved != nil, case .stale = summaries.freshness[key] {
+                CountChip(L10n.text("Outdated", zhHans: "已过期"))
             }
             if let note {
                 Text(note)
@@ -133,65 +130,86 @@ struct SessionSummaryPane: View {
 
     // MARK: - Progress
 
+    /// A run in progress: what is happening in plain words, the sections that are coming, and
+    /// the live text tucked behind a disclosure for those who want to watch it
     private func progressCard(_ live: SummaryLiveState) -> some View {
-        SectionCard {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(live.stage.label)
-                    .font(Theme.font.themed(12.5, .semibold))
-                if live.chunkTotal > 1 {
-                    CountChip(live.stage == .merging
-                        ? L10n.format("%@ parts done · merging", zhHans: "%@ 段完成 · 合并中", String(live.chunkTotal))
-                        : L10n.format("Part %@ of %@", zhHans: "第 %@ / %@ 段", String(min(live.chunksDone + 1, live.chunkTotal)), String(live.chunkTotal)))
-                }
-                Spacer(minLength: 0)
-                SourceBadge(source: live.executor.source, size: 12)
+        let sections = summaries.template(id: summaries.selectedTemplateId)?.usableSections ?? []
+        return ReviewCard(
+            title: L10n.text("Writing your review", zhHans: "正在生成复盘"), icon: "sparkles"
+        ) {
+            HStack(spacing: 6) {
+                SourceBadge(source: live.executor.source, size: 11)
                 Text(live.executor.displayName)
-                    .font(Theme.font.themed(11))
-                    .foregroundStyle(.secondary)
-            }
-            // Elapsed / last event tick every second without touching the service
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                HStack(spacing: 14) {
-                    metric(L10n.text("Elapsed", zhHans: "已用时"), formatDuration(context.date.timeIntervalSince(live.startedAt)))
-                    metric(
-                        L10n.text("Last event", zhHans: "最近事件"),
-                        live.lastEventAt.map {
-                            L10n.format("%@ ago", zhHans: "%@ 前", formatDuration(max(0, context.date.timeIntervalSince($0))))
-                        } ?? L10n.text("none yet", zhHans: "尚无"))
-                    if let coverage = live.coverage {
-                        metric(L10n.text("Input", zhHans: "输入"), L10n.format(
-                            "%@ messages · ~%@ tokens", zhHans: "%@ 条消息 · 约 %@ tokens",
-                            String(coverage.totalMessages), formatTokens(coverage.estimatedTokens)))
-                    }
-                }
-            }
-            if !live.streamedText.isEmpty {
-                Divider()
-                MarkdownRichText(text: SummaryReferences.linkify(live.streamedText, scheme: summaryMessageScheme))
-            } else if !live.streams && (live.stage == .waiting || live.stage == .summarizing) {
-                Text(L10n.format(
-                    "%@ returns the text when it finishes; there is no partial output to show.",
-                    zhHans: "%@ 完成后才返回全文，过程中没有可显示的部分输出。", live.executor.displayName))
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
             }
+        } content: {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stageSentence(live))
+                        .font(Theme.font.themed(12.5, .medium))
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(L10n.format(
+                            "%@ so far", zhHans: "已用 %@",
+                            formatDuration(context.date.timeIntervalSince(live.startedAt))))
+                            .font(Theme.font.themed(10.5))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            if !sections.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(sections) { section in
+                        HStack(spacing: 8) {
+                            Image(systemName: ReviewSectionKind(heading: section.heading).icon)
+                                .font(Theme.font.themed(10))
+                                .foregroundStyle(Theme.brandFg.opacity(0.6))
+                                .frame(width: 16)
+                            Text(ReviewSectionKind.title(for: section.heading))
+                                .font(Theme.font.themed(11.5))
+                                .foregroundStyle(.secondary)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Theme.hairline)
+                                .frame(height: 6)
+                                .frame(maxWidth: 160)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+            if !live.streamedText.isEmpty {
+                DisclosureGroup(L10n.text("Watch the live output", zhHans: "查看实时输出")) {
+                    MarkdownRichText(text: SummaryReferences.linkify(live.streamedText, scheme: summaryMessageScheme))
+                        .padding(.top, 6)
+                }
+                .font(Theme.font.themed(11, .medium))
+                .tint(Theme.brandFg)
+            }
             if saved != nil {
-                Text(L10n.text("The previous summary below stays until this run succeeds.", zhHans: "下方的上一版总结会保留，直到这次生成成功。"))
+                Text(L10n.text("The previous review below stays until this one is ready.", zhHans: "下方的上一版复盘会保留，直到这次生成完成。"))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
             }
         }
     }
 
-    private func metric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(Theme.font.themed(9.5, .medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(Theme.font.themedMono(11, .medium))
-                .lineLimit(1)
+    private func stageSentence(_ live: SummaryLiveState) -> String {
+        switch live.stage {
+        case .queued, .reading, .preparing:
+            return L10n.text("Reading the whole conversation…", zhHans: "正在读完整段对话…")
+        case .launching, .waiting:
+            return L10n.format("Waiting for %@ to answer…", zhHans: "等待 %@ 回应…", live.executor.displayName)
+        case .summarizing where live.chunkTotal > 1:
+            return L10n.format(
+                "Reading part %@ of %@ of a long conversation…", zhHans: "长对话，正在读第 %@ / %@ 段…",
+                String(min(live.chunksDone + 1, live.chunkTotal)), String(live.chunkTotal))
+        case .summarizing:
+            return L10n.text("Writing the review…", zhHans: "正在写复盘…")
+        case .merging:
+            return L10n.text("Putting the parts together…", zhHans: "正在把各段合成一份…")
+        default:
+            return live.stage.label
         }
     }
 
@@ -232,8 +250,12 @@ struct SessionSummaryPane: View {
                     summaries.summarize(session, with: run.executor)
                 }
                 .disabled(summaries.availability[run.executor]?.isAvailable != true)
-                MenuButton(title: L10n.text("Use another CLI", zhHans: "换一个 CLI"), icon: "arrow.triangle.branch") {
-                    SummaryExecutorMenuItems(summaries: summaries, session: session)
+                SummaryExecutorPickerButton(
+                    summaries: summaries,
+                    title: L10n.text("Use another CLI", zhHans: "换一个 CLI"),
+                    icon: "arrow.triangle.branch"
+                ) { kind in
+                    summaries.summarize(session, with: kind)
                 }
                 if let draft = run.draft {
                     SecondaryButton(
@@ -290,80 +312,112 @@ struct SessionSummaryPane: View {
                 RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
                     .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
         }
-        VStack(alignment: .leading, spacing: 12) {
-            provenance(run)
-            Rectangle().fill(Theme.hairline).frame(height: 1)
-            MarkdownRichText(text: SummaryReferences.linkify(run.markdown ?? "", scheme: summaryMessageScheme))
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.card)
-                .fill(Theme.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radius.card)
-                        .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
-                .themeCardShadow())
-    }
-
-    /// Who wrote it, from what, and when
-    private func provenance(_ run: SummaryRunRecord) -> some View {
-        let coverage = run.coverage
-        var parts = [L10n.format("%@ messages", zhHans: "%@ 条消息", String(coverage.totalMessages))]
-        if let first = coverage.firstMessageId, let last = coverage.lastMessageId {
-            parts.append("#\(first)–#\(last)")
-        }
-        if coverage.chunkCount > 1 {
-            parts.append(L10n.format("%@ parts merged", zhHans: "%@ 段合并", String(coverage.chunkCount)))
-        }
-        if coverage.compactedToolSteps > 0 {
-            parts.append(L10n.format("%@ tool steps compacted", zhHans: "%@ 个工具步骤已压缩", String(coverage.compactedToolSteps)))
-        }
-        if coverage.excludedThinking > 0 {
-            parts.append(L10n.format("%@ thinking blocks excluded", zhHans: "排除 %@ 段思考", String(coverage.excludedThinking)))
-        }
-        if coverage.validReferences > 0 {
-            parts.append(L10n.format("%@ citations", zhHans: "%@ 处引用", String(coverage.validReferences)))
-        }
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                SourceBadge(source: run.executor.source, size: 12)
-                Text(run.executor.displayName + (run.executorVersion.map { " \($0)" } ?? ""))
-                    .font(Theme.font.themed(11, .semibold))
-                if let model = run.model {
-                    Text(model)
-                        .font(Theme.font.themedMono(10.5))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                Text(relativeFormatter.localizedString(for: run.finishedAt ?? run.updatedAt, relativeTo: Date()))
-                    .font(Theme.font.themed(10))
-                    .foregroundStyle(.tertiary)
-            }
-            Text(L10n.format("Covers %@", zhHans: "覆盖 %@", parts.joined(separator: " · ")))
-                .font(Theme.font.themed(10))
-                .foregroundStyle(.secondary)
-            if coverage.validReferences > 0 {
-                Text(L10n.text("Click a [#n] citation to open that message in the conversation.", zhHans: "点击 [#n] 引用可跳到对话中的原消息。"))
-                    .font(Theme.font.themed(9.5))
-                    .foregroundStyle(.tertiary)
-            }
-        }
+        SessionReviewReport(summaries: summaries, run: run, session: session)
     }
 
     // MARK: - Empty state
 
+    /// First visit: what a review gives you, the template to use, and one button to start
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            EmptyStateView(
-                icon: "sparkles",
-                title: L10n.text("No AI summary yet", zhHans: "还没有 AI 总结"),
-                hint: L10n.text(
-                    "A local CLI reads the whole conversation and writes an overview, the decisions and their evidence, what was done and verified, what is open, and a handoff. It uses that CLI's own sign-in and model, so it is not offline.",
-                    zhHans: "由本地 CLI 读取完整对话，写出概览、关键决策与依据、已完成与验证、未决事项和交接信息。使用该 CLI 自己的登录和模型，并非离线推理。"))
-                .padding(.top, 24)
-            SectionCard(L10n.text("Executors", zhHans: "执行器")) { executorList }
+        let hard = ThemeStyle.current.isHardEdged
+        let executor = summaries.preferredExecutor.flatMap { summaries.availability[$0]?.isAvailable == true ? $0 : nil }
+            ?? SummaryExecutorKind.allCases.first { summaries.availability[$0]?.isAvailable == true }
+        return VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(Theme.font.themed(22, .semibold))
+                    .foregroundStyle(hard ? Theme.ink : Theme.brandFg)
+                Text(L10n.text("Turn this session into something you keep", zhHans: "把这次协作，变成你的收获"))
+                    .font(Theme.font.themed(19, .bold))
+                Text(L10n.text(
+                    "A local CLI reads the whole conversation and writes it up from your side: what you learned, the calls you made and why, and how you chose among the AI's proposals. Worth-keeping items can be saved to the project's memory, one by one.",
+                    zhHans: "由本地 CLI 读完整段对话，从你的角度写出：你学到了什么、做了哪些决定和为什么、面对 AI 的方案你是怎么选的。值得留下的内容，可以逐条确认后存入项目记忆。"))
+                    .font(Theme.font.themed(12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.text("Template", zhHans: "模板"))
+                    .font(Theme.font.themed(11, .semibold))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+                    ForEach(summaries.templates) { template in
+                        templateCard(template)
+                    }
+                }
+            }
+            HStack(spacing: 10) {
+                if let executor {
+                    PrimaryButton(
+                        title: L10n.format("Write the review with %@", zhHans: "用 %@ 生成复盘", executor.displayName),
+                        icon: "sparkles"
+                    ) {
+                        summaries.summarize(session, with: executor)
+                    }
+                    SummaryExecutorPickerButton(
+                        summaries: summaries, title: L10n.text("Another CLI", zhHans: "换一个 CLI"),
+                        icon: "arrow.triangle.branch"
+                    ) { kind in
+                        summaries.summarize(session, with: kind)
+                    }
+                } else {
+                    Text(summaries.probing
+                        ? L10n.text("Looking for local CLIs…", zhHans: "正在查找本地 CLI…")
+                        : L10n.text("No local CLI can write a review yet; see below.", zhHans: "还没有可用的本地 CLI，见下方。"))
+                        .font(Theme.font.themed(11.5))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            DisclosureGroup(
+                L10n.text("Executors and models", zhHans: "执行器与模型"), isExpanded: $showExecutors
+            ) {
+                VStack(alignment: .leading, spacing: 10) { executorList }
+                    .padding(.top, 8)
+            }
+            .font(Theme.font.themed(11, .medium))
+            .tint(Theme.brandFg)
         }
+        .padding(.top, 18)
+    }
+
+    private func templateCard(_ template: SummaryTemplateSpec) -> some View {
+        let selected = summaries.selectedTemplateId == template.id
+        let hard = ThemeStyle.current.isHardEdged
+        return Button {
+            summaries.selectedTemplateId = template.id
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                        .font(Theme.font.themed(11))
+                        .foregroundStyle(selected ? Theme.brandFg : .secondary)
+                    Text(template.name)
+                        .font(Theme.font.themed(12.5, .semibold))
+                        .lineLimit(1)
+                }
+                Text(template.summary)
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3, reservesSpace: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(template.usableSections.map { ReviewSectionKind.title(for: $0.heading) }.joined(separator: " · "))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(selected ? Theme.brandFill(0.10) : Theme.surface))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .strokeBorder(
+                        selected ? (hard ? Theme.ink : Theme.brand.opacity(0.55)) : (hard ? Theme.cardBorder : Theme.hairline),
+                        lineWidth: selected ? (hard ? Theme.cardBorderWidth : 1.5) : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -378,8 +432,15 @@ struct SessionSummaryPane: View {
         return HStack(spacing: 8) {
             SourceBadge(source: kind.source, size: 13)
             VStack(alignment: .leading, spacing: 2) {
-                Text(kind.displayName + (availability?.executor?.version.map { " \($0)" } ?? ""))
-                    .font(Theme.font.themed(11.5, .medium))
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(kind.displayName)
+                        .font(Theme.font.themed(11.5, .medium))
+                    if let version = availability?.executor?.version {
+                        Text(version)
+                            .font(Theme.font.themedMono(9.5))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 Text(availability.map { $0.isAvailable
                     ? ($0.executor?.path ?? "")
                     : ($0.reason ?? "") } ?? L10n.text("Checking…", zhHans: "检测中…"))
@@ -388,15 +449,7 @@ struct SessionSummaryPane: View {
                     .lineLimit(2)
             }
             Spacer(minLength: 6)
-            TextField(
-                L10n.text("Model (optional)", zhHans: "模型（可选）"),
-                text: Binding(
-                    get: { summaries.models[kind] ?? "" },
-                    set: { summaries.models[kind] = $0 }))
-                .textFieldStyle(.roundedBorder)
-                .font(Theme.font.themedMono(10.5))
-                .frame(width: 150)
-                .help(L10n.text("Passed to the CLI as --model; leave empty for its default", zhHans: "作为 --model 传给 CLI；留空则用它的默认模型"))
+            SummaryModelField(summaries: summaries, kind: kind)
             SecondaryButton(title: L10n.text("Summarize", zhHans: "总结"), icon: "sparkles") {
                 summaries.summarize(session, with: kind)
             }

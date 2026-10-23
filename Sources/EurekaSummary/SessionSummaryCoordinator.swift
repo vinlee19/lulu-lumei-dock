@@ -19,11 +19,14 @@ public final class SessionSummaryCoordinator {
         public var executor: SummaryExecutorKind
         public var model: String?
         public var language: AppLanguage
+        public var template: SummaryTemplateSpec
 
         public init(
             session: AgentSessionInfo, header: SummaryTemplate.SessionHeader,
-            executor: SummaryExecutorKind, model: String?, language: AppLanguage
+            executor: SummaryExecutorKind, model: String?, language: AppLanguage,
+            template: SummaryTemplateSpec = .collabReview
         ) {
+            self.template = template
             self.session = session
             self.header = header
             self.executor = executor
@@ -114,6 +117,14 @@ public final class SessionSummaryCoordinator {
         storeQueue.sync { try? body(store) }
     }
 
+    /// Persists the person's decisions on a run's "worth keeping" candidates
+    @discardableResult
+    public func updateCandidateDecisions(
+        runId: String, decisions: [String: SummaryCandidateDecision]
+    ) -> Bool {
+        withStore { try $0.summaryRuns.updateCandidateDecisions(id: runId, decisions: decisions) } != nil
+    }
+
     /// Launch-time reconciliation; returns how many rows were marked interrupted
     @discardableResult
     public func reconcileOnLaunch() -> Int {
@@ -150,7 +161,9 @@ public final class SessionSummaryCoordinator {
         let runId = UUID().uuidString.lowercased()
         let record = SummaryRunRecord(
             id: runId, source: session.source, sessionId: session.id, status: .queued,
-            executor: request.executor, model: request.model, language: request.language.rawValue,
+            executor: request.executor, model: request.model,
+            templateId: request.template.id, templateName: request.template.name,
+            language: request.language.rawValue,
             startedAt: startedAt, updatedAt: startedAt)
         let live = SummaryLiveState(
             runId: runId, sessionKey: key, executor: request.executor, stage: .queued,
@@ -252,7 +265,7 @@ public final class SessionSummaryCoordinator {
         let input = SessionSummaryEngine.Input(
             snapshot: snapshot, header: job.request.header, executor: executor, adapter: adapter,
             model: job.request.model, workingDirectory: workingDirectory.path,
-            language: job.request.language)
+            language: job.request.language, template: job.request.template)
         let result = engine.run(input, cancel: job.cancel) { [weak self] progress in
             self?.handle(progress, job: job)
         }

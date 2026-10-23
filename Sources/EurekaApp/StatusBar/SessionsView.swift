@@ -79,7 +79,21 @@ struct SessionsView: View {
             initialPane: pane, initialTurn: turn)
     }
 
+    /// Nothing indexed at all (after a finished scan): no detail pane, the list explains it
+    private var hasNoSessions: Bool {
+        service.summary.sessionCount == 0 && !service.scanning && service.lastIndexedAt != nil
+    }
+
+    @ViewBuilder
     private var twoPane: some View {
+        if hasNoSessions {
+            listPane.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            splitPanes
+        }
+    }
+
+    private var splitPanes: some View {
         HSplitView {
             // maxWidth sets how far the divider can be dragged: at 420 there was only 170pt, barely
             // noticeable in a wide window (reported as "can't resize"); 620 opens it up while
@@ -111,6 +125,12 @@ struct SessionsView: View {
                 service.sortMode = mode
             }
             service.refreshIfStale()
+            summaries.factsProvider = { [weak service] session in
+                service?.summaryFacts(for: session) ?? []
+            }
+            if service.selected == nil, let latest = service.mostRecentSession() {
+                service.select(latest)
+            }
         }
         .onChange(of: settings.sessionRangeAll) { _, newValue in
             service.rangeAll = newValue

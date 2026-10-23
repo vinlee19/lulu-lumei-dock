@@ -182,6 +182,11 @@ public struct SummaryRunRecord: Equatable, Sendable, Identifiable {
     public var executorVersion: String?
     public var model: String?
     public var templateVersion: Int
+    /// Template the run used (nil for runs made before templates were selectable: the handoff
+    /// layout)
+    public var templateId: String?
+    /// Template name at the time of the run, so a renamed or deleted template still reads right
+    public var templateName: String?
     public var language: String
     /// Fingerprint of the normalized snapshot the run covered (empty until reading finished)
     public var fingerprint: String
@@ -196,15 +201,19 @@ public struct SummaryRunRecord: Equatable, Sendable, Identifiable {
     public var errorMessage: String?
     public var inputTokens: Int?
     public var outputTokens: Int?
+    /// What the person did with each "worth keeping" candidate, by `Candidate.id`
+    public var candidateDecisions: [String: SummaryCandidateDecision]
 
     public init(
         id: String, source: AgentSource, sessionId: String, status: SummaryStage,
         executor: SummaryExecutorKind, executorVersion: String? = nil, model: String? = nil,
-        templateVersion: Int = SummaryTemplate.version, language: String,
+        templateVersion: Int = SummaryTemplate.version, templateId: String? = nil,
+        templateName: String? = nil, language: String,
         fingerprint: String = "", coverage: SummaryCoverage = SummaryCoverage(),
         startedAt: Date, updatedAt: Date, finishedAt: Date? = nil, markdown: String? = nil,
         errorKind: SummaryFailureKind? = nil, errorMessage: String? = nil,
-        inputTokens: Int? = nil, outputTokens: Int? = nil
+        inputTokens: Int? = nil, outputTokens: Int? = nil,
+        candidateDecisions: [String: SummaryCandidateDecision] = [:]
     ) {
         self.id = id
         self.source = source
@@ -214,6 +223,8 @@ public struct SummaryRunRecord: Equatable, Sendable, Identifiable {
         self.executorVersion = executorVersion
         self.model = model
         self.templateVersion = templateVersion
+        self.templateId = templateId
+        self.templateName = templateName
         self.language = language
         self.fingerprint = fingerprint
         self.coverage = coverage
@@ -225,6 +236,7 @@ public struct SummaryRunRecord: Equatable, Sendable, Identifiable {
         self.errorMessage = errorMessage
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.candidateDecisions = candidateDecisions
     }
 
     public var sessionKey: String { AgentTask.key(source: source, sessionId: sessionId) }
@@ -233,6 +245,21 @@ public struct SummaryRunRecord: Equatable, Sendable, Identifiable {
     public var draft: String? {
         guard status != .completed, let markdown, !markdown.isEmpty else { return nil }
         return markdown
+    }
+}
+
+/// A person's decision on one "worth keeping" candidate of a run
+public struct SummaryCandidateDecision: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable { case saved, dismissed }
+    public var status: Status
+    /// File the candidate was saved to
+    public var path: String?
+    public var decidedAt: Date
+
+    public init(status: Status, path: String? = nil, decidedAt: Date) {
+        self.status = status
+        self.path = path
+        self.decidedAt = decidedAt
     }
 }
 

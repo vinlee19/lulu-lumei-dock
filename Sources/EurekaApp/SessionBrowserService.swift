@@ -131,7 +131,7 @@ final class SessionBrowserService: ObservableObject {
         didSet { if rangeAll != oldValue { refresh() } }
     }
     /// When the last index scan finished (opening the tab within a minute reuses it)
-    private var lastIndexedAt: Date?
+    private(set) var lastIndexedAt: Date?
 
     /// .utility: the index scan walks every agent's history and must not compete with the UI on
     /// the performance cores; opening a transcript enqueues at .userInitiated (see
@@ -275,6 +275,10 @@ final class SessionBrowserService: ObservableObject {
                         self.select(hit)
                     }
                 }
+                // Open on the latest conversation instead of an empty "select a session" pane
+                if self.selected == nil, let latest = self.mostRecentSession() {
+                    self.select(latest)
+                }
                 // A refresh request arrived during the scan (e.g. the time range changed) → rescan
                 // automatically with the latest state rather than leaving the user's click with no
                 // effect
@@ -350,6 +354,29 @@ final class SessionBrowserService: ObservableObject {
 
     var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Newest session the list shows, skipping folded harness prompts (memory compaction and the
+    /// like are not what someone opening the tab wants to read)
+    func mostRecentSession() -> AgentSessionInfo? {
+        let visible = flatSessions.isEmpty ? groups.flatMap(\.sessions) : flatSessions
+        return visible
+            .filter { !PromptClassifier.isHarnessUtility($0.displayName) }
+            .max { $0.lastActiveAt < $1.lastActiveAt }
+    }
+
+    /// Objective numbers for the AI summary prompt, in plain English (the prompt language)
+    func summaryFacts(for session: AgentSessionInfo) -> [String] {
+        var facts: [String] = []
+        if let prompts = promptCounts[session.id] { facts.append("Prompts the user typed: \(prompts)") }
+        if let cost = costs[session.id] {
+            facts.append("Tokens used: \(cost.totalTokens)")
+            if let usd = cost.costUSD { facts.append(String(format: "API-equivalent cost: $%.2f", usd)) }
+        }
+        if let duration = session.duration, duration > 0 {
+            facts.append(String(format: "Active duration: %.1f hours", duration / 3600))
+        }
+        return facts
     }
 
     // MARK: - Full-text search

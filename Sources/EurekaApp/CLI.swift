@@ -164,6 +164,13 @@ enum EurekaCLI {
                     index += 2
                     continue
                 }
+                // --lang zh renders the Simplified Chinese interface (default: the app's setting)
+                if args[index] == "--lang", args.indices.contains(index + 1) {
+                    if args[index + 1].lowercased().hasPrefix("zh") { PreviewRenderer.languageOverride = .simplifiedChinese }
+                    if args[index + 1].lowercased().hasPrefix("en") { PreviewRenderer.languageOverride = .english }
+                    index += 2
+                    continue
+                }
                 if !args[index].hasPrefix("--") { positional.append(args[index]) }
                 index += 1
             }

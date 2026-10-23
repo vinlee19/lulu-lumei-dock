@@ -366,6 +366,11 @@ enum Schema {
         // AI session summaries (user-requested artifacts with generation history): created
         // idempotently with no version bump, and never part of the DROP block above
         try db.execute(SummaryRunsRepo.createSQL)
+        // Which template a run used, and what the person did with its "worth keeping" items.
+        // Facts like the rest of the table: idempotent ALTER, no version bump.
+        try addColumnIfMissing(db, table: "summary_runs", column: "template_id", type: "TEXT")
+        try addColumnIfMissing(db, table: "summary_runs", column: "template_name", type: "TEXT")
+        try addColumnIfMissing(db, table: "summary_runs", column: "candidate_state", type: "TEXT")
 
         // task_history takes no part in drop/rebuild (real history); old DBs get missing columns
         // via idempotent ALTER
