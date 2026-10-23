@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminalProbeTimer: Timer?
     private let probeQueue = DispatchQueue(
         label: "com.vinlee.eureka.terminalprobe", qos: .utility)
+    /// Direct session links (Claude / Codex Desktop) for the island's "open session" button
+    private let sessionLinks = SessionAppLinkCache()
 
     @objc private func languageDidChange() {
         MainActor.assumeIsolated {
@@ -272,6 +274,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         island.viewModel.onToggleTimeMode = { [weak settings] in
             settings?.showStartTime.toggle()
         }
+        // "Open session": direct links for desktop-app sessions are looked up in the background and
+        // pushed to the island; clicks go to SessionJumper
+        sessionLinks.onChange = { [weak island] links in
+            island?.viewModel.updateAppLinks(links)
+        }
+        island.viewModel.onOpenSession = { SessionJumper.perform($0) }
 
         // Answering Claude's questions on the island: the toggle governs both the heartbeat/polling
         // and the answer hook in settings.json. settings.json is only edited when the user actually
@@ -632,6 +640,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     : settings.notifyError)
                     && !shouldSuppressCard(terminal: task.terminal)
                 if !isStale && wantCard {
+                    // A session never seen in the active list (a very short turn) starts its lookup
+                    // only now; the button appears once the link is found
+                    sessionLinks.prefetch([(task.source, task.sessionId)])
                     island.viewModel.enqueueFinished(task)
                 }
                 // System notifications only check the toggle, no "watching the terminal" mute: they
@@ -671,6 +682,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         island.viewModel.updateActiveTasks(
             store.sortedActiveTasks, idle: store.sortedIdleTasks)
+        // Look up direct links as soon as a session appears, so its finished / waiting card can
+        // carry the button right away (sessions already looked up cost no file reads)
+        sessionLinks.prefetch(
+            (store.sortedActiveTasks + store.sortedIdleTasks).map { ($0.source, $0.sessionId) })
         mascotController?.viewModel.updateActiveTasks(
             active: store.sortedActiveTasks, idle: store.sortedIdleTasks)
         render()
