@@ -157,7 +157,7 @@ struct ConsistencyCard: View {
                     ForEach(report.instructionGaps) { gap in
                         HStack(spacing: 8) {
                             Text(gap.project)
-                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                                .font(Theme.font.themed(11, .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 8)
                             ForEach(gap.missing, id: \.self) { TagChip(L10n.format("Missing %@", zhHans: "缺 %@", $0), tint: Theme.gold) }
@@ -194,10 +194,10 @@ struct ConsistencyCard: View {
                     ForEach(mcpDrifts) { drift in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(drift.name)
-                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                                .font(Theme.font.themed(11, .medium))
                             ForEach(drift.variants, id: \.self) { variant in
                                 Text(variant)
-                                    .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                                    .font(Theme.font.themed(9.5, .regular))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -211,7 +211,7 @@ struct ConsistencyCard: View {
                     ForEach(report.libraryDrifts) { drift in
                         HStack(spacing: 8) {
                             Text(drift.projectName)
-                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                                .font(Theme.font.themed(11, .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 8)
                             if drift.unindexed > 0 {

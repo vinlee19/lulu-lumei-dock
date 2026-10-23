@@ -462,7 +462,7 @@ private struct AgentCard: View {
                     MonogramTile(name: item.name, source: item.source, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.name)
-                            .font(Theme.font.monoSkillName(13))
+                            .font(Theme.font.themed(13, .semibold))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
                             .help(item.name)
@@ -517,7 +517,7 @@ private struct AgentRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(item.name)
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
@@ -564,7 +564,7 @@ private struct AgentScopeChips: View {
         if let plugin = item.pluginName {
             TagChip(L10n.format("Plugin · %@", zhHans: "插件 · %@", plugin), neutral: true)
         }
-        if let project = item.projectName { TagChip(project) }
+        if let project = item.projectName { TagChip(project, neutral: true) }
     }
 }
 
@@ -631,7 +631,7 @@ private struct AgentDetailView: View {
                 builtinOverview
             } else if editing {
                 TextEditor(text: $text)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: text)
@@ -687,7 +687,7 @@ private struct AgentDetailView: View {
                 .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             if let project = agent.scope.projectName {
-                TagChip(project)
+                TagChip(project, neutral: true)
             }
             Spacer(minLength: 8)
             if editable {
@@ -723,7 +723,7 @@ private struct AgentDetailView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text(editable ? agent.path : L10n.format("Managed by Claude Code (read-only) · %@", zhHans: "由 Claude Code 管理（只读） · %@", agent.path))
-                .font(Theme.font.monoSkillName(9, weight: .regular))
+                .font(Theme.font.themed(9, .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -787,7 +787,7 @@ private struct CodexProfileDetailView: View {
             Divider()
             HStack {
                 Text(L10n.format("Writes the [profiles.%@] table in ~/.codex/config.toml", zhHans: "写入 ~/.codex/config.toml 的 [profiles.%@] 段", name.isEmpty ? "…" : name))
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)

@@ -717,12 +717,12 @@ struct SourceLogoTile: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.brand))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        Theme.tileBorder,
                         lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(SourceBadge(source: source, size: size * 0.55))
     }
@@ -1696,7 +1696,7 @@ struct ScopeBadge: View {
     let isGlobal: Bool
 
     var body: some View {
-        let tint = isGlobal ? Theme.brand : Theme.gold
+        let tint = isGlobal ? Theme.brandFg : Theme.textSecondary
         Text(isGlobal
             ? L10n.text("Global", zhHans: "全局")
             : L10n.text("Project", zhHans: "项目"))
@@ -1782,17 +1782,17 @@ struct MonogramTile: View {
     var body: some View {
         let hard = ThemeStyle.current.isHardEdged
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.brand))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        hard ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        Theme.tileBorder,
                         lineWidth: hard ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Text(Self.initials(of: name))
                     .font(Theme.font.themedMono(size * 0.4, .bold))
-                    .foregroundStyle(Theme.brandFg))
+                    .foregroundStyle(Theme.textSecondary))
             .overlay(alignment: .bottomTrailing) {
                 if let source {
                     let badge = max(14, (size * 0.5).rounded())
@@ -1820,13 +1820,14 @@ struct RoleTag: View {
     let role: AgentRole
 
     var body: some View {
-        let color = Theme.roleColor(role)
+        // Role is a guess from the agent's name, so it gets no color of its own:
+        // the colour budget keeps hue for state (toggle) and selection only.
         Text(role.displayName)
             .font(Theme.font.themed(9.5, .medium))
-            .foregroundStyle(color)
+            .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
-            .background(Capsule().fill(color.opacity(0.14)))
+            .background(Capsule().fill(Theme.surfaceSecondary))
     }
 }
 

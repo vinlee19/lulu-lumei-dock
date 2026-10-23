@@ -477,7 +477,7 @@ struct MCPToolRowView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(tool.name)
-                    .font(Theme.font.monoSkillName(11, weight: .medium))
+                    .font(Theme.font.themed(11, .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if let title = tool.title, !title.isEmpty, title != tool.name {
@@ -545,7 +545,7 @@ struct MCPNamedRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.name)
-                .font(Theme.font.monoSkillName(11, weight: .medium))
+                .font(Theme.font.themed(11, .medium))
                 .foregroundStyle(.primary)
             if let desc = item.description, !desc.isEmpty {
                 Text(mcpFlatDescription(desc))
@@ -616,17 +616,17 @@ struct MCPIconTile: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.brand))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        Theme.tileBorder,
                         lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Image(systemName: ToolKind.mcp.icon)
                     .font(Theme.font.themed(size * 0.42, .medium))
-                    .foregroundStyle(Theme.brandFg))
+                    .foregroundStyle(Theme.textSecondary))
     }
 }
 
@@ -702,17 +702,17 @@ private struct MCPRow: View {
                                     : L10n.format("Last probe: %@", zhHans: "上次检测：%@", String(snapshot.label)))
                         }
                         Text(entry.name)
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .foregroundStyle(entry.enabled != false ? .primary : .secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .layoutPriority(1)
                         TagChip(entry.transport, neutral: true)
                         if let project = entry.projectName {
-                            TagChip(project)
+                            TagChip(project, neutral: true)
                         }
                         if entry.enabled == false {
-                            TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
+                            TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                         }
                     }
                     if let summary = entry.commandSummary ?? entry.urlSummary {
@@ -797,14 +797,14 @@ private struct MCPCard: View {
                     MonogramTile(name: entry.name, source: entry.source, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(entry.name)
-                            .font(Theme.font.monoSkillName(13))
+                            .font(Theme.font.themed(13, .semibold))
                             .foregroundStyle(entry.enabled != false ? .primary : .secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         HStack(spacing: 5) {
                             TagChip(entry.transport, neutral: true)
                             if entry.enabled == false {
-                                TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
+                                TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                             }
                         }
                     }
@@ -822,7 +822,7 @@ private struct MCPCard: View {
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
                     if let project = entry.projectName {
-                        TagChip(project)
+                        TagChip(project, neutral: true)
                     }
                     Spacer(minLength: 0)
                     if let summary = mcpCapabilitySummary(toolInfo) {
@@ -928,7 +928,7 @@ private struct MCPDetailView: View {
             .buttonStyle(.borderless)
             MCPIconTile(size: 26)
             Text(serverName)
-                .font(Theme.font.monoSkillName(15, weight: .bold))
+                .font(Theme.font.themed(15, .bold))
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let transport = primary?.transport {
@@ -995,7 +995,7 @@ private struct MCPDetailView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             fieldLabel(label)
             Text(value)
-                .font(Theme.font.monoSkillName(11, weight: .regular))
+                .font(Theme.font.themed(11, .regular))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
@@ -1237,7 +1237,7 @@ private struct MCPDetailView: View {
                     HStack(spacing: 6) {
                         TextField(L10n.text("client_id issued by the authorization server", zhHans: "授权服务器分发的 client_id"), text: $clientIDDraft)
                             .textFieldStyle(.roundedBorder)
-                            .font(Theme.font.monoSkillName(10.5, weight: .regular))
+                            .font(Theme.font.themed(10.5, .regular))
                         Button(L10n.text("Save", zhHans: "保存")) {
                             service.setPreRegisteredClientID(clientIDDraft, for: primary)
                         }
@@ -1496,7 +1496,7 @@ private struct MCPDetailView: View {
                 FlowLayout(spacing: 5, lineSpacing: 5) {
                     ForEach(cache.toolNames, id: \.self) { name in
                         Text(name)
-                            .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                            .font(Theme.font.themed(9.5, .regular))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -1581,7 +1581,7 @@ private struct MCPDetailView: View {
                     FlowLayout(spacing: 5, lineSpacing: 5) {
                         ForEach(activity.topTools, id: \.name) { tool in
                             Text("\(tool.name) · \(tool.count)")
-                                .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                                .font(Theme.font.themed(9.5, .regular))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -1774,7 +1774,7 @@ private struct MCPDetailView: View {
             }
             if !projectRootPath.isEmpty {
                 Text("\(projectRootPath)/.mcp.json")
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
             }
             Toggle(isOn: $projectCursorToo) {
@@ -1850,12 +1850,12 @@ private struct MCPDetailView: View {
                         TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"),
                                 neutral: entry.projectName == nil)
                         if entry.enabled == false {
-                            TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
+                            TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                         }
                         probeChip(for: entry)
                     }
                     Text(entry.configPath)
-                        .font(Theme.font.monoSkillName(9, weight: .regular))
+                        .font(Theme.font.themed(9, .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -2038,7 +2038,7 @@ private struct MCPServerFormView: View {
                 fieldColumn(L10n.text("Name", zhHans: "名称")) {
                     TextField("my-mcp-server", text: $name)
                         .textFieldStyle(.roundedBorder)
-                        .font(Theme.font.monoSkillName(12, weight: .regular))
+                        .font(Theme.font.themed(12, .regular))
                         .disabled(isEditing)  // rename = delete + create (same rule as Codex profiles)
                         .frame(maxWidth: 320)
                 }
@@ -2065,7 +2065,7 @@ private struct MCPServerFormView: View {
                     .buttonStyle(.borderless)
                 Spacer(minLength: 12)
                 Text(footerHint)
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
                     .truncationMode(.middle)
@@ -2102,7 +2102,7 @@ private struct MCPServerFormView: View {
                 Text(entry.source.displayName).font(Theme.font.themed(12, .medium))
                 TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"), neutral: entry.projectName == nil)
                 Text(entry.configPath)
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -2125,12 +2125,12 @@ private struct MCPServerFormView: View {
             fieldColumn("URL") {
                 TextField("https://mcp.example.com/mcp", text: $urlText)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
             }
             fieldColumn(L10n.text("Timeout ms (optional)", zhHans: "超时时间 MS（可选）")) {
                 TextField("30000", text: $timeoutText)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .frame(maxWidth: 200)
             }
             kvDisclosure(L10n.text("Headers (optional)", zhHans: "请求头（可选）"), rows: $headerRows, expanded: $headersExpanded,
@@ -2140,13 +2140,13 @@ private struct MCPServerFormView: View {
             fieldColumn(L10n.text("Command", zhHans: "命令")) {
                 TextField("npx", text: $command)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .frame(maxWidth: 320)
             }
             fieldColumn(L10n.text("Arguments (space-separated)", zhHans: "参数（空格分隔）")) {
                 TextField("-y @modelcontextprotocol/server-memory", text: $argsText)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
             }
             kvDisclosure(L10n.text("Environment (optional)", zhHans: "环境变量（可选）"), rows: $envRows, expanded: $envExpanded,
                          keyPlaceholder: "API_KEY", valuePlaceholder: L10n.text("Value (written only to the target config; Eureka does not keep it)", zhHans: "值（只写入目标配置，Eureka 不保存）"),
@@ -2164,11 +2164,11 @@ private struct MCPServerFormView: View {
                     HStack(spacing: 8) {
                         TextField(keyPlaceholder, text: $row.key)
                             .textFieldStyle(.roundedBorder)
-                            .font(Theme.font.monoSkillName(11.5, weight: .regular))
+                            .font(Theme.font.themed(11.5, .regular))
                             .frame(width: 220)
                         TextField(valuePlaceholder, text: $row.value)
                             .textFieldStyle(.roundedBorder)
-                            .font(Theme.font.monoSkillName(11.5, weight: .regular))
+                            .font(Theme.font.themed(11.5, .regular))
                         Button {
                             rows.wrappedValue.removeAll { $0.id == row.id }
                         } label: {
@@ -2213,7 +2213,7 @@ private struct MCPServerFormView: View {
         fieldColumn(L10n.text("Command, URL, or JSON", zhHans: "命令、URL 或 JSON")) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $quickText)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .frame(minHeight: 140)
                     .scrollContentBackground(.hidden)
                     .padding(6)
@@ -2223,7 +2223,7 @@ private struct MCPServerFormView: View {
                         Text(verbatim: L10n.text("or https://example.com/mcp", zhHans: "或 https://example.com/mcp"))
                         Text(verbatim: L10n.text("or a whole {\"mcpServers\": …} JSON", zhHans: "或整段 {\"mcpServers\": …} JSON"))
                     }
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 12)
                     .padding(.leading, 11)
@@ -2261,7 +2261,7 @@ private struct MCPServerFormView: View {
     private var jsonEditor: some View {
         fieldColumn(L10n.text("JSON (a whole mcpServers object is fine; every server is written to the selected targets)", zhHans: "JSON（支持整段 mcpServers 对象；多个 server 会全部写入所选目标）")) {
             TextEditor(text: $pasteText)
-                .font(Theme.font.monoSkillName(11.5, weight: .regular))
+                .font(Theme.font.themed(11.5, .regular))
                 .frame(minHeight: 220)
                 .scrollContentBackground(.hidden)
                 .padding(6)
@@ -2396,7 +2396,7 @@ private struct MCPServerFormView: View {
                         .compactMap { MCPService.writableTarget(for: $0)?.configURL.path }
                         .sorted()
                         .joined(separator: "\n"))
-                        .font(Theme.font.monoSkillName(9, weight: .regular))
+                        .font(Theme.font.themed(9, .regular))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -2455,7 +2455,7 @@ private struct MCPServerFormView: View {
                 \(projectRootPath)/.mcp.json\(projectCursorToo
                     ? "\n\(projectRootPath)/.cursor/mcp.json" : "")
                 """)
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
             }
             Toggle(isOn: $projectCursorToo) {
