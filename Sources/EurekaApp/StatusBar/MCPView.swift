@@ -219,7 +219,7 @@ struct MCPView: View {
                     distributionTitle: L10n.text("Transport", zhHans: "传输方式"),
                     segments: transportSegments,
                     trailingNote: measuredCapabilityNote)
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: ToolKind.mcp.icon,
                     totalCount: totalCount,

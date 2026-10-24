@@ -148,7 +148,7 @@ struct PromptsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard(counts: counts, sourceCount: sources.count)
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: "text.quote",
                     totalCount: service.totalCount,

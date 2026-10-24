@@ -1845,3 +1845,83 @@ struct ModelChip: View {
             .background(Capsule().fill(Theme.surfaceSecondary))
     }
 }
+
+// MARK: - Source filter as a pop-up menu
+
+/// One button ("Source: All ▾") instead of a row of a dozen chips. Same inputs as
+/// `SourceFilterBar`, so a page swaps one for the other without touching its data. The menu
+/// lists every source with its count and marks the current one; the button shows the chosen
+/// source's logo and name so the active filter is never hidden.
+struct SourceFilterMenu: View {
+    @Binding var selected: AgentSource?
+    let allLabel: String
+    let allIcon: String
+    let totalCount: Int
+    let sources: [AgentSource]
+    let count: (AgentSource) -> Int
+    /// Accepted for drop-in compatibility with `SourceFilterBar`; a menu has one line anyway.
+    var singleLine = false
+
+    private var hard: Bool { ThemeStyle.current.isHardEdged }
+
+    var body: some View {
+        Menu {
+            Button {
+                selected = nil
+            } label: {
+                Label(
+                    L10n.format("%@ · %@", zhHans: "%@ · %@", allLabel, String(totalCount)),
+                    systemImage: selected == nil ? "checkmark" : allIcon)
+            }
+            Divider()
+            ForEach(sources, id: \.self) { source in
+                Button {
+                    selected = source
+                } label: {
+                    if selected == source {
+                        Label(
+                            L10n.format("%@ · %@", zhHans: "%@ · %@", source.displayName, String(count(source))),
+                            systemImage: "checkmark")
+                    } else {
+                        Text(L10n.format("%@ · %@", zhHans: "%@ · %@", source.displayName, String(count(source))))
+                    }
+                }
+            }
+        } label: {
+            // A pull-down label keeps one image and one text; anything else in the HStack is
+            // dropped. So the count and the chevron ride inside a single concatenated Text.
+            HStack(spacing: 6) {
+                if let selected {
+                    SourceBadge(source: selected, size: 14)
+                } else {
+                    Image(systemName: allIcon)
+                        .font(Theme.font.themed(11, .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Text(L10n.text("Source", zhHans: "来源") + "：" + (selected?.displayName ?? allLabel))
+                    .font(Theme.font.themed(12, .medium))
+                    .foregroundColor(.primary)
+                + Text("  " + String(selected.map(count) ?? totalCount))
+                    .font(Theme.font.themedMono(11))
+                    .foregroundColor(Theme.textTertiary)
+                + Text("  ")
+                + Text(Image(systemName: "chevron.down"))
+                    .font(Theme.font.themed(9, .semibold))
+                    .foregroundColor(Theme.textSecondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 11)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                .fill(Theme.surface)
+                .themeControlShadow())
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: hard ? Theme.cardBorderWidth : 0.5))
+        .help(L10n.text("Show only one tool's items", zhHans: "只看某一个工具的条目"))
+    }
+}

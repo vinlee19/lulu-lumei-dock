@@ -100,7 +100,7 @@ struct PlansView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: "list.bullet.clipboard.fill",
                     totalCount: service.totalCount,

@@ -135,7 +135,29 @@ struct SkillDetailPane: View {
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
+            stateControl
+        }
+    }
+
+    /// The one control people reach for most: the switch, with its state written next to it.
+    /// A group with several copies has one switch per copy further down, so it shows the tally.
+    @ViewBuilder private var stateControl: some View {
+        if group.copies.count == 1 {
+            HStack(spacing: 8) {
+                Text(copy.enabled ? L10n.text("Enabled", zhHans: "已启用") : L10n.text("Disabled", zhHans: "已停用"))
+                    .font(Theme.font.themed(12, .medium))
+                    .foregroundStyle(copy.enabled ? .primary : Theme.textSecondary)
+                MiniSwitch(isOn: copy.enabled) { service.setSkillEnabled(copy, !copy.enabled) }
+            }
+            .help(copy.enabled
+                ? L10n.text("Turn off: the tool stops reading this skill, the files stay", zhHans: "关掉后工具不再读取这个技能，文件仍保留")
+                : L10n.text("Turn on: the tool uses this skill again", zhHans: "打开后工具会重新使用这个技能"))
+        } else {
+            Text(L10n.format("%1$@ of %2$@ copies on", zhHans: "%2$@ 份里 %1$@ 份已启用",
+                             String(group.enabledCount), String(group.copies.count)))
+                .font(Theme.font.themed(12, .medium))
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -189,24 +211,66 @@ struct SkillDetailPane: View {
                            String(group.enabledCount), String(total))
     }
 
+    /// Three things, each saying what it does: edit the text here, open it in the editor,
+    /// everything else behind "More". Enable / disable lives on the switch in the header.
     private var actions: some View {
-        FlowLayout(spacing: 8, lineSpacing: 8) {
-            PaneButton(L10n.text("Open SKILL.md", zhHans: "打开 SKILL.md"), kind: .primary) {
+        FlowLayout(spacing: 10, lineSpacing: 10) {
+            PaneButton(L10n.text("Edit the text", zhHans: "编辑说明"), icon: "pencil", kind: .primary) {
+                draft = text
+                expanded = true
+                editing = true
+            }
+            .help(L10n.text("Edit SKILL.md right here, below", zhHans: "在下面直接修改 SKILL.md"))
+            PaneButton(L10n.text("Open in editor", zhHans: "用编辑器打开"), icon: "arrow.up.forward.app") {
                 service.openInEditor(path: copy.path)
             }
-            PaneButton(L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) {
+            .help(L10n.text("Open SKILL.md in your default editor", zhHans: "用系统默认编辑器打开 SKILL.md"))
+            moreMenu
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button {
                 service.reveal(path: copy.path)
-            }
-            if !unconfigured.isEmpty { installMenu(compact: false) }
-            if group.copies.count == 1 {
-                PaneButton(copy.enabled
-                    ? L10n.text("Disable", zhHans: "停用")
-                    : L10n.text("Enable", zhHans: "启用")) {
-                    service.setSkillEnabled(copy, !copy.enabled)
+            } label: { Label(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") }
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(copy.directory, forType: .string)
+            } label: { Label(L10n.text("Copy folder path", zhHans: "复制目录路径"), systemImage: "doc.on.doc") }
+            if !unconfigured.isEmpty {
+                Divider()
+                Menu {
+                    ForEach(unconfigured, id: \.self) { source in
+                        Button(source.displayName) { installTarget = source }
+                    }
+                } label: {
+                    Label(L10n.text("Install to another tool", zhHans: "安装到其他工具"), systemImage: "square.and.arrow.down")
                 }
             }
-            PaneButton(L10n.text("Delete…", zhHans: "删除…"), kind: .quiet) { onDelete(copy) }
+            Divider()
+            Button(role: .destructive) {
+                onDelete(copy)
+            } label: { Label(L10n.text("Move to Trash…", zhHans: "移到废纸篓…"), systemImage: "trash") }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "ellipsis").font(Theme.font.themed(12, .semibold))
+                Text(L10n.text("More", zhHans: "更多")).font(Theme.font.themed(12.5))
+            }
+            .foregroundStyle(.primary)
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 13)
+        .frame(height: 30)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                .fill(Theme.surface)
+                .themeControlShadow())
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: hard ? Theme.cardBorderWidth : 0.5))
     }
 
     /// The chrome sits on the `Menu` itself, not inside its label: SwiftUI's pull-down
@@ -217,14 +281,17 @@ struct SkillDetailPane: View {
                 Button(source.displayName) { installTarget = source }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text(compact
-                    ? L10n.text("Install…", zhHans: "安装到…")
-                    : L10n.text("Install to other tools", zhHans: "安装到其他工具"))
-                    .font(Theme.font.themed(compact ? 11 : 12))
-                Image(systemName: "chevron.down").font(Theme.font.themed(9, .semibold))
-            }
-            .foregroundStyle(.primary)
+            // One concatenated Text: a pull-down label would otherwise move the chevron in
+            // front of the title (it keeps only "icon + title").
+            Text(compact
+                ? L10n.text("Install…", zhHans: "安装到…")
+                : L10n.text("Install to other tools", zhHans: "安装到其他工具"))
+                .font(Theme.font.themed(compact ? 11 : 12))
+                .foregroundColor(.primary)
+            + Text("  ")
+            + Text(Image(systemName: "chevron.down"))
+                .font(Theme.font.themed(9, .semibold))
+                .foregroundColor(Theme.textSecondary)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -270,11 +337,6 @@ struct SkillDetailPane: View {
                     PaneButton(L10n.text("Cancel", zhHans: "取消"), small: true) {
                         draft = text
                         editing = false
-                    }
-                } else {
-                    PaneButton(L10n.text("Edit here", zhHans: "在这里修改"), small: true) {
-                        draft = text
-                        editing = true
                     }
                 }
             }
@@ -627,12 +689,15 @@ enum PaneButtonKind { case primary, normal, quiet }
 /// the card border; quiet = text only. Brutal adds the ink outline and the hard shadow.
 struct PaneButton: View {
     let title: String
+    var icon: String?
     var kind: PaneButtonKind = .normal
     var small = false
     let action: () -> Void
 
-    init(_ title: String, kind: PaneButtonKind = .normal, small: Bool = false, action: @escaping () -> Void) {
+    init(_ title: String, icon: String? = nil, kind: PaneButtonKind = .normal, small: Bool = false,
+         action: @escaping () -> Void) {
         self.title = title
+        self.icon = icon
         self.kind = kind
         self.small = small
         self.action = action
@@ -640,7 +705,7 @@ struct PaneButton: View {
 
     var body: some View {
         Button(action: action) {
-            PaneButtonLabel(title, kind: kind, small: small)
+            PaneButtonLabel(title, icon: icon, kind: kind, small: small)
         }
         .buttonStyle(.plain)
     }
@@ -648,12 +713,15 @@ struct PaneButton: View {
 
 struct PaneButtonLabel: View {
     let title: String
+    var icon: String?
     var kind: PaneButtonKind = .normal
     var chevron = false
     var small = false
 
-    init(_ title: String, kind: PaneButtonKind = .normal, chevron: Bool = false, small: Bool = false) {
+    init(_ title: String, icon: String? = nil, kind: PaneButtonKind = .normal, chevron: Bool = false,
+         small: Bool = false) {
         self.title = title
+        self.icon = icon
         self.kind = kind
         self.chevron = chevron
         self.small = small
@@ -662,15 +730,18 @@ struct PaneButtonLabel: View {
     private var hard: Bool { ThemeStyle.current.isHardEdged }
 
     var body: some View {
-        HStack(spacing: 5) {
-            Text(title).font(Theme.font.themed(small ? 11 : 12, kind == .primary ? .medium : .regular))
+        HStack(spacing: 6) {
+            if let icon {
+                Image(systemName: icon).font(Theme.font.themed(small ? 10 : 11.5, .semibold))
+            }
+            Text(title).font(Theme.font.themed(small ? 11 : 12.5, kind == .primary ? .medium : .regular))
             if chevron {
                 Image(systemName: "chevron.down").font(Theme.font.themed(9, .semibold))
             }
         }
         .foregroundStyle(foreground)
-        .padding(.horizontal, small ? 9 : 11)
-        .frame(height: small ? 24 : 28)
+        .padding(.horizontal, small ? 9 : 13)
+        .frame(height: small ? 24 : 30)
         // The hard (zero-blur) brutal shadow goes on the shape layer only; on a view
         // that contains text it double-prints the glyphs.
         .background(

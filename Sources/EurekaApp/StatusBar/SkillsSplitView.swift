@@ -27,7 +27,8 @@ struct SkillsSplitView: View {
     @State private var seeded = false
 
     static let listWidth: CGFloat = 396
-    static let splitThreshold: CGFloat = 760
+    // The detail pane needs ~480pt to read comfortably: 396 (list) + 12 (gap) + 480.
+    static let splitThreshold: CGFloat = 900
 
     // MARK: - Derived data
 
@@ -127,11 +128,14 @@ struct SkillsSplitView: View {
                         .font(Theme.font.themed(11))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
-                    SkillSourceFilter(
+                    SourceFilterMenu(
                         selected: $selectedSource,
-                        total: service.skills.count,
-                        sources: sourceCounts)
+                        allLabel: L10n.text("All", zhHans: "全部"), allIcon: "sparkles",
+                        totalCount: service.skills.count,
+                        sources: sourceCounts.map(\.source),
+                        count: { source in sourceCounts.first { $0.source == source }?.count ?? 0 })
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
                 .padding(.bottom, 9)
@@ -421,57 +425,6 @@ struct SkillGroupRow: View {
 
     private var nameColor: Color { isSelected && hard ? Theme.onBrand : .primary }
     private var metaColor: Color { isSelected && hard ? Theme.onBrand.opacity(0.75) : Theme.textSecondary }
-}
-
-// MARK: - Source filter
-
-/// "All" plus one chip per source (logo + count), most copies first.
-struct SkillSourceFilter: View {
-    @Binding var selected: AgentSource?
-    let total: Int
-    let sources: [(source: AgentSource, count: Int)]
-
-    var body: some View {
-        FlowLayout(spacing: 5, lineSpacing: 5) {
-            chip(source: nil, count: total)
-            ForEach(sources, id: \.source) { item in
-                chip(source: item.source, count: item.count)
-            }
-        }
-    }
-
-    private func chip(source: AgentSource?, count: Int) -> some View {
-        let isOn = selected == source
-        let hard = ThemeStyle.current.isHardEdged
-        return Button {
-            withAnimation(.easeOut(duration: 0.12)) { selected = source }
-        } label: {
-            HStack(spacing: 5) {
-                if let source {
-                    SourceBadge(source: source, size: 14)
-                } else {
-                    Text(L10n.text("All", zhHans: "全部"))
-                        .font(Theme.font.themed(10.5, .medium))
-                }
-                Text(String(count))
-                    .font(Theme.font.themedMono(10.5))
-            }
-            .foregroundStyle(isOn ? (hard ? Theme.onBrand : .primary) : Theme.textSecondary)
-            .padding(.horizontal, 7)
-            .frame(height: 24)
-            .background(
-                RoundedRectangle(cornerRadius: hard ? 4 : 12, style: .continuous)
-                    .fill(isOn ? (hard ? Theme.brand : Theme.brandFill(0.14)) : Theme.surface))
-            .overlay(
-                RoundedRectangle(cornerRadius: hard ? 4 : 12, style: .continuous)
-                    .strokeBorder(
-                        isOn && !hard ? Theme.brand.opacity(0.5) : Theme.cardBorder,
-                        lineWidth: hard ? Theme.cardBorderWidth : 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: hard ? 4 : 12))
-        }
-        .buttonStyle(.plain)
-        .help(source?.displayName ?? L10n.text("All sources", zhHans: "全部来源"))
-    }
 }
 
 // MARK: - Top-bar actions (New skill ▾ · ⋯)
