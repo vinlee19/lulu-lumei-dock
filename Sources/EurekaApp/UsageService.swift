@@ -62,6 +62,8 @@ final class UsageService: ObservableObject {
     }
     /// Top skill ranking (Skills page analysis card, filtered by the selected time period)
     @Published private(set) var skillRanking: [ToolCallsRepo.SkillUsageStat] = []
+    /// Calls per day across all skills, for the Skills overview trend
+    @Published private(set) var skillDailyTotals: [SkillDayCount] = []
     /// All-time subagent call stats (Agents page "called N times"; kind='agent', data from
     /// Claude/Kimi)
     @Published private(set) var agentStats: [ToolCallsRepo.SkillUsageStat] = []
@@ -715,6 +717,16 @@ final class UsageService: ObservableObject {
                 source: source, kind: "skill", name: name, from: from, to: to)) ?? []
             let points = series.map { SkillDayCount(day: $0.day, count: $0.count) }
             DispatchQueue.main.async { completion(points) }
+        }
+    }
+
+    /// Calls per day across all skills (the Skills overview trend); published on the main thread
+    func loadSkillDailyTotals(from: Date, to: Date) {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
+            let series = (try? store.toolCalls.dailyTotals(kind: "skill", from: from, to: to)) ?? []
+            let points = series.map { SkillDayCount(day: $0.day, count: $0.count) }
+            self.publish { $0.skillDailyTotals = points }
         }
     }
 

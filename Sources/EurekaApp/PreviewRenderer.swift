@@ -389,6 +389,10 @@ enum PreviewRenderer {
         // The Skills overview card's "hits this week" reads the ranking; without it the preview
         // always shows 0
         usage.loadSkillRanking(from: UsageService.DashboardPeriod.week.startDate, to: Date())
+        // The Skills overview reads the 30-day ranking and the per-day totals
+        let overviewFrom = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        usage.loadSkillRanking(from: overviewFrom, to: Date())
+        usage.loadSkillDailyTotals(from: overviewFrom, to: Date())
 
         // Wait for all three scans to finish (the CLI has no main runloop → pump manually; the
         // first full session parse may take minutes, capped at 300s)
@@ -438,16 +442,32 @@ enum PreviewRenderer {
         snap("knowledge-plans-list", PlansView(service: plans, initialLayout: .list))
         snap("knowledge-plans-cards", PlansView(service: plans, initialLayout: .cards))
         snap("knowledge-plans-cards-wide", PlansView(service: plans, initialLayout: .cards), width: 1270)
-        // Skills shell: narrow (list only), narrow with the detail pushed, the minimum
-        // window width, the wide split, and the wide split in dark mode.
+        // Skills shell: narrow (list only), narrow with the overview pushed, the minimum
+        // window width, the wide split (overview by default, then one skill selected), and
+        // the wide split in dark mode. The selected skill is the most-used one that is still
+        // installed, so the detail shows a usage chart; failing that, the first group.
+        let skillGroups = SkillGrouping.groups(skillMemory.skills, usage: [:])
+        let firstSkillKey = usage.skillRanking.lazy
+            .compactMap { stat in
+                skillGroups.first {
+                    $0.key == SkillMemoryIndexer.normalizeSkillName(stat.name)
+                        && $0.sources.contains(stat.source)
+                }
+            }
+            .first?.key ?? skillGroups.first?.key
         snap("knowledge-skills", SkillsSplitView(service: skillMemory, usageService: usage))
         snap("knowledge-skills-detail",
-             SkillsSplitView(service: skillMemory, usageService: usage, initialPushDetail: true))
+             SkillsSplitView(service: skillMemory, usageService: usage,
+                             initialSelectionKey: firstSkillKey, initialPushDetail: true))
         snap("knowledge-skills-min", SkillsSplitView(service: skillMemory, usageService: usage),
              width: 675)
         snap("knowledge-skills-wide", SkillsSplitView(service: skillMemory, usageService: usage),
              width: 1270)
-        snap("knowledge-skills-wide-dark", SkillsSplitView(service: skillMemory, usageService: usage),
+        snap("knowledge-skills-wide-detail",
+             SkillsSplitView(service: skillMemory, usageService: usage, initialSelectionKey: firstSkillKey),
+             width: 1270)
+        snap("knowledge-skills-wide-dark",
+             SkillsSplitView(service: skillMemory, usageService: usage, initialSelectionKey: firstSkillKey),
              dark: true, width: 1270)
         snap("knowledge-memory-list",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,

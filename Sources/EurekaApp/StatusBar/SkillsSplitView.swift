@@ -55,8 +55,9 @@ struct SkillsSplitView: View {
     private var sections: [SkillSection] { SkillGrouping.sections(groups, now: Date()) }
     private var orderedGroups: [SkillGroup] { sections.flatMap(\.groups) }
 
+    /// nil = the module overview (the default landing); a key = that skill's detail.
     private var selectedGroup: SkillGroup? {
-        orderedGroups.first { $0.key == selectedKey } ?? orderedGroups.first
+        orderedGroups.first { $0.key == selectedKey }
     }
 
     /// Sources with at least one copy, most copies first (filter chips).
@@ -79,7 +80,7 @@ struct SkillsSplitView: View {
                         listPane.frame(width: Self.listWidth)
                         detailPane(wide: true).frame(maxWidth: .infinity)
                     }
-                } else if detailPushed, selectedGroup != nil {
+                } else if detailPushed {
                     detailPane(wide: false)
                 } else {
                     listPane
@@ -92,6 +93,10 @@ struct SkillsSplitView: View {
         .onAppear {
             service.refresh()
             usageService.loadSkillStats()
+            // 30-day ranking feeds the overview's top list.
+            let now = Date()
+            usageService.loadSkillRanking(
+                source: nil, from: Calendar.current.date(byAdding: .day, value: -30, to: now) ?? now, to: now)
             if !seeded {
                 seeded = true
                 if let key = initialSelectionKey { selectedKey = key }
@@ -178,6 +183,8 @@ struct SkillsSplitView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
+                    SkillsOverviewRow(isSelected: selectedKey == nil) { selectOverview() }
+                        .id("__overview__")
                     ForEach(sections) { section in
                         sectionHeader(section)
                         ForEach(section.groups) { group in
@@ -253,17 +260,10 @@ struct SkillsSplitView: View {
                 onDelete: { deleting = $0 })
                 .id(group.key + "|" + (focusedCopyPath ?? ""))
         } else {
-            KnowledgePane {
-                VStack(spacing: 6) {
-                    Text(L10n.text("Select a skill to see what it does, how often it ran and where it is installed.",
-                                   zhHans: "选择一个技能，查看它做什么、用过多少次、装在哪里。"))
-                        .font(Theme.font.themed(12))
-                        .foregroundStyle(Theme.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            SkillsOverviewPane(
+                groups: allGroups, service: service, usageService: usageService,
+                onBack: wide ? nil : { withAnimation(.easeOut(duration: 0.15)) { detailPushed = false } },
+                onSelect: { select($0) })
         }
     }
 
@@ -277,18 +277,26 @@ struct SkillsSplitView: View {
         }
     }
 
+    private func selectOverview() {
+        focusedCopyPath = nil
+        withAnimation(.easeOut(duration: 0.15)) {
+            selectedKey = nil
+            detailPushed = true
+        }
+    }
+
+    /// ↑ / ↓ walk the overview row and then the groups in list order.
     private func move(_ direction: MoveCommandDirection) {
         let list = orderedGroups
-        guard !list.isEmpty else { return }
-        let current = list.firstIndex { $0.key == selectedGroup?.key } ?? 0
+        let current = list.firstIndex { $0.key == selectedKey }.map { $0 + 1 } ?? 0
         let next: Int
         switch direction {
         case .up: next = max(0, current - 1)
-        case .down: next = min(list.count - 1, current + 1)
+        case .down: next = min(list.count, current + 1)
         default: return
         }
         focusedCopyPath = nil
-        selectedKey = list[next].key
+        selectedKey = next == 0 ? nil : list[next - 1].key
     }
 
     /// Deep-link landing (⌘K, "related skill" jumps): select the group that owns the
@@ -520,5 +528,59 @@ struct SkillsToolbarActions: View {
                 creating = nil
             }
         }
+    }
+}
+
+// MARK: - Overview row (pinned above the sections)
+
+/// First row of the list: the module overview. Selected when nothing else is.
+struct SkillsOverviewRow: View {
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    @State private var hovering = false
+    private var hard: Bool { ThemeStyle.current.isHardEdged }
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: Theme.radius.tile, style: .continuous)
+                    .fill(isSelected && !hard ? Theme.brand : Theme.tileBackground)
+                    .frame(width: 28, height: 28)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.radius.tile, style: .continuous)
+                            .strokeBorder(Theme.tileBorder, lineWidth: hard ? Theme.cardBorderWidth : 0.5))
+                    .overlay(
+                        Image(systemName: "chart.bar.xaxis")
+                            .font(Theme.font.themed(13, .semibold))
+                            .foregroundStyle(isSelected && !hard ? Theme.onBrand : Theme.textSecondary))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.text("Overview", zhHans: "概览"))
+                        .font(Theme.font.themed(12.5, .medium))
+                        .foregroundStyle(isSelected && hard ? Theme.onBrand : .primary)
+                    Text(L10n.text("Numbers, 30-day trend, what needs attention", zhHans: "数字、30 天趋势、需要处理的事"))
+                        .font(Theme.font.themed(10.5))
+                        .foregroundStyle(isSelected && hard ? Theme.onBrand.opacity(0.75) : Theme.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 46)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(isSelected ? (hard ? Theme.brand : Theme.brandFill(0.14))
+                        : (hovering ? Color.primary.opacity(0.04) : .clear)))
+            .overlay(
+                Group {
+                    if isSelected, let outline = Theme.controlOutline {
+                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                            .strokeBorder(outline.color, lineWidth: outline.width)
+                    }
+                })
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
