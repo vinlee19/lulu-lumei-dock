@@ -30,6 +30,8 @@ struct SkillDetailPane: View {
     @State private var recentSessions: [(sessionId: String, lastTs: Date, count: Int)] = []
     @State private var installTarget: AgentSource?
     @State private var installNote: String?
+    @State private var showMore = false
+    @State private var showInstall = false
     @State private var sessionIndexVersion = 0
 
     private var hard: Bool { ThemeStyle.current.isHardEdged }
@@ -230,81 +232,64 @@ struct SkillDetailPane: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            Button {
-                service.reveal(path: copy.path)
-            } label: { Label(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") }
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(copy.directory, forType: .string)
-            } label: { Label(L10n.text("Copy folder path", zhHans: "复制目录路径"), systemImage: "doc.on.doc") }
-            if !unconfigured.isEmpty {
-                Divider()
-                Menu {
-                    ForEach(unconfigured, id: \.self) { source in
-                        Button(source.displayName) { installTarget = source }
-                    }
-                } label: {
-                    Label(L10n.text("Install to another tool", zhHans: "安装到其他工具"), systemImage: "square.and.arrow.down")
-                }
-            }
-            Divider()
-            Button(role: .destructive) {
-                onDelete(copy)
-            } label: { Label(L10n.text("Move to Trash…", zhHans: "移到废纸篓…"), systemImage: "trash") }
+        Button {
+            showMore.toggle()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "ellipsis").font(Theme.font.themed(12, .semibold))
                 Text(L10n.text("More", zhHans: "更多")).font(Theme.font.themed(12.5))
             }
             .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome(height: 30, horizontalPadding: 13))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .padding(.horizontal, 13)
-        .frame(height: 30)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                .fill(Theme.surface)
-                .themeControlShadow())
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: hard ? Theme.cardBorderWidth : 0.5))
+        .buttonStyle(.plain)
+        .popover(isPresented: $showMore, arrowEdge: .bottom) {
+            PopupList {
+                PopupRow(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") {
+                    showMore = false
+                    service.reveal(path: copy.path)
+                }
+                PopupRow(L10n.text("Copy folder path", zhHans: "复制目录路径"), systemImage: "doc.on.doc") {
+                    showMore = false
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(copy.directory, forType: .string)
+                }
+                Divider().padding(.vertical, 3)
+                PopupRow(L10n.text("Move to Trash…", zhHans: "移到废纸篓…"), systemImage: "trash", destructive: true) {
+                    showMore = false
+                    onDelete(copy)
+                }
+            }
+        }
     }
 
-    /// The chrome sits on the `Menu` itself, not inside its label: SwiftUI's pull-down
-    /// label strips backgrounds and overlays, so a styled label renders as bare text.
+    /// Pop-up of the tools that do not have this skill yet; picking one asks before copying.
     private func installMenu(compact: Bool) -> some View {
-        Menu {
-            ForEach(unconfigured, id: \.self) { source in
-                Button(source.displayName) { installTarget = source }
-            }
+        Button {
+            showInstall.toggle()
         } label: {
-            // One concatenated Text: a pull-down label would otherwise move the chevron in
-            // front of the title (it keeps only "icon + title").
-            Text(compact
-                ? L10n.text("Install…", zhHans: "安装到…")
-                : L10n.text("Install to other tools", zhHans: "安装到其他工具"))
-                .font(Theme.font.themed(compact ? 11 : 12))
-                .foregroundColor(.primary)
-            + Text("  ")
-            + Text(Image(systemName: "chevron.down"))
-                .font(Theme.font.themed(9, .semibold))
-                .foregroundColor(Theme.textSecondary)
+            HStack(spacing: 5) {
+                Text(compact
+                    ? L10n.text("Install…", zhHans: "安装到…")
+                    : L10n.text("Install to other tools", zhHans: "安装到其他工具"))
+                    .font(Theme.font.themed(compact ? 11 : 12))
+                Image(systemName: "chevron.down").font(Theme.font.themed(9, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome(height: compact ? 24 : 28, horizontalPadding: compact ? 9 : 11))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .padding(.horizontal, compact ? 9 : 11)
-        .frame(height: compact ? 24 : 28)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                .fill(Theme.surface)
-                .themeControlShadow())
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: hard ? Theme.cardBorderWidth : 0.5))
+        .buttonStyle(.plain)
+        .popover(isPresented: $showInstall, arrowEdge: .bottom) {
+            PopupList(title: L10n.text("Copy this skill to", zhHans: "把这个技能复制到")) {
+                ForEach(unconfigured, id: \.self) { source in
+                    PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {
+                        showInstall = false
+                        installTarget = source
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Sections

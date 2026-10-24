@@ -1846,10 +1846,111 @@ struct ModelChip: View {
     }
 }
 
-// MARK: - Source filter as a pop-up menu
+// MARK: - Themed pop-up lists (replace system menus, which ignore the style)
+
+/// Container for a themed pop-up: an optional caption and rows built from `PopupRow`, shown in a
+/// `.popover` from the triggering button. The NSPopover frame itself stays system-drawn (same
+/// trade-off as the AI summary executor picker); rows, fonts and colors follow `Theme`.
+struct PopupList<Content: View>: View {
+    var title: String? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let title {
+                Text(title)
+                    .font(Theme.font.themed(9.5, .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.bottom, 2)
+            }
+            content
+        }
+        .padding(6)
+        .frame(minWidth: 210, maxWidth: 300, alignment: .leading)
+    }
+}
+
+/// One row of a themed pop-up: leading glyph (logo or SF Symbol), title, optional trailing count
+/// and a check on the current choice. Destructive rows read in the failure red.
+struct PopupRow<Leading: View>: View {
+    let title: String
+    var trailing: String? = nil
+    var selected = false
+    var destructive = false
+    @ViewBuilder var leading: () -> Leading
+    let action: () -> Void
+
+    init(_ title: String, trailing: String? = nil, selected: Bool = false, destructive: Bool = false,
+         @ViewBuilder leading: @escaping () -> Leading, action: @escaping () -> Void) {
+        self.title = title
+        self.trailing = trailing
+        self.selected = selected
+        self.destructive = destructive
+        self.leading = leading
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                leading().frame(width: 16, height: 16)
+                Text(title)
+                    .font(Theme.font.themed(11.5, selected ? .medium : .regular))
+                    .lineLimit(1)
+                Spacer(minLength: 12)
+                if let trailing {
+                    Text(trailing)
+                        .font(Theme.font.themedMono(10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(Theme.font.themed(10, .semibold))
+                        .foregroundStyle(Theme.brandFg)
+                }
+            }
+            .foregroundStyle(destructive ? Theme.failureRed : .primary)
+            .modifier(PickerRowChrome(selected: selected))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension PopupRow where Leading == Image {
+    /// Row with an SF Symbol glyph.
+    init(_ title: String, systemImage: String, trailing: String? = nil, selected: Bool = false,
+         destructive: Bool = false, action: @escaping () -> Void) {
+        self.init(title, trailing: trailing, selected: selected, destructive: destructive,
+                  leading: { Image(systemName: systemImage) }, action: action)
+    }
+}
+
+/// The chrome of a pull-down button: surface, card border, brutal hard shadow on the shape only.
+struct PopupButtonChrome: ViewModifier {
+    var height: CGFloat = 28
+    var horizontalPadding: CGFloat = 11
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, horizontalPadding)
+            .frame(height: height)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(Theme.surface)
+                    .themeControlShadow())
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .strokeBorder(Theme.cardBorder,
+                                  lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
+    }
+}
+
+// MARK: - Source filter as a pop-up
 
 /// One button ("Source: All ▾") instead of a row of a dozen chips. Same inputs as
-/// `SourceFilterBar`, so a page swaps one for the other without touching its data. The menu
+/// `SourceFilterBar`, so a page swaps one for the other without touching its data. The pop-up
 /// lists every source with its count and marks the current one; the button shows the chosen
 /// source's logo and name so the active filter is never hidden.
 struct SourceFilterMenu: View {
@@ -1859,37 +1960,15 @@ struct SourceFilterMenu: View {
     let totalCount: Int
     let sources: [AgentSource]
     let count: (AgentSource) -> Int
-    /// Accepted for drop-in compatibility with `SourceFilterBar`; a menu has one line anyway.
+    /// Accepted for drop-in compatibility with `SourceFilterBar`; a pop-up has one line anyway.
     var singleLine = false
 
-    private var hard: Bool { ThemeStyle.current.isHardEdged }
+    @State private var showing = false
 
     var body: some View {
-        Menu {
-            Button {
-                selected = nil
-            } label: {
-                Label(
-                    L10n.format("%@ · %@", zhHans: "%@ · %@", allLabel, String(totalCount)),
-                    systemImage: selected == nil ? "checkmark" : allIcon)
-            }
-            Divider()
-            ForEach(sources, id: \.self) { source in
-                Button {
-                    selected = source
-                } label: {
-                    if selected == source {
-                        Label(
-                            L10n.format("%@ · %@", zhHans: "%@ · %@", source.displayName, String(count(source))),
-                            systemImage: "checkmark")
-                    } else {
-                        Text(L10n.format("%@ · %@", zhHans: "%@ · %@", source.displayName, String(count(source))))
-                    }
-                }
-            }
+        Button {
+            showing.toggle()
         } label: {
-            // A pull-down label keeps one image and one text; anything else in the HStack is
-            // dropped. So the count and the chevron ride inside a single concatenated Text.
             HStack(spacing: 6) {
                 if let selected {
                     SourceBadge(source: selected, size: 14)
@@ -1900,28 +1979,33 @@ struct SourceFilterMenu: View {
                 }
                 Text(L10n.text("Source", zhHans: "来源") + "：" + (selected?.displayName ?? allLabel))
                     .font(Theme.font.themed(12, .medium))
-                    .foregroundColor(.primary)
-                + Text("  " + String(selected.map(count) ?? totalCount))
+                Text(String(selected.map(count) ?? totalCount))
                     .font(Theme.font.themedMono(11))
-                    .foregroundColor(Theme.textTertiary)
-                + Text("  ")
-                + Text(Image(systemName: "chevron.down"))
+                    .foregroundStyle(Theme.textTertiary)
+                Image(systemName: "chevron.down")
                     .font(Theme.font.themed(9, .semibold))
-                    .foregroundColor(Theme.textSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("Show only one tool's items", zhHans: "只看某一个工具的条目"))
+        .popover(isPresented: $showing, arrowEdge: .bottom) {
+            PopupList(title: L10n.text("Show items from", zhHans: "只看来自")) {
+                PopupRow(allLabel, systemImage: allIcon, trailing: String(totalCount), selected: selected == nil) {
+                    selected = nil
+                    showing = false
+                }
+                Divider().padding(.vertical, 3)
+                ForEach(sources, id: \.self) { source in
+                    PopupRow(source.displayName, trailing: String(count(source)), selected: selected == source,
+                             leading: { SourceBadge(source: source, size: 14) }) {
+                        selected = source
+                        showing = false
+                    }
+                }
             }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .padding(.horizontal, 11)
-        .frame(height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                .fill(Theme.surface)
-                .themeControlShadow())
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: hard ? Theme.cardBorderWidth : 0.5))
-        .help(L10n.text("Show only one tool's items", zhHans: "只看某一个工具的条目"))
     }
 }

@@ -408,7 +408,7 @@ struct SkillGroupRow: View {
     private var toolLabel: String {
         let first = group.primary.source.displayName
         if group.sources.count > 1 {
-            // English counts the others ("+ 3 more"); Chinese counts the total ("等 4 个工具").
+        // English counts the others ("+ 3 more"); Chinese counts the total (all N tools).
             return L10n.format("%1$@ + %2$@ more tools", zhHans: "%1$@ 等 %3$@ 个工具",
                                first, String(group.sources.count - 1), String(group.sources.count))
         }
@@ -438,15 +438,13 @@ struct SkillsToolbarActions: View {
 
     @State private var creating: AgentSource?
     @State private var newName = ""
+    @State private var showNew = false
+    @State private var showMore = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Menu {
-                ForEach(AgentSource.allCases, id: \.self) { source in
-                    Button(L10n.format("%@ skill", zhHans: "%@ 技能", source.displayName)) {
-                        creating = source
-                    }
-                }
+            Button {
+                showNew.toggle()
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "plus")
@@ -458,46 +456,52 @@ struct SkillsToolbarActions: View {
                     }
                 }
                 .foregroundStyle(Theme.onBrand)
+                .padding(.horizontal, compact ? 8 : 11)
+                .frame(height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                        .fill(Theme.brand)
+                        .themeControlShadow())
+                .overlay(
+                    Group {
+                        if let outline = Theme.controlOutline {
+                            RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                                .strokeBorder(outline.color, lineWidth: outline.width)
+                        }
+                    })
+                .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            // Chrome on the Menu, not inside its label (the pull-down label drops
-            // backgrounds); hard shadow on the shape layer only (text would ghost).
-            .padding(.horizontal, compact ? 8 : 11)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .fill(Theme.brand)
-                    .themeControlShadow())
-            .overlay(
-                Group {
-                    if let outline = Theme.controlOutline {
-                        RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                            .strokeBorder(outline.color, lineWidth: outline.width)
-                    }
-                })
+            .buttonStyle(.plain)
             .help(L10n.text("New skill", zhHans: "新建技能"))
+            .popover(isPresented: $showNew, arrowEdge: .bottom) {
+                PopupList(title: L10n.text("Create a skill for", zhHans: "给哪个工具新建技能")) {
+                    ForEach(AgentSource.allCases, id: \.self) { source in
+                        PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {
+                            showNew = false
+                            creating = source
+                        }
+                    }
+                }
+            }
 
-            Menu {
-                Button(L10n.text("Rescan", zhHans: "重新扫描")) { service.refresh(force: true) }
+            Button {
+                showMore.toggle()
             } label: {
                 Image(systemName: "ellipsis")
                     .font(Theme.font.themed(12, .semibold))
                     .foregroundStyle(Theme.textSecondary)
+                    .modifier(PopupButtonChrome(height: 28, horizontalPadding: 8))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 28, height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .fill(Theme.surface)
-                    .themeControlShadow())
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
-                    .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
+            .buttonStyle(.plain)
             .help(L10n.text("More", zhHans: "更多"))
+            .popover(isPresented: $showMore, arrowEdge: .bottom) {
+                PopupList {
+                    PopupRow(L10n.text("Rescan skills", zhHans: "重新扫描技能"), systemImage: "arrow.clockwise") {
+                        showMore = false
+                        service.refresh(force: true)
+                    }
+                }
+            }
         }
         .alert(
             L10n.format("New %@ skill", zhHans: "新建 %@ 技能", creating?.displayName ?? ""),
