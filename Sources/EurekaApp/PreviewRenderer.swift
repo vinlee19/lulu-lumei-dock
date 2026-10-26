@@ -570,24 +570,30 @@ enum PreviewRenderer {
              SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
              width: 675)
 
-        // The whole hub as the window shows it: sidebar (one "Knowledge" entry) + type
-        // switcher + the Skills shell. Services not scanned above are constructed idle;
-        // their counts read 0 in the switcher, which is fine for a layout check.
-        let navigation = PopoverNavigation()
-        navigation.tab = .skills
-        let hub = HStack(spacing: 0) {
-            SidebarView(selected: .skills, limitsBadge: ("67%", Theme.gold),
-                        historyBadge: "1.2k", appVersion: "dev", onSelect: { _ in })
-            Divider()
-            KnowledgeHubView(
-                navigation: navigation, skillMemoryService: skillMemory, usageService: usage,
-                sessionBrowser: sessions, plansService: plans,
-                promptsService: PromptsService(sessionBrowser: sessions),
-                agentConfigService: agents, mcpService: mcp)
+        // Both hubs as the window shows them: sidebar (Capabilities + Knowledge entries) +
+        // type switcher + content. Services not scanned above are constructed idle; their
+        // counts read 0 in the switcher, which is fine for a layout check.
+        let prompts = PromptsService(sessionBrowser: sessions)
+        @MainActor func hub(_ tab: PopoverRootView.Tab) -> some View {
+            let navigation = PopoverNavigation()
+            navigation.tab = tab
+            return HStack(spacing: 0) {
+                SidebarView(selected: tab, limitsBadge: ("67%", Theme.gold),
+                            historyBadge: "1.2k", appVersion: "dev", onSelect: { _ in })
+                Divider()
+                KnowledgeHubView(
+                    navigation: navigation, tabs: tab.hubTabs ?? [],
+                    skillMemoryService: skillMemory, usageService: usage,
+                    sessionBrowser: sessions, plansService: plans,
+                    promptsService: prompts,
+                    agentConfigService: agents, mcpService: mcp)
+            }
         }
-        snap("knowledge-hub", hub, width: 1270)
-        snap("knowledge-hub-min", hub, width: 840)
-        snap("knowledge-hub-dark", hub, dark: true, width: 1270)
+        snap("knowledge-hub", hub(.skills), width: 1270)
+        snap("knowledge-hub-min", hub(.skills), width: 840)
+        snap("knowledge-hub-dark", hub(.skills), dark: true, width: 1270)
+        snap("knowledge-hub-mcp", hub(.mcp), width: 1270)
+        snap("knowledge-hub-knowledge", hub(.memory), width: 1270)
     }
 
     /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light

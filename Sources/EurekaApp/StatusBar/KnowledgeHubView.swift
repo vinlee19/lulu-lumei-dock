@@ -1,15 +1,18 @@
 import EurekaKit
 import SwiftUI
 
-/// The knowledge hub: one page for Skills / Memory / Instructions / Plans / Agents / MCP /
-/// Prompts. The sidebar has a single "Knowledge" entry; the type switcher sits in this
+/// One hub page: Capabilities (Skills / MCP / Agents) or Knowledge (Memory / Instructions /
+/// Prompts), chosen by `tabs`. Each has one sidebar entry; the type switcher sits in this
 /// page's top bar and writes straight to `navigation.tab`, so every existing deep link
 /// (`navigation.tab = .memory`, `focusPath`, ⌘K results) keeps working unchanged.
 ///
-/// Skills renders the new list + detail shell (`SkillsSplitView`). The other six types still
-/// render their previous pages inside the hub until they are migrated one by one.
+/// Skills renders the list + detail shell (`SkillsSplitView`) and MCP splits the same way
+/// when wide. The other types still render their previous pages inside the hub until they
+/// are migrated one by one.
 struct KnowledgeHubView: View {
     @ObservedObject var navigation: PopoverNavigation
+    /// The segments of this hub's type switcher (`Tab.capabilityTabs` or `Tab.knowledgeTabs`).
+    let tabs: [PopoverRootView.Tab]
     @ObservedObject var skillMemoryService: SkillMemoryService
     @ObservedObject var usageService: UsageService
     @ObservedObject var sessionBrowser: SessionBrowserService
@@ -34,10 +37,12 @@ struct KnowledgeHubView: View {
 
     private var topBar: some View {
         GeometryReader { geo in
-            let density: BarDensity = geo.size.width >= 1040 ? .full
-                : (geo.size.width >= 760 ? .medium : .compact)
+            // Three segments fit with titles at much narrower widths than seven did.
+            let density: BarDensity = geo.size.width >= 720 ? .full
+                : (geo.size.width >= 560 ? .medium : .compact)
             HStack(spacing: 10) {
                 KnowledgeTypeSegments(
+                    tabs: tabs,
                     selected: Binding(
                         get: { navigation.tab },
                         set: { tab in
@@ -101,8 +106,6 @@ struct KnowledgeHubView: View {
             SkillMemoryView(
                 service: skillMemoryService, mode: .instructions, usageService: usageService,
                 sessionBrowser: sessionBrowser)
-        case .plans:
-            PlansView(service: plansService)
         case .prompts:
             PromptsView(
                 service: promptsService, sessionBrowser: sessionBrowser,
@@ -119,9 +122,10 @@ struct KnowledgeHubView: View {
 
 // MARK: - Type switcher
 
-/// Segmented control over the seven knowledge types: icon + name + count. One accent only:
+/// Segmented control over one hub's types: icon + name + count. One accent only:
 /// the selected segment lifts onto `Theme.surface` (brutal: brand fill with the ink outline).
 struct KnowledgeTypeSegments: View {
+    let tabs: [PopoverRootView.Tab]
     @Binding var selected: PopoverRootView.Tab
     let count: (PopoverRootView.Tab) -> Int?
     var showsTitles = true
@@ -129,7 +133,7 @@ struct KnowledgeTypeSegments: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(PopoverRootView.Tab.knowledgeTabs, id: \.self) { tab in
+            ForEach(tabs, id: \.self) { tab in
                 segment(tab)
             }
         }
