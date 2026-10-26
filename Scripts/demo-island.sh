@@ -70,7 +70,7 @@ step "demo1 再次完成 → 完成卡收起后未读回到 3"
 "$BIN/eureka-relay" inject --event stop --session demo1
 sleep 9
 
-step "现在点一下胶囊：展开新样式的任务列表（空闲会话 3），未读清零；再点岛外收起 → 岛隐藏"
+step "现在点一下胶囊：展开新样式的任务列表（空闲会话 3），未读清零；再点岛外收起 → 回到胶囊，只显示变暗的空闲来源"
 sleep 15
 
 echo ""

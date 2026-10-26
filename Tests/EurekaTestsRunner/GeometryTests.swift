@@ -481,4 +481,19 @@ func islandPillTests(_ t: TestRunner) {
         try expectEqual(
             IslandPill.alert(active: [task("r")], idle: [], unread: IslandUnreadFinished()), nil)
     }
+
+    t.test("胶囊保留：运行中、空闲会话、未读完成任一存在就保留，三者都空才隐藏") {
+        let none = IslandUnreadFinished()
+        var unread = IslandUnreadFinished()
+        unread.add(FinishedTask(
+            source: .claude, sessionId: "f",
+            finishedAt: Date(timeIntervalSince1970: 1000), outcome: .success))
+
+        try expect(IslandPill.isShown(active: [task("r")], idle: [], unread: none))
+        try expect(
+            IslandPill.isShown(active: [], idle: [task("i", .idle)], unread: none),
+            "只剩空闲会话也保留胶囊")
+        try expect(IslandPill.isShown(active: [], idle: [], unread: unread))
+        try expect(!IslandPill.isShown(active: [], idle: [], unread: none))
+    }
 }
