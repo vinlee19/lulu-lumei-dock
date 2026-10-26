@@ -74,19 +74,16 @@ struct MCPView: View {
             usageService.loadMCPStats()
             usageService.loadMCPOverview()
         }
-        .confirmationDialog(
+        .themedConfirm(
             deletingEntry.map {
                 L10n.format("From %@, remove server “%@”? A .bak.eureka backup is kept before writing.", zhHans: "从 %@ 移除 server「%@」？写前会留 .bak.eureka 备份。", String($0.source.displayName), String($0.name))
             } ?? "",
             isPresented: Binding(
                 get: { deletingEntry != nil },
                 set: { if !$0 { deletingEntry = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Remove", zhHans: "移除"), destructive: true
         ) {
-            Button(L10n.text("Remove", zhHans: "移除"), role: .destructive) {
-                if let entry = deletingEntry { service.remove(entry) }
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            if let entry = deletingEntry { service.remove(entry) }
         }
     }
 
@@ -1487,18 +1484,13 @@ private struct MCPDetailView: View {
                     Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
                 }
             }
-            .confirmationDialog(
+            .themedConfirm(
                 L10n.format("Remove “%@” from every config?", zhHans: "从所有配置移除「%@」？", String(serverName)),
                 isPresented: $removeAllConfirm,
-                titleVisibility: .visible
-            ) {
-                Button(L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(entries.count)), role: .destructive) {
-                    runRemoveEverywhere()
-                }
-                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-            } message: {
-                Text(L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(entries.map(\.configPath).joined(separator: "\n"))))
-            }
+                message: L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(entries.map(\.configPath).joined(separator: "\n"))),
+                confirm: L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(entries.count)),
+                destructive: true
+            ) { runRemoveEverywhere() }
         }
         Text(L10n.format("Probed %@", zhHans: "检测于 %@", String(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))))
             .font(Theme.font.themed(9))
@@ -1719,21 +1711,16 @@ private struct MCPDetailView: View {
             }
         }
         .sheet(isPresented: $projectSheet) { projectInstallSheet }
-        .confirmationDialog(
+        .themedConfirm(
             L10n.format("Install into %@?", zhHans: "安装到 %@？", String(installTarget?.displayName ?? "")),
             isPresented: Binding(
                 get: { installTarget != nil },
                 set: { if !$0 { installTarget = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button(L10n.text("Write this agent’s MCP config", zhHans: "写入该 agent 的 MCP 配置")) { runInstall() }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-        } message: {
-            if let target = installTarget,
-               let writable = MCPService.writableTarget(for: target) {
-                Text(L10n.format("The server definition (including secret values, copied only between files on this Mac) will be written to\n%@\nA .bak.eureka backup is kept first.", zhHans: "将把 server 定义（含密钥值，仅本机文件间复制）写入\n%@\n写前会留 .bak.eureka 备份。", String(writable.configURL.path)))
-            }
-        }
+            message: installTarget.flatMap { MCPService.writableTarget(for: $0) }.map { writable in
+                L10n.format("The server definition (including secret values, copied only between files on this Mac) will be written to\n%@\nA .bak.eureka backup is kept first.", zhHans: "将把 server 定义（含密钥值，仅本机文件间复制）写入\n%@\n写前会留 .bak.eureka 备份。", String(writable.configURL.path))
+            },
+            confirm: L10n.text("Write this agent’s MCP config", zhHans: "写入该 agent 的 MCP 配置")
+        ) { runInstall() }
     }
 
     @ViewBuilder

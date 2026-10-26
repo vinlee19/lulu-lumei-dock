@@ -178,6 +178,8 @@ struct PopoverRootView: View {
                 }
                 .transition(.opacity)
             }
+            // Themed confirmations and name prompts, over everything in the window.
+            ThemedDialogHost()
         }
         // The main window is resizable: fill it; the minimum size matches
         // MainWindowController.minSize (so the two don't fight)

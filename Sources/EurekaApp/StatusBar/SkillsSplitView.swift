@@ -106,20 +106,16 @@ struct SkillsSplitView: View {
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .confirmationDialog(
+        .themedConfirm(
             deleting.map {
                 L10n.format(
                     "Delete “%@”? The skill folder moves to the Trash and can be restored.",
                     zhHans: "删除「%@」？技能目录会移入废纸篓，可恢复。", $0.name)
             } ?? "",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let entry = deleting { service.deleteSkill(entry) }
-                deleting = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { deleting = nil }
+            if let entry = deleting { service.deleteSkill(entry) }
         }
     }
 
@@ -511,23 +507,18 @@ struct SkillsToolbarActions: View {
                 }
             }
         }
-        .alert(
+        .themedPrompt(
             L10n.format("New %@ skill", zhHans: "新建 %@ 技能", creating?.displayName ?? ""),
-            isPresented: Binding(get: { creating != nil }, set: { if !$0 { creating = nil } })
-        ) {
-            TextField(L10n.text("Name", zhHans: "名称"), text: $newName)
-            Button(L10n.text("Create", zhHans: "创建")) {
+            isPresented: Binding(get: { creating != nil }, set: { if !$0 { creating = nil } }),
+            text: $newName, placeholder: L10n.text("Name", zhHans: "名称"),
+            confirm: L10n.text("Create", zhHans: "创建"),
+            onConfirm: {
                 if let source = creating, !newName.trimmingCharacters(in: .whitespaces).isEmpty {
                     service.createSkill(source: source, name: newName)
                 }
                 newName = ""
-                creating = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {
-                newName = ""
-                creating = nil
-            }
-        }
+            },
+            onCancel: { newName = "" })
     }
 }
 

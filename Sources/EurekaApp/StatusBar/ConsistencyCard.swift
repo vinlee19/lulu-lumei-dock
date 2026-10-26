@@ -53,7 +53,7 @@ struct ConsistencyCard: View {
                     details(report)
                 }
             }
-            .confirmationDialog(
+            .themedConfirm(
                 L10n.format(
                     "Install %@ skills onto %@?",
                     zhHans: "把 %@ 个技能安装到 %@？",
@@ -61,15 +61,9 @@ struct ConsistencyCard: View {
                 isPresented: Binding(
                     get: { fixGap != nil },
                     set: { if !$0 { fixGap = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button(L10n.text("Copy these skills over", zhHans: "复制这些技能过去")) { runFix() }
-                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-            } message: {
-                if let gap = fixGap {
-                    Text(gap.missing.joined(separator: L10n.text(", ", zhHans: "、")))
-                }
-            }
+                message: fixGap.map { $0.missing.joined(separator: L10n.text(", ", zhHans: "、")) },
+                confirm: L10n.text("Copy these skills over", zhHans: "复制这些技能过去")
+            ) { runFix() }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(

@@ -58,7 +58,7 @@ struct MascotSettingsSection: View {
             syncSelection()
         }
         .onChange(of: settings.mascotPack) { _, _ in syncSelection() }
-        .confirmationDialog(
+        .themedConfirm(
             confirmingDelete.map {
                 L10n.format(
                     "Delete the companion \"%@\"? Its images move to the Trash.",
@@ -66,17 +66,14 @@ struct MascotSettingsSection: View {
             } ?? "",
             isPresented: Binding(
                 get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let info = confirmingDelete {
-                    if settings.mascotPack == info.id {
-                        settings.mascotPack = MascotPackLoader.builtInID
-                    }
-                    library.delete(packID: info.id)
+            if let info = confirmingDelete {
+                if settings.mascotPack == info.id {
+                    settings.mascotPack = MascotPackLoader.builtInID
                 }
+                library.delete(packID: info.id)
             }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 

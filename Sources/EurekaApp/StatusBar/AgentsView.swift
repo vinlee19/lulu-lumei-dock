@@ -60,9 +60,11 @@ struct AgentsView: View {
             service.refresh()
             usageService.loadAgentStats()
         }
-        .alert(createAlertTitle, isPresented: $creatingAgent) {
-            TextField(L10n.text("Name", zhHans: "名称"), text: $newAgentName)
-            Button(L10n.text("Create", zhHans: "创建")) {
+        .themedPrompt(
+            createAlertTitle, isPresented: $creatingAgent,
+            text: $newAgentName, placeholder: L10n.text("Name", zhHans: "名称"),
+            confirm: L10n.text("Create", zhHans: "创建"),
+            onConfirm: {
                 let name = newAgentName.trimmingCharacters(in: .whitespaces)
                 if !name.isEmpty {
                     switch creatingKind {
@@ -73,38 +75,33 @@ struct AgentsView: View {
                     }
                 }
                 newAgentName = ""
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { newAgentName = "" }
-        }
-        .confirmationDialog(
+            },
+            onCancel: { newAgentName = "" })
+        .themedConfirm(
             deletingAgent.map {
                 L10n.format(
                     "Delete agent “%@”? The file moves to the Trash and can be restored.",
                     zhHans: "删除 agent「%@」？文件会移入废纸篓，可恢复。",
                     $0.name)
             } ?? "",
-            isPresented: deletingAgentBinding, titleVisibility: .visible
+            isPresented: deletingAgentBinding,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let a = deletingAgent { service.deleteAgent(a) }
-                detail = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            if let a = deletingAgent { service.deleteAgent(a) }
+            detail = nil
         }
-        .confirmationDialog(
+        .themedConfirm(
             deletingProfile.map {
                 L10n.format(
                     "Delete Codex profile “%@”? This removes that table from config.toml.",
                     zhHans: "删除 Codex profile「%@」？会从 config.toml 移除该段。",
                     $0.name)
             } ?? "",
-            isPresented: deletingProfileBinding, titleVisibility: .visible
+            isPresented: deletingProfileBinding,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let p = deletingProfile { service.deleteProfile(name: p.name) }
-                profileDetail = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            if let p = deletingProfile { service.deleteProfile(name: p.name) }
+            profileDetail = nil
         }
     }
 

@@ -53,19 +53,16 @@ struct PlansView: View {
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .confirmationDialog(
+        .themedConfirm(
             deleting.map { L10n.format("Delete plan “%@”? The file moves to the Trash and can be restored.", zhHans: "删除计划「%@」？文件会移入废纸篓，可恢复。", String($0.title)) } ?? "",
             isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let entry = deleting {
-                    service.delete(entry)
-                    if detail?.id == entry.id { detail = nil }
-                }
+            if let entry = deleting {
+                service.delete(entry)
+                if detail?.id == entry.id { detail = nil }
             }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 

@@ -594,6 +594,30 @@ enum PreviewRenderer {
         snap("knowledge-popups", popups, width: 900)
         snap("knowledge-popups-dark", popups, dark: true, width: 900)
 
+        // Themed dialogs: the window-level host can't be captured with a page alone, so this
+        // draws the two cards it shows (a destructive confirmation and a name prompt) on the dim.
+        let sampleName = Binding.constant("code-reviewer")
+        let dialogs = ZStack {
+            Color.black.opacity(0.28)
+            HStack(alignment: .top, spacing: 28) {
+                ThemedDialogCard(model: ThemedDialogModel(
+                    title: L10n.format(
+                        "Delete agent “%@”? The file moves to the Trash and can be restored.",
+                        zhHans: "删除 agent「%@」？文件会移入废纸篓，可恢复。", "Explore"),
+                    confirmTitle: L10n.text("Delete", zhHans: "删除"), destructive: true,
+                    onConfirm: {}))
+                ThemedDialogCard(model: ThemedDialogModel(
+                    title: L10n.text("New Claude Agent", zhHans: "新建 Claude Agent"),
+                    confirmTitle: L10n.text("Create", zhHans: "创建"),
+                    text: sampleName, placeholder: L10n.text("Name", zhHans: "名称"),
+                    onConfirm: {}))
+            }
+        }
+        snap("knowledge-dialogs", dialogs, width: 900)
+        snap("knowledge-dialogs-dark", dialogs, dark: true, width: 900)
+        snap("knowledge-agents-header",
+             AgentsView(service: agents, usageService: usage, initialLayout: .list), width: 1270)
+
         // Sessions wide/fullscreen + narrow preview to verify header toolbar alignment
         let sessions = SessionBrowserService()
         let settings = AppSettings()

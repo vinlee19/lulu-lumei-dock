@@ -138,19 +138,17 @@ struct SessionsView: View {
         .onChange(of: service.sortMode) { _, newValue in
             settings.sessionSortMode = newValue.rawValue
         }
-        .confirmationDialog(
+        .themedConfirm(
             L10n.format(
                 "Delete the %@ selected sessions? Transcript files move to the Trash and can be restored.",
                 zhHans: "删除选中的 %@ 个会话？transcript 文件会移入废纸篓，可恢复。",
                 String(deletableChecked.count)),
-            isPresented: $confirmingBatchDelete, titleVisibility: .visible
+            isPresented: $confirmingBatchDelete,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                service.deleteSessions(deletableChecked)
-                checkedIds = []
-                multiSelect = false
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            service.deleteSessions(deletableChecked)
+            checkedIds = []
+            multiSelect = false
         }
     }
 

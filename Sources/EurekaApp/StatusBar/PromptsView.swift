@@ -81,19 +81,16 @@ struct PromptsView: View {
         }
         .onChange(of: service.focusId) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .confirmationDialog(
+        .themedConfirm(
             deleting.map { L10n.format("Remove “%@” from Prompts? The source session is not affected.", zhHans: "从 Prompt 库移除「%@」？源会话不受影响。", String($0.title)) } ?? "",
             isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Remove", zhHans: "移除"), destructive: true
         ) {
-            Button(L10n.text("Remove", zhHans: "移除"), role: .destructive) {
-                if let entry = deleting {
-                    service.delete(entry.id)
-                    if detail?.id == entry.id { detail = nil }
-                }
+            if let entry = deleting {
+                service.delete(entry.id)
+                if detail?.id == entry.id { detail = nil }
             }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 

@@ -138,9 +138,11 @@ struct SkillMemoryView: View {
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .alert(L10n.format("New %@", zhHans: "新建%@", creating?.label ?? ""), isPresented: creatingBinding) {
-            TextField(L10n.text("Name", zhHans: "名称"), text: $newName)
-            Button(L10n.text("Create", zhHans: "创建")) {
+        .themedPrompt(
+            L10n.format("New %@", zhHans: "新建%@", creating?.label ?? ""), isPresented: creatingBinding,
+            text: $newName, placeholder: L10n.text("Name", zhHans: "名称"),
+            confirm: L10n.text("Create", zhHans: "创建"),
+            onConfirm: {
                 if let creating, !newName.trimmingCharacters(in: .whitespaces).isEmpty {
                     if creating.isSkill {
                         service.createSkill(source: creating.source, name: newName)
@@ -149,24 +151,21 @@ struct SkillMemoryView: View {
                     }
                 }
                 newName = ""
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { newName = "" }
-        }
-        .confirmationDialog(
+            },
+            onCancel: { newName = "" })
+        .themedConfirm(
             deleting.map {
                 L10n.format(
                     "Delete “%@”? The file moves to the Trash and can be restored.",
                     zhHans: "删除「%@」？文件会移入废纸篓，可恢复。",
                     $0.title)
             } ?? "",
-            isPresented: deletingBinding, titleVisibility: .visible
+            isPresented: deletingBinding,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                deleting?.perform(service)
-                detail = nil
-                memoryDetail = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            deleting?.perform(service)
+            detail = nil
+            memoryDetail = nil
         }
     }
 

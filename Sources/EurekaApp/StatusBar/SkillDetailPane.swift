@@ -92,21 +92,17 @@ struct SkillDetailPane: View {
             sessionBrowser?.objectWillChange.eraseToAnyPublisher()
                 ?? Empty<Void, Never>().eraseToAnyPublisher()
         ) { _ in sessionIndexVersion &+= 1 }
-        .confirmationDialog(
+        .themedConfirm(
             L10n.format("Install to %@?", zhHans: "安装到 %@？", installTarget?.displayName ?? ""),
             isPresented: Binding(get: { installTarget != nil }, set: { if !$0 { installTarget = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button(L10n.text("Copy the skill folder over", zhHans: "复制技能目录过去")) { runInstall() }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { installTarget = nil }
-        } message: {
-            if let target = installTarget {
-                Text(L10n.format(
+            message: installTarget.map { target in
+                L10n.format(
                     "The whole skill folder will be copied to\n%@",
                     zhHans: "将把整个技能目录复制到\n%@",
-                    SkillMemoryService.writableSkillRoot(for: target).path))
-            }
-        }
+                    SkillMemoryService.writableSkillRoot(for: target).path)
+            },
+            confirm: L10n.text("Copy the skill folder over", zhHans: "复制技能目录过去")
+        ) { runInstall() }
     }
 
     // MARK: - Header / status / actions
@@ -668,10 +664,11 @@ struct SkillDetailPane: View {
 
 // MARK: - Buttons
 
-enum PaneButtonKind { case primary, normal, quiet }
+enum PaneButtonKind { case primary, normal, quiet, destructive }
 
 /// Labelled action button of the detail pane. Primary = brand fill; normal = surface with
-/// the card border; quiet = text only. Brutal adds the ink outline and the hard shadow.
+/// the card border; quiet = text only; destructive = failure-red fill for irreversible
+/// confirmations. Brutal adds the ink outline and the hard shadow.
 struct PaneButton: View {
     let title: String
     var icon: String?
@@ -719,7 +716,8 @@ struct PaneButtonLabel: View {
             if let icon {
                 Image(systemName: icon).font(Theme.font.themed(small ? 10 : 11.5, .semibold))
             }
-            Text(title).font(Theme.font.themed(small ? 11 : 12.5, kind == .primary ? .medium : .regular))
+            Text(title).font(Theme.font.themed(
+                small ? 11 : 12.5, kind == .primary || kind == .destructive ? .medium : .regular))
             if chevron {
                 Image(systemName: "chevron.down").font(Theme.font.themed(9, .semibold))
             }
@@ -744,6 +742,7 @@ struct PaneButtonLabel: View {
         case .primary: return Theme.onBrand
         case .normal: return .primary
         case .quiet: return Theme.textSecondary
+        case .destructive: return .white
         }
     }
 
@@ -752,6 +751,7 @@ struct PaneButtonLabel: View {
         case .primary: return Theme.brand
         case .normal: return Theme.surface
         case .quiet: return .clear
+        case .destructive: return Theme.failureRed
         }
     }
 
@@ -760,6 +760,7 @@ struct PaneButtonLabel: View {
         case .primary: return hard ? Theme.ink : Theme.brand
         case .normal: return Theme.cardBorder
         case .quiet: return .clear
+        case .destructive: return hard ? Theme.ink : Theme.failureRed
         }
     }
 
