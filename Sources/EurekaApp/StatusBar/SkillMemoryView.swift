@@ -173,11 +173,13 @@ struct SkillMemoryView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(mode.title).font(Theme.font.themed(15, .bold))
+            // No page title: the hub's type switcher names the page. Search sits where every
+            // hub page puts it (`KnowledgeHubView.searchWidth`).
             SearchField(
                 placeholder: mode.searchPlaceholder,
                 text: $service.searchText, scanning: service.scanning,
-                resultCount: totalCount)
+                resultCount: totalCount, maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             createMenu
             ScanStatusLabel(

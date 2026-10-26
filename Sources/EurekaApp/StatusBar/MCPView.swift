@@ -174,17 +174,15 @@ struct MCPView: View {
 
     // MARK: - Top bar (byte-for-byte identical to the family)
 
-    /// In the split layout the hub's type switcher already names the page, and the list has
-    /// one layout only, so the title and the list / grid toggle are left out.
+    /// No page title: the hub's type switcher names the page, and search sits where every hub
+    /// page puts it. In the split layout the list has one layout only, so the toggle goes too.
     private func header(inSplit: Bool) -> some View {
         HStack(spacing: 12) {
-            if !inSplit {
-                Text("MCP").font(Theme.font.themed(15, .bold))
-            }
             SearchField(
                 placeholder: L10n.text("Search MCP servers", zhHans: "搜索 MCP server"), text: $service.searchText,
                 scanning: service.scanning, resultCount: totalCount,
-                maxWidth: inSplit ? 260 : 460)
+                maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             createButton
             ScanStatusLabel(

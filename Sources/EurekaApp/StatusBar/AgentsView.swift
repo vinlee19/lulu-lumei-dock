@@ -109,10 +109,13 @@ struct AgentsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Agents").font(Theme.font.themed(15, .bold))
+            // No page title: the hub's type switcher names the page. Search sits where every
+            // hub page puts it (`KnowledgeHubView.searchWidth`).
             SearchField(
                 placeholder: L10n.text("Search subagents", zhHans: "搜索子代理"), text: $service.searchText,
-                scanning: service.scanning, resultCount: totalCount)
+                scanning: service.scanning, resultCount: totalCount,
+                maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             createMenu
             ScanStatusLabel(

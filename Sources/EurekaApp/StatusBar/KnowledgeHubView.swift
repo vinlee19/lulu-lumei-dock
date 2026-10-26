@@ -13,6 +13,10 @@ struct KnowledgeHubView: View {
     @ObservedObject var navigation: PopoverNavigation
     /// The segments of this hub's type switcher (`Tab.capabilityTabs` or `Tab.knowledgeTabs`).
     let tabs: [PopoverRootView.Tab]
+
+    /// Every hub page puts its search first in its own toolbar row, at this width, so the field
+    /// never moves when the user switches type.
+    static let searchWidth: CGFloat = 300
     @ObservedObject var skillMemoryService: SkillMemoryService
     @ObservedObject var usageService: UsageService
     @ObservedObject var sessionBrowser: SessionBrowserService
@@ -55,17 +59,6 @@ struct KnowledgeHubView: View {
                     showsCounts: density != .compact)
                     .fixedSize()
                 Spacer(minLength: 8)
-                if navigation.tab == .skills {
-                    SearchField(
-                        placeholder: L10n.text("Search skills", zhHans: "搜索技能"),
-                        text: $skillMemoryService.searchText,
-                        scanning: skillMemoryService.scanning,
-                        resultCount: skillMemoryService.isSearching ? skillMemoryService.skills.count : nil,
-                        maxWidth: density == .full ? 220 : 150)
-                        .frame(width: density == .full ? 220 : 150)
-                    SkillsToolbarActions(service: skillMemoryService, compact: density == .compact)
-                        .fixedSize()
-                }
             }
             .padding(.horizontal, 14)
             .frame(width: geo.size.width, height: geo.size.height)
