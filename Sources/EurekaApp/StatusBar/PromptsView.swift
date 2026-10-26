@@ -19,6 +19,8 @@ struct PromptsView: View {
     @State private var deleting: PromptEntry?
     /// Source filter (nil = all)
     @State private var selectedSource: AgentSource?
+    /// Project filter (nil = all), by `PromptsService.project(of:)`
+    @State private var selectedProject: String?
     /// Expanded frequent-repeat groups (set of fingerprints)
     @State private var expandedGroups: Set<String> = []
     /// "Most effort" sort: severity descending → step count descending (surfaces the prompts
@@ -43,6 +45,7 @@ struct PromptsView: View {
     private var filtered: [PromptEntry] {
         let base = service.prompts
             .filter { selectedSource == nil || $0.source == selectedSource }
+            .filter { selectedProject == nil || service.project(of: $0) == selectedProject }
         guard effortSort else { return base }
         return base.enumerated().sorted { lhs, rhs in
             let le = service.eval(of: lhs.element.id)
@@ -145,13 +148,20 @@ struct PromptsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard(counts: counts, sourceCount: sources.count)
-                SourceFilterMenu(
-                    selected: $selectedSource,
-                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: "text.quote",
-                    totalCount: service.totalCount,
-                    sources: sources,
-                    count: { counts[$0] ?? 0 })
-                if rows.isEmpty && service.groups.isEmpty {
+                HStack(spacing: 8) {
+                    SourceFilterMenu(
+                        selected: $selectedSource,
+                        allLabel: L10n.text("All", zhHans: "全部"), allIcon: "text.quote",
+                        totalCount: service.totalCount,
+                        sources: sources,
+                        count: { counts[$0] ?? 0 })
+                    ProjectFilterMenu(
+                        selected: $selectedProject,
+                        projects: projectCounts,
+                        totalCount: selectedSource.map { counts[$0] ?? 0 } ?? service.totalCount)
+                    Spacer(minLength: 0)
+                }
+                if rows.isEmpty && visibleGroups.isEmpty {
                     emptyState.padding(.top, 40)
                 } else if service.isSearching {
                     // Search = flat hits (including kinds folded by default, so anything can be
@@ -167,9 +177,9 @@ struct PromptsView: View {
                         sectionHeader("star.fill", L10n.text("Favorites", zhHans: "收藏"), favorites.count)
                         promptList(favorites)
                     }
-                    if selectedSource == nil, !service.groups.isEmpty {
+                    if selectedSource == nil, !visibleGroups.isEmpty {
                         sectionHeader(
-                            "repeat", L10n.text("Repeated often", zhHans: "高频重复"), service.groups.count,
+                            "repeat", L10n.text("Repeated often", zhHans: "高频重复"), visibleGroups.count,
                             note: L10n.text("The same thing asked again and again — the best candidates to turn into a skill or instructions", zhHans: "反复在问的同一件事 —— 升级为技能/指令的头号候选"))
                         groupsList
                     }
@@ -256,7 +266,8 @@ struct PromptsView: View {
     private var groupsList: some View {
         KnowledgeListContainer {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(service.groups.enumerated()), id: \.element.id) { index, group in
+                let groups = visibleGroups
+                ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                     PromptGroupRow(
                         group: group,
                         effortCount: group.memberIds.filter {
@@ -278,7 +289,7 @@ struct PromptsView: View {
                             }
                         }
                     }
-                    if index < service.groups.count - 1 {
+                    if index < groups.count - 1 {
                         Divider().opacity(0.4).padding(.leading, 46)
                     }
                 }
@@ -307,6 +318,32 @@ struct PromptsView: View {
             counts[entry.source, default: 0] += 1
         }
         return counts
+    }
+
+    /// Prompts per project within the chosen source, busiest first (the project filter's rows).
+    private var projectCounts: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for entry in service.knowledgeSnapshot()
+        where selectedSource == nil || entry.source == selectedSource {
+            if let project = service.project(of: entry) { counts[project, default: 0] += 1 }
+        }
+        return counts.map { (name: $0.key, count: $0.value) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.name < $1.name }
+    }
+
+    /// Repeated-prompt groups narrowed to the chosen project: only that project's members count,
+    /// and a group needs two of them to still be a repeat.
+    private var visibleGroups: [PromptGroup] {
+        guard let project = selectedProject else { return service.groups }
+        return service.groups.compactMap { group in
+            let members = group.memberIds.filter { id in
+                service.entry(id: id).map { service.project(of: $0) == project } ?? false
+            }
+            guard members.count >= 2, let newest = members.first.flatMap(service.entry(id:)) else { return nil }
+            return PromptGroup(
+                fingerprint: group.fingerprint, representative: newest,
+                count: members.count, projectCount: 1, memberIds: members)
+        }
     }
 
     private func open(_ entry: PromptEntry) {
@@ -457,7 +494,7 @@ private struct PromptRow: View {
                         .help(L10n.text("This prompt was hard to run (open for the evidence): ", zhHans: "这条提问执行得费劲（点开看证据）：") +
                             eval.ruleIds.map(promptRuleLabel).joined(separator: L10n.text(", ", zhHans: "、")))
                     }
-                    if let project = entry.projectName {
+                    if let project = service.project(of: entry) {
                         Text(project).font(Theme.font.themed(10)).foregroundStyle(.secondary)
                     }
                     if let ts = entry.timestamp {
@@ -657,7 +694,7 @@ private struct PromptDetailView: View {
                 metaItem("clock", ts.formatted(
                     .dateTime.year().month().day().hour().minute().second()))
             }
-            if let project = entry.projectName {
+            if let project = service.project(of: entry) {
                 metaItem("folder", project)
             }
             Text(L10n.format("%@ characters", zhHans: "%@ 字", String(entry.text.count)))

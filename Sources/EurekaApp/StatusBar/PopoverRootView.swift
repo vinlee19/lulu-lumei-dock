@@ -108,10 +108,11 @@ struct PopoverRootView: View {
         /// What an agent can do: skills, MCP servers, subagents. One sidebar entry, anchored on
         /// `.skills`.
         static let capabilityTabs: [Tab] = [.skills, .mcp, .agents]
-        /// What an agent knows: memories it wrote, instructions the user wrote, saved prompts.
-        /// One sidebar entry, anchored on `.memory`. Plans are neither: they are what a session
-        /// produced, so they sit with sessions in the Activity group.
-        static let knowledgeTabs: [Tab] = [.memory, .instructions, .prompts]
+        /// What an agent knows and reads into every session: memories it wrote and instructions
+        /// the user wrote. One sidebar entry, anchored on `.memory`. Plans and prompts are
+        /// neither: both are what sessions produced (prompts are extracted from transcripts), so
+        /// they sit with sessions in the Activity group.
+        static let knowledgeTabs: [Tab] = [.memory, .instructions]
         var isCapability: Bool { Self.capabilityTabs.contains(self) }
         var isKnowledge: Bool { Self.knowledgeTabs.contains(self) }
         /// The hub this tab belongs to (its type switcher's segments), or nil for plain pages.
@@ -141,7 +142,7 @@ struct PopoverRootView: View {
         /// names are read for the current language each time and can't go into a static let.
         static var sidebarGroups: [(label: String, tabs: [Tab])] {
             [
-                (L10n.text("Activity", zhHans: "活动"), [.history, .sessions, .plans]),
+                (L10n.text("Activity", zhHans: "活动"), [.history, .sessions, .plans, .prompts]),
                 // Two hubs (anchors `.skills` and `.memory`); each type switcher lives on its page.
                 (L10n.text("Agent", zhHans: "Agent"), [.skills, .memory]),
                 (L10n.text("Security", zhHans: "安全"), [.audit]),
@@ -316,7 +317,11 @@ struct PopoverRootView: View {
                          skillMemory: skillMemoryService, plans: plansService)
         case .plans:
             PlansView(service: plansService)
-        case .skills, .memory, .instructions, .agents, .mcp, .prompts:
+        case .prompts:
+            PromptsView(
+                service: promptsService, sessionBrowser: sessionBrowser,
+                skillMemory: skillMemoryService)
+        case .skills, .memory, .instructions, .agents, .mcp:
             KnowledgeHubView(
                 navigation: navigation, tabs: navigation.tab.hubTabs ?? [],
                 skillMemoryService: skillMemoryService, usageService: usageService,

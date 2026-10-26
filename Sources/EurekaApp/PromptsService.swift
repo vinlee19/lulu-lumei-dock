@@ -3,6 +3,7 @@ import Combine
 import EurekaIngest
 import EurekaKit
 import EurekaStore
+import EurekaUsage
 import Foundation
 
 /// Prompt library service: incrementally extracts user prompts from session transcripts for
@@ -277,6 +278,15 @@ final class PromptsService: ObservableObject {
 
     func entry(id: String) -> PromptEntry? {
         byId[id]
+    }
+
+    /// Project names use the display rule (`ProjectResolver.Mode.project`): a worktree counts as
+    /// its main repo, and a plain folder inside a workspace repo counts as itself.
+    private let projectResolver = ProjectResolver(mode: .project)
+
+    /// The project a prompt was typed in (nil when its session recorded no directory).
+    func project(of entry: PromptEntry) -> String? {
+        projectResolver.projectName(forCwd: entry.cwd)
     }
 
     /// Low reuse-value kinds folded by default (noise / trivial / long paste); favorited entries

@@ -1,8 +1,8 @@
 import EurekaKit
 import SwiftUI
 
-/// One hub page: Capabilities (Skills / MCP / Agents) or Knowledge (Memory / Instructions /
-/// Prompts), chosen by `tabs`. Each has one sidebar entry; the type switcher sits in this
+/// One hub page: Capabilities (Skills / MCP / Agents) or Knowledge (Memory / Instructions),
+/// chosen by `tabs`. Each has one sidebar entry; the type switcher sits in this
 /// page's top bar and writes straight to `navigation.tab`, so every existing deep link
 /// (`navigation.tab = .memory`, `focusPath`, ⌘K results) keeps working unchanged.
 ///
@@ -99,10 +99,6 @@ struct KnowledgeHubView: View {
             SkillMemoryView(
                 service: skillMemoryService, mode: .instructions, usageService: usageService,
                 sessionBrowser: sessionBrowser)
-        case .prompts:
-            PromptsView(
-                service: promptsService, sessionBrowser: sessionBrowser,
-                skillMemory: skillMemoryService)
         case .agents:
             AgentsView(service: agentConfigService, usageService: usageService)
         case .mcp:

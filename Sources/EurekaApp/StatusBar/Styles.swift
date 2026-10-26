@@ -2019,3 +2019,69 @@ struct SourceFilterMenu: View {
         }
     }
 }
+
+// MARK: - Project filter as a pop-up
+
+/// "Project: All ▾": the source filter's twin for pages whose items carry a project. Projects
+/// are listed busiest first; a long list scrolls inside the pop-up instead of running off screen.
+struct ProjectFilterMenu: View {
+    @Binding var selected: String?
+    /// (project name, item count), busiest first.
+    let projects: [(name: String, count: Int)]
+    let totalCount: Int
+
+    @State private var showing = false
+
+    /// Rows show at this height before the list scrolls (about 13 rows).
+    private static let maxListHeight: CGFloat = 340
+    private static let rowHeight: CGFloat = 26
+
+    var body: some View {
+        Button {
+            showing.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(Theme.font.themed(11, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                Text(L10n.text("Project", zhHans: "项目") + "："
+                     + (selected ?? L10n.text("All", zhHans: "全部")))
+                    .font(Theme.font.themed(12, .medium))
+                    .lineLimit(1)
+                Text(String(selected.flatMap { name in projects.first { $0.name == name }?.count } ?? totalCount))
+                    .font(Theme.font.themedMono(11))
+                    .foregroundStyle(Theme.textTertiary)
+                Image(systemName: "chevron.down")
+                    .font(Theme.font.themed(9, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("Show only one project's items", zhHans: "只看某一个项目的条目"))
+        .themedPopup(isPresented: $showing) {
+            PopupList(title: L10n.text("Show items from project", zhHans: "只看这个项目")) {
+                PopupRow(L10n.text("All projects", zhHans: "全部项目"), systemImage: "square.stack",
+                         trailing: String(totalCount), selected: selected == nil) {
+                    selected = nil
+                    showing = false
+                }
+                Divider().padding(.vertical, 3)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(projects, id: \.name) { project in
+                            PopupRow(project.name, systemImage: "folder", trailing: String(project.count),
+                                     selected: selected == project.name) {
+                                selected = project.name
+                                showing = false
+                            }
+                            .frame(height: Self.rowHeight)
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(projects.count) * Self.rowHeight, Self.maxListHeight))
+            }
+        }
+    }
+}
