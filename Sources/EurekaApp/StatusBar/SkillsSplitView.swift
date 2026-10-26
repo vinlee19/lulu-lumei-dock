@@ -183,7 +183,7 @@ struct SkillsSplitView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    SkillsOverviewRow(isSelected: selectedKey == nil) { selectOverview() }
+                    OverviewListRow(isSelected: selectedKey == nil) { selectOverview() }
                         .id("__overview__")
                     ForEach(sections) { section in
                         sectionHeader(section)
@@ -534,7 +534,7 @@ struct SkillsToolbarActions: View {
 // MARK: - Overview row (pinned above the sections)
 
 /// First row of the list: the module overview. Selected when nothing else is.
-struct SkillsOverviewRow: View {
+struct OverviewListRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
 

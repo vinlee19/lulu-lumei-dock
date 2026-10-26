@@ -46,42 +46,33 @@ struct MCPView: View {
     private let gridColumns = KnowledgeGrid.columns
 
     var body: some View {
-        Group {
-            if let target = formTarget {
-                MCPServerFormView(
-                    service: service, target: target,
-                    onBack: { withAnimation(.easeOut(duration: 0.15)) { formTarget = nil } })
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else if let name = detailName {
-                MCPDetailView(
-                    service: service, usage: usageService, serverName: name,
-                    onBack: { withAnimation(.easeOut(duration: 0.15)) { detailName = nil } },
-                    onDeleteEntry: { deletingEntry = $0 },
-                    onEdit: { entry in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            formTarget = MCPFormTarget(
-                                id: "edit:\(entry.id)", mode: .form, editing: entry)
-                        }
-                    },
-                    onEditCredentials: { entry in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            formTarget = MCPFormTarget(
-                                id: "edit:\(entry.id)", mode: .form, editing: entry,
-                                expandCredentials: true)
-                        }
-                    })
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else {
-                VStack(spacing: 0) {
-                    header
-                    Divider()
-                    content
+        GeometryReader { geo in
+            let wide = geo.size.width >= SkillsSplitView.splitThreshold
+            Group {
+                if let target = formTarget {
+                    MCPServerFormView(
+                        service: service, target: target,
+                        onBack: { withAnimation(.easeOut(duration: 0.15)) { formTarget = nil } })
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else if wide {
+                    splitLayout
+                } else if let name = detailName {
+                    detail(name)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else {
+                    VStack(spacing: 0) {
+                        header(inSplit: false)
+                        Divider()
+                        content
+                    }
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .onAppear {
             service.refresh()
             usageService.loadMCPStats()
+            usageService.loadMCPOverview()
         }
         .confirmationDialog(
             deletingEntry.map {
@@ -99,21 +90,113 @@ struct MCPView: View {
         }
     }
 
+    private func detail(_ name: String) -> some View {
+        MCPDetailView(
+            service: service, usage: usageService, serverName: name,
+            onBack: { withAnimation(.easeOut(duration: 0.15)) { detailName = nil } },
+            onDeleteEntry: { deletingEntry = $0 },
+            onEdit: { entry in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    formTarget = MCPFormTarget(
+                        id: "edit:\(entry.id)", mode: .form, editing: entry)
+                }
+            },
+            onEditCredentials: { entry in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    formTarget = MCPFormTarget(
+                        id: "edit:\(entry.id)", mode: .form, editing: entry,
+                        expandCredentials: true)
+                }
+            })
+    }
+
+    // MARK: - Wide layout: server list + overview / detail (the Skills shell's shape)
+
+    private var splitLayout: some View {
+        VStack(spacing: 0) {
+            header(inSplit: true)
+            Divider()
+            HStack(spacing: 12) {
+                KnowledgePane { splitList }
+                    .frame(width: SkillsSplitView.listWidth)
+                KnowledgePane {
+                    if let name = detailName {
+                        detail(name).id(name)
+                    } else {
+                        MCPOverviewPane(service: service, usageService: usageService) { name in
+                            withAnimation(.easeOut(duration: 0.15)) { detailName = name }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(12)
+        }
+        .background(Theme.surfaceSecondary)
+    }
+
+    private var splitList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.format("%@ servers · %@ config locations", zhHans: "%@ 个 server · %@ 处配置",
+                                 String(dedupedCount), String(totalCount)))
+                    .font(Theme.font.themed(11))
+                    .foregroundStyle(Theme.textSecondary)
+                SourceFilterMenu(
+                    selected: $selectedSource,
+                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: ToolKind.mcp.icon,
+                    totalCount: totalCount,
+                    sources: availableSources,
+                    count: { count(for: $0) })
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    OverviewListRow(isSelected: detailName == nil) {
+                        withAnimation(.easeOut(duration: 0.15)) { detailName = nil }
+                    }
+                    ForEach(groupedEntries, id: \.key) { group in
+                        MCPServerListRow(
+                            entries: group.entries, service: service,
+                            calls30: usageService.mcpOverview?.serverCalls[group.key] ?? 0,
+                            isSelected: detailName?.lowercased() == group.key,
+                            onSelect: {
+                                withAnimation(.easeOut(duration: 0.15)) { detailName = group.entries[0].name }
+                            })
+                    }
+                    if filteredEntries.isEmpty {
+                        emptyState.padding(.top, 30)
+                    }
+                }
+                .padding(6)
+            }
+        }
+    }
+
     // MARK: - Top bar (byte-for-byte identical to the family)
 
-    private var header: some View {
+    /// In the split layout the hub's type switcher already names the page, and the list has
+    /// one layout only, so the title and the list / grid toggle are left out.
+    private func header(inSplit: Bool) -> some View {
         HStack(spacing: 12) {
-            Text("MCP").font(Theme.font.themed(15, .bold))
+            if !inSplit {
+                Text("MCP").font(Theme.font.themed(15, .bold))
+            }
             SearchField(
                 placeholder: L10n.text("Search MCP servers", zhHans: "搜索 MCP server"), text: $service.searchText,
-                scanning: service.scanning, resultCount: totalCount)
+                scanning: service.scanning, resultCount: totalCount,
+                maxWidth: inSplit ? 260 : 460)
             Spacer(minLength: 12)
             createButton
             ScanStatusLabel(
                 scanning: service.scanning, phase: nil,
                 lastScanAt: service.lastScanAt)
             RefreshButton(help: L10n.text("Force rescan of MCP config", zhHans: "强制重扫 MCP 配置")) { service.refresh(force: true) }
-            LayoutToggle(layout: $layout)
+            if !inSplit {
+                LayoutToggle(layout: $layout)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

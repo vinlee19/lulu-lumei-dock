@@ -541,6 +541,58 @@ enum PreviewRenderer {
         snap("knowledge-mcp-form-manual",
              MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(id: "new", mode: .form)))
         snap("knowledge-mcp-list-dark", MCPView(service: mcp, usageService: usage, initialLayout: .list), dark: true)
+        // Wide MCP: server list + overview by default, then the most-called server selected.
+        usage.loadMCPOverview()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        snap("knowledge-mcp-wide", MCPView(service: mcp, usageService: usage), width: 1270)
+        let topServer = usage.mcpOverview?.serverCalls
+            .filter { key, _ in mcp.servers.contains { $0.name.lowercased() == key } }
+            .max { $0.value < $1.value }?.key
+        if let entry = mcp.servers.first(where: { $0.name.lowercased() == topServer }) ?? mcp.servers.first {
+            snap("knowledge-mcp-wide-detail",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: entry.name), width: 1270)
+        }
+        snap("knowledge-mcp-wide-dark", MCPView(service: mcp, usageService: usage), dark: true, width: 1270)
+
+        // Themed pop-ups. The panel itself can't be captured offscreen, so this draws the same
+        // surface and rows `themedPopup` puts in it: the source filter, a detail "More" list,
+        // and the new-skill list.
+        var sourceCounts: [AgentSource: Int] = [:]
+        for skill in skillMemory.skills { sourceCounts[skill.source, default: 0] += 1 }
+        let popupSources = sourceCounts.sorted { $0.value > $1.value }.prefix(8)
+        let popups = HStack(alignment: .top, spacing: 28) {
+            ThemedPopupSurface {
+                PopupList(title: L10n.text("Only show from", zhHans: "只看来自")) {
+                    PopupRow(L10n.text("All", zhHans: "全部"), systemImage: "sparkles",
+                             trailing: String(skillMemory.skills.count), selected: true) {}
+                    Divider().padding(.vertical, 3)
+                    ForEach(Array(popupSources), id: \.key) { source, count in
+                        PopupRow(source.displayName, trailing: String(count),
+                                 leading: { SourceBadge(source: source, size: 14) }) {}
+                    }
+                }
+            }
+            ThemedPopupSurface {
+                PopupList {
+                    PopupRow(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") {}
+                    PopupRow(L10n.text("Copy folder path", zhHans: "复制目录路径"), systemImage: "doc.on.doc") {}
+                    Divider().padding(.vertical, 3)
+                    PopupRow(L10n.text("Move to Trash…", zhHans: "移到废纸篓…"), systemImage: "trash",
+                             destructive: true) {}
+                }
+            }
+            ThemedPopupSurface {
+                PopupList(title: L10n.text("Create a skill for", zhHans: "给哪个工具新建技能")) {
+                    ForEach([AgentSource.claude, .codex, .opencode, .gemini], id: \.self) { source in
+                        PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {}
+                    }
+                }
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        snap("knowledge-popups", popups, width: 900)
+        snap("knowledge-popups-dark", popups, dark: true, width: 900)
 
         // Sessions wide/fullscreen + narrow preview to verify header toolbar alignment
         let sessions = SessionBrowserService()

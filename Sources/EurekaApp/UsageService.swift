@@ -64,6 +64,8 @@ final class UsageService: ObservableObject {
     @Published private(set) var skillRanking: [ToolCallsRepo.SkillUsageStat] = []
     /// Calls per day across all skills, for the Skills overview trend
     @Published private(set) var skillDailyTotals: [SkillDayCount] = []
+    /// The MCP overview's last 30 days (nil = not loaded yet)
+    @Published private(set) var mcpOverview: MCPOverviewStats?
     /// All-time subagent call stats (Agents page "called N times"; kind='agent', data from
     /// Claude/Kimi)
     @Published private(set) var agentStats: [ToolCallsRepo.SkillUsageStat] = []
@@ -657,6 +659,48 @@ final class UsageService: ObservableObject {
                 .map { (name: $0.key, count: $0.value) }
             let activity = MCPServerActivity(series: series, topTools: topTools)
             DispatchQueue.main.async { completion(activity) }
+        }
+    }
+
+    /// The MCP overview's window: calls per day across all servers (zero-filled, old → new),
+    /// calls per server (lowercased name), and each server's three most-used tools.
+    struct MCPOverviewStats {
+        var series: [SkillDayCount]
+        var serverCalls: [String: Int]
+        var topTools: [String: [(name: String, count: Int)]]
+    }
+
+    func loadMCPOverview(days: Int = 30) {
+        readQueue.async { [weak self] in
+            guard let self, let store = self.readerStore() else { return }
+            let rows = (try? store.toolCalls.mcpDailyTotals()) ?? []
+            // Same local yyyy-MM-dd the scanners write, so a string compare is a date compare.
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            guard let first = calendar.date(byAdding: .day, value: -(days - 1), to: today) else { return }
+            let cutoff = formatter.string(from: first)
+            var byDay: [String: Int] = [:]
+            var byServer: [String: Int] = [:]
+            var byTool: [String: [String: Int]] = [:]
+            for row in rows where row.day >= cutoff {
+                let key = Self.mcpServerKey(row.name)
+                guard !key.isEmpty else { continue }
+                byDay[row.day, default: 0] += row.count
+                byServer[key, default: 0] += row.count
+                byTool[key, default: [:]][Self.mcpToolLabel(row.name), default: 0] += row.count
+            }
+            var series: [SkillDayCount] = []
+            for offset in stride(from: days - 1, through: 0, by: -1) {
+                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+                series.append(SkillDayCount(day: day, count: byDay[formatter.string(from: day)] ?? 0))
+            }
+            let topTools = byTool.mapValues { tools in
+                tools.sorted { $0.value > $1.value }.prefix(3).map { (name: $0.key, count: $0.value) }
+            }
+            let stats = MCPOverviewStats(series: series, serverCalls: byServer, topTools: topTools)
+            self.publish { $0.mcpOverview = stats }
         }
     }
 
