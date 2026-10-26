@@ -32,7 +32,7 @@ struct SummaryTemplateChip: View {
         }
         .buttonStyle(.plain)
         .help(L10n.text("Template for the next summary", zhHans: "下次总结使用的模板"))
-        .popover(isPresented: $showList, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showList) {
             SummaryTemplateList(summaries: summaries) { template in
                 showList = false
                 editing = template

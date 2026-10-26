@@ -481,7 +481,7 @@ struct SkillsToolbarActions: View {
             }
             .buttonStyle(.plain)
             .help(L10n.text("New skill", zhHans: "新建技能"))
-            .popover(isPresented: $showNew, arrowEdge: .bottom) {
+            .themedPopup(isPresented: $showNew, alignment: .trailing) {
                 PopupList(title: L10n.text("Create a skill for", zhHans: "给哪个工具新建技能")) {
                     ForEach(AgentSource.allCases, id: \.self) { source in
                         PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {
@@ -502,7 +502,7 @@ struct SkillsToolbarActions: View {
             }
             .buttonStyle(.plain)
             .help(L10n.text("More", zhHans: "更多"))
-            .popover(isPresented: $showMore, arrowEdge: .bottom) {
+            .themedPopup(isPresented: $showMore, alignment: .trailing) {
                 PopupList {
                     PopupRow(L10n.text("Rescan skills", zhHans: "重新扫描技能"), systemImage: "arrow.clockwise") {
                         showMore = false

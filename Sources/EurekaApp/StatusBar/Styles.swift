@@ -1848,9 +1848,8 @@ struct ModelChip: View {
 
 // MARK: - Themed pop-up lists (replace system menus, which ignore the style)
 
-/// Container for a themed pop-up: an optional caption and rows built from `PopupRow`, shown in a
-/// `.popover` from the triggering button. The NSPopover frame itself stays system-drawn (same
-/// trade-off as the AI summary executor picker); rows, fonts and colors follow `Theme`.
+/// Contents of a themed pop-up: an optional caption and rows built from `PopupRow`, shown with
+/// `themedPopup` from the triggering button, which also draws the frame from `Theme`.
 struct PopupList<Content: View>: View {
     var title: String? = nil
     @ViewBuilder var content: Content
@@ -1859,8 +1858,8 @@ struct PopupList<Content: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             if let title {
                 Text(title)
-                    .font(Theme.font.themed(9.5, .semibold))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.font.themed(10, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
                     .padding(.horizontal, 7)
                     .padding(.bottom, 2)
             }
@@ -1991,7 +1990,7 @@ struct SourceFilterMenu: View {
         }
         .buttonStyle(.plain)
         .help(L10n.text("Show only one tool's items", zhHans: "只看某一个工具的条目"))
-        .popover(isPresented: $showing, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showing) {
             PopupList(title: L10n.text("Show items from", zhHans: "只看来自")) {
                 PopupRow(allLabel, systemImage: allIcon, trailing: String(totalCount), selected: selected == nil) {
                     selected = nil

@@ -397,7 +397,7 @@ struct SessionsView: View {
         }
         .buttonStyle(.plain)
         .help(L10n.text("Filter sessions by CLI source", zhHans: "按 CLI 来源筛选会话"))
-        .popover(isPresented: $showSourcePicker, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showSourcePicker) {
             sourcePickerPopover
         }
     }
@@ -415,13 +415,7 @@ struct SessionsView: View {
         }
         .padding(8)
         .frame(width: 210)
-        .background(
-            ThemeStyle.current.isHardEdged
-                ? AnyShapeStyle(Theme.surface)
-                : AnyShapeStyle(
-                    LinearGradient(
-                        colors: [Theme.brand.opacity(0.06), Theme.gold.opacity(0.05)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing)))
+        // The themed pop-up draws the surface; no wash of its own.
     }
 
     private func sourcePickerRow(

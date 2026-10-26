@@ -243,7 +243,7 @@ struct SkillDetailPane: View {
             .modifier(PopupButtonChrome(height: 30, horizontalPadding: 13))
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showMore, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showMore) {
             PopupList {
                 PopupRow(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") {
                     showMore = false
@@ -280,7 +280,7 @@ struct SkillDetailPane: View {
             .modifier(PopupButtonChrome(height: compact ? 24 : 28, horizontalPadding: compact ? 9 : 11))
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showInstall, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showInstall) {
             PopupList(title: L10n.text("Copy this skill to", zhHans: "把这个技能复制到")) {
                 ForEach(unconfigured, id: \.self) { source in
                     PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {
