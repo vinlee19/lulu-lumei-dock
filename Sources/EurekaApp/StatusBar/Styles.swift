@@ -873,11 +873,23 @@ enum KnowledgeLayout: String, CaseIterable {
     /// them this mode would only show an empty graph)
     case graph = "图谱"
 
+    /// Plain names for what each mode shows: "Icons" did not say the items become cards, and
+    /// "Graph" read as jargon for what is a map of which memories link to which.
     var title: String {
         switch self {
         case .list: return L10n.text("List", zhHans: "列表")
-        case .cards: return L10n.text("Icons", zhHans: "图标")
-        case .graph: return L10n.text("Graph", zhHans: "图谱")
+        case .cards: return L10n.text("Cards", zhHans: "卡片")
+        case .graph: return L10n.text("Relations", zhHans: "关系图")
+        }
+    }
+
+    /// Tooltip: what the user gets by switching.
+    var help: String {
+        switch self {
+        case .list: return L10n.text("One row each, with every detail", zhHans: "一行一条，信息最全")
+        case .cards: return L10n.text("Larger cards, easier to browse", zhHans: "大卡片，适合浏览")
+        case .graph: return L10n.text("Which memories link to which, and the sessions they came from",
+                                      zhHans: "看记忆之间怎么互相引用，以及来自哪些会话")
         }
     }
 
@@ -885,7 +897,7 @@ enum KnowledgeLayout: String, CaseIterable {
         switch self {
         case .list: return "list.bullet"
         case .cards: return "square.grid.2x2"
-        case .graph: return "point.3.filled.connected.trianglepath.dotted"
+        case .graph: return "point.3.connected.trianglepath.dotted"
         }
     }
 
@@ -901,16 +913,15 @@ struct LayoutToggle: View {
     var cases: [KnowledgeLayout] = KnowledgeLayout.withoutGraph
 
     var body: some View {
-        // Icons only with three modes: the top bar is already tight at the minimum window width
-        // (840), and labels would squeeze "List" into an ellipsis
-        let iconOnly = cases.count > 2
+        // Always icon + word: an icon alone made users guess what "the third one" does. The hub
+        // pages dropped their repeated title, which leaves room for the words at 840pt.
         CapsuleTabTray {
             ForEach(cases, id: \.self) { item in
                 CapsuleTabButton(
-                    title: iconOnly ? "" : item.title, icon: item.icon, fillWidth: false,
+                    title: item.title, icon: item.icon, fillWidth: false,
                     isSelected: layout == item
                 ) { layout = item }
-                    .help(item.title)
+                    .help(item.help)
             }
         }
     }
