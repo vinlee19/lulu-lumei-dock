@@ -1261,6 +1261,25 @@ public final class ToolCallsRepo {
         }
     }
 
+    /// Calls per day for a whole kind across every source and name (the module overview's
+    /// trend chart: "how often did skills run this month").
+    public func dailyTotals(kind: String, from: Date, to: Date) throws -> [(day: Date, count: Int)] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return try db.query("""
+        SELECT day, SUM(count) FROM tool_calls
+        WHERE kind = ? AND day >= ? AND day <= ?
+        GROUP BY day ORDER BY day
+        """, [
+            .text(kind), .text(formatter.string(from: from)), .text(formatter.string(from: to)),
+        ]) { row in
+            let day = row.text(0).flatMap { formatter.date(from: $0) }
+                ?? Date(timeIntervalSince1970: 0)
+            return (day, Int(row.int(1)))
+        }
+    }
+
     /// Sessions where a skill appeared most recently (all-time; kind fixed to 'skill'). Historic
     /// rows with an empty session are not counted.
     public func recentSkillSessions(

@@ -32,7 +32,7 @@ struct SummaryTemplateChip: View {
         }
         .buttonStyle(.plain)
         .help(L10n.text("Template for the next summary", zhHans: "下次总结使用的模板"))
-        .popover(isPresented: $showList, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showList) {
             SummaryTemplateList(summaries: summaries) { template in
                 showList = false
                 editing = template
@@ -240,14 +240,13 @@ struct SummaryTemplateEditor: View {
         }
         .frame(width: 580, height: 640)
         .background(Theme.windowBackground)
-        .confirmationDialog(
+        .themedConfirm(
             L10n.format("Delete the template \"%@\"?", zhHans: "删除模板「%@」？", original.name),
-            isPresented: $confirmingDelete, titleVisibility: .visible
+            isPresented: $confirmingDelete,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                summaries.deleteTemplate(id: original.id)
-                onClose()
-            }
+            summaries.deleteTemplate(id: original.id)
+            onClose()
         }
     }
 

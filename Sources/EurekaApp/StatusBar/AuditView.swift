@@ -102,20 +102,16 @@ struct AuditView: View {
         .onChange(of: kindFilter) { _, _ in resetAndReload() }
         .onChange(of: riskOnly) { _, _ in resetAndReload() }
         .onChange(of: keyword) { _, _ in resetAndReload() }
-        .confirmationDialog(
+        .themedConfirm(
             L10n.text("The exported CSV contains full command text (it may include secrets). Export it to Downloads?", zhHans: "导出的 CSV 含完整命令文本（可能包含敏感信息），确认导出到下载目录？"),
-            isPresented: $showExportConfirm, titleVisibility: .visible
-        ) {
-            Button(L10n.text("Export", zhHans: "导出")) { service.exportCSV(query: query) }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-        }
-        .confirmationDialog(
+            isPresented: $showExportConfirm,
+            confirm: L10n.text("Export", zhHans: "导出")
+        ) { service.exportCSV(query: query) }
+        .themedConfirm(
             L10n.text("Clear all audit data? This cannot be undone.", zhHans: "确认清空全部审计数据？此操作不可撤销。"),
-            isPresented: $showClearConfirm, titleVisibility: .visible
-        ) {
-            Button(L10n.text("Clear", zhHans: "清空"), role: .destructive) { service.clearAll() }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-        }
+            isPresented: $showClearConfirm,
+            confirm: L10n.text("Clear", zhHans: "清空"), destructive: true
+        ) { service.clearAll() }
     }
 
     // MARK: - Header (title 15/bold + search + gear / export / clear / refresh)

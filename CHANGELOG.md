@@ -17,6 +17,61 @@ this project uses [Semantic Versioning](https://semver.org/).
   is unread. Idle sessions still leave the island when they exit or after an
   hour without activity.
 
+## [0.41.0] - 2026-10-27
+
+### Added
+
+- **Capabilities and Knowledge** (@vinlee19). The seven knowledge tabs leave
+  the sidebar for two entries under an "Agent" group: Capabilities (Skills,
+  MCP, Subagents: what an agent can do) and Knowledge (Memory, Instructions:
+  what it reads into every session). A type switcher at the top of each page
+  moves between them, and each entry returns to the type you last opened.
+  Plans and Prompts are what sessions produced, so they move to the Activity
+  group next to History and Sessions. Every existing link and ⌘K result still
+  lands on the same page.
+- **A list + detail layout for Skills.** One row per skill, folded across every
+  tool that has a copy ("Claude Code + 3 more tools", n/m enabled), grouped
+  into Frequent, Enabled and Disabled. The detail pane puts the on/off switch
+  in its header and keeps three plainly named actions (Edit instructions, Open
+  in editor, More), then the description, the SKILL.md text (collapsed past
+  300pt, editable in place), usage with a 30-day chart and the sessions that
+  used it, where it is installed, and its files. Narrow windows push the detail
+  over the list.
+- **Overview pages for Skills and MCP.** Before you pick an item, the right
+  pane shows the module at a glance: a row of numbers, calls per day over the
+  last 30 days, what needs attention, and the 30-day top 10. For Skills, the
+  attention list offers to copy over skills a tool is missing and lists
+  enabled skills nobody has called. For MCP, it lists config locations whose
+  last check failed (with a re-check), enabled servers unused for 30 days and
+  the tokens of tool definitions they still add to every turn, and servers
+  never checked. MCP also gets the list + detail layout when the window is
+  wide.
+- **Prompts by project.** A "Project: All ▾" filter sits beside the source
+  filter and narrows favorites, recent prompts and the repeated-prompt groups.
+  A worktree counts as its main repository, and a plain folder inside a
+  workspace folder that is itself a git repository counts as its own project
+  instead of disappearing into "workspace". The Sessions page groups projects
+  the same way. The usage ledger keeps its existing project names.
+
+### Changed
+
+- **Every pop-up and dialog follows the selected style.** Pull-downs (source
+  filters, New skill, More, Install, the session source picker, and the summary
+  executor, model and template lists) open a panel drawn from the theme instead
+  of a system menu or popover. Confirmations and name prompts — all 22 of them,
+  from "New Claude Agent" to clearing the search index — are in-window dialogs
+  with the theme's surface, border and buttons; Return confirms, Esc cancels,
+  and destructive actions use a red button.
+- Search sits in the same place on every Capabilities and Knowledge page: first
+  in the page's toolbar row at one width, with the page's own buttons on the
+  right and no repeated page title.
+- The layout switch always shows words and reads List / Cards / Relations
+  (formerly an unlabeled Icons / Graph), with a tooltip saying what each shows.
+- Knowledge pages use one color budget: the brand color marks only selection,
+  primary actions and progress; green only marks enabled switches; gold only
+  warnings. Tiles, tags and scope badges are neutral, and every font on these
+  pages comes from the theme, so all nine styles render them consistently.
+
 ## [0.40.0] - 2026-10-23
 
 ### Added
@@ -2194,7 +2249,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.41.0
 [0.40.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.40.0
 [0.39.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.39.0
 [0.38.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.38.0

@@ -60,12 +60,12 @@ struct SidebarView: View {
                             .padding(.top, 2)
                         ForEach(group.tabs, id: \.self) { tab in
                             SidebarNavButton(
-                                title: tab.title, icon: tab.icon, tileColor: tab.tileColor,
+                                title: tab.sidebarTitle, icon: tab.sidebarIcon, tileColor: tab.tileColor,
                                 badge: tab == .limits ? limitsBadge?.text
                                     : (tab == .history ? historyBadge : nil),
                                 badgeColor: (tab == .limits ? limitsBadge?.color : nil)
                                     ?? .secondary,
-                                isSelected: selected == tab
+                                isSelected: selected.sidebarAnchor == tab
                             ) {
                                 onSelect(tab)
                             }

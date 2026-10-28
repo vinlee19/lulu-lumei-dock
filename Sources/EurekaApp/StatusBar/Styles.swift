@@ -717,12 +717,12 @@ struct SourceLogoTile: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.brand))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        Theme.tileBorder,
                         lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(SourceBadge(source: source, size: size * 0.55))
     }
@@ -844,7 +844,7 @@ struct CardActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: size * 0.44, weight: .medium))
+                .font(Theme.font.themed(size * 0.44, .medium))
                 .foregroundStyle(color)
                 .frame(width: size, height: size)
                 .background(
@@ -873,11 +873,23 @@ enum KnowledgeLayout: String, CaseIterable {
     /// them this mode would only show an empty graph)
     case graph = "图谱"
 
+    /// Plain names for what each mode shows: "Icons" did not say the items become cards, and
+    /// "Graph" read as jargon for what is a map of which memories link to which.
     var title: String {
         switch self {
         case .list: return L10n.text("List", zhHans: "列表")
-        case .cards: return L10n.text("Icons", zhHans: "图标")
-        case .graph: return L10n.text("Graph", zhHans: "图谱")
+        case .cards: return L10n.text("Cards", zhHans: "卡片")
+        case .graph: return L10n.text("Relations", zhHans: "关系图")
+        }
+    }
+
+    /// Tooltip: what the user gets by switching.
+    var help: String {
+        switch self {
+        case .list: return L10n.text("One row each, with every detail", zhHans: "一行一条，信息最全")
+        case .cards: return L10n.text("Larger cards, easier to browse", zhHans: "大卡片，适合浏览")
+        case .graph: return L10n.text("Which memories link to which, and the sessions they came from",
+                                      zhHans: "看记忆之间怎么互相引用，以及来自哪些会话")
         }
     }
 
@@ -885,7 +897,7 @@ enum KnowledgeLayout: String, CaseIterable {
         switch self {
         case .list: return "list.bullet"
         case .cards: return "square.grid.2x2"
-        case .graph: return "point.3.filled.connected.trianglepath.dotted"
+        case .graph: return "point.3.connected.trianglepath.dotted"
         }
     }
 
@@ -901,16 +913,15 @@ struct LayoutToggle: View {
     var cases: [KnowledgeLayout] = KnowledgeLayout.withoutGraph
 
     var body: some View {
-        // Icons only with three modes: the top bar is already tight at the minimum window width
-        // (840), and labels would squeeze "List" into an ellipsis
-        let iconOnly = cases.count > 2
+        // Always icon + word: an icon alone made users guess what "the third one" does. The hub
+        // pages dropped their repeated title, which leaves room for the words at 840pt.
         CapsuleTabTray {
             ForEach(cases, id: \.self) { item in
                 CapsuleTabButton(
-                    title: iconOnly ? "" : item.title, icon: item.icon, fillWidth: false,
+                    title: item.title, icon: item.icon, fillWidth: false,
                     isSelected: layout == item
                 ) { layout = item }
-                    .help(item.title)
+                    .help(item.help)
             }
         }
     }
@@ -1696,7 +1707,7 @@ struct ScopeBadge: View {
     let isGlobal: Bool
 
     var body: some View {
-        let tint = isGlobal ? Theme.brand : Theme.gold
+        let tint = isGlobal ? Theme.brandFg : Theme.textSecondary
         Text(isGlobal
             ? L10n.text("Global", zhHans: "全局")
             : L10n.text("Project", zhHans: "项目"))
@@ -1782,17 +1793,17 @@ struct MonogramTile: View {
     var body: some View {
         let hard = ThemeStyle.current.isHardEdged
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.brand))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        hard ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        Theme.tileBorder,
                         lineWidth: hard ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Text(Self.initials(of: name))
                     .font(Theme.font.themedMono(size * 0.4, .bold))
-                    .foregroundStyle(Theme.brandFg))
+                    .foregroundStyle(Theme.textSecondary))
             .overlay(alignment: .bottomTrailing) {
                 if let source {
                     let badge = max(14, (size * 0.5).rounded())
@@ -1820,13 +1831,14 @@ struct RoleTag: View {
     let role: AgentRole
 
     var body: some View {
-        let color = Theme.roleColor(role)
+        // Role is a guess from the agent's name, so it gets no color of its own:
+        // the colour budget keeps hue for state (toggle) and selection only.
         Text(role.displayName)
             .font(Theme.font.themed(9.5, .medium))
-            .foregroundStyle(color)
+            .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
-            .background(Capsule().fill(color.opacity(0.14)))
+            .background(Capsule().fill(Theme.surfaceSecondary))
     }
 }
 
@@ -1842,5 +1854,234 @@ struct ModelChip: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Capsule().fill(Theme.surfaceSecondary))
+    }
+}
+
+// MARK: - Themed pop-up lists (replace system menus, which ignore the style)
+
+/// Contents of a themed pop-up: an optional caption and rows built from `PopupRow`, shown with
+/// `themedPopup` from the triggering button, which also draws the frame from `Theme`.
+struct PopupList<Content: View>: View {
+    var title: String? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let title {
+                Text(title)
+                    .font(Theme.font.themed(10, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 7)
+                    .padding(.bottom, 2)
+            }
+            content
+        }
+        .padding(6)
+        .frame(minWidth: 210, maxWidth: 300, alignment: .leading)
+    }
+}
+
+/// One row of a themed pop-up: leading glyph (logo or SF Symbol), title, optional trailing count
+/// and a check on the current choice. Destructive rows read in the failure red.
+struct PopupRow<Leading: View>: View {
+    let title: String
+    var trailing: String? = nil
+    var selected = false
+    var destructive = false
+    @ViewBuilder var leading: () -> Leading
+    let action: () -> Void
+
+    init(_ title: String, trailing: String? = nil, selected: Bool = false, destructive: Bool = false,
+         @ViewBuilder leading: @escaping () -> Leading, action: @escaping () -> Void) {
+        self.title = title
+        self.trailing = trailing
+        self.selected = selected
+        self.destructive = destructive
+        self.leading = leading
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                leading().frame(width: 16, height: 16)
+                Text(title)
+                    .font(Theme.font.themed(11.5, selected ? .medium : .regular))
+                    .lineLimit(1)
+                Spacer(minLength: 12)
+                if let trailing {
+                    Text(trailing)
+                        .font(Theme.font.themedMono(10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(Theme.font.themed(10, .semibold))
+                        .foregroundStyle(Theme.brandFg)
+                }
+            }
+            .foregroundStyle(destructive ? Theme.failureRed : .primary)
+            .modifier(PickerRowChrome(selected: selected))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension PopupRow where Leading == Image {
+    /// Row with an SF Symbol glyph.
+    init(_ title: String, systemImage: String, trailing: String? = nil, selected: Bool = false,
+         destructive: Bool = false, action: @escaping () -> Void) {
+        self.init(title, trailing: trailing, selected: selected, destructive: destructive,
+                  leading: { Image(systemName: systemImage) }, action: action)
+    }
+}
+
+/// The chrome of a pull-down button: surface, card border, brutal hard shadow on the shape only.
+struct PopupButtonChrome: ViewModifier {
+    var height: CGFloat = 28
+    var horizontalPadding: CGFloat = 11
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, horizontalPadding)
+            .frame(height: height)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .fill(Theme.surface)
+                    .themeControlShadow())
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius.container, style: .continuous)
+                    .strokeBorder(Theme.cardBorder,
+                                  lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
+    }
+}
+
+// MARK: - Source filter as a pop-up
+
+/// One button ("Source: All ▾") instead of a row of a dozen chips. Same inputs as
+/// `SourceFilterBar`, so a page swaps one for the other without touching its data. The pop-up
+/// lists every source with its count and marks the current one; the button shows the chosen
+/// source's logo and name so the active filter is never hidden.
+struct SourceFilterMenu: View {
+    @Binding var selected: AgentSource?
+    let allLabel: String
+    let allIcon: String
+    let totalCount: Int
+    let sources: [AgentSource]
+    let count: (AgentSource) -> Int
+    /// Accepted for drop-in compatibility with `SourceFilterBar`; a pop-up has one line anyway.
+    var singleLine = false
+
+    @State private var showing = false
+
+    var body: some View {
+        Button {
+            showing.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                if let selected {
+                    SourceBadge(source: selected, size: 14)
+                } else {
+                    Image(systemName: allIcon)
+                        .font(Theme.font.themed(11, .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Text(L10n.text("Source", zhHans: "来源") + "：" + (selected?.displayName ?? allLabel))
+                    .font(Theme.font.themed(12, .medium))
+                Text(String(selected.map(count) ?? totalCount))
+                    .font(Theme.font.themedMono(11))
+                    .foregroundStyle(Theme.textTertiary)
+                Image(systemName: "chevron.down")
+                    .font(Theme.font.themed(9, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("Show only one tool's items", zhHans: "只看某一个工具的条目"))
+        .themedPopup(isPresented: $showing) {
+            PopupList(title: L10n.text("Show items from", zhHans: "只看来自")) {
+                PopupRow(allLabel, systemImage: allIcon, trailing: String(totalCount), selected: selected == nil) {
+                    selected = nil
+                    showing = false
+                }
+                Divider().padding(.vertical, 3)
+                ForEach(sources, id: \.self) { source in
+                    PopupRow(source.displayName, trailing: String(count(source)), selected: selected == source,
+                             leading: { SourceBadge(source: source, size: 14) }) {
+                        selected = source
+                        showing = false
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Project filter as a pop-up
+
+/// "Project: All ▾": the source filter's twin for pages whose items carry a project. Projects
+/// are listed busiest first; a long list scrolls inside the pop-up instead of running off screen.
+struct ProjectFilterMenu: View {
+    @Binding var selected: String?
+    /// (project name, item count), busiest first.
+    let projects: [(name: String, count: Int)]
+    let totalCount: Int
+
+    @State private var showing = false
+
+    /// Rows show at this height before the list scrolls (about 13 rows).
+    private static let maxListHeight: CGFloat = 340
+    private static let rowHeight: CGFloat = 26
+
+    var body: some View {
+        Button {
+            showing.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(Theme.font.themed(11, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                Text(L10n.text("Project", zhHans: "项目") + "："
+                     + (selected ?? L10n.text("All", zhHans: "全部")))
+                    .font(Theme.font.themed(12, .medium))
+                    .lineLimit(1)
+                Text(String(selected.flatMap { name in projects.first { $0.name == name }?.count } ?? totalCount))
+                    .font(Theme.font.themedMono(11))
+                    .foregroundStyle(Theme.textTertiary)
+                Image(systemName: "chevron.down")
+                    .font(Theme.font.themed(9, .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("Show only one project's items", zhHans: "只看某一个项目的条目"))
+        .themedPopup(isPresented: $showing) {
+            PopupList(title: L10n.text("Show items from project", zhHans: "只看这个项目")) {
+                PopupRow(L10n.text("All projects", zhHans: "全部项目"), systemImage: "square.stack",
+                         trailing: String(totalCount), selected: selected == nil) {
+                    selected = nil
+                    showing = false
+                }
+                Divider().padding(.vertical, 3)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(projects, id: \.name) { project in
+                            PopupRow(project.name, systemImage: "folder", trailing: String(project.count),
+                                     selected: selected == project.name) {
+                                selected = project.name
+                                showing = false
+                            }
+                            .frame(height: Self.rowHeight)
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(projects.count) * Self.rowHeight, Self.maxListHeight))
+            }
+        }
     }
 }

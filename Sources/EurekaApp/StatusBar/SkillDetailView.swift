@@ -105,7 +105,7 @@ struct SkillDetailView: View {
                 MarkdownDocumentCard(text: text)
             case .edit:
                 TextEditor(text: $text)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .padding(8)
             }
             if pane != .overview, let entry {
@@ -149,11 +149,11 @@ struct SkillDetailView: View {
             .buttonStyle(.borderless)
             SourceLogoTile(source: target.source, size: 26)
             Text(entry?.name ?? target.name)
-                .font(Theme.font.monoSkillName(15, weight: .bold))
+                .font(Theme.font.themed(15, .bold))
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let project = entry?.scope.projectName {
-                TagChip(project)
+                TagChip(project, neutral: true)
             }
             if let entry {
                 EnableToggle(enabled: entry.enabled) {
@@ -196,7 +196,7 @@ struct SkillDetailView: View {
     private func documentFooter(_ entry: SkillEntry) -> some View {
         HStack(spacing: 8) {
             Text(entry.path)
-                .font(Theme.font.monoSkillName(9, weight: .regular))
+                .font(Theme.font.themed(9, .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)

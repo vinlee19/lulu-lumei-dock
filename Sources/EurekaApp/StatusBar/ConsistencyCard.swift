@@ -53,7 +53,7 @@ struct ConsistencyCard: View {
                     details(report)
                 }
             }
-            .confirmationDialog(
+            .themedConfirm(
                 L10n.format(
                     "Install %@ skills onto %@?",
                     zhHans: "把 %@ 个技能安装到 %@？",
@@ -61,15 +61,9 @@ struct ConsistencyCard: View {
                 isPresented: Binding(
                     get: { fixGap != nil },
                     set: { if !$0 { fixGap = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button(L10n.text("Copy these skills over", zhHans: "复制这些技能过去")) { runFix() }
-                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-            } message: {
-                if let gap = fixGap {
-                    Text(gap.missing.joined(separator: L10n.text(", ", zhHans: "、")))
-                }
-            }
+                message: fixGap.map { $0.missing.joined(separator: L10n.text(", ", zhHans: "、")) },
+                confirm: L10n.text("Copy these skills over", zhHans: "复制这些技能过去")
+            ) { runFix() }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
@@ -157,7 +151,7 @@ struct ConsistencyCard: View {
                     ForEach(report.instructionGaps) { gap in
                         HStack(spacing: 8) {
                             Text(gap.project)
-                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                                .font(Theme.font.themed(11, .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 8)
                             ForEach(gap.missing, id: \.self) { TagChip(L10n.format("Missing %@", zhHans: "缺 %@", $0), tint: Theme.gold) }
@@ -194,10 +188,10 @@ struct ConsistencyCard: View {
                     ForEach(mcpDrifts) { drift in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(drift.name)
-                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                                .font(Theme.font.themed(11, .medium))
                             ForEach(drift.variants, id: \.self) { variant in
                                 Text(variant)
-                                    .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                                    .font(Theme.font.themed(9.5, .regular))
                                     .foregroundStyle(.tertiary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -211,7 +205,7 @@ struct ConsistencyCard: View {
                     ForEach(report.libraryDrifts) { drift in
                         HStack(spacing: 8) {
                             Text(drift.projectName)
-                                .font(Theme.font.monoSkillName(11, weight: .medium))
+                                .font(Theme.font.themed(11, .medium))
                                 .lineLimit(1)
                             Spacer(minLength: 8)
                             if drift.unindexed > 0 {

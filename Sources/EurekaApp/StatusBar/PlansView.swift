@@ -53,19 +53,16 @@ struct PlansView: View {
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .confirmationDialog(
+        .themedConfirm(
             deleting.map { L10n.format("Delete plan “%@”? The file moves to the Trash and can be restored.", zhHans: "删除计划「%@」？文件会移入废纸篓，可恢复。", String($0.title)) } ?? "",
             isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let entry = deleting {
-                    service.delete(entry)
-                    if detail?.id == entry.id { detail = nil }
-                }
+            if let entry = deleting {
+                service.delete(entry)
+                if detail?.id == entry.id { detail = nil }
             }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
         }
     }
 
@@ -100,7 +97,7 @@ struct PlansView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: "list.bullet.clipboard.fill",
                     totalCount: service.totalCount,
@@ -145,7 +142,7 @@ struct PlansView: View {
                 .init(label: L10n.text("Done", zhHans: "完成"), count: counts.complete, color: Theme.enabledGreen),
                 .init(label: L10n.text("In progress", zhHans: "进行"), count: counts.inProgress, color: Theme.brand),
                 .init(label: L10n.text("Draft", zhHans: "草稿"), count: counts.draft, color: Theme.draftGray),
-                .init(label: L10n.text("Document", zhHans: "文档"), count: counts.document, color: Theme.gold),
+                .init(label: L10n.text("Document", zhHans: "文档"), count: counts.document, color: Theme.autoCleanGray),
             ])
     }
 
@@ -197,7 +194,10 @@ struct PlansView: View {
 /// Plan status dot / status text color: drafts use a readable gray (distinct from the light gray
 /// segment in the distribution bar).
 private func planAccentColor(_ status: PlanMaterializer.PlanStatus) -> Color {
-    status == .draft ? Color(hex: "9A9AA0") : Theme.planStatusColor(status)
+    switch status {
+    case .draft, .document: return Theme.textTertiary  // quiet states: no hue of their own
+    default: return Theme.planStatusColor(status)
+    }
 }
 
 /// Real files (Claude plans / project docs) are editable and deletable; materialized copies are
@@ -270,7 +270,7 @@ private struct PlanCard: View {
                     Text(plan.status.displayName)
                         .font(Theme.font.themed(10.5, .semibold))
                         .foregroundStyle(planAccentColor(plan.status))
-                    if let project = plan.project { TagChip(project) }
+                    if let project = plan.project { TagChip(project, neutral: true) }
                     Spacer(minLength: 0)
                     Text(plan.modifiedAt, formatter: relativeFormatter)
                         .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
@@ -363,15 +363,17 @@ private struct PlanIconTile: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.gold))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-                    .strokeBorder(TileSpec.border(Theme.gold), lineWidth: 0.5))
+                    .strokeBorder(
+                        Theme.tileBorder,
+                        lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Image(systemName: kind == .projectDocument ? "folder.fill" : "doc.text")
-                    .font(.system(size: size * 0.42))
-                    .foregroundStyle(Theme.goldFg))
+                    .font(Theme.font.themed(size * 0.42))
+                    .foregroundStyle(Theme.textSecondary))
     }
 }
 
@@ -410,7 +412,7 @@ private struct PlanDetailView: View {
             Divider()
             if editing {
                 TextEditor(text: $text)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: text)
@@ -438,7 +440,7 @@ private struct PlanDetailView: View {
                 .font(Theme.font.themed(15, .bold))
                 .lineLimit(1)
             if let project = plan.project {
-                TagChip(project)
+                TagChip(project, neutral: true)
             }
             Spacer(minLength: 8)
             if editable {
@@ -482,7 +484,7 @@ private struct PlanDetailView: View {
                 ? (plan.kind == .projectDocument
                     ? L10n.format("Project document (real file in the repo) · %@", zhHans: "项目文档（仓库内真实文件） · %@", String(plan.path)) : plan.path)
                 : L10n.format("Materialized copy (read-only, rebuilt each scan) · %@", zhHans: "物化副本（只读，每轮扫描自动重建） · %@", String(plan.path)))
-                .font(Theme.font.monoSkillName(9, weight: .regular))
+                .font(Theme.font.themed(9, .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)

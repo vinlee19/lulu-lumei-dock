@@ -195,13 +195,11 @@ struct HistoryView: View {
                     .padding(.bottom, 8)
                 }
             }
-            .confirmationDialog(
+            .themedConfirm(
                 L10n.text("Export the last 14 days of task history as CSV to Downloads?", zhHans: "导出近 14 天任务历史为 CSV 到下载目录？"),
-                isPresented: $showExportConfirm, titleVisibility: .visible
-            ) {
-                Button(L10n.text("Export", zhHans: "导出")) { onExport() }
-                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-            }
+                isPresented: $showExportConfirm,
+                confirm: L10n.text("Export", zhHans: "导出")
+            ) { onExport() }
         }
     }
 
