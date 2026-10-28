@@ -2,9 +2,9 @@ import Foundation
 
 /// Unread finished: the "✓ N" mark left on the pill after a finished card auto-dismisses.
 ///
-/// A finished card dismissing on time doesn't mean the user saw it -- without this, when the only
-/// running session finishes, the island hides entirely once the card dismisses, and missing those
-/// few seconds means nothing can be recovered. Hence:
+/// A finished card dismissing on time doesn't mean the user saw it -- without this, once the card
+/// dismisses nothing on the pill says a session finished (and if that session has also exited, the
+/// island hides entirely), so missing those few seconds means nothing can be recovered. Hence:
 /// - a card **dismissing on time** doesn't count as read; the mark stays on the pill;
 /// - only **clicking that card** / **opening the task list** counts as read;
 /// - the session **starting a new turn** (running/waiting again) also clears it: the user is

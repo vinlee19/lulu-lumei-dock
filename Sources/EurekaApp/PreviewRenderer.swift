@@ -229,6 +229,19 @@ enum PreviewRenderer {
             $0.enqueueFinished(finished)
             $0.expireCurrentCard()
         }
+        // Nothing running and nothing unread, only open idle sessions: the pill stays with the
+        // idle sources dimmed
+        snapshot("5e-compact-idle-only", screen: notched) {
+            let idleClaude = AgentTask(
+                source: .claude, sessionId: "idle-claude", title: "方案需要继续增加",
+                cwd: "/Users/me/work/one-agent",
+                startedAt: now.addingTimeInterval(-3600), phase: .idle)
+            let idleCodex = AgentTask(
+                source: .codex, sessionId: "idle-codex", title: "整理发布说明",
+                cwd: "/Users/me/work/eureka",
+                startedAt: now.addingTimeInterval(-1800), phase: .idle)
+            $0.updateActiveTasks([], idle: [idleClaude, idleCodex])
+        }
         snapshot("6-card-waiting", screen: notched) {
             $0.updateActiveTasks([waitingTask])
             $0.enqueueWaiting(waitingTask)

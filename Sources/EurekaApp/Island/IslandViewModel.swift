@@ -18,12 +18,12 @@ final class IslandViewModel: ObservableObject {
 
     @Published private(set) var display: Display = .hidden
     @Published private(set) var activeTasks: [AgentTask] = []
-    /// Idle sessions (open but not running a turn): shown in the task list, not counted in the
-    /// capsule
+    /// Idle sessions (open but not running a turn): shown in the task list and as dimmed source
+    /// icons on the capsule, which they keep visible; not counted in the running count
     @Published private(set) var idleTasks: [AgentTask] = []
     @Published private(set) var queuedCount = 0
     /// Finished cards that auto-dismissed on time and the user hasn't opened yet: the pill's "✓ N";
-    /// while present, the island stays visible even with no running tasks
+    /// while present, the island stays visible even after every session has exited
     @Published private(set) var unreadFinished = IslandUnreadFinished()
     /// Id of the task whose subagent box is expanded in the task list (nil = all collapsed; one at
     /// a time, bounded geometry)
@@ -497,7 +497,9 @@ final class IslandViewModel: ObservableObject {
             }
         } else {
             timerCard = nil
-            setDisplay(activeTasks.isEmpty && unreadFinished.isEmpty ? .hidden : .compact)
+            let shown = IslandPill.isShown(
+                active: activeTasks, idle: idleTasks, unread: unreadFinished)
+            setDisplay(shown ? .compact : .hidden)
         }
         queuedCount = queue.pendingCount
     }

@@ -33,6 +33,14 @@ public enum IslandPill {
     /// Context usage at or above this percentage lights the right-wing alert
     public static let contextAlertPercent: Double = 90
 
+    /// Whether the pill stays up when no card is showing: any open session (running, waiting or
+    /// idle) or an unread finish keeps it; the island hides only when all three are empty
+    public static func isShown(
+        active: [AgentTask], idle: [AgentTask], unread: IslandUnreadFinished
+    ) -> Bool {
+        !(active.isEmpty && idle.isEmpty && unread.isEmpty)
+    }
+
     /// Left-wing sources: union of the sources of running and idle sessions, in the fixed order of
     /// `AgentSource.allCases`
     public static func sourceMarks(active: [AgentTask], idle: [AgentTask]) -> [SourceMark] {

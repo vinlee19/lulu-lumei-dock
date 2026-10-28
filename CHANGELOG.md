@@ -6,6 +6,17 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The island stays up while sessions are open.** The capsule used to hide
+  as soon as nothing was running and nothing finished was unread, so with
+  every session waiting for your next prompt the notch looked empty even
+  though the app was running. It now stays as long as any session is open:
+  sources with a running session light up, sources with only idle sessions
+  show dimmed, and the island hides only when no session is open and nothing
+  is unread. Idle sessions still leave the island when they exit or after an
+  hour without activity.
+
 ## [0.41.0] - 2026-10-27
 
 ### Added
