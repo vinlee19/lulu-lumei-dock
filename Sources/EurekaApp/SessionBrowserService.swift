@@ -137,7 +137,9 @@ final class SessionBrowserService: ObservableObject {
     /// the performance cores; opening a transcript enqueues at .userInitiated (see
     /// loadTranscript), which boosts the queue while the user waits
     private let queue = DispatchQueue(label: "com.vinlee.eureka.sessions", qos: .utility)
-    private let resolver = ProjectResolver()
+    /// Display rule: a worktree groups under its main repo, a plain folder inside a workspace
+    /// repo under its own name (`ProjectResolver.Mode.project`).
+    private let resolver = ProjectResolver(mode: .project)
     private var sessions: [AgentSessionInfo] = []
     /// Session id waiting to be revealed (recorded while the index isn't ready, consumed
     /// after refresh completes)

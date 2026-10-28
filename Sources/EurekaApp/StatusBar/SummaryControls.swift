@@ -54,7 +54,7 @@ struct SummarizeSplitButton: View {
                 split
             }
         }
-        .popover(isPresented: $showPicker, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showPicker) {
             SummaryExecutorPicker(summaries: summaries) { kind in
                 showPicker = false
                 summaries.summarize(session, with: kind)
@@ -128,7 +128,7 @@ struct SummaryExecutorPickerButton: View {
 
     var body: some View {
         SecondaryButton(title: title, icon: icon) { showPicker.toggle() }
-            .popover(isPresented: $showPicker, arrowEdge: .bottom) {
+            .themedPopup(isPresented: $showPicker) {
                 SummaryExecutorPicker(summaries: summaries) { kind in
                     showPicker = false
                     onPick(kind)
@@ -248,6 +248,13 @@ struct PickerRowChrome: ViewModifier {
                     .fill(selected
                         ? Theme.brandFill(0.12)
                         : (hovering && isEnabled ? Theme.brandFill(0.07) : .clear)))
+            // Brutal marks the current choice with the ink edge its other selections use.
+            .overlay(
+                Group {
+                    if selected, let outline = Theme.controlOutline {
+                        Rectangle().strokeBorder(outline.color, lineWidth: outline.width - 0.5)
+                    }
+                })
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
     }
@@ -382,7 +389,7 @@ struct SummaryModelField: View {
                     hard ? Theme.ink : (focused ? Theme.brand.opacity(0.6) : Theme.hairline),
                     lineWidth: hard ? max(1, Theme.cardBorderWidth - 0.5) : 1))
         .help(L10n.text("Passed to the CLI as --model; leave empty for its default", zhHans: "作为 --model 传给 CLI；留空则用它的默认模型"))
-        .popover(isPresented: $showList, arrowEdge: .bottom) {
+        .themedPopup(isPresented: $showList) {
             SummaryModelList(summaries: summaries, kind: kind) { showList = false }
         }
         .onAppear {

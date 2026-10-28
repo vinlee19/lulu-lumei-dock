@@ -389,6 +389,10 @@ enum PreviewRenderer {
         // The Skills overview card's "hits this week" reads the ranking; without it the preview
         // always shows 0
         usage.loadSkillRanking(from: UsageService.DashboardPeriod.week.startDate, to: Date())
+        // The Skills overview reads the 30-day ranking and the per-day totals
+        let overviewFrom = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        usage.loadSkillRanking(from: overviewFrom, to: Date())
+        usage.loadSkillDailyTotals(from: overviewFrom, to: Date())
 
         // Wait for all three scans to finish (the CLI has no main runloop → pump manually; the
         // first full session parse may take minutes, capped at 300s)
@@ -438,23 +442,33 @@ enum PreviewRenderer {
         snap("knowledge-plans-list", PlansView(service: plans, initialLayout: .list))
         snap("knowledge-plans-cards", PlansView(service: plans, initialLayout: .cards))
         snap("knowledge-plans-cards-wide", PlansView(service: plans, initialLayout: .cards), width: 1270)
-        snap("knowledge-skills-list",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list))
-        // Dark and minimum-width (840pt window − 165pt sidebar) variants of the list
-        snap("knowledge-skills-list-dark",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list), dark: true)
-        snap("knowledge-skills-list-min",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list), width: 675)
-        snap("knowledge-skills-cards",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .cards))
-        snap("knowledge-skills-cards-wide",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .cards),
+        // Skills shell: narrow (list only), narrow with the overview pushed, the minimum
+        // window width, the wide split (overview by default, then one skill selected), and
+        // the wide split in dark mode. The selected skill is the most-used one that is still
+        // installed, so the detail shows a usage chart; failing that, the first group.
+        let skillGroups = SkillGrouping.groups(skillMemory.skills, usage: [:])
+        let firstSkillKey = usage.skillRanking.lazy
+            .compactMap { stat in
+                skillGroups.first {
+                    $0.key == SkillMemoryIndexer.normalizeSkillName(stat.name)
+                        && $0.sources.contains(stat.source)
+                }
+            }
+            .first?.key ?? skillGroups.first?.key
+        snap("knowledge-skills", SkillsSplitView(service: skillMemory, usageService: usage))
+        snap("knowledge-skills-detail",
+             SkillsSplitView(service: skillMemory, usageService: usage,
+                             initialSelectionKey: firstSkillKey, initialPushDetail: true))
+        snap("knowledge-skills-min", SkillsSplitView(service: skillMemory, usageService: usage),
+             width: 675)
+        snap("knowledge-skills-wide", SkillsSplitView(service: skillMemory, usageService: usage),
              width: 1270)
+        snap("knowledge-skills-wide-detail",
+             SkillsSplitView(service: skillMemory, usageService: usage, initialSelectionKey: firstSkillKey),
+             width: 1270)
+        snap("knowledge-skills-wide-dark",
+             SkillsSplitView(service: skillMemory, usageService: usage, initialSelectionKey: firstSkillKey),
+             dark: true, width: 1270)
         snap("knowledge-memory-list",
              SkillMemoryView(service: skillMemory, mode: .memory, usageService: usage,
                              initialLayout: .list))
@@ -488,9 +502,8 @@ enum PreviewRenderer {
         // Search state: hit-count capsule + round clear button (the focus gradient ring needs real
         // keyboard focus, impossible offscreen)
         skillMemory.searchText = "arkcli"
-        snap("knowledge-skills-search",
-             SkillMemoryView(service: skillMemory, mode: .skills, usageService: usage,
-                             initialLayout: .list))
+        snap("knowledge-skills-search", SkillsSplitView(service: skillMemory, usageService: usage),
+             width: 1270)
         skillMemory.searchText = ""
         snap("knowledge-agents-list",
              AgentsView(service: agents, usageService: usage, initialLayout: .list))
@@ -528,6 +541,82 @@ enum PreviewRenderer {
         snap("knowledge-mcp-form-manual",
              MCPView(service: mcp, usageService: usage, initialFormTarget: MCPFormTarget(id: "new", mode: .form)))
         snap("knowledge-mcp-list-dark", MCPView(service: mcp, usageService: usage, initialLayout: .list), dark: true)
+        // Wide MCP: server list + overview by default, then the most-called server selected.
+        usage.loadMCPOverview()
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        snap("knowledge-mcp-wide", MCPView(service: mcp, usageService: usage), width: 1270)
+        let topServer = usage.mcpOverview?.serverCalls
+            .filter { key, _ in mcp.servers.contains { $0.name.lowercased() == key } }
+            .max { $0.value < $1.value }?.key
+        if let entry = mcp.servers.first(where: { $0.name.lowercased() == topServer }) ?? mcp.servers.first {
+            snap("knowledge-mcp-wide-detail",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: entry.name), width: 1270)
+        }
+        snap("knowledge-mcp-wide-dark", MCPView(service: mcp, usageService: usage), dark: true, width: 1270)
+
+        // Themed pop-ups. The panel itself can't be captured offscreen, so this draws the same
+        // surface and rows `themedPopup` puts in it: the source filter, a detail "More" list,
+        // and the new-skill list.
+        var sourceCounts: [AgentSource: Int] = [:]
+        for skill in skillMemory.skills { sourceCounts[skill.source, default: 0] += 1 }
+        let popupSources = sourceCounts.sorted { $0.value > $1.value }.prefix(8)
+        let popups = HStack(alignment: .top, spacing: 28) {
+            ThemedPopupSurface {
+                PopupList(title: L10n.text("Only show from", zhHans: "只看来自")) {
+                    PopupRow(L10n.text("All", zhHans: "全部"), systemImage: "sparkles",
+                             trailing: String(skillMemory.skills.count), selected: true) {}
+                    Divider().padding(.vertical, 3)
+                    ForEach(Array(popupSources), id: \.key) { source, count in
+                        PopupRow(source.displayName, trailing: String(count),
+                                 leading: { SourceBadge(source: source, size: 14) }) {}
+                    }
+                }
+            }
+            ThemedPopupSurface {
+                PopupList {
+                    PopupRow(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") {}
+                    PopupRow(L10n.text("Copy folder path", zhHans: "复制目录路径"), systemImage: "doc.on.doc") {}
+                    Divider().padding(.vertical, 3)
+                    PopupRow(L10n.text("Move to Trash…", zhHans: "移到废纸篓…"), systemImage: "trash",
+                             destructive: true) {}
+                }
+            }
+            ThemedPopupSurface {
+                PopupList(title: L10n.text("Create a skill for", zhHans: "给哪个工具新建技能")) {
+                    ForEach([AgentSource.claude, .codex, .opencode, .gemini], id: \.self) { source in
+                        PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {}
+                    }
+                }
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        snap("knowledge-popups", popups, width: 900)
+        snap("knowledge-popups-dark", popups, dark: true, width: 900)
+
+        // Themed dialogs: the window-level host can't be captured with a page alone, so this
+        // draws the two cards it shows (a destructive confirmation and a name prompt) on the dim.
+        let sampleName = Binding.constant("code-reviewer")
+        let dialogs = ZStack {
+            Color.black.opacity(0.28)
+            HStack(alignment: .top, spacing: 28) {
+                ThemedDialogCard(model: ThemedDialogModel(
+                    title: L10n.format(
+                        "Delete agent “%@”? The file moves to the Trash and can be restored.",
+                        zhHans: "删除 agent「%@」？文件会移入废纸篓，可恢复。", "Explore"),
+                    confirmTitle: L10n.text("Delete", zhHans: "删除"), destructive: true,
+                    onConfirm: {}))
+                ThemedDialogCard(model: ThemedDialogModel(
+                    title: L10n.text("New Claude Agent", zhHans: "新建 Claude Agent"),
+                    confirmTitle: L10n.text("Create", zhHans: "创建"),
+                    text: sampleName, placeholder: L10n.text("Name", zhHans: "名称"),
+                    onConfirm: {}))
+            }
+        }
+        snap("knowledge-dialogs", dialogs, width: 900)
+        snap("knowledge-dialogs-dark", dialogs, dark: true, width: 900)
+        snap("knowledge-agents-header",
+             AgentsView(service: agents, usageService: usage, initialLayout: .list), width: 1270)
 
         // Sessions wide/fullscreen + narrow preview to verify header toolbar alignment
         let sessions = SessionBrowserService()
@@ -556,6 +645,31 @@ enum PreviewRenderer {
         snap("knowledge-sessions-min",
              SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
              width: 675)
+
+        // Both hubs as the window shows them: sidebar (Capabilities + Knowledge entries) +
+        // type switcher + content. Services not scanned above are constructed idle; their
+        // counts read 0 in the switcher, which is fine for a layout check.
+        let prompts = PromptsService(sessionBrowser: sessions)
+        @MainActor func hub(_ tab: PopoverRootView.Tab) -> some View {
+            let navigation = PopoverNavigation()
+            navigation.tab = tab
+            return HStack(spacing: 0) {
+                SidebarView(selected: tab, limitsBadge: ("67%", Theme.gold),
+                            historyBadge: "1.2k", appVersion: "dev", onSelect: { _ in })
+                Divider()
+                KnowledgeHubView(
+                    navigation: navigation, tabs: tab.hubTabs ?? [],
+                    skillMemoryService: skillMemory, usageService: usage,
+                    sessionBrowser: sessions, plansService: plans,
+                    promptsService: prompts,
+                    agentConfigService: agents, mcpService: mcp)
+            }
+        }
+        snap("knowledge-hub", hub(.skills), width: 1270)
+        snap("knowledge-hub-min", hub(.skills), width: 840)
+        snap("knowledge-hub-dark", hub(.skills), dark: true, width: 1270)
+        snap("knowledge-hub-mcp", hub(.mcp), width: 1270)
+        snap("knowledge-hub-knowledge", hub(.memory), width: 1270)
     }
 
     /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light

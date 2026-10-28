@@ -46,74 +46,152 @@ struct MCPView: View {
     private let gridColumns = KnowledgeGrid.columns
 
     var body: some View {
-        Group {
-            if let target = formTarget {
-                MCPServerFormView(
-                    service: service, target: target,
-                    onBack: { withAnimation(.easeOut(duration: 0.15)) { formTarget = nil } })
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else if let name = detailName {
-                MCPDetailView(
-                    service: service, usage: usageService, serverName: name,
-                    onBack: { withAnimation(.easeOut(duration: 0.15)) { detailName = nil } },
-                    onDeleteEntry: { deletingEntry = $0 },
-                    onEdit: { entry in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            formTarget = MCPFormTarget(
-                                id: "edit:\(entry.id)", mode: .form, editing: entry)
-                        }
-                    },
-                    onEditCredentials: { entry in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            formTarget = MCPFormTarget(
-                                id: "edit:\(entry.id)", mode: .form, editing: entry,
-                                expandCredentials: true)
-                        }
-                    })
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else {
-                VStack(spacing: 0) {
-                    header
-                    Divider()
-                    content
+        GeometryReader { geo in
+            let wide = geo.size.width >= SkillsSplitView.splitThreshold
+            Group {
+                if let target = formTarget {
+                    MCPServerFormView(
+                        service: service, target: target,
+                        onBack: { withAnimation(.easeOut(duration: 0.15)) { formTarget = nil } })
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else if wide {
+                    splitLayout
+                } else if let name = detailName {
+                    detail(name)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else {
+                    VStack(spacing: 0) {
+                        header(inSplit: false)
+                        Divider()
+                        content
+                    }
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .onAppear {
             service.refresh()
             usageService.loadMCPStats()
+            usageService.loadMCPOverview()
         }
-        .confirmationDialog(
+        .themedConfirm(
             deletingEntry.map {
                 L10n.format("From %@, remove server “%@”? A .bak.eureka backup is kept before writing.", zhHans: "从 %@ 移除 server「%@」？写前会留 .bak.eureka 备份。", String($0.source.displayName), String($0.name))
             } ?? "",
             isPresented: Binding(
                 get: { deletingEntry != nil },
                 set: { if !$0 { deletingEntry = nil } }),
-            titleVisibility: .visible
+            confirm: L10n.text("Remove", zhHans: "移除"), destructive: true
         ) {
-            Button(L10n.text("Remove", zhHans: "移除"), role: .destructive) {
-                if let entry = deletingEntry { service.remove(entry) }
+            if let entry = deletingEntry { service.remove(entry) }
+        }
+    }
+
+    private func detail(_ name: String) -> some View {
+        MCPDetailView(
+            service: service, usage: usageService, serverName: name,
+            onBack: { withAnimation(.easeOut(duration: 0.15)) { detailName = nil } },
+            onDeleteEntry: { deletingEntry = $0 },
+            onEdit: { entry in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    formTarget = MCPFormTarget(
+                        id: "edit:\(entry.id)", mode: .form, editing: entry)
+                }
+            },
+            onEditCredentials: { entry in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    formTarget = MCPFormTarget(
+                        id: "edit:\(entry.id)", mode: .form, editing: entry,
+                        expandCredentials: true)
+                }
+            })
+    }
+
+    // MARK: - Wide layout: server list + overview / detail (the Skills shell's shape)
+
+    private var splitLayout: some View {
+        VStack(spacing: 0) {
+            header(inSplit: true)
+            Divider()
+            HStack(spacing: 12) {
+                KnowledgePane { splitList }
+                    .frame(width: SkillsSplitView.listWidth)
+                KnowledgePane {
+                    if let name = detailName {
+                        detail(name).id(name)
+                    } else {
+                        MCPOverviewPane(service: service, usageService: usageService) { name in
+                            withAnimation(.easeOut(duration: 0.15)) { detailName = name }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            .padding(12)
+        }
+        .background(Theme.surfaceSecondary)
+    }
+
+    private var splitList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.format("%@ servers · %@ config locations", zhHans: "%@ 个 server · %@ 处配置",
+                                 String(dedupedCount), String(totalCount)))
+                    .font(Theme.font.themed(11))
+                    .foregroundStyle(Theme.textSecondary)
+                SourceFilterMenu(
+                    selected: $selectedSource,
+                    allLabel: L10n.text("All", zhHans: "全部"), allIcon: ToolKind.mcp.icon,
+                    totalCount: totalCount,
+                    sources: availableSources,
+                    count: { count(for: $0) })
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    OverviewListRow(isSelected: detailName == nil) {
+                        withAnimation(.easeOut(duration: 0.15)) { detailName = nil }
+                    }
+                    ForEach(groupedEntries, id: \.key) { group in
+                        MCPServerListRow(
+                            entries: group.entries, service: service,
+                            calls30: usageService.mcpOverview?.serverCalls[group.key] ?? 0,
+                            isSelected: detailName?.lowercased() == group.key,
+                            onSelect: {
+                                withAnimation(.easeOut(duration: 0.15)) { detailName = group.entries[0].name }
+                            })
+                    }
+                    if filteredEntries.isEmpty {
+                        emptyState.padding(.top, 30)
+                    }
+                }
+                .padding(6)
+            }
         }
     }
 
     // MARK: - Top bar (byte-for-byte identical to the family)
 
-    private var header: some View {
+    /// No page title: the hub's type switcher names the page, and search sits where every hub
+    /// page puts it. In the split layout the list has one layout only, so the toggle goes too.
+    private func header(inSplit: Bool) -> some View {
         HStack(spacing: 12) {
-            Text("MCP").font(Theme.font.themed(15, .bold))
             SearchField(
                 placeholder: L10n.text("Search MCP servers", zhHans: "搜索 MCP server"), text: $service.searchText,
-                scanning: service.scanning, resultCount: totalCount)
+                scanning: service.scanning, resultCount: totalCount,
+                maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             createButton
             ScanStatusLabel(
                 scanning: service.scanning, phase: nil,
                 lastScanAt: service.lastScanAt)
             RefreshButton(help: L10n.text("Force rescan of MCP config", zhHans: "强制重扫 MCP 配置")) { service.refresh(force: true) }
-            LayoutToggle(layout: $layout)
+            if !inSplit {
+                LayoutToggle(layout: $layout)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -219,7 +297,7 @@ struct MCPView: View {
                     distributionTitle: L10n.text("Transport", zhHans: "传输方式"),
                     segments: transportSegments,
                     trailingNote: measuredCapabilityNote)
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: ToolKind.mcp.icon,
                     totalCount: totalCount,
@@ -477,7 +555,7 @@ struct MCPToolRowView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(tool.name)
-                    .font(Theme.font.monoSkillName(11, weight: .medium))
+                    .font(Theme.font.themed(11, .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if let title = tool.title, !title.isEmpty, title != tool.name {
@@ -545,7 +623,7 @@ struct MCPNamedRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.name)
-                .font(Theme.font.monoSkillName(11, weight: .medium))
+                .font(Theme.font.themed(11, .medium))
                 .foregroundStyle(.primary)
             if let desc = item.description, !desc.isEmpty {
                 Text(mcpFlatDescription(desc))
@@ -616,17 +694,17 @@ struct MCPIconTile: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
-            .fill(TileSpec.fill(Theme.brand))
+            .fill(Theme.tileBackground)
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: TileSpec.radius(size), style: .continuous)
                     .strokeBorder(
-                        ThemeStyle.current.isHardEdged ? Theme.cardBorder : TileSpec.border(Theme.brand),
+                        Theme.tileBorder,
                         lineWidth: ThemeStyle.current.isHardEdged ? Theme.cardBorderWidth : 0.5))
             .overlay(
                 Image(systemName: ToolKind.mcp.icon)
-                    .font(.system(size: size * 0.42, weight: .medium))
-                    .foregroundStyle(Theme.brandFg))
+                    .font(Theme.font.themed(size * 0.42, .medium))
+                    .foregroundStyle(Theme.textSecondary))
     }
 }
 
@@ -702,17 +780,17 @@ private struct MCPRow: View {
                                     : L10n.format("Last probe: %@", zhHans: "上次检测：%@", String(snapshot.label)))
                         }
                         Text(entry.name)
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .foregroundStyle(entry.enabled != false ? .primary : .secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .layoutPriority(1)
                         TagChip(entry.transport, neutral: true)
                         if let project = entry.projectName {
-                            TagChip(project)
+                            TagChip(project, neutral: true)
                         }
                         if entry.enabled == false {
-                            TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
+                            TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                         }
                     }
                     if let summary = entry.commandSummary ?? entry.urlSummary {
@@ -797,14 +875,14 @@ private struct MCPCard: View {
                     MonogramTile(name: entry.name, source: entry.source, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(entry.name)
-                            .font(Theme.font.monoSkillName(13))
+                            .font(Theme.font.themed(13, .semibold))
                             .foregroundStyle(entry.enabled != false ? .primary : .secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         HStack(spacing: 5) {
                             TagChip(entry.transport, neutral: true)
                             if entry.enabled == false {
-                                TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
+                                TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                             }
                         }
                     }
@@ -822,7 +900,7 @@ private struct MCPCard: View {
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
                     if let project = entry.projectName {
-                        TagChip(project)
+                        TagChip(project, neutral: true)
                     }
                     Spacer(minLength: 0)
                     if let summary = mcpCapabilitySummary(toolInfo) {
@@ -928,7 +1006,7 @@ private struct MCPDetailView: View {
             .buttonStyle(.borderless)
             MCPIconTile(size: 26)
             Text(serverName)
-                .font(Theme.font.monoSkillName(15, weight: .bold))
+                .font(Theme.font.themed(15, .bold))
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let transport = primary?.transport {
@@ -995,7 +1073,7 @@ private struct MCPDetailView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             fieldLabel(label)
             Text(value)
-                .font(Theme.font.monoSkillName(11, weight: .regular))
+                .font(Theme.font.themed(11, .regular))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
@@ -1237,7 +1315,7 @@ private struct MCPDetailView: View {
                     HStack(spacing: 6) {
                         TextField(L10n.text("client_id issued by the authorization server", zhHans: "授权服务器分发的 client_id"), text: $clientIDDraft)
                             .textFieldStyle(.roundedBorder)
-                            .font(Theme.font.monoSkillName(10.5, weight: .regular))
+                            .font(Theme.font.themed(10.5, .regular))
                         Button(L10n.text("Save", zhHans: "保存")) {
                             service.setPreRegisteredClientID(clientIDDraft, for: primary)
                         }
@@ -1404,18 +1482,13 @@ private struct MCPDetailView: View {
                     Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
                 }
             }
-            .confirmationDialog(
+            .themedConfirm(
                 L10n.format("Remove “%@” from every config?", zhHans: "从所有配置移除「%@」？", String(serverName)),
                 isPresented: $removeAllConfirm,
-                titleVisibility: .visible
-            ) {
-                Button(L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(entries.count)), role: .destructive) {
-                    runRemoveEverywhere()
-                }
-                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-            } message: {
-                Text(L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(entries.map(\.configPath).joined(separator: "\n"))))
-            }
+                message: L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(entries.map(\.configPath).joined(separator: "\n"))),
+                confirm: L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(entries.count)),
+                destructive: true
+            ) { runRemoveEverywhere() }
         }
         Text(L10n.format("Probed %@", zhHans: "检测于 %@", String(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))))
             .font(Theme.font.themed(9))
@@ -1496,7 +1569,7 @@ private struct MCPDetailView: View {
                 FlowLayout(spacing: 5, lineSpacing: 5) {
                     ForEach(cache.toolNames, id: \.self) { name in
                         Text(name)
-                            .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                            .font(Theme.font.themed(9.5, .regular))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -1581,7 +1654,7 @@ private struct MCPDetailView: View {
                     FlowLayout(spacing: 5, lineSpacing: 5) {
                         ForEach(activity.topTools, id: \.name) { tool in
                             Text("\(tool.name) · \(tool.count)")
-                                .font(Theme.font.monoSkillName(9.5, weight: .regular))
+                                .font(Theme.font.themed(9.5, .regular))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -1636,21 +1709,16 @@ private struct MCPDetailView: View {
             }
         }
         .sheet(isPresented: $projectSheet) { projectInstallSheet }
-        .confirmationDialog(
+        .themedConfirm(
             L10n.format("Install into %@?", zhHans: "安装到 %@？", String(installTarget?.displayName ?? "")),
             isPresented: Binding(
                 get: { installTarget != nil },
                 set: { if !$0 { installTarget = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button(L10n.text("Write this agent’s MCP config", zhHans: "写入该 agent 的 MCP 配置")) { runInstall() }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-        } message: {
-            if let target = installTarget,
-               let writable = MCPService.writableTarget(for: target) {
-                Text(L10n.format("The server definition (including secret values, copied only between files on this Mac) will be written to\n%@\nA .bak.eureka backup is kept first.", zhHans: "将把 server 定义（含密钥值，仅本机文件间复制）写入\n%@\n写前会留 .bak.eureka 备份。", String(writable.configURL.path)))
-            }
-        }
+            message: installTarget.flatMap { MCPService.writableTarget(for: $0) }.map { writable in
+                L10n.format("The server definition (including secret values, copied only between files on this Mac) will be written to\n%@\nA .bak.eureka backup is kept first.", zhHans: "将把 server 定义（含密钥值，仅本机文件间复制）写入\n%@\n写前会留 .bak.eureka 备份。", String(writable.configURL.path))
+            },
+            confirm: L10n.text("Write this agent’s MCP config", zhHans: "写入该 agent 的 MCP 配置")
+        ) { runInstall() }
     }
 
     @ViewBuilder
@@ -1774,7 +1842,7 @@ private struct MCPDetailView: View {
             }
             if !projectRootPath.isEmpty {
                 Text("\(projectRootPath)/.mcp.json")
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
             }
             Toggle(isOn: $projectCursorToo) {
@@ -1850,12 +1918,12 @@ private struct MCPDetailView: View {
                         TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"),
                                 neutral: entry.projectName == nil)
                         if entry.enabled == false {
-                            TagChip(L10n.text("Disabled", zhHans: "已停用"), tint: Theme.failureRed)
+                            TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                         }
                         probeChip(for: entry)
                     }
                     Text(entry.configPath)
-                        .font(Theme.font.monoSkillName(9, weight: .regular))
+                        .font(Theme.font.themed(9, .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -2038,7 +2106,7 @@ private struct MCPServerFormView: View {
                 fieldColumn(L10n.text("Name", zhHans: "名称")) {
                     TextField("my-mcp-server", text: $name)
                         .textFieldStyle(.roundedBorder)
-                        .font(Theme.font.monoSkillName(12, weight: .regular))
+                        .font(Theme.font.themed(12, .regular))
                         .disabled(isEditing)  // rename = delete + create (same rule as Codex profiles)
                         .frame(maxWidth: 320)
                 }
@@ -2065,7 +2133,7 @@ private struct MCPServerFormView: View {
                     .buttonStyle(.borderless)
                 Spacer(minLength: 12)
                 Text(footerHint)
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
                     .truncationMode(.middle)
@@ -2102,7 +2170,7 @@ private struct MCPServerFormView: View {
                 Text(entry.source.displayName).font(Theme.font.themed(12, .medium))
                 TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"), neutral: entry.projectName == nil)
                 Text(entry.configPath)
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -2125,12 +2193,12 @@ private struct MCPServerFormView: View {
             fieldColumn("URL") {
                 TextField("https://mcp.example.com/mcp", text: $urlText)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
             }
             fieldColumn(L10n.text("Timeout ms (optional)", zhHans: "超时时间 MS（可选）")) {
                 TextField("30000", text: $timeoutText)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .frame(maxWidth: 200)
             }
             kvDisclosure(L10n.text("Headers (optional)", zhHans: "请求头（可选）"), rows: $headerRows, expanded: $headersExpanded,
@@ -2140,13 +2208,13 @@ private struct MCPServerFormView: View {
             fieldColumn(L10n.text("Command", zhHans: "命令")) {
                 TextField("npx", text: $command)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .frame(maxWidth: 320)
             }
             fieldColumn(L10n.text("Arguments (space-separated)", zhHans: "参数（空格分隔）")) {
                 TextField("-y @modelcontextprotocol/server-memory", text: $argsText)
                     .textFieldStyle(.roundedBorder)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
             }
             kvDisclosure(L10n.text("Environment (optional)", zhHans: "环境变量（可选）"), rows: $envRows, expanded: $envExpanded,
                          keyPlaceholder: "API_KEY", valuePlaceholder: L10n.text("Value (written only to the target config; Eureka does not keep it)", zhHans: "值（只写入目标配置，Eureka 不保存）"),
@@ -2164,11 +2232,11 @@ private struct MCPServerFormView: View {
                     HStack(spacing: 8) {
                         TextField(keyPlaceholder, text: $row.key)
                             .textFieldStyle(.roundedBorder)
-                            .font(Theme.font.monoSkillName(11.5, weight: .regular))
+                            .font(Theme.font.themed(11.5, .regular))
                             .frame(width: 220)
                         TextField(valuePlaceholder, text: $row.value)
                             .textFieldStyle(.roundedBorder)
-                            .font(Theme.font.monoSkillName(11.5, weight: .regular))
+                            .font(Theme.font.themed(11.5, .regular))
                         Button {
                             rows.wrappedValue.removeAll { $0.id == row.id }
                         } label: {
@@ -2213,7 +2281,7 @@ private struct MCPServerFormView: View {
         fieldColumn(L10n.text("Command, URL, or JSON", zhHans: "命令、URL 或 JSON")) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $quickText)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .frame(minHeight: 140)
                     .scrollContentBackground(.hidden)
                     .padding(6)
@@ -2223,7 +2291,7 @@ private struct MCPServerFormView: View {
                         Text(verbatim: L10n.text("or https://example.com/mcp", zhHans: "或 https://example.com/mcp"))
                         Text(verbatim: L10n.text("or a whole {\"mcpServers\": …} JSON", zhHans: "或整段 {\"mcpServers\": …} JSON"))
                     }
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 12)
                     .padding(.leading, 11)
@@ -2261,7 +2329,7 @@ private struct MCPServerFormView: View {
     private var jsonEditor: some View {
         fieldColumn(L10n.text("JSON (a whole mcpServers object is fine; every server is written to the selected targets)", zhHans: "JSON（支持整段 mcpServers 对象；多个 server 会全部写入所选目标）")) {
             TextEditor(text: $pasteText)
-                .font(Theme.font.monoSkillName(11.5, weight: .regular))
+                .font(Theme.font.themed(11.5, .regular))
                 .frame(minHeight: 220)
                 .scrollContentBackground(.hidden)
                 .padding(6)
@@ -2396,7 +2464,7 @@ private struct MCPServerFormView: View {
                         .compactMap { MCPService.writableTarget(for: $0)?.configURL.path }
                         .sorted()
                         .joined(separator: "\n"))
-                        .font(Theme.font.monoSkillName(9, weight: .regular))
+                        .font(Theme.font.themed(9, .regular))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -2455,7 +2523,7 @@ private struct MCPServerFormView: View {
                 \(projectRootPath)/.mcp.json\(projectCursorToo
                     ? "\n\(projectRootPath)/.cursor/mcp.json" : "")
                 """)
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
             }
             Toggle(isOn: $projectCursorToo) {

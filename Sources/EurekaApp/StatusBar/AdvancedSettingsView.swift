@@ -133,13 +133,11 @@ struct AdvancedSettingsView: View {
         SecondaryButton(
             title: L10n.text("Clear Full-Text Index", zhHans: "清空全文索引"), classic: .push
         ) { confirmingClearIndex = true }
-            .confirmationDialog(
+            .themedConfirm(
                 L10n.text("Clear the cross-session full-text index? The next scan rebuilds it, which can take a few minutes when there are many sessions.", zhHans: "确认清空跨会话全文索引？下次扫描会重新建索引，大量会话时需要几分钟。"),
-                isPresented: $confirmingClearIndex, titleVisibility: .visible
-            ) {
-                Button(L10n.text("Clear", zhHans: "清空"), role: .destructive) { usageService.clearSearchIndex() }
-                Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-            }
+                isPresented: $confirmingClearIndex,
+                confirm: L10n.text("Clear", zhHans: "清空"), destructive: true
+            ) { usageService.clearSearchIndex() }
     }
 }
 

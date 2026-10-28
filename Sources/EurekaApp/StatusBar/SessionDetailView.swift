@@ -118,18 +118,14 @@ struct SessionDetailView: View {
                     Color.clear.preference(key: DetailWidthKey.self, value: proxy.size.width)
                 })
                 .onPreferenceChange(DetailWidthKey.self) { detailWidth = $0 }
-                .confirmationDialog(
+                .themedConfirm(
                     L10n.format(
                         "Delete session “%@”? The transcript file moves to the Trash and can be restored.",
                         zhHans: "删除会话「%@」？transcript 文件会移入废纸篓，可恢复。",
                         session.name ?? String(session.id.prefix(8))),
-                    isPresented: $confirmingDelete, titleVisibility: .visible
-                ) {
-                    Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                        service.deleteSessions([session])
-                    }
-                    Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
-                }
+                    isPresented: $confirmingDelete,
+                    confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
+                ) { service.deleteSessions([session]) }
             } else {
                 EmptyStateView(
                     icon: "bubble.left.and.text.bubble.right",

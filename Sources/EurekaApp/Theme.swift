@@ -475,6 +475,45 @@ enum Theme {
         }
     }
 
+    // MARK: - Color budget tokens (knowledge pages, phase 1)
+    //
+    // The knowledge pages used to spend the brand color on tiles, heat bars, counts and
+    // tags all at once. These tokens give every "quiet" element a neutral home so the
+    // brand color is left for selection, primary actions and progress only.
+
+    /// Secondary text: classic = system secondaryLabel (pixel-identical to `.secondary`);
+    /// brutal = warm grey tuned for the cream / warm-black grounds; palettes = ink at 70%,
+    /// so the grey follows each palette's own foreground instead of a fixed value.
+    static var textSecondary: Color {
+        switch ThemeStyle.current {
+        case .classic: return Color(nsColor: .secondaryLabelColor)
+        case .brutal: return dynamic(light: hexRGB("4A4542"), dark: hexRGB("D8D0C2"))
+        default: return ink.opacity(0.70)
+        }
+    }
+
+    /// Tertiary text (timestamps, counts that must not compete): same scheme at 45%.
+    static var textTertiary: Color {
+        switch ThemeStyle.current {
+        case .classic: return Color(nsColor: .tertiaryLabelColor)
+        case .brutal: return dynamic(light: hexRGB("7B746E"), dark: hexRGB("A2998B"))
+        default: return ink.opacity(0.45)
+        }
+    }
+
+    /// Neutral ground for logo / glyph tiles (replaces the brand-tinted 10% fill).
+    static var tileBackground: Color {
+        switch ThemeStyle.current {
+        case .classic: return Color.primary.opacity(0.06)
+        default: return surfaceSecondary
+        }
+    }
+
+    /// Tile outline: classic / palettes = the regular card border; brutal = ink.
+    static var tileBorder: Color {
+        ThemeStyle.current.isHardEdged ? ink : cardBorder
+    }
+
     /// Main window background: classic = clear (keeps the system window background); brutal = cream
     /// (dark = warm black)
     static var windowBackground: Color {
@@ -604,6 +643,15 @@ enum Theme {
             ThemeStyle.current.isHardEdged
                 ? ThemeFonts.mono(size, weight: weight)
                 : .system(size: size, weight: weight).monospacedDigit()
+        }
+
+        /// Fully monospaced text (paths, commands, raw content): classic / palettes =
+        /// SF Mono via the monospaced design; brutal = Space Mono. Replaces inline
+        /// `.system(size:).monospaced()` so brutal's font reaches code-like text too.
+        static func code(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+            ThemeStyle.current.isHardEdged
+                ? ThemeFonts.mono(size, weight: weight)
+                : .system(size: size, weight: weight, design: .monospaced)
         }
     }
 

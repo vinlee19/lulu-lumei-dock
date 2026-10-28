@@ -60,9 +60,11 @@ struct AgentsView: View {
             service.refresh()
             usageService.loadAgentStats()
         }
-        .alert(createAlertTitle, isPresented: $creatingAgent) {
-            TextField(L10n.text("Name", zhHans: "名称"), text: $newAgentName)
-            Button(L10n.text("Create", zhHans: "创建")) {
+        .themedPrompt(
+            createAlertTitle, isPresented: $creatingAgent,
+            text: $newAgentName, placeholder: L10n.text("Name", zhHans: "名称"),
+            confirm: L10n.text("Create", zhHans: "创建"),
+            onConfirm: {
                 let name = newAgentName.trimmingCharacters(in: .whitespaces)
                 if !name.isEmpty {
                     switch creatingKind {
@@ -73,38 +75,33 @@ struct AgentsView: View {
                     }
                 }
                 newAgentName = ""
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { newAgentName = "" }
-        }
-        .confirmationDialog(
+            },
+            onCancel: { newAgentName = "" })
+        .themedConfirm(
             deletingAgent.map {
                 L10n.format(
                     "Delete agent “%@”? The file moves to the Trash and can be restored.",
                     zhHans: "删除 agent「%@」？文件会移入废纸篓，可恢复。",
                     $0.name)
             } ?? "",
-            isPresented: deletingAgentBinding, titleVisibility: .visible
+            isPresented: deletingAgentBinding,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let a = deletingAgent { service.deleteAgent(a) }
-                detail = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            if let a = deletingAgent { service.deleteAgent(a) }
+            detail = nil
         }
-        .confirmationDialog(
+        .themedConfirm(
             deletingProfile.map {
                 L10n.format(
                     "Delete Codex profile “%@”? This removes that table from config.toml.",
                     zhHans: "删除 Codex profile「%@」？会从 config.toml 移除该段。",
                     $0.name)
             } ?? "",
-            isPresented: deletingProfileBinding, titleVisibility: .visible
+            isPresented: deletingProfileBinding,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                if let p = deletingProfile { service.deleteProfile(name: p.name) }
-                profileDetail = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            if let p = deletingProfile { service.deleteProfile(name: p.name) }
+            profileDetail = nil
         }
     }
 
@@ -112,10 +109,13 @@ struct AgentsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Agents").font(Theme.font.themed(15, .bold))
+            // No page title: the hub's type switcher names the page. Search sits where every
+            // hub page puts it (`KnowledgeHubView.searchWidth`).
             SearchField(
                 placeholder: L10n.text("Search subagents", zhHans: "搜索子代理"), text: $service.searchText,
-                scanning: service.scanning, resultCount: totalCount)
+                scanning: service.scanning, resultCount: totalCount,
+                maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             createMenu
             ScanStatusLabel(
@@ -256,7 +256,7 @@ struct AgentsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"), allIcon: "person.2.fill",
                     totalCount: totalCount,
@@ -462,7 +462,7 @@ private struct AgentCard: View {
                     MonogramTile(name: item.name, source: item.source, size: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(item.name)
-                            .font(Theme.font.monoSkillName(13))
+                            .font(Theme.font.themed(13, .semibold))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
                             .help(item.name)
@@ -517,7 +517,7 @@ private struct AgentRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(item.name)
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .foregroundStyle(item.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
@@ -564,7 +564,7 @@ private struct AgentScopeChips: View {
         if let plugin = item.pluginName {
             TagChip(L10n.format("Plugin · %@", zhHans: "插件 · %@", plugin), neutral: true)
         }
-        if let project = item.projectName { TagChip(project) }
+        if let project = item.projectName { TagChip(project, neutral: true) }
     }
 }
 
@@ -631,7 +631,7 @@ private struct AgentDetailView: View {
                 builtinOverview
             } else if editing {
                 TextEditor(text: $text)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: text)
@@ -687,7 +687,7 @@ private struct AgentDetailView: View {
                 .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
             if let project = agent.scope.projectName {
-                TagChip(project)
+                TagChip(project, neutral: true)
             }
             Spacer(minLength: 8)
             if editable {
@@ -723,7 +723,7 @@ private struct AgentDetailView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text(editable ? agent.path : L10n.format("Managed by Claude Code (read-only) · %@", zhHans: "由 Claude Code 管理（只读） · %@", agent.path))
-                .font(Theme.font.monoSkillName(9, weight: .regular))
+                .font(Theme.font.themed(9, .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -787,7 +787,7 @@ private struct CodexProfileDetailView: View {
             Divider()
             HStack {
                 Text(L10n.format("Writes the [profiles.%@] table in ~/.codex/config.toml", zhHans: "写入 ~/.codex/config.toml 的 [profiles.%@] 段", name.isEmpty ? "…" : name))
-                    .font(Theme.font.monoSkillName(9, weight: .regular))
+                    .font(Theme.font.themed(9, .regular))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)

@@ -138,9 +138,11 @@ struct SkillMemoryView: View {
         }
         .onChange(of: service.focusPath) { _, _ in consumeFocus() }
         .onChange(of: service.lastScanAt) { _, _ in consumeFocus() }
-        .alert(L10n.format("New %@", zhHans: "新建%@", creating?.label ?? ""), isPresented: creatingBinding) {
-            TextField(L10n.text("Name", zhHans: "名称"), text: $newName)
-            Button(L10n.text("Create", zhHans: "创建")) {
+        .themedPrompt(
+            L10n.format("New %@", zhHans: "新建%@", creating?.label ?? ""), isPresented: creatingBinding,
+            text: $newName, placeholder: L10n.text("Name", zhHans: "名称"),
+            confirm: L10n.text("Create", zhHans: "创建"),
+            onConfirm: {
                 if let creating, !newName.trimmingCharacters(in: .whitespaces).isEmpty {
                     if creating.isSkill {
                         service.createSkill(source: creating.source, name: newName)
@@ -149,24 +151,21 @@ struct SkillMemoryView: View {
                     }
                 }
                 newName = ""
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) { newName = "" }
-        }
-        .confirmationDialog(
+            },
+            onCancel: { newName = "" })
+        .themedConfirm(
             deleting.map {
                 L10n.format(
                     "Delete “%@”? The file moves to the Trash and can be restored.",
                     zhHans: "删除「%@」？文件会移入废纸篓，可恢复。",
                     $0.title)
             } ?? "",
-            isPresented: deletingBinding, titleVisibility: .visible
+            isPresented: deletingBinding,
+            confirm: L10n.text("Delete", zhHans: "删除"), destructive: true
         ) {
-            Button(L10n.text("Delete", zhHans: "删除"), role: .destructive) {
-                deleting?.perform(service)
-                detail = nil
-                memoryDetail = nil
-            }
-            Button(L10n.text("Cancel", zhHans: "取消"), role: .cancel) {}
+            deleting?.perform(service)
+            detail = nil
+            memoryDetail = nil
         }
     }
 
@@ -174,11 +173,13 @@ struct SkillMemoryView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(mode.title).font(Theme.font.themed(15, .bold))
+            // No page title: the hub's type switcher names the page. Search sits where every
+            // hub page puts it (`KnowledgeHubView.searchWidth`).
             SearchField(
                 placeholder: mode.searchPlaceholder,
                 text: $service.searchText, scanning: service.scanning,
-                resultCount: totalCount)
+                resultCount: totalCount, maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             createMenu
             ScanStatusLabel(
@@ -256,7 +257,7 @@ struct SkillMemoryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 statsCard
-                SourceFilterBar(
+                SourceFilterMenu(
                     selected: $selectedSource,
                     allLabel: L10n.text("All", zhHans: "全部"),
                     allIcon: allSourcesIcon,
@@ -486,7 +487,7 @@ struct SkillMemoryView: View {
                 distributionTitle: L10n.text("Scope", zhHans: "范围分布"),
                 segments: [
                     .init(label: L10n.text("Global", zhHans: "全局"), count: scope.global, color: Theme.brand),
-                    .init(label: L10n.text("Project root", zhHans: "项目根"), count: scope.project, color: Theme.gold),
+                    .init(label: L10n.text("Project root", zhHans: "项目根"), count: scope.project, color: Theme.autoCleanGray),
                 ])
         } else if mode == .skills {
             let enabled = service.skills.filter(\.enabled).count
@@ -520,7 +521,7 @@ struct SkillMemoryView: View {
                 distributionTitle: L10n.text("Scope", zhHans: "范围分布"),
                 segments: [
                     .init(label: L10n.text("Global", zhHans: "全局"), count: scope.global, color: Theme.brand),
-                    .init(label: L10n.text("Project libraries", zhHans: "项目记忆库"), count: scope.library, color: Theme.enabledGreen),
+                    .init(label: L10n.text("Project libraries", zhHans: "项目记忆库"), count: scope.library, color: Theme.autoCleanGray),
                 ],
                 trailingNote: libraryNote)
         }
@@ -833,7 +834,7 @@ private struct SkillCard: View {
                 HStack(spacing: 10) {
                     MonogramTile(name: skill.name, source: skill.source, size: 28)
                     Text(skill.name)
-                        .font(Theme.font.monoSkillName(13))
+                        .font(Theme.font.themed(13, .semibold))
                         .foregroundStyle(skill.enabled ? .primary : .secondary)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
@@ -851,10 +852,10 @@ private struct SkillCard: View {
                 HStack(spacing: 6) {
                     if let stat, stat.count > 0 {
                         Text(L10n.format("%@ hits", zhHans: "命中 %@ 次", String(stat.count)))
-                            .font(Theme.font.themedMono(10.5, .semibold))
-                            .foregroundStyle(Theme.brandFg)
+                            .font(Theme.font.themedMono(10.5, .medium))
+                            .foregroundStyle(.secondary)
                     }
-                    if let project = skill.scope.projectName { TagChip(project) }
+                    if let project = skill.scope.projectName { TagChip(project, neutral: true) }
                     Spacer(minLength: 0)
                     if let last = stat?.lastTs {
                         Text(relativeFormatter.localizedString(for: last, relativeTo: Date()))
@@ -902,11 +903,11 @@ private struct SkillListRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(skill.name)
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .foregroundStyle(skill.enabled ? .primary : .secondary)
                             .lineLimit(1).truncationMode(.tail)
                             .layoutPriority(1)
-                        if let project = skill.scope.projectName { TagChip(project) }
+                        if let project = skill.scope.projectName { TagChip(project, neutral: true) }
                     }
                     if let desc = skill.description, !desc.isEmpty {
                         Text(desc).font(Theme.font.themed(10.5)).foregroundStyle(.secondary).lineLimit(1)
@@ -942,7 +943,7 @@ private struct SkillStatsTrailing<Control: View>: View {
                     Capsule().fill(Theme.hairline)
                         .frame(width: Self.barWidth, height: 6)
                         .overlay(alignment: .leading) {
-                            Capsule().fill(Theme.brand)
+                            Capsule().fill(Theme.textTertiary)
                                 .frame(
                                     width: max(4, Self.barWidth * min(1, CGFloat(hits) / CGFloat(maxHit))),
                                     height: 6)
@@ -952,8 +953,8 @@ private struct SkillStatsTrailing<Control: View>: View {
                 }
             }
             Text(hits > 0 ? L10n.format("%@ times", zhHans: "%@ 次", String(hits)) : "")
-                .font(Theme.font.themedMono(12, .semibold))
-                .foregroundStyle(Theme.brandFg)
+                .font(Theme.font.themedMono(12, .medium))
+                .foregroundStyle(.primary)
                 .frame(width: 52, alignment: .trailing)
             Text(stat?.lastTs.map { relativeFormatter.localizedString(for: $0, relativeTo: Date()) } ?? "")
                 .font(Theme.font.themed(9.5)).foregroundStyle(.tertiary)
@@ -1122,7 +1123,7 @@ private struct MemoryLibraryTypeSummary: View {
         }
         if parts.isEmpty {
             Text(abbreviateHome(library.directory))
-                .font(Theme.font.monoSkillName(10, weight: .regular))
+                .font(Theme.font.themed(10, .regular))
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
         } else {
@@ -1154,7 +1155,7 @@ private struct MemoryLibraryRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(library.projectName)
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .lineLimit(1).truncationMode(.middle)
                             .layoutPriority(1)
                         // 0 entries = only a MEMORY.md (Qwen creates an empty index first); say so
@@ -1162,7 +1163,7 @@ private struct MemoryLibraryRow: View {
                         if library.count == 0 {
                             TagChip(L10n.text("Index only", zhHans: "仅索引"), neutral: true)
                         } else {
-                            TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), tint: Theme.brand)
+                            TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), neutral: true)
                         }
                         if library.index == nil { TagChip(L10n.text("No index", zhHans: "无索引"), neutral: true) }
                         // Not listed in MEMORY.md = dead memory the agent can't read; must be
@@ -1202,14 +1203,14 @@ private struct MemoryLibraryCard: View {
                 HStack(spacing: 10) {
                     MonogramTile(name: library.projectName, source: library.source, size: 28)
                     Text(library.projectName)
-                        .font(Theme.font.monoSkillName(13))
+                        .font(Theme.font.themed(13, .semibold))
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
                     // Same basis as the list row: 0 entries = only a MEMORY.md
                     if library.count == 0 {
                         TagChip(L10n.text("Index only", zhHans: "仅索引"), neutral: true)
                     } else {
-                        TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), tint: Theme.brand)
+                        TagChip(L10n.format("%@ entries", zhHans: "%@ 条", String(library.count)), neutral: true)
                     }
                 }
                 MemoryLibraryTypeSummary(library: library)
@@ -1243,7 +1244,7 @@ private struct MemoryLibraryMeta: View {
                         Text("\(library.linkedSessionCount)")
                             .font(Theme.font.themedMono(9.5, .semibold))
                     }
-                    .foregroundStyle(Theme.goldFg)
+                    .foregroundStyle(Theme.textSecondary)
                     .help(L10n.format(
                         "%@ source sessions still have transcripts you can open",
                         zhHans: "%@ 个来源会话的记录还在，可以点开",
@@ -1292,7 +1293,7 @@ private struct MemoryCard: View {
                     // scope would give dozens of memories in the same project identical titles down
                     // the column.
                     Text(memoryDisplayTitle(memory, isInstruction: isInstruction))
-                        .font(Theme.font.monoSkillName(13))
+                        .font(Theme.font.themed(13, .semibold))
                         .lineLimit(1).truncationMode(.middle)
                         .help(memory.title)
                     Spacer(minLength: 4)
@@ -1300,13 +1301,13 @@ private struct MemoryCard: View {
                 }
                 Text(memory.summary ?? abbreviateHome(memory.path))
                     .font(memory.summary == nil
-                        ? Theme.font.monoSkillName(10.5, weight: .regular) : Theme.font.themed(10.5))
+                        ? Theme.font.themed(10.5, .regular) : Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2).truncationMode(.middle)
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
                     memoryTypeChip(memory)
-                    if !isInstruction, let project = memory.projectName { TagChip(project) }
+                    if !isInstruction, let project = memory.projectName { TagChip(project, neutral: true) }
                     if let worktree = worktreeName(memory.path) { TagChip("worktree · \(worktree)", neutral: true) }
                     if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     Spacer(minLength: 0)
@@ -1349,19 +1350,19 @@ private struct MemoryListRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(memoryDisplayTitle(memory, isInstruction: isInstruction))
-                            .font(Theme.font.monoSkillName(13, weight: .medium))
+                            .font(Theme.font.themed(13, .medium))
                             .lineLimit(1).truncationMode(.middle)
                             .layoutPriority(1)
                             .help(memory.title)
                         if showsScope { ScopeBadge(isGlobal: isGlobal) }
                         memoryTypeChip(memory)
-                        if showsScope, !isInstruction, let project = memory.projectName { TagChip(project) }
+                        if showsScope, !isInstruction, let project = memory.projectName { TagChip(project, neutral: true) }
                         if let worktree = worktreeName(memory.path) { TagChip("worktree · \(worktree)", neutral: true) }
                         if memory.kind == .generated { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                     }
                     Text(memory.summary ?? abbreviateHome(memory.path))
                         .font(memory.summary == nil
-                            ? Theme.font.monoSkillName(10, weight: .regular) : Theme.font.themed(10.5))
+                            ? Theme.font.themed(10, .regular) : Theme.font.themed(10.5))
                         .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                 }
@@ -1425,7 +1426,7 @@ private struct MemoryDetailView: View {
             }
             if editing {
                 TextEditor(text: $text)
-                    .font(Theme.font.monoSkillName(12, weight: .regular))
+                    .font(Theme.font.themed(12, .regular))
                     .padding(8)
             } else {
                 MarkdownDocumentCard(text: Self.strippingFrontmatter(text))
@@ -1467,7 +1468,7 @@ private struct MemoryDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                    .font(Theme.font.themed(10)).foregroundStyle(Theme.brandFg)
+                    .font(Theme.font.themed(10)).foregroundStyle(Theme.textSecondary)
                 Text(L10n.text("Related", zhHans: "关联")).font(Theme.font.themed(11, .semibold))
                 Text(L10n.format("%@ links", zhHans: "%@ 处", String(relation.graph.nodes.count - 1)))
                     .font(Theme.font.themedMono(10)).foregroundStyle(.tertiary)
@@ -1534,7 +1535,7 @@ private struct MemoryDetailView: View {
             Text(memory.title)
                 .font(Theme.font.themed(13, .semibold))
                 .lineLimit(1)
-            if let project = memory.projectName { TagChip(project) }
+            if let project = memory.projectName { TagChip(project, neutral: true) }
             memoryTypeChip(memory)
             Spacer(minLength: 8)
             // Origin sessions: only offer an entry while the transcript file still exists (jumping
@@ -1544,7 +1545,7 @@ private struct MemoryDetailView: View {
             if jumpable.count == 1, let ref = jumpable.first {
                 Button { revealSession(ref.sessionId) } label: { sessionLabel(L10n.text("Source session", zhHans: "来源会话")) }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.goldFg)
+                    .foregroundStyle(Theme.brandFg)
                     .help(L10n.text("Jump to the session that wrote this memory", zhHans: "跳到写下这条记忆的那次会话"))
             } else if jumpable.count > 1 {
                 Menu {
@@ -1557,7 +1558,7 @@ private struct MemoryDetailView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .foregroundStyle(Theme.goldFg)
+                .foregroundStyle(Theme.brandFg)
                 .help(L10n.format("This memory aggregates %@ sessions", zhHans: "这条记忆聚合了 %@ 次会话", String(jumpable.count)))
             }
             if memory.isEditable {
@@ -1591,7 +1592,7 @@ private struct MemoryDetailView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text(memory.isEditable ? memory.path : L10n.format("Codex generated state (read-only) · %@", zhHans: "Codex 生成状态（只读） · %@", memory.path))
-                .font(Theme.font.monoSkillName(9, weight: .regular))
+                .font(Theme.font.themed(9, .regular))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
