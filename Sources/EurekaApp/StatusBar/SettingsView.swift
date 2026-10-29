@@ -18,6 +18,10 @@ struct SettingsView: View {
     @ObservedObject var updateService: UpdateService
     @ObservedObject var syncService: SyncService
 
+    /// Selectable alert sounds: the directories are read once when the card appears, not again
+    /// while the volume slider is dragged
+    @State private var availableSounds: [String] = []
+
     enum SettingsSection: String, CaseIterable {
         case general = "通用"
         case integrations = "集成"
@@ -223,6 +227,8 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            soundCard
+
             settingCard(L10n.text("Display and limits", zhHans: "显示与限额")) {
                 Toggle(
                     L10n.text(
@@ -273,6 +279,65 @@ struct SettingsView: View {
             }
 
             healthCard
+        }
+    }
+
+    @ViewBuilder
+    private var soundCard: some View {
+        settingCard(L10n.text("Sound alerts", zhHans: "提示音")) {
+            Toggle(
+                L10n.text("Play a sound when a card pops", zhHans: "弹卡时播放提示音"),
+                isOn: $settings.soundAlertsEnabled)
+            Text(L10n.text(
+                "Follows Task notifications above: no card, no sound, and permission cards always ring. Several events within 1.5 seconds ring once; a more urgent one cuts in. An event that already rang posts its system notification without the default sound.",
+                zhHans: "跟随上方「任务通知」：卡片没弹出就不响，「等待授权」和卡片一样永远会响。1.5 秒内的多个事件只响一声，更紧急的会打断前一声。已经响过提示音的事件，系统通知横幅不再带默认音。"))
+                .font(Theme.font.themed(10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            if settings.soundAlertsEnabled {
+                HStack {
+                    Text(L10n.text("Volume", zhHans: "音量"))
+                    Spacer(minLength: 8)
+                    Slider(value: $settings.soundVolume, in: 0.1...1)
+                        .frame(maxWidth: 240)
+                    Text("\(Int((settings.soundVolume * 100).rounded()))%")
+                        .font(Theme.font.themedMono(11))
+                        .frame(width: 36, alignment: .trailing)
+                }
+                ForEach(SoundCue.allCases, id: \.self) { cue in
+                    soundRow(cue, sounds: availableSounds)
+                }
+                Text(L10n.text(
+                    "The list comes from the macOS alert sounds. .aiff / .wav files placed in ~/Library/Sounds show up here too.",
+                    zhHans: "列表来自 macOS 提示音；把 .aiff / .wav 文件放进 ~/Library/Sounds 也会出现在这里。"))
+                    .font(Theme.font.themed(10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear { availableSounds = SoundPlayer.availableSounds() }
+    }
+
+    private func soundRow(_ cue: SoundCue, sounds: [String]) -> some View {
+        let choice = Binding<String>(
+            get: { settings.soundChoices[cue.rawValue] ?? cue.defaultSound },
+            set: { settings.soundChoices[cue.rawValue] = $0 })
+        // Keep a chosen sound in the list even if its file was deleted, or the Picker shows blank
+        let options = sounds.contains(choice.wrappedValue) || choice.wrappedValue.isEmpty
+            ? sounds : [choice.wrappedValue] + sounds
+        return HStack {
+            Text(cue.label)
+            Spacer(minLength: 8)
+            Picker("", selection: choice) {
+                Text(L10n.text("None", zhHans: "无")).tag("")
+                ForEach(options, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 140)
+            RoundGlyphButton(icon: "speaker.wave.2", help: L10n.text("Preview", zhHans: "试听")) {
+                SoundPlayer.play(choice.wrappedValue, volume: settings.soundVolume)
+            }
+            .disabled(choice.wrappedValue.isEmpty)
         }
     }
 

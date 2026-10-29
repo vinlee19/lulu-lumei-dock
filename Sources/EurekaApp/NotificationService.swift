@@ -72,13 +72,14 @@ final class NotificationService: NSObject, ObservableObject {
     }
 
     /// Posts a key-event notification (finished / waiting / error; identifier dedups so the same
-    /// event doesn't pop twice)
-    func postEvent(_ note: SystemEventNotification) {
+    /// event doesn't pop twice). silent: the event already played the app's own sound alert, so the
+    /// banner goes without the default sound
+    func postEvent(_ note: SystemEventNotification, silent: Bool = false) {
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = note.title
         content.body = note.body
-        content.sound = .default
+        content.sound = silent ? nil : .default
         center.add(UNNotificationRequest(
             identifier: note.identifier, content: content, trigger: nil))
     }
