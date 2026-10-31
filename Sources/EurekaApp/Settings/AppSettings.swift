@@ -43,6 +43,20 @@ final class AppSettings: ObservableObject {
     @Published var eventSystemNotifyEnabled: Bool {
         didSet { defaults.set(eventSystemNotifyEnabled, forKey: "eventSystemNotifyEnabled") }
     }
+    /// Play a sound when a card pops (finished / failed / interrupted / waiting / question). On by
+    /// default; still gated by the per-type toggles above.
+    @Published var soundAlertsEnabled: Bool {
+        didSet { defaults.set(soundAlertsEnabled, forKey: "soundAlertsEnabled") }
+    }
+    /// Sound alert volume (0...1, relative to the system output volume)
+    @Published var soundVolume: Double {
+        didSet { defaults.set(soundVolume, forKey: "soundVolume") }
+    }
+    /// Sound chosen per category: key = `SoundCue.rawValue`, value = sound name, empty string =
+    /// silent for that category; a category never set uses its default sound
+    @Published var soundChoices: [String: String] {
+        didSet { defaults.set(soundChoices, forKey: "soundChoices") }
+    }
     @Published var autoDismissSeconds: Double {
         didSet { defaults.set(autoDismissSeconds, forKey: "autoDismissSeconds") }
     }
@@ -255,6 +269,9 @@ final class AppSettings: ObservableObject {
         notifyError = defaults.object(forKey: "notifyError") as? Bool ?? true
         answerQuestionsOnIsland = defaults.object(forKey: "answerQuestionsOnIsland") as? Bool ?? true
         eventSystemNotifyEnabled = defaults.bool(forKey: "eventSystemNotifyEnabled")
+        soundAlertsEnabled = defaults.object(forKey: "soundAlertsEnabled") as? Bool ?? true
+        soundVolume = defaults.object(forKey: "soundVolume") as? Double ?? 0.8
+        soundChoices = defaults.dictionary(forKey: "soundChoices") as? [String: String] ?? [:]
         autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
         showStartTime = defaults.bool(forKey: "islandShowStartTime")
         menuBarShowsLimit = defaults.object(forKey: "menuBarShowsLimit") as? Bool ?? true
@@ -304,6 +321,12 @@ final class AppSettings: ObservableObject {
         // explicitly once every property is initialized)
         ThemeStyle.current = ThemeStyle.resolve(themeStyle)
         L10n.current = AppLanguage.resolve(appLanguage)
+    }
+
+    /// The sound chosen for this category; nil when "None" is chosen
+    func soundName(for cue: SoundCue) -> String? {
+        let name = soundChoices[cue.rawValue] ?? cue.defaultSound
+        return name.isEmpty ? nil : name
     }
 
     /// SMAppService registration may be flaky for ad-hoc / dev builds: on failure show a degraded

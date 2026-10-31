@@ -84,6 +84,10 @@ Trae itself gates hooks per account — see the Trae footnote under [Supported a
   that plus 4s — long enough to read, short enough to stop owning your screen. Nothing is lost when a
   waiting card collapses: the capsule stays amber, the task list still shows what it's waiting for, and
   the system notification remains in Notification Center.
+- Sound alerts (on by default): each card type — finished, failed, interrupted, waiting for
+  permission, waiting for input, island question — plays its own macOS alert sound, picked per type
+  in Settings (sounds dropped into `~/Library/Sounds` show up too). No card, no sound; several events
+  within 1.5s ring once, and a more urgent one cuts in.
 - Multi‑task merged counts, queued finished cards shown one by one, click the capsule to expand the
   task list (current tool, context usage `ctx%`, idle sessions).
 - Toggle time display: elapsed duration ↔ the session's original start time (resolved across resume

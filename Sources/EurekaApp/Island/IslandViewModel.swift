@@ -76,6 +76,8 @@ final class IslandViewModel: ObservableObject {
     @Published private(set) var wantsKeyboard = false
     /// Hands the answer to the hook (AppDelegate wires it to QuestionInbox)
     var onQuestionReply: (@MainActor (_ questionId: String, _ reply: QuestionReply) -> Void)?
+    /// A new question card was queued (AppDelegate plays a sound alert)
+    var onQuestionArrived: (@MainActor () -> Void)?
     /// Keyboard focus demand changed (the panel controller calls makeKey / hands focus back
     /// accordingly)
     var onKeyboardChange: (@MainActor (Bool) -> Void)?
@@ -164,10 +166,12 @@ final class IslandViewModel: ObservableObject {
         for id in queued.subtracting(waiting) {
             queue.removeQuestion(id: id)
         }
-        for question in questions where !queued.contains(question.id) {
+        let arrived = questions.filter { !queued.contains($0.id) }
+        for question in arrived {
             queue.enqueue(.question(question))
         }
         refresh()
+        if !arrived.isEmpty { onQuestionArrived?() }
     }
 
     func chooseOption(_ label: String) {

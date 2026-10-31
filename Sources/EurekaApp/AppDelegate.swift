@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let cliTools = CLIToolsService()
     private let auditService = AuditService()
     private let notificationService = NotificationService()
+    private lazy var soundAlerts = SoundAlertService(settings: settings)
     private let updateService = UpdateService()
     private let navigation = PopoverNavigation()
     private let knowledgeIndexer = KnowledgeSearchIndexer()
@@ -294,6 +295,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // is gated by the "auto-update hooks" toggle
         let questionBridge = IslandQuestionBridge(viewModel: island.viewModel)
         self.questionBridge = questionBridge
+        island.viewModel.onQuestionArrived = { [weak self] in
+            self?.soundAlerts.play(.question)
+        }
         installer.askHookEnabled = { [weak settings] in settings?.answerQuestionsOnIsland ?? true }
         settings.$answerQuestionsOnIsland
             .sink { [weak questionBridge] on in questionBridge?.setEnabled(on) }
@@ -648,18 +652,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ? settings.notifyCompletion
                     : settings.notifyError)
                     && !shouldSuppressCard(terminal: task.terminal)
+                // The sound alert follows the card: no card, no sound
+                var rang = false
                 if !isStale && wantCard {
                     // A session never seen in the active list (a very short turn) starts its lookup
                     // only now; the button appears once the link is found
                     sessionLinks.prefetch([(task.source, task.sessionId)])
                     island.viewModel.enqueueFinished(task)
+                    rang = soundAlerts.play(.forFinished(task.outcome))
                 }
                 // System notifications only check the toggle, no "watching the terminal" mute: they
                 // exist precisely for when you can't see the screen
                 if !isStale, let note = SystemEventNotifications.forFinished(
                     task, master: settings.eventSystemNotifyEnabled,
                     completion: settings.notifyCompletion, error: settings.notifyError) {
-                    notificationService.postEvent(note)
+                    notificationService.postEvent(note, silent: rang)
                 }
                 if !isStale {
                     mascotController?.viewModel.showFinished(success: task.outcome == .success)
@@ -675,13 +682,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     suppressible = false
                 }
+                var rang = false
                 if !isStale && settings.notifyWaiting && !suppressible {
                     island.viewModel.enqueueWaiting(task)
+                    if case .waiting(let reason, _) = task.phase {
+                        rang = soundAlerts.play(.forWaiting(reason))
+                    }
                 }
                 if !isStale, let note = SystemEventNotifications.forWaiting(
                     task, master: settings.eventSystemNotifyEnabled,
                     waiting: settings.notifyWaiting) {
-                    notificationService.postEvent(note)
+                    notificationService.postEvent(note, silent: rang)
                 }
             case .activeTasksChanged:
                 // History page's "running" group: push a copy to UsageService on the same path, in

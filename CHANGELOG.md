@@ -6,6 +6,21 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Sound alerts.** Island cards now play a macOS alert sound, one per type:
+  finished (Glass), failed (Basso), interrupted (Funk), waiting for
+  permission (Ping), waiting for input (Pop) and island questions (Purr).
+  Settings → General → Sound alerts has an on/off switch (on by default), a
+  volume slider, and a per-type picker with preview; any sound in
+  `~/Library/Sounds`, `/Library/Sounds` or `/System/Library/Sounds` can be
+  chosen, or "None" to mute one type. Sounds follow the card rules: no card,
+  no sound (including the "don't show a finished card while that terminal is
+  frontmost" setting), and waiting-for-permission always rings. Several
+  events within 1.5s ring once; a more urgent one cuts in. When system
+  notifications are on, an event that already rang posts its banner without
+  the default sound.
+
 ### Changed
 
 - **The island stays up while sessions are open.** The capsule used to hide
