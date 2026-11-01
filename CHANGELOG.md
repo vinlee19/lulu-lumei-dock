@@ -6,6 +6,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-01
+
 ### Added
 
 - **Sound alerts.** Island cards now play a macOS alert sound, one per type:
@@ -2264,7 +2266,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.0
 [0.41.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.41.0
 [0.40.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.40.0
 [0.39.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.39.0
