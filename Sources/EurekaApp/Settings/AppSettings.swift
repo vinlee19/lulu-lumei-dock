@@ -184,6 +184,15 @@ final class AppSettings: ObservableObject {
     @Published var subscriptionPrices: [String: Double] {
         didSet { defaults.set(subscriptionPrices, forKey: "subscriptionPrices") }
     }
+    /// Usage dashboard period (`UsageService.DashboardPeriod` raw value), kept across tab switches
+    /// and relaunches
+    @Published var usageDashboardPeriod: String {
+        didSet { defaults.set(usageDashboardPeriod, forKey: "usageDashboardPeriod") }
+    }
+    /// The custom period's range (`UsageRangeSelection.storageValue`)
+    @Published var usageCustomRange: String {
+        didSet { defaults.set(usageCustomRange, forKey: "usageCustomRange") }
+    }
     /// Companion size (`MascotSize` raw value)
     @Published var mascotSize: String {
         didSet { defaults.set(mascotSize, forKey: "mascotSize") }
@@ -298,6 +307,8 @@ final class AppSettings: ObservableObject {
         mascotSize = defaults.string(forKey: "mascotSize") ?? MascotSize.medium.rawValue
         usageMonthlyBudget = defaults.object(forKey: "usageMonthlyBudget") as? Double ?? 0
         subscriptionPrices = defaults.dictionary(forKey: "subscriptionPrices") as? [String: Double] ?? [:]
+        usageDashboardPeriod = defaults.string(forKey: "usageDashboardPeriod") ?? ""
+        usageCustomRange = defaults.string(forKey: "usageCustomRange") ?? ""
         cloudBackupEnabled = defaults.bool(forKey: "cloudBackupEnabled")
         storageProvider = defaults.string(forKey: "storageProvider") ?? "tencent-cos"
         cosRegion = defaults.string(forKey: "cosRegion") ?? ""

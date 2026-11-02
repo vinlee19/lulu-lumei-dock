@@ -21,8 +21,9 @@ struct UsageDashboardView: View {
     @State private var page = 1
     @State private var trendMode: TrendMode = .byDate
     @State private var trendMetric: TrendMetric = .tokens
-    @State private var customFrom = Date().addingTimeInterval(-7 * 86400)
-    @State private var customTo = Date()
+    /// The custom period's days; a preset keeps rolling with the calendar
+    @State private var rangeSelection: UsageRangeSelection
+    @State private var showsRangePicker = false
     @State private var pageInput = ""
 
     enum SubTab: String, CaseIterable {
@@ -47,16 +48,21 @@ struct UsageDashboardView: View {
         }
     }
 
-    /// Offscreen-render / preview injection: pick the initial period and sub-tab
-    /// (same convention as `PlansView(initialLayout:)`).
+    /// The period and custom range come back from settings (kept across tab switches and
+    /// relaunches); offscreen renders pass their own (same convention as
+    /// `PlansView(initialLayout:)`).
     init(
         usageService: UsageService, sessionBrowser: SessionBrowserService, settings: AppSettings,
-        initialPeriod: UsageService.DashboardPeriod = .today, initialSubTab: SubTab = .overview
+        initialPeriod: UsageService.DashboardPeriod? = nil,
+        initialRange: UsageRangeSelection? = nil, initialSubTab: SubTab = .overview
     ) {
         self._usageService = ObservedObject(wrappedValue: usageService)
         self._sessionBrowser = ObservedObject(wrappedValue: sessionBrowser)
         self._settings = ObservedObject(wrappedValue: settings)
-        self._period = State(initialValue: initialPeriod)
+        self._period = State(initialValue: initialPeriod
+            ?? UsageService.DashboardPeriod(rawValue: settings.usageDashboardPeriod) ?? .today)
+        self._rangeSelection = State(initialValue: initialRange
+            ?? UsageRangeSelection(storageValue: settings.usageCustomRange) ?? .default)
         self._subTab = State(initialValue: initialSubTab)
     }
 
@@ -139,7 +145,10 @@ struct UsageDashboardView: View {
             usageService.refreshNow()
             reload()
         }
-        .onChange(of: period) { _, _ in
+        .onChange(of: period) { _, newPeriod in
+            settings.usageDashboardPeriod = newPeriod.rawValue
+            // Choosing Custom is choosing days: open the picker on the range shown
+            if newPeriod == .custom { showsRangePicker = true }
             page = 1
             reload()
         }
@@ -147,8 +156,11 @@ struct UsageDashboardView: View {
             page = 1
             reload()
         }
-        .onChange(of: customFrom) { _, _ in if period == .custom { page = 1; reload() } }
-        .onChange(of: customTo) { _, _ in if period == .custom { page = 1; reload() } }
+        .onChange(of: rangeSelection) { _, newSelection in
+            settings.usageCustomRange = newSelection.storageValue()
+            page = 1
+            reload()
+        }
         .onChange(of: usageService.pricingRevision) { _, _ in reload() }
         // New data landed (the first-install backfill publishes interim summaries; later passes
         // every 60s): reads run on their own connection, so refreshing the page is cheap
@@ -157,17 +169,10 @@ struct UsageDashboardView: View {
 
     // MARK: - Range and data aggregation
 
-    /// Current time range: fixed periods = (startDate, now); custom = (start day's midnight, end
-    /// day's end), auto-correcting reversed bounds
+    /// Current time range `[from, to)`: fixed periods = (startDate, now); custom = whole days,
+    /// cut at now when they reach today (see `UsageDateRange.interval`)
     private func currentRange() -> (from: Date, to: Date) {
-        if period == .custom {
-            let cal = Calendar.current
-            let lo = min(customFrom, customTo)
-            let hi = max(customFrom, customTo)
-            let from = cal.startOfDay(for: lo)
-            let to = cal.date(bySettingHour: 23, minute: 59, second: 59, of: hi) ?? hi
-            return (from, to)
-        }
+        if period == .custom { return rangeSelection.resolve().interval() }
         return (period.startDate, Date())
     }
 
@@ -447,7 +452,15 @@ struct UsageDashboardView: View {
                 }
             }
             .chartXAxis {
-                if hourly {
+                if hourly && axis.domain.upperBound.timeIntervalSince(axis.domain.lowerBound) > 86_400 {
+                    // Up to 48 hourly buckets over two days: bare hours would repeat, so label
+                    // the day too and thin the ticks
+                    AxisMarks(values: .stride(by: .hour, count: 6)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.month(.defaultDigits).day()
+                            .hour(.twoDigits(amPM: .omitted)))
+                    }
+                } else if hourly {
                     AxisMarks(values: .stride(by: .hour, count: 3)) { _ in
                         AxisGridLine()
                         AxisValueLabel(format: .dateTime.hour(.twoDigits(amPM: .omitted)))
@@ -540,9 +553,28 @@ struct UsageDashboardView: View {
     private var filterRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
+                // Sized to its labels: a fixed 230pt fit the Chinese ones, and the English ones
+                // overflowed into the range button next to it
                 ThemedSegmentedPicker(
                     selection: $period, options: UsageService.DashboardPeriod.allCases,
-                    label: { periodTitle($0) }, classicWidth: 230, controlSize: .small)
+                    label: { periodTitle($0) }, controlSize: .small)
+                    .fixedSize()
+
+                if period == .custom {
+                    SecondaryButton(
+                        title: UsageRangeText.button(rangeSelection), icon: "calendar",
+                        help: L10n.text("Choose the days", zhHans: "选择日期区间")
+                    ) { showsRangePicker = true }
+                    .popover(isPresented: $showsRangePicker, arrowEdge: .bottom) {
+                        UsageRangePicker(
+                            selection: rangeSelection,
+                            onApply: { selection in
+                                rangeSelection = selection
+                                showsRangePicker = false
+                            },
+                            onCancel: { showsRangePicker = false })
+                    }
+                }
 
                 Spacer(minLength: 8)
 
@@ -572,20 +604,6 @@ struct UsageDashboardView: View {
                     sourceChip(source, label: source.displayName)
                 }
             }
-            if period == .custom {
-                HStack(spacing: 6) {
-                    DatePicker("", selection: $customFrom, displayedComponents: .date)
-                        .labelsHidden()
-                        .datePickerStyle(.field)
-                        .controlSize(.small)
-                    Text(L10n.text("to", zhHans: "至")).font(Theme.font.themed(10)).foregroundStyle(.secondary)
-                    DatePicker("", selection: $customTo, displayedComponents: .date)
-                        .labelsHidden()
-                        .datePickerStyle(.field)
-                        .controlSize(.small)
-                    Spacer(minLength: 0)
-                }
-            }
         }
     }
 
@@ -608,7 +626,7 @@ struct UsageDashboardView: View {
                 .frame(width: 40, height: 40)
                 .background(Circle().fill(Theme.brandFill(0.12)))
             VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.format("Tokens used (%@)", zhHans: "消耗 Tokens（%@）", periodTitle(period)))
+                Text(L10n.format("Tokens used (%@)", zhHans: "消耗 Tokens（%@）", periodHeading))
                     .font(Theme.font.themed(10.5))
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -700,9 +718,19 @@ struct UsageDashboardView: View {
         case .today: return L10n.text("vs yesterday so far", zhHans: "对比昨日同时段")
         case .week: return L10n.text("vs last week so far", zhHans: "对比上周同期")
         case .month: return L10n.text("vs last month so far", zhHans: "对比上月同期")
-        case .custom: return L10n.text("vs the previous range", zhHans: "对比前一等长区间")
+        case .custom:
+            // Name the days compared against: "previous range" alone left users guessing
+            guard let previous = comparisonRange(currentRange()) else { return "" }
+            let shown = UsageDateRange(
+                previous.from, previous.to.addingTimeInterval(-1), now: previous.to)
+            return L10n.format("vs %@", zhHans: "对比 %@", UsageRangeText.dates(shown))
         case .all: return ""
         }
+    }
+
+    /// What the hero card's "Tokens used (…)" covers: the custom period says its days
+    private var periodHeading: String {
+        period == .custom ? UsageRangeText.dates(rangeSelection.resolve()) : periodTitle(period)
     }
 
     // MARK: - Tiles

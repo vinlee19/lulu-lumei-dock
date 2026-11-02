@@ -1013,6 +1013,23 @@ enum PreviewRenderer {
                  width: 1270, height: 2200)
             planDefaults.removePersistentDomain(forName: planSuite)
         }
+        // Custom period: the range button in its two shapes, and the picker it opens
+        snap("pages-usage-custom-preset",
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
+                                initialPeriod: .custom, initialRange: .preset(.last7Days)),
+             width: 1270, height: 900)
+        let pickedDays = UsageDateRange(
+            Date().addingTimeInterval(-40 * 86_400), Date().addingTimeInterval(-26 * 86_400))
+        snap("pages-usage-custom-days",
+             UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
+                                initialPeriod: .custom, initialRange: .days(pickedDays)),
+             width: 675, height: 900)
+        snap("pages-usage-range-picker",
+             UsageRangePicker(selection: .preset(.last30Days), onApply: { _ in }, onCancel: {}),
+             width: 520, height: 260)
+        snap("pages-usage-range-picker-dark",
+             UsageRangePicker(selection: .days(pickedDays), onApply: { _ in }, onCancel: {}),
+             dark: true, width: 520, height: 260)
         snap("pages-usage-log-min",
              UsageDashboardView(usageService: usage, sessionBrowser: sessions, settings: settings,
                                 initialPeriod: .month, initialSubTab: .log),
