@@ -6,6 +6,39 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-11-02
+
+### Changed
+
+- **Custom usage ranges come from a calendar, not two date fields.** Choosing
+  Custom opens a picker with quick ranges (yesterday, last 7 / 30 / 90 days,
+  last week, last month, this year) and a start and an end calendar; the
+  dashboard reloads once when you apply, not on every keystroke. The button
+  shows the days ("Last 7 days · 10/27 – 11/2"), so does the headline, and the
+  delta names the range it compares with. The period and range are remembered
+  across tabs and launches, and a quick range keeps rolling with the calendar.
+
+### Fixed
+
+- **Usage totals no longer count the same request two or three times.** When a
+  scanner lost track of a file (an agent rewrote it, Codex compressed a rollout
+  and unpacked it again on resume, a dedup key aged out) it read the file from
+  the start and recorded its whole history again. All-time and past-period
+  totals were inflated, Codex most of all (about 2.7x on one machine); today's
+  numbers were unaffected, which is why the ccusage check never caught it. On
+  first launch the ledger is repaired in place: copies are removed (every row
+  involved is kept in the `usage_records_dedup_backup` table), and later
+  re-reads are recognised as the same requests. **Expect All-time, past custom
+  ranges and past weekly reports to drop** (about a third on that machine);
+  the current month and budget alerts were already right.
+- **A custom range that includes today is compared fairly.** It used to be
+  measured to the end of today against a whole previous span, so the delta
+  read low all day; it now compares the same elapsed time. The last second of
+  the end day is no longer dropped.
+- The hourly trend over two days labels the date, not just the hour; the
+  period switch no longer overflows in English; the cost legend follows a
+  language or style change without a relaunch.
+
 ## [0.42.0] - 2026-11-01
 
 ### Added
@@ -2266,7 +2299,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.42.1...HEAD
+[0.42.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.1
 [0.42.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.0
 [0.41.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.41.0
 [0.40.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.40.0
