@@ -903,13 +903,16 @@ struct UsageDashboardView: View {
 
     // MARK: - Cost structure
 
-    private static let costSegments: [(key: KeyPath<CostBreakdown, Double>, label: String, tint: Color)] = [
-        (\.input, L10n.text("New input", zhHans: "新增输入"), .blue),
-        (\.output, L10n.text("Output", zhHans: "输出"), .purple),
-        (\.cacheWrite, L10n.text("Cache write", zhHans: "缓存创建"), .orange),
-        (\.cacheRead, L10n.text("Cache read", zhHans: "缓存命中"), Theme.brand),
-        (\.reported, L10n.text("Self-reported", zhHans: "来源自报"), .gray),
-    ]
+    // Computed, not a `static let`: a cached copy kept the language and theme of its first use
+    private static var costSegments: [(key: KeyPath<CostBreakdown, Double>, label: String, tint: Color)] {
+        [
+            (\.input, L10n.text("New input", zhHans: "新增输入"), .blue),
+            (\.output, L10n.text("Output", zhHans: "输出"), .purple),
+            (\.cacheWrite, L10n.text("Cache write", zhHans: "缓存创建"), .orange),
+            (\.cacheRead, L10n.text("Cache read", zhHans: "缓存命中"), Theme.brand),
+            (\.reported, L10n.text("Self-reported", zhHans: "来源自报"), .gray),
+        ]
+    }
 
     /// Where the money goes by token type. Cache reads dominate the token count, so the cost split
     /// is what tells you whether output or cache writes are the real bill.
