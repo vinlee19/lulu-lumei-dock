@@ -159,12 +159,12 @@ public final class GeminiUsageScanner {
             for candidate in candidates
             where existing[candidate.dedupKey] == nil
                 && seenThisBatch.insert(candidate.dedupKey).inserted {
-                let recordId = try store.usage.insertReturningId(candidate.record)
+                let stored = try store.usage.insertReturningId(candidate.record)
                 try store.scanState.upsertDedupKey(
-                    candidate.dedupKey, recordId: recordId,
+                    candidate.dedupKey, recordId: stored.id,
                     outputTokens: candidate.record.outputTokens,
                     at: candidate.record.timestamp)
-                inserted += 1
+                if stored.inserted { inserted += 1 }
             }
             try store.scanState.setFileState(
                 path: path,

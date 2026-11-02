@@ -192,7 +192,10 @@ public final class CodexUsageScanner {
         let extraJSON = String(
             data: (try? JSONEncoder().encode(extra)) ?? Data(), encoding: .utf8)
         try store.scanState.transaction {
-            try store.usage.insert(records)
+            // Codex rewrites old rollouts and re-stamps the replayed events: match those copies by
+            // their token counts within a window, not by timestamp
+            newCount = try store.usage.insert(
+                records, nearCopyWindow: UsageLedgerIntegrity.nearCopyWindows[.codex])
             for (composite, count) in toolBumps {
                 let parts = composite.components(separatedBy: "\u{1}")
                 guard parts.count == 3 else { continue }
@@ -207,7 +210,6 @@ public final class CodexUsageScanner {
                     path: path, sessionId: sessionId,
                     count: promptCount, reset: offset == 0)
             }
-            newCount = records.count
         }
         return newCount
     }

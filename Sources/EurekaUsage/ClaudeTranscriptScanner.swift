@@ -85,6 +85,8 @@ public final class ClaudeTranscriptScanner {
         // extra IO)
         var merged: [String: UsageRecord] = [:]
         var order: [String] = []
+        // Timestamps of every line merged into a key: a ledger row at any of them is that request
+        var spans: [String: ClosedRange<Date>] = [:]
         var promptCount = 0
         // Tool/skill/plugin calls: **accumulated per tool_use id**, not merged by the assistant
         // dedup key -- Claude Code writes each content block as its own line but they share one
@@ -131,6 +133,10 @@ public final class ClaudeTranscriptScanner {
                     toolCalls.append((id, call.kind, call.name, day, ts, lineTokens))
                 }
             }
+            let lineTime = record.timestamp
+            spans[key] = spans[key].map {
+                min($0.lowerBound, lineTime)...max($0.upperBound, lineTime)
+            } ?? lineTime...lineTime
             if let prior = merged[key] {
                 if record.outputTokens > prior.outputTokens {
                     merged[key] = record
@@ -152,6 +158,12 @@ public final class ClaudeTranscriptScanner {
             // Dedup must be global across files: persisted in the dedup_keys table
             let existing = try store.scanState.existingDedupKeys(order)
             let now = Date()
+            // A message younger than this would still have its key had it been read before, so a
+            // missing key means it is new and only an exact record match can be a duplicate.
+            // Matching across a message's line span is kept for older ones: it would otherwise
+            // merge parallel subagent requests that share every token count (6 such pairs within
+            // 6 seconds among 44k local requests).
+            let keysMayHaveAgedOut = now.addingTimeInterval(-ScanStateRepo.dedupKeyRetention)
             for key in order {
                 guard let record = merged[key] else { continue }
                 if let entry = existing[key] {
@@ -159,17 +171,23 @@ public final class ClaudeTranscriptScanner {
                     // stored; backfill the larger value
                     if record.outputTokens > entry.outputTokens, let recordId = entry.recordId {
                         try store.usage.updateOutputTokens(
-                            recordId: recordId, outputTokens: record.outputTokens)
+                            recordId: recordId, outputTokens: record.outputTokens,
+                            timestamp: record.timestamp)
                         try store.scanState.upsertDedupKey(
                             key, recordId: recordId,
                             outputTokens: record.outputTokens, at: now)
                     }
                 } else {
-                    let recordId = try store.usage.insertReturningId(record)
+                    // The key may only have aged out (pruned after 8 days) while the row is still
+                    // in the ledger: the insert then resolves to that row instead of a new one
+                    let stored = try store.usage.insertReturningId(
+                        record,
+                        sameRequestWithin: record.timestamp < keysMayHaveAgedOut
+                            ? spans[key] : nil)
                     try store.scanState.upsertDedupKey(
-                        key, recordId: recordId,
+                        key, recordId: stored.id,
                         outputTokens: record.outputTokens, at: now)
-                    newCount += 1
+                    if stored.inserted { newCount += 1 }
                 }
             }
             // Tool/skill/plugin/subagent calls: deduped across files by tc:<tool_use id>,

@@ -954,7 +954,7 @@ final class UsageService: ObservableObject {
                 }
             }
             try store.scanState.pruneDedupKeys(
-                before: Date().addingTimeInterval(-8 * 86400))
+                before: Date().addingTimeInterval(-ScanStateRepo.dedupKeyRetention))
             let summary = try UsageAggregator.summarize(store: store, pricing: pricing)
             // One successful pass clears the previous error: occasional lock contention (during
             // launch warm-up/large-file indexing, another connection's write transaction exceeds

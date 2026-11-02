@@ -122,12 +122,13 @@ public final class HermesUsageScanner {
                 guard !records.isEmpty || snapshot != baseline else { continue }
                 // One transaction per session: snapshot and records commit or fail together; a
                 // mid-way failure at most makes the next round recompute that session
+                var written = 0
                 try store.scanState.transaction {
-                    try store.usage.insert(records)
+                    written = try store.usage.insert(records)
                     try store.scanState.setFileState(
                         path: key, .init(inode: inode, offset: seen, extra: encode(snapshot)))
                 }
-                inserted += records.count
+                inserted += written
             }
         }
         // Advance the watermark last: any failure makes the next round rescan the same batch

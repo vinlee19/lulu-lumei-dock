@@ -185,8 +185,7 @@ public final class CursorUsageScanner {
 
         var inserted = 0
         try store.scanState.transaction {
-            try store.usage.insert(records)
-            inserted = records.count
+            inserted = try store.usage.insert(records)
             for bump in toolBumps {
                 try store.toolCalls.bump(
                     day: bump.day, source: .cursor, kind: bump.kind, name: bump.name, ts: bump.ts)

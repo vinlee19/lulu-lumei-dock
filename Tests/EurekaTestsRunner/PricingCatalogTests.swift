@@ -387,8 +387,10 @@ func pricingCatalogTests(_ t: TestRunner) {
             .appendingPathComponent("eureka-merge-\(UUID().uuidString)/test.sqlite")
         let store = try EurekaStore(path: url)
         let now = Date()
+        // Two separate requests: provider is not part of a record's identity, so the same instant
+        // and tokens would be one request seen twice
         try store.usage.insert([
-            UsageRecord(source: .opencode, model: "glm-5.2", timestamp: now,
+            UsageRecord(source: .opencode, model: "glm-5.2", timestamp: now.addingTimeInterval(-1),
                         inputTokens: 1_000_000, outputTokens: 0, provider: "volcengine-agent-plan"),
             UsageRecord(source: .opencode, model: "glm-5.2", timestamp: now,
                         inputTokens: 1_000_000, outputTokens: 0, provider: "zhipuai"),

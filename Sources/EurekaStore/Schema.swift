@@ -1,6 +1,9 @@
 import Foundation
 
 enum Schema {
+    /// (index added within v24, no version bump) idx_usage_record_key: one usage row per request,
+    ///      created by `UsageLedgerIntegrity` after it repairs existing duplicates in place (their
+    ///      groups are copied to usage_records_dedup_backup, a fact table never DROPped).
     /// (table added within v24, no version bump) summary_runs: AI session summaries and their
     ///      generation history. User-requested output, not re-derivable → never DROPped on upgrade.
     /// (column added within v24, no version bump) prompts gains hidden_at (user "remove" =
@@ -57,16 +60,20 @@ enum Schema {
     /// already started filling. So a pending migration runs inside a write transaction that
     /// re-reads the version, and an up-to-date database only re-applies the idempotent part
     /// (no `user_version` write, no write lock taken).
-    static func migrate(_ db: SQLiteDB) throws {
+    ///
+    /// The usage ledger's uniqueness repair runs afterwards in its own transaction (see
+    /// `UsageLedgerIntegrity`); it is not a version step because a bump DROPs the ledger.
+    static func migrate(_ db: SQLiteDB) throws -> UsageLedgerRepair {
         let current = readVersion(db)
-        guard current < version else {
+        if current < version {
+            try db.transaction {
+                // Another connection may have migrated while this one waited for the lock
+                try apply(db, from: readVersion(db))
+            }
+        } else {
             try apply(db, from: current)
-            return
         }
-        try db.transaction {
-            // Another connection may have migrated while this one waited for the lock
-            try apply(db, from: readVersion(db))
-        }
+        return UsageLedgerIntegrity.enforce(db)
     }
 
     private static func readVersion(_ db: SQLiteDB) -> Int64 {

@@ -177,8 +177,7 @@ public final class KimiUsageScanner {
         let extraJSON = String(
             data: (try? JSONEncoder().encode(extra)) ?? Data(), encoding: .utf8)
         try store.scanState.transaction {
-            try store.usage.insert(records)
-            inserted = records.count
+            inserted = try store.usage.insert(records)
             for bump in toolBumps {
                 try store.toolCalls.bump(
                     day: bump.day, source: .kimi, kind: bump.kind, name: bump.name,

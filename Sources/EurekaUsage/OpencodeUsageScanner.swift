@@ -109,12 +109,13 @@ public final class OpencodeUsageScanner {
             newWatermark = rowid
         }
 
+        var inserted = 0
         try store.scanState.transaction {
-            try store.usage.insert(records)
+            inserted = try store.usage.insert(records)
             try store.scanState.setFileState(
                 path: path, .init(inode: inode, offset: newWatermark, extra: nil))
         }
-        return (records.count, newWatermark, rows.count == Self.pageSize && !stoppedEarly)
+        return (inserted, newWatermark, rows.count == Self.pageSize && !stoppedEarly)
     }
 
     // MARK: - opencode 2.x: session_message table
@@ -185,8 +186,9 @@ public final class OpencodeUsageScanner {
             newWatermark = rowid
         }
 
+        var inserted = 0
         try store.scanState.transaction {
-            try store.usage.insert(records)
+            inserted = try store.usage.insert(records)
             for (composite, count) in toolBumps {
                 let parts = composite.components(separatedBy: "\u{1}")
                 guard parts.count == 2 else { continue }
@@ -197,7 +199,7 @@ public final class OpencodeUsageScanner {
                 path: key, .init(inode: inode, offset: newWatermark, extra: nil))
         }
         let full = rows.count == Self.pageSize && !stoppedEarly
-        return (records.count, full && newWatermark > watermark)
+        return (inserted, full && newWatermark > watermark)
     }
 
     /// 2.x per-session user prompt counts. A migrated session's session_message is a superset of

@@ -1,5 +1,6 @@
 import Foundation
 import EurekaKit
+import SQLite3
 
 /// SQLite persistence entry point. Call every method on the same queue (in the app, UsageService's
 /// queue).
@@ -20,12 +21,14 @@ public final class EurekaStore {
     public let sessionTerminals: SessionTerminalsRepo
     public let prompts: PromptsRepo
     public let summaryRuns: SummaryRunsRepo
+    /// What this open did to the usage ledger's duplicate guard (see `UsageLedgerIntegrity`)
+    public let usageLedgerRepair: UsageLedgerRepair
 
     public init(path: URL) throws {
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         db = try SQLiteDB(path: path.path)
-        try Schema.migrate(db)
+        usageLedgerRepair = try Schema.migrate(db)
         history = TaskHistoryRepo(db: db)
         usage = UsageRepo(db: db)
         scanState = ScanStateRepo(db: db)
@@ -154,20 +157,47 @@ public final class UsageRepo {
         self.db = db
     }
 
-    public func insert(_ records: [UsageRecord]) throws {
+    /// Inserts the records the ledger doesn't hold yet; returns how many were new.
+    /// `nearCopyWindow`: a row with every token count equal and a stamp at most this far away is
+    /// the same request (sources that re-stamp copies, see `UsageLedgerIntegrity.nearCopyWindows`)
+    @discardableResult
+    public func insert(_ records: [UsageRecord], nearCopyWindow: TimeInterval? = nil) throws -> Int {
+        var inserted = 0
         for record in records {
-            _ = try insertReturningId(record)
+            let span = nearCopyWindow.map {
+                record.timestamp.addingTimeInterval(-$0)...record.timestamp.addingTimeInterval($0)
+            }
+            if try insertReturningId(record, sameRequestWithin: span).inserted { inserted += 1 }
         }
+        return inserted
     }
 
-    /// Insert and return the rowid (used to back-fill output for a dedup key)
-    public func insertReturningId(_ record: UsageRecord) throws -> Int64 {
+    /// Inserts a record unless the ledger already holds it (same identity, see
+    /// `UsageLedgerIntegrity.keyExpressions`), which happens whenever a scanner re-reads a file it
+    /// lost track of. A re-read copy only raises the stored output, since the first read may have
+    /// caught a reply mid-stream. Returns the row id either way (Claude keeps it to back-fill
+    /// output through its dedup key).
+    ///
+    /// `sameRequestWithin`: where else this request may be stamped. A row with every token count
+    /// equal, output included, and a stamp in the range is the same request, and keeps its stamp:
+    /// Claude passes the stamps of the lines it merged (rows written before the backfill below
+    /// kept ts in step carry the first line's); Codex a window around the event, where the stored
+    /// stamp is the real call time and the re-read one a rewrite's replay time.
+    @discardableResult
+    public func insertReturningId(
+        _ record: UsageRecord, sameRequestWithin span: ClosedRange<Date>? = nil
+    ) throws -> (id: Int64, inserted: Bool) {
+        if let span, span.lowerBound < span.upperBound,
+           let id = try rowId(sameRequestAs: record, within: span) {
+            return (id, false)
+        }
         try db.run("""
         INSERT INTO usage_records
             (source, model, project, session_id, ts, input_tokens, output_tokens,
              cache_creation_tokens, cache_creation_1h_tokens, cache_read_tokens, provider,
              reported_cost_usd)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT DO NOTHING
         """, [
             .text(record.source.rawValue), .text(record.model),
             .string(record.project),
@@ -180,7 +210,30 @@ public final class UsageRepo {
             .string(record.provider),
             record.reportedCostUSD.map { .real($0) } ?? .null,
         ])
-        return db.lastInsertRowID
+        if db.changes > 0 { return (db.lastInsertRowID, true) }
+        let existing = try db.query("""
+        UPDATE usage_records SET output_tokens = MAX(output_tokens, ?)
+        WHERE \(UsageLedgerIntegrity.keyPredicate)
+        RETURNING id
+        """, [.int(Int64(record.outputTokens))]
+            + UsageLedgerIntegrity.keyBindings(record, ts: [record.timestamp])) { $0.int(0) }
+        guard let id = existing.first else {
+            // ON CONFLICT fired but no row matches the key: the index and keyPredicate disagree
+            throw SQLiteError(
+                code: SQLITE_CONSTRAINT,
+                message: "usage record conflict without a matching key row")
+        }
+        return (id, false)
+    }
+
+    private func rowId(sameRequestAs record: UsageRecord, within span: ClosedRange<Date>) throws
+        -> Int64?
+    {
+        try db.query(
+            "SELECT id FROM usage_records WHERE \(UsageLedgerIntegrity.sameRequestPredicate) LIMIT 1",
+            UsageLedgerIntegrity.sameRequestBindings(record, within: span),
+            map: { $0.int(0) }
+        ).first
     }
 
     /// Delete every record of a session (sources whose files get rewritten and rescanned from zero
@@ -211,11 +264,15 @@ public final class UsageRepo {
             [.text(provider)] + bindings)
     }
 
-    /// Output growth on streamed duplicate rows: overwrite with the larger final value
-    public func updateOutputTokens(recordId: Int64, outputTokens: Int) throws {
+    /// Output growth on streamed duplicate rows: overwrite with the larger final value, and take
+    /// the timestamp of the line that carried it. A full re-read picks that same line (first one
+    /// with the largest output), so the stored row keeps matching the record key a re-read builds.
+    /// OR IGNORE: if another row already holds that key, the row stays as it was rather than
+    /// failing the whole scan transaction.
+    public func updateOutputTokens(recordId: Int64, outputTokens: Int, timestamp: Date) throws {
         try db.run(
-            "UPDATE usage_records SET output_tokens = ? WHERE id = ?",
-            [.int(Int64(outputTokens)), .int(recordId)])
+            "UPDATE OR IGNORE usage_records SET output_tokens = ?, ts = ? WHERE id = ?",
+            [.int(Int64(outputTokens)), .real(timestamp.timeIntervalSince1970), .int(recordId)])
     }
 
     /// Totals per (project, source, model) inside the range, for the project table and cost
@@ -667,6 +724,11 @@ public final class SessionStatsRepo {
 }
 
 public final class ScanStateRepo {
+    /// How long a dedup key is kept after it was written. A key older than this is pruned, so a
+    /// message last seen before then can come back without one; the ledger's own record key (see
+    /// `UsageLedgerIntegrity`) is what keeps such a re-read from counting twice.
+    public static let dedupKeyRetention: TimeInterval = 8 * 86_400
+
     private let db: SQLiteDB
 
     init(db: SQLiteDB) {
@@ -745,8 +807,9 @@ public final class ScanStateRepo {
         ])
     }
 
-    /// Prune to an 8-day window (resume/fork only copy recent rows, so old keys carry no collision
-    /// risk)
+    /// Prune keys written before `before` (normally `dedupKeyRetention` ago). Old messages do come
+    /// back after that (a rewritten file is re-read from the start, forked subagents copy old
+    /// lines); the ledger's unique record key absorbs them, not these keys.
     public func pruneDedupKeys(before: Date) throws {
         try db.run(
             "DELETE FROM dedup_keys WHERE ts < ?",
