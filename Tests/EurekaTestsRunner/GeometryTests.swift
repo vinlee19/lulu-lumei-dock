@@ -65,6 +65,63 @@ func geometryTests(_ t: TestRunner) {
         try expectEqual(IslandGeometry.pillCenterGap(screen: notched), 196)
     }
 
+    t.test("刘海胶囊：翼宽跟内容走，钳到原来的固定翼宽，无内容一侧只留圆角宽的窄边") {
+        let padding = IslandGeometry.notchWingOuterPadding + IslandGeometry.notchWingInnerPadding
+        let lip = IslandGeometry.notchPillBottomRadius
+        // Mascot + "3" on the left, "⊖ 6" on the right (issue #29's screenshot)
+        let pill = IslandGeometry.notchPill(screen: notched, leftContent: 40, rightContent: 30)
+        try expectEqual(pill.leftWing, 40 + padding)
+        try expectEqual(pill.rightWing, 30 + padding)
+        try expectEqual(pill.size, CGSize(width: 40 + 30 + 2 * padding + 196, height: 32))
+        try expect(pill.size.width < IslandGeometry.pillSize(screen: notched).width)
+        // Content wider than a full wing: never wider than before
+        let wide = IslandGeometry.notchPill(screen: notched, leftContent: 300, rightContent: 91)
+        try expectEqual(wide.leftWing, 92)
+        try expectEqual(wide.rightWing, 92)
+        try expectEqual(wide.size, IslandGeometry.pillSize(screen: notched))
+        // Only an unread mark left: the left wing stays at the notch
+        let unreadOnly = IslandGeometry.notchPill(screen: notched, leftContent: 0, rightContent: 30)
+        try expectEqual(unreadOnly.leftWing, lip)
+        try expectEqual(unreadOnly.size.width, lip + 196 + 30 + padding)
+        // Fractional measurements round up, so text is never squeezed by a fraction of a point
+        try expectEqual(
+            IslandGeometry.notchPill(screen: notched, leftContent: 40.2, rightContent: 0).leftWing,
+            41 + padding)
+    }
+
+    t.test("刘海胶囊：左右不等宽时整体偏移，中缝仍对准刘海；interactiveRect 跟着偏") {
+        let layout = IslandGeometry.Layout.standard
+        let pill = IslandGeometry.notchPill(screen: notched, leftContent: 0, rightContent: 30)
+        try expectEqual(pill.offsetX, (pill.rightWing - pill.leftWing) / 2)
+        let rect = IslandGeometry.interactiveRect(
+            contentSize: pill.size, topInset: 0, layout: layout, offsetX: pill.offsetX)
+        // The notch is centred in the panel: the left wing ends, and the right one starts, at its
+        // edges
+        let panelMid = layout.panelSize.width / 2
+        try expectEqual(rect.minX + pill.leftWing, panelMid - 98)
+        try expectEqual(rect.maxX - pill.rightWing, panelMid + 98)
+        // Wider on the left: shifts left
+        let leftHeavy = IslandGeometry.notchPill(screen: notched, leftContent: 50, rightContent: 0)
+        try expect(leftHeavy.offsetX < 0)
+        // Equal wings: centred exactly as before
+        let even = IslandGeometry.notchPill(screen: notched, leftContent: 30, rightContent: 30)
+        try expectEqual(even.offsetX, 0)
+    }
+
+    t.test("刘海胶囊：大屏按缩放放大内边距与上限，窄边不缩放") {
+        let scale: CGFloat = 1.5
+        let layout = IslandGeometry.Layout.standard.scaled(by: scale)
+        let padding = (IslandGeometry.notchWingOuterPadding + IslandGeometry.notchWingInnerPadding)
+            * scale
+        let pill = IslandGeometry.notchPill(
+            screen: notched, layout: layout, leftContent: 60, rightContent: 0, scale: scale)
+        try expectEqual(pill.leftWing, 60 + padding)
+        try expectEqual(pill.rightWing, IslandGeometry.notchPillBottomRadius)
+        let wide = IslandGeometry.notchPill(
+            screen: notched, layout: layout, leftContent: 500, rightContent: 1, scale: scale)
+        try expectEqual(wide.leftWing, 92 * scale)
+    }
+
     t.test("无刘海屏：避开菜单栏悬浮、小胶囊、无中缝") {
         try expectEqual(IslandGeometry.contentTopInset(screen: external4K), 24 + 5)
         try expectEqual(IslandGeometry.pillSize(screen: external4K), CGSize(width: 232, height: 40))

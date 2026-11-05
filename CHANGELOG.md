@@ -14,6 +14,12 @@ this project uses [Semantic Versioning](https://semver.org/).
   where you left off, partly answered questions included. Nothing is answered
   for you, so Claude's own dialog still works too. Before, the card stayed
   open at the top of the screen until you answered it or gave it up.
+- **The capsule no longer covers menu bar items next to the notch.** On a
+  notched screen each side of the capsule is now only as wide as what it shows,
+  up to the old fixed width, and a side with nothing to show stays at the
+  notch. With only an unread mark left, the parts beside the notch shrink
+  from 92 pt each to a 12 pt lip on the left and about 60 pt on the right, so
+  the status items there can be seen and clicked again.
 
 ## [0.42.1] - 2026-11-02
 

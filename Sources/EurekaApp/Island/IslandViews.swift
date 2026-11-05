@@ -14,6 +14,8 @@ struct IslandRootView: View {
         VStack(spacing: 0) {
             if viewModel.display != .hidden {
                 island(size: size)
+                    // Uneven notch wings: keep the gap between them over the notch
+                    .offset(x: viewModel.contentOffsetX)
                     .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .top)))
             }
             Spacer(minLength: 0)
@@ -22,6 +24,8 @@ struct IslandRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.38, dampingFraction: 0.8), value: viewModel.display)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: viewModel.isFloating)
+        // The notch pill's wings follow their content (a count gains a digit, an alert appears)
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: viewModel.notchPill)
         // When the session link arrives after the card is up, the card grows and the button fades in
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: viewModel.cardJump)
         // Rebuild the whole island on language change so already-projected copy picks up the new
@@ -51,7 +55,7 @@ struct IslandRootView: View {
         let fused = viewModel.fuseWithNotch
         switch viewModel.display {
         case .compact:
-            let bottomRadius: CGFloat = fused ? 12 : 15
+            let bottomRadius: CGFloat = fused ? IslandGeometry.notchPillBottomRadius : 15
             return RectangleCornerRadii(
                 topLeading: fused ? 0 : 15, bottomLeading: bottomRadius,
                 bottomTrailing: bottomRadius, topTrailing: fused ? 0 : 15)
@@ -76,7 +80,8 @@ struct IslandRootView: View {
                 deferredQuestions: viewModel.deferredQuestionCount,
                 centerGap: viewModel.pillCenterGap,
                 showStartTime: viewModel.showStartTime,
-                scale: scale
+                scale: scale,
+                wings: viewModel.fuseWithNotch ? viewModel.notchPill : nil
             )
         case .card(.question):
             if let draft = viewModel.questionDraft {
@@ -121,6 +126,10 @@ struct IslandRootView: View {
 ///   only idle sessions remain) + running count;
 /// - right wing: alert slot, folded question > waiting for permission/input > ctx ≥ 90% > unread
 ///   finished, see `IslandPill.alert`; with no alert it shows the oldest task's timer.
+///
+/// Fused with the notch, each wing is as wide as its content (`wings`, measured by
+/// `wingContentWidths`), because the wings sit over menu bar items that can't be seen or clicked
+/// under them. Floating / without a notch the pill keeps its fixed size and the two halves split it.
 struct CompactPillView: View {
     let tasks: [AgentTask]
     var idleTasks: [AgentTask] = []
@@ -129,6 +138,10 @@ struct CompactPillView: View {
     let centerGap: CGFloat
     var showStartTime = false
     var scale: CGFloat = 1
+    /// Wing widths of a notch-fused pill; nil = the halves share the pill evenly
+    var wings: IslandGeometry.NotchPill?
+    /// Measuring only: a static stand-in for the live elapsed timer (see `timerShape`)
+    var timerSample: String?
 
     private static let accent = Color(red: 0.353, green: 0.784, blue: 0.980)      // #5AC8FA
     private static let alertRed = Color(red: 1.0, green: 0.420, blue: 0.392)      // #FF6B64
@@ -141,18 +154,19 @@ struct CompactPillView: View {
         // subagent marker on the right) instead of letting SwiftUI break a line.
         let marks = IslandPill.sourceMarks(active: tasks, idle: idleTasks)
         HStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                leftWing(marks)
-                leftWing(marks.filter(\.isActive))
-                leftWing([])
+            wingFrame(width: wings?.leftWing, outer: .leading) {
+                ViewThatFits(in: .horizontal) {
+                    leftWing(marks)
+                    leftWing(marks.filter(\.isActive))
+                    leftWing([])
+                }
             }
-            .frame(maxWidth: .infinity)
 
             if centerGap > 0 {
                 Color.clear.frame(width: centerGap, height: 1)
             }
 
-            Group {
+            wingFrame(width: wings?.rightWing, outer: .trailing) {
                 if let alert = currentAlert {
                     ViewThatFits(in: .horizontal) {
                         alertBadge(alert, showIcon: true, showText: true)
@@ -166,14 +180,30 @@ struct CompactPillView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 14 * scale)
+        .padding(.horizontal, wings == nil ? 14 * scale : 0)
     }
 
     private var currentAlert: IslandPill.Alert? {
         IslandPill.alert(
             active: tasks, idle: idleTasks, unread: unread, deferredQuestions: deferredQuestions)
+    }
+
+    /// A notch wing gets its measured width with the content against the outer padding; the gap
+    /// towards the notch is only counted in the width (`IslandGeometry.notchPill`), so a wing
+    /// clamped to its cap still offers the content as much room as the old fixed wing did. Without
+    /// `width` the wing takes its even share of the pill.
+    @ViewBuilder
+    private func wingFrame<Content: View>(
+        width: CGFloat?, outer: Edge.Set, @ViewBuilder content: () -> Content
+    ) -> some View {
+        if let width {
+            content()
+                .padding(outer, IslandGeometry.notchWingOuterPadding * scale)
+                .frame(width: width, alignment: outer == .leading ? .leading : .trailing)
+        } else {
+            content().frame(maxWidth: .infinity)
+        }
     }
 
     /// Left wing: source icons + running count (count hidden when nothing is running)
@@ -266,7 +296,9 @@ struct CompactPillView: View {
             }
             if let earliest = tasks.first {
                 Group {
-                    if showStartTime {
+                    if let timerSample, !showStartTime {
+                        Text(timerSample)
+                    } else if showStartTime {
                         // When the session was first created (across turns/resume); falls back to
                         // the current turn start if missing
                         Text(formatStartTime(earliest.sessionStartedAt ?? earliest.startedAt))
@@ -285,6 +317,72 @@ struct CompactPillView: View {
     /// Total present subagents (aggregate marker on the compact pill)
     private var subagentTotal: Int {
         tasks.reduce(0) { $0 + $1.subagents.count }
+    }
+}
+
+// MARK: - Measuring the notch wings
+
+extension CompactPillView {
+    /// Everything the wings' content widths depend on: re-measure only when it changes
+    struct WingMeasureKey: Equatable {
+        var marks: [IslandPill.SourceMark]
+        var runningCount: Int
+        var alert: IslandPill.Alert?
+        var subagentTotal: Int
+        /// Timer shape or start time; nil = no timer
+        var rightText: String?
+        var scale: CGFloat
+        var language: AppLanguage
+    }
+
+    var wingMeasureKey: WingMeasureKey {
+        let rightText = tasks.first.map { earliest in
+            showStartTime
+                ? formatStartTime(earliest.sessionStartedAt ?? earliest.startedAt)
+                : timerSample ?? ""
+        }
+        return WingMeasureKey(
+            marks: IslandPill.sourceMarks(active: tasks, idle: idleTasks),
+            runningCount: tasks.count, alert: currentAlert, subagentTotal: subagentTotal,
+            rightText: rightText, scale: scale, language: L10n.current)
+    }
+
+    /// Widths of each wing's full content, i.e. the first `ViewThatFits` candidate, laid out by
+    /// the very views the pill renders (0 = the wing shows nothing). Set `timerSample` first: the
+    /// live timer can't be measured.
+    func wingContentWidths() -> (left: CGFloat, right: CGFloat) {
+        func width(_ view: some View) -> CGFloat {
+            NSHostingView(rootView: view.fixedSize()).fittingSize.width
+        }
+        let marks = IslandPill.sourceMarks(active: tasks, idle: idleTasks)
+        let left = marks.isEmpty && tasks.isEmpty ? 0 : width(leftWing(marks))
+        let right: CGFloat
+        if let alert = currentAlert {
+            right = width(alertBadge(alert, showIcon: true, showText: true))
+        } else if tasks.isEmpty {
+            right = 0
+        } else {
+            right = width(rightWing(showSubagents: true))
+        }
+        return (left, right)
+    }
+
+    /// Static stand-in for the live elapsed timer with its digit layout ("0:00", "00:00",
+    /// "0:00:00", …). Its digits are monospaced, so the shape alone sets the width.
+    static func timerShape(elapsed: TimeInterval) -> String {
+        let total = max(Int(elapsed), 0)
+        let hours = total / 3600
+        if hours > 0 { return String(repeating: "0", count: String(hours).count) + ":00:00" }
+        let minutes = total / 60
+        return String(repeating: "0", count: String(minutes).count) + ":00"
+    }
+
+    /// Elapsed seconds at which `timerShape` next gets wider
+    static func nextTimerShapeChange(elapsed: TimeInterval) -> TimeInterval {
+        if elapsed < 600 { return 600 }
+        var boundary: TimeInterval = 3600
+        while elapsed >= boundary { boundary *= 10 }
+        return boundary
     }
 }
 

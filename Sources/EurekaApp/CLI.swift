@@ -101,7 +101,14 @@ enum EurekaCLI {
                     args.indices.contains(idx + 1) ? Int(args[idx + 1]) : nil
                 } ?? 50)
         case "--render-previews":
-            let dir = args.count > 1 ? args[1] : "/tmp/eureka-previews"
+            // --lang zh|en renders that interface language (default: the app's setting)
+            var rest = Array(args.dropFirst())
+            if let flag = rest.firstIndex(of: "--lang"), rest.indices.contains(flag + 1) {
+                L10n.current = rest[flag + 1].lowercased().hasPrefix("zh")
+                    ? .simplifiedChinese : .english
+                rest.removeSubrange(flag...(flag + 1))
+            }
+            let dir = rest.first ?? "/tmp/eureka-previews"
             MainActor.assumeIsolated {
                 PreviewRenderer.renderAll(to: dir)
             }
@@ -578,7 +585,7 @@ enum EurekaCLI {
           --build-pricing-catalog <litellm> <models.dev> <output>  Generate the bundled pricing catalog snapshot
           --pricing-refresh         Fetch the pricing catalog with the app’s network code (print only, without caching)
           --mcp-inspect <name>       Inspect an MCP server (remote handshake / deep stdio inspection) and cache results
-          --render-previews [dir]    Offscreen-render Dynamic Island states to PNG
+          --render-previews [dir]    Offscreen-render Dynamic Island states to PNG (--lang zh|en)
           --render-mascot [dir]      Offscreen-render all mascot variants and storyboards to PNG
           --pack-mascot-v3 <dir> <file>  Pack 12 2×2 storyboards into a v3 atlas
           --render-shell [dir]       Offscreen-render the sidebar (including branding) and audit page in light/dark modes
@@ -598,7 +605,7 @@ enum EurekaCLI {
           --build-pricing-catalog <litellm> <models.dev> <输出>  生成随包价格目录快照
           --pricing-refresh         用 app 同一套网络代码拉一次价格目录（只打印结果，不写缓存）
           --mcp-inspect <名字>       检测某个 MCP server（remote 握手 / stdio 深探），结果落缓存
-          --render-previews [目录]   离屏渲染灵动岛各形态 PNG
+          --render-previews [目录]   离屏渲染灵动岛各形态 PNG（--lang zh|en）
           --render-mascot [目录]     离屏渲染全部吉祥物变体与分镜 PNG
           --pack-mascot-v3 <目录> <文件>  将 12 张 2×2 分镜打包为 v3 图集
           --render-shell [目录]      离屏渲染侧栏（含品牌区）与审计页，明/暗两版
