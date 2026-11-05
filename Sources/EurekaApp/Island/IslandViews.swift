@@ -73,6 +73,7 @@ struct IslandRootView: View {
                 tasks: viewModel.activeTasks,
                 idleTasks: viewModel.idleTasks,
                 unread: viewModel.unreadFinished,
+                deferredQuestions: viewModel.deferredQuestionCount,
                 centerGap: viewModel.pillCenterGap,
                 showStartTime: viewModel.showStartTime,
                 scale: scale
@@ -118,12 +119,13 @@ struct IslandRootView: View {
 /// for the physical notch:
 /// - left wing: present source icons (lit with a cyan dot when a session is running, dimmed when
 ///   only idle sessions remain) + running count;
-/// - right wing: alert slot, waiting for permission/input > ctx ≥ 90% > unread finished, see
-///   `IslandPill.alert`; with no alert it shows the oldest task's timer.
+/// - right wing: alert slot, folded question > waiting for permission/input > ctx ≥ 90% > unread
+///   finished, see `IslandPill.alert`; with no alert it shows the oldest task's timer.
 struct CompactPillView: View {
     let tasks: [AgentTask]
     var idleTasks: [AgentTask] = []
     var unread = IslandUnreadFinished()
+    var deferredQuestions = 0
     let centerGap: CGFloat
     var showStartTime = false
     var scale: CGFloat = 1
@@ -151,7 +153,7 @@ struct CompactPillView: View {
             }
 
             Group {
-                if let alert = IslandPill.alert(active: tasks, idle: idleTasks, unread: unread) {
+                if let alert = currentAlert {
                     ViewThatFits(in: .horizontal) {
                         alertBadge(alert, showIcon: true, showText: true)
                         alertBadge(alert, showIcon: false, showText: true)
@@ -167,6 +169,11 @@ struct CompactPillView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 14 * scale)
+    }
+
+    private var currentAlert: IslandPill.Alert? {
+        IslandPill.alert(
+            active: tasks, idle: idleTasks, unread: unread, deferredQuestions: deferredQuestions)
     }
 
     /// Left wing: source icons + running count (count hidden when nothing is running)
@@ -225,6 +232,9 @@ struct CompactPillView: View {
     /// interrupted gray)
     private func alertStyle(_ alert: IslandPill.Alert) -> (icon: String, text: String, color: Color) {
         switch alert {
+        case .question(let count):
+            // Icon + count only: the wing stays narrow, and no copy needs translating
+            return ("questionmark.bubble.fill", "\(count)", .orange)
         case .waiting(.permission):
             return ("hand.raised.fill", L10n.text("Needs permission", zhHans: "等待授权"), .orange)
         case .waiting(.idle):

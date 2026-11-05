@@ -213,6 +213,23 @@ enum PreviewRenderer {
             $0.updatePendingQuestions([asking([pickFramework])])
             $0.beginOther()
         }
+        // Outside click on a question card (issue #28): it folds into the pill, which keeps a
+        // "? 1" mark while the hook goes on waiting
+        snapshot("14e-compact-question-deferred", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.updatePendingQuestions([asking([pickFramework])])
+            $0.outsideClicked()
+        }
+        // Answer the first of two questions, tick one option of the second, fold, click the pill:
+        // back on the second question with that option still ticked
+        snapshot("14f-card-question-resumed", screen: notched) {
+            $0.updateActiveTasks([running1])
+            $0.updatePendingQuestions([asking([pickFramework, pickSections])])
+            $0.chooseOption("React")
+            $0.toggleOption("风险与阻塞")
+            $0.outsideClicked()
+            $0.islandTapped()
+        }
 
         // Design mock compact state: two sources running (lit + cyan dot), one source with only
         // idle sessions (dimmed), an idle session at ctx 92% lights the right-wing alert

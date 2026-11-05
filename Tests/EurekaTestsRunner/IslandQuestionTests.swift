@@ -107,6 +107,52 @@ func questionQueueTests(_ t: TestRunner) {
         try expectEqual(queue.current, finished("f1"))
         try expectEqual(IslandState.Card.question(pendingQuestion("a", [])).autoDismisses, false)
     }
+
+    t.test("岛外点击收起：当前题和排队的题一起收起，下一张非提问卡上屏；对账不会重新入队") {
+        var queue = IslandCardQueue()
+        queue.enqueue(first)
+        queue.enqueue(finished("f1"))
+        queue.enqueue(second)
+        queue.deferQuestions()
+        try expectEqual(queue.current, finished("f1"))
+        try expectEqual(queue.pending, [])
+        try expectEqual(queue.deferredQuestions.map(\.id), ["a", "b"])
+        // Still pending with the hook: reconciliation must see them as already queued
+        try expectEqual(Set(queue.questionIds), ["a", "b"])
+        queue.enqueue(first)
+        try expectEqual(queue.current, finished("f1"), "同 id 不会再上屏")
+        // Folding only applies to a question on stage
+        queue.deferQuestions()
+        try expectEqual(queue.current, finished("f1"))
+    }
+
+    t.test("点胶囊恢复：按原顺序回到台上；舞台有卡时不恢复") {
+        var queue = IslandCardQueue()
+        queue.enqueue(first)
+        queue.enqueue(second)
+        queue.deferQuestions()
+        try expectEqual(queue.current, nil)
+        queue.enqueue(finished("f1"))
+        queue.resumeDeferredQuestions()
+        try expectEqual(queue.current, finished("f1"), "完成卡在台上时不抢")
+        queue.advance()
+        queue.resumeDeferredQuestions()
+        try expectEqual(queue.current, first)
+        try expectEqual(queue.pending, [second])
+        try expectEqual(queue.deferredQuestions, [])
+    }
+
+    t.test("收起的题被撤（Claude 里答完 / hook 放弃）；收起期间新题照常上屏") {
+        var queue = IslandCardQueue()
+        queue.enqueue(first)
+        queue.deferQuestions()
+        queue.enqueue(second)
+        try expectEqual(queue.current, second, "新提问立刻上屏")
+        try expectEqual(queue.deferredQuestions.map(\.id), ["a"])
+        queue.removeQuestion(id: "a")
+        try expectEqual(queue.deferredQuestions, [])
+        try expectEqual(queue.questionIds, ["b"])
+    }
 }
 
 func questionInboxTests(_ t: TestRunner) {

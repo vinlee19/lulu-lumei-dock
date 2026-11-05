@@ -71,6 +71,9 @@ final class IslandViewModel: ObservableObject {
     /// Answer progress of the current question card (nil when the current card isn't a question
     /// card)
     @Published private(set) var questionDraft: QuestionDraft?
+    /// Questions folded into the pill by an outside click, still waiting for an answer: the pill's
+    /// "? N", and a click on the pill brings them back
+    @Published private(set) var deferredQuestionCount = 0
     /// Typing "Other" in the question card: the panel must temporarily become key window to receive
     /// the keyboard
     @Published private(set) var wantsKeyboard = false
@@ -90,6 +93,9 @@ final class IslandViewModel: ObservableObject {
     }
 
     private var queue = IslandCardQueue()
+    /// Answer progress of folded questions, by question id: unfolding resumes where the user left
+    /// off instead of from the first question
+    private var foldedDrafts: [String: QuestionDraft] = [:]
     private var hovering = false
     private var dismissTimer: Timer?
     /// Which card the current dismiss timer was scheduled for. Distinguishes "card changed" from
@@ -230,11 +236,13 @@ final class IslandViewModel: ObservableObject {
     }
 
     /// Whether a question card is on stage decides the answer progress: switching to another
-    /// question card starts it from scratch, leaving question cards clears it
+    /// question card starts it from scratch (or from where it was folded), leaving question cards
+    /// clears it
     private func syncQuestionDraft() {
         if case .card(.question(let question)) = display {
             if questionDraft?.question.id != question.id {
-                questionDraft = QuestionDraft(question: question)
+                questionDraft = foldedDrafts.removeValue(forKey: question.id)
+                    ?? QuestionDraft(question: question)
             }
         } else {
             questionDraft = nil
@@ -251,6 +259,12 @@ final class IslandViewModel: ObservableObject {
     func islandTapped() {
         switch display {
         case .compact:
+            if deferredQuestionCount > 0 {
+                // A folded question outranks the task list: the agent is paused on it
+                queue.resumeDeferredQuestions()
+                refresh()
+                return
+            }
             unreadFinished.markAllRead()
             if activeTasks.isEmpty && idleTasks.isEmpty {
                 // Only the unread mark is left and all sessions have exited: the list has nothing
@@ -275,12 +289,28 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// A click outside the island (another app, the desktop, another window of this app) while
-    /// the task list is open closes it at once. Only the click-opened task list is affected;
-    /// cards are timed notifications and an outside click does not dismiss them.
-    func dismissTaskList() {
-        guard case .taskList = display else { return }
-        refresh(collapseTaskList: true)
+    /// A click outside the island (another app, the desktop, another window of this app).
+    /// - Task list: closes at once.
+    /// - Question card: folds into the pill, which keeps a "? N" mark; a click on the pill brings
+    ///   it back with its answer progress. Nothing goes to the hook, which keeps waiting, and
+    ///   Claude's own dialog stays the other way to answer. Questions never time out on the
+    ///   island, so without this the card could only be put away by answering or giving it up.
+    /// - Other cards are timed notifications; an outside click leaves them alone.
+    func outsideClicked() {
+        switch display {
+        case .taskList:
+            refresh(collapseTaskList: true)
+        case .card(.question):
+            if var draft = questionDraft {
+                // Folding drops the keyboard, so an open "Other…" field doesn't come back typing
+                draft.cancelOther()
+                foldedDrafts[draft.question.id] = draft
+            }
+            queue.deferQuestions()
+            refresh()
+        default:
+            break
+        }
     }
 
     // MARK: - Open session
@@ -469,6 +499,11 @@ final class IslandViewModel: ObservableObject {
     // MARK: - Internal
 
     private func refresh(collapseTaskList: Bool = false) {
+        let deferred = queue.deferredQuestions.count
+        if deferredQuestionCount != deferred { deferredQuestionCount = deferred }
+        // Drafts of questions that are gone (answered here or in Claude, hook gave up)
+        let questionIds = Set(queue.questionIds)
+        foldedDrafts = foldedDrafts.filter { questionIds.contains($0.key) }
         if case .taskList = display, !collapseTaskList,
            queue.current == nil,
            !(activeTasks.isEmpty && idleTasks.isEmpty) {
@@ -502,7 +537,8 @@ final class IslandViewModel: ObservableObject {
         } else {
             timerCard = nil
             let shown = IslandPill.isShown(
-                active: activeTasks, idle: idleTasks, unread: unreadFinished)
+                active: activeTasks, idle: idleTasks, unread: unreadFinished,
+                deferredQuestions: deferredQuestionCount)
             setDisplay(shown ? .compact : .hidden)
         }
         queuedCount = queue.pendingCount

@@ -21,6 +21,9 @@ public enum IslandPill {
 
     /// Right-wing alert. When several hold at once, the first one in case order wins
     public enum Alert: Equatable, Sendable {
+        /// Questions folded into the pill by an outside click, still waiting for an answer:
+        /// the agent is paused on them, so they outrank everything else
+        case question(count: Int)
         /// A session is waiting for permission / input (permission first)
         case waiting(WaitReason)
         /// Some session's (idle included) context usage ≥ `contextAlertPercent`; the highest is
@@ -34,11 +37,13 @@ public enum IslandPill {
     public static let contextAlertPercent: Double = 90
 
     /// Whether the pill stays up when no card is showing: any open session (running, waiting or
-    /// idle) or an unread finish keeps it; the island hides only when all three are empty
+    /// idle), an unread finish or a folded question keeps it; the island hides only when all are
+    /// empty
     public static func isShown(
-        active: [AgentTask], idle: [AgentTask], unread: IslandUnreadFinished
+        active: [AgentTask], idle: [AgentTask], unread: IslandUnreadFinished,
+        deferredQuestions: Int = 0
     ) -> Bool {
-        !(active.isEmpty && idle.isEmpty && unread.isEmpty)
+        !(active.isEmpty && idle.isEmpty && unread.isEmpty && deferredQuestions == 0)
     }
 
     /// Left-wing sources: union of the sources of running and idle sessions, in the fixed order of
@@ -52,8 +57,10 @@ public enum IslandPill {
     }
 
     public static func alert(
-        active: [AgentTask], idle: [AgentTask], unread: IslandUnreadFinished
+        active: [AgentTask], idle: [AgentTask], unread: IslandUnreadFinished,
+        deferredQuestions: Int = 0
     ) -> Alert? {
+        if deferredQuestions > 0 { return .question(count: deferredQuestions) }
         let reasons = active.compactMap { task -> WaitReason? in
             if case .waiting(let reason, _) = task.phase { return reason }
             return nil

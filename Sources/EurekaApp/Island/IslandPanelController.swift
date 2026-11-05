@@ -34,8 +34,8 @@ final class IslandPanelController {
     private var isProgrammaticMove = false
     /// Snap radius (pt)
     private let snapDistance: CGFloat = 40
-    /// Outside-island click monitors while the task list is expanded (global + local), removed on
-    /// collapse
+    /// Outside-island click monitors while the task list or a question card is up (global +
+    /// local), removed once neither is
     private var outsideClickMonitors: [Any] = []
 
     init() {
@@ -237,7 +237,7 @@ final class IslandPanelController {
     }
 
     private func displayChanged(_ display: IslandViewModel.Display) {
-        if display == .taskList {
+        if Self.collapsesOnOutsideClick(display) {
             installOutsideClickMonitors()
         } else {
             removeOutsideClickMonitors()
@@ -281,6 +281,15 @@ final class IslandPanelController {
 
     // MARK: - Collapse on outside click
 
+    /// The task list closes and a question card folds into the pill (see
+    /// `IslandViewModel.outsideClicked`); timed cards are left alone
+    private static func collapsesOnOutsideClick(_ display: IslandViewModel.Display) -> Bool {
+        switch display {
+        case .taskList, .card(.question): return true
+        default: return false
+        }
+    }
+
     /// The panel is nonactivating and passes hitTest through outside the island, so it almost never
     /// becomes key window; resignKey / didResignActive never arrive → "losing focus" can only be
     /// detected by monitoring mouse-downs outside the island. The global monitor catches clicks
@@ -308,14 +317,17 @@ final class IslandPanelController {
     }
 
     /// Clicks within the island's visible area go to SwiftUI tap / drag handling; outside it,
-    /// collapse the task list
+    /// collapse the task list or fold the question card
     private func handleMouseDown() {
         // interactiveRect is in panel coordinates (origin bottom-left); translate to global screen
         // coordinates before comparing
         let islandRect = viewModel.interactiveRect.offsetBy(
             dx: panel.frame.minX, dy: panel.frame.minY)
         guard !islandRect.contains(NSEvent.mouseLocation) else { return }
-        viewModel.dismissTaskList()
+        // Typing in "Other…" made the panel key. This click already hands the keyboard to whatever
+        // was clicked; activating the app we took it from would snatch it back from there.
+        keyboardOwnerBeforeTyping = nil
+        viewModel.outsideClicked()
     }
 }
 

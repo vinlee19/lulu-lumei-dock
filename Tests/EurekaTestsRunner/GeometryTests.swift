@@ -458,6 +458,22 @@ func islandPillTests(_ t: TestRunner) {
         ])
     }
 
+    t.test("收起的提问排在所有告警之前；只剩收起的提问也保留胶囊") {
+        let permission = task("w", .waiting(.permission, since: since))
+        try expectEqual(
+            IslandPill.alert(
+                active: [permission], idle: [], unread: IslandUnreadFinished(),
+                deferredQuestions: 2),
+            .question(count: 2))
+        try expectEqual(
+            IslandPill.alert(
+                active: [permission], idle: [], unread: IslandUnreadFinished(),
+                deferredQuestions: 0),
+            .waiting(.permission))
+        try expect(IslandPill.isShown(
+            active: [], idle: [], unread: IslandUnreadFinished(), deferredQuestions: 1))
+    }
+
     t.test("告警优先级：等待授权 > 等待输入 > ctx ≥ 90% > 未读完成 > 无") {
         var unread = IslandUnreadFinished()
         unread.add(FinishedTask(
