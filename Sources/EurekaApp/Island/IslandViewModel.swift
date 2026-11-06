@@ -35,7 +35,9 @@ final class IslandViewModel: ObservableObject {
     @Published var isFloating = false
     /// Time display mode: false = elapsed duration (timer), true = start date-time. The source of
     /// truth is AppSettings (shared by Settings and the island button); this is only a projection.
-    @Published var showStartTime = false
+    @Published var showStartTime = false {
+        didSet { updateNotchPill() }
+    }
     /// Interface language projection. Island copy is looked up in the views; a language change
     /// redraws via this publish.
     @Published private(set) var language: AppLanguage = L10n.current
@@ -74,6 +76,13 @@ final class IslandViewModel: ObservableObject {
     /// Questions folded into the pill by an outside click, still waiting for an answer: the pill's
     /// "? N", and a click on the pill brings them back
     @Published private(set) var deferredQuestionCount = 0
+    /// Notch-fused pill sized to what its wings show. Cached: hitTest reads `contentSize` on every
+    /// mouse move, so it must never measure there
+    @Published private(set) var notchPill = IslandGeometry.notchPill(
+        screen: IslandGeometry.ScreenInfo(
+            frame: CGRect(x: 0, y: 0, width: 1512, height: 982), safeAreaTopInset: 32,
+            notchWidth: 196),
+        leftContent: 0, rightContent: 0)
     /// Typing "Other" in the question card: the panel must temporarily become key window to receive
     /// the keyboard
     @Published private(set) var wantsKeyboard = false
@@ -96,6 +105,11 @@ final class IslandViewModel: ObservableObject {
     /// Answer progress of folded questions, by question id: unfolding resumes where the user left
     /// off instead of from the first question
     private var foldedDrafts: [String: QuestionDraft] = [:]
+    /// What the cached wing widths were measured from (re-measure only when it changes)
+    private var notchPillKey: CompactPillView.WingMeasureKey?
+    private var notchPillContent: (left: CGFloat, right: CGFloat) = (0, 0)
+    /// Fires just before the elapsed timer gains a digit, so the right wing grows in time
+    private var notchPillTimer: Timer?
     private var hovering = false
     private var dismissTimer: Timer?
     /// Which card the current dismiss timer was scheduled for. Distinguishes "card changed" from
@@ -107,10 +121,12 @@ final class IslandViewModel: ObservableObject {
 
     func noteLanguage(_ language: AppLanguage) {
         self.language = language
+        updateNotchPill()
     }
 
     func updateScreen(_ info: IslandGeometry.ScreenInfo) {
         screen = info
+        updateNotchPill()
     }
 
     func updateActiveTasks(_ tasks: [AgentTask], idle: [AgentTask] = []) {
@@ -414,9 +430,13 @@ final class IslandViewModel: ObservableObject {
     }
 
     private var pillSize: CGSize {
-        isFloating
-            ? layout.compactPillNoNotchSize
-            : IslandGeometry.pillSize(screen: screen, layout: layout)
+        fuseWithNotch ? notchPill.size : layout.compactPillNoNotchSize
+    }
+
+    /// Horizontal shift of the island off the panel centre: a notch pill with uneven wings moves so
+    /// the gap between them stays over the notch
+    var contentOffsetX: CGFloat {
+        display == .compact && fuseWithNotch ? notchPill.offsetX : 0
     }
 
     var contentSize: CGSize {
@@ -493,7 +513,41 @@ final class IslandViewModel: ObservableObject {
     /// Interactive area in panel coordinates (hitTest pass-through + hover tracking)
     var interactiveRect: CGRect {
         IslandGeometry.interactiveRect(
-            contentSize: contentSize, topInset: topInset, layout: layout)
+            contentSize: contentSize, topInset: topInset, layout: layout, offsetX: contentOffsetX)
+    }
+
+    /// Re-measures the notch pill's wings from the state the pill renders (see
+    /// `CompactPillView.wingContentWidths`). Cheap when nothing it depends on changed.
+    private func updateNotchPill() {
+        notchPillTimer?.invalidate()
+        notchPillTimer = nil
+        guard screen.hasNotch else { return }
+        var timerSample: String?
+        if !showStartTime, let earliest = activeTasks.first {
+            // Measured a little ahead, and re-measured just before the next extra digit: the live
+            // timer ticks on its own, without any refresh to re-measure it
+            let elapsed = Date().timeIntervalSince(earliest.startedAt) + 2
+            timerSample = CompactPillView.timerShape(elapsed: elapsed)
+            let wait = max(CompactPillView.nextTimerShapeChange(elapsed: elapsed) - elapsed, 1)
+            notchPillTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) {
+                [weak self] _ in
+                MainActor.assumeIsolated { self?.updateNotchPill() }
+            }
+        }
+        let pill = CompactPillView(
+            tasks: activeTasks, idleTasks: idleTasks, unread: unreadFinished,
+            deferredQuestions: deferredQuestionCount, centerGap: 0,
+            showStartTime: showStartTime, scale: uiScale, timerSample: timerSample)
+        let key = pill.wingMeasureKey
+        if key != notchPillKey {
+            notchPillKey = key
+            notchPillContent = pill.wingContentWidths()
+        }
+        let measured = IslandGeometry.notchPill(
+            screen: screen, layout: layout,
+            leftContent: notchPillContent.left, rightContent: notchPillContent.right,
+            scale: uiScale)
+        if measured != notchPill { notchPill = measured }
     }
 
     // MARK: - Internal
@@ -504,6 +558,7 @@ final class IslandViewModel: ObservableObject {
         // Drafts of questions that are gone (answered here or in Claude, hook gave up)
         let questionIds = Set(queue.questionIds)
         foldedDrafts = foldedDrafts.filter { questionIds.contains($0.key) }
+        defer { updateNotchPill() }
         if case .taskList = display, !collapseTaskList,
            queue.current == nil,
            !(activeTasks.isEmpty && idleTasks.isEmpty) {

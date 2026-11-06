@@ -111,6 +111,18 @@ enum PreviewRenderer {
                     .fittingSize.height
                 print("提问卡高度 \(name)：\(vm.questionLines) 行问题，排版 \(measured) / 计算 \(vm.contentSize.height)")
             }
+            if vm.display == .compact, vm.fuseWithNotch {
+                // Wings follow their content (issue #29); a clamped wing relies on ViewThatFits
+                // dropping a piece instead
+                let pill = vm.notchPill
+                let cap = vm.layout.notchWingWidth
+                func describe(_ wing: CGFloat) -> String {
+                    let note = wing >= cap ? "（已钳到上限）"
+                        : wing <= IslandGeometry.notchPillBottomRadius ? "（窄边）" : ""
+                    return String(format: "%.1f", wing) + note
+                }
+                print("胶囊翼宽 \(name)：左 \(describe(pill.leftWing)) / 右 \(describe(pill.rightWing))，上限 \(cap)，偏移 \(pill.offsetX)")
+            }
             let root = IslandRootView(viewModel: vm)
                 .frame(width: vm.layout.panelSize.width, height: vm.layout.panelSize.height)
             let renderer = ImageRenderer(content: root)
@@ -259,6 +271,28 @@ enum PreviewRenderer {
                 startedAt: now.addingTimeInterval(-1800), phase: .idle)
             $0.updateActiveTasks([], idle: [idleClaude, idleCodex])
         }
+        // Notch wings sized to their content (issue #29): two-digit counts on both wings and the
+        // longest waiting copy (a cross-day start time with subagents comes after `withSubs`)
+        snapshot("5f-compact-two-digit", screen: notched) {
+            var many: [AgentTask] = [running2]
+            for index in 0..<11 {
+                many.append(AgentTask(
+                    source: .claude, sessionId: "many-\(index)", title: nil,
+                    cwd: "/Users/me/work/many",
+                    startedAt: now.addingTimeInterval(-Double(index) * 300 - 4000)))
+            }
+            $0.updateActiveTasks(many)
+            for index in 0..<12 {
+                $0.enqueueFinished(FinishedTask(
+                    source: .claude, sessionId: "done-\(index)", cwd: "/Users/me/work/many",
+                    startedAt: now.addingTimeInterval(-600), finishedAt: now,
+                    outcome: index == 0 ? .interrupted : .success))
+            }
+            while case .card = $0.display { $0.expireCurrentCard() }
+        }
+        snapshot("5h-compact-permission", screen: notched) {
+            $0.updateActiveTasks([running1, running2, running3, waitingTask])
+        }
         snapshot("6-card-waiting", screen: notched) {
             $0.updateActiveTasks([waitingTask])
             $0.enqueueWaiting(waitingTask)
@@ -368,6 +402,13 @@ enum PreviewRenderer {
         }
         snapshot("12-compact-subagent-marker", screen: notched) {
             $0.updateActiveTasks([withSubs, running2])
+        }
+        snapshot("12b-compact-start-time-cross-day", screen: notched) {
+            var old = withSubs
+            old.sessionStartedAt = now.addingTimeInterval(-6 * 86400)
+            old.startedAt = now.addingTimeInterval(-6 * 86400)
+            $0.showStartTime = true
+            $0.updateActiveTasks([old, running2])
         }
         // Crowded floating pill, reproduced from two real screenshots (2026-10-16): one source
         // (so the wing carries the "claude" word), a two-digit count, a waiting task, subagents

@@ -79,6 +79,8 @@ Trae itself gates hooks per account — see the Trae footnote under [Supported a
 - A compact capsule pins to the top while sessions are open (fuses with the notch, or drag it
   anywhere and it snaps back to center): running sources light up, sources with only idle sessions
   stay dimmed, and the island hides only when no session is open and nothing finished is unread.
+  Fused with the notch, each side of the capsule is only as wide as what it shows (an empty side
+  stays at the notch), so it covers as little of the menu bar and its status items as it can.
 - Every card auto‑dismisses back to the capsule (hover to pause): finished / errored / interrupted
   after the configured delay (6s by default, 3–15s in Settings), waiting‑for‑permission / input after
   that plus 4s — long enough to read, short enough to stop owning your screen. Nothing is lost when a

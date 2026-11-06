@@ -274,6 +274,58 @@ public enum IslandGeometry {
         )
     }
 
+    /// Compact pill fused with the notch, with each wing sized to what it shows. The wings may
+    /// differ: the gap between them stays over the physical notch and the pill is shifted by
+    /// `offsetX` instead.
+    public struct NotchPill: Equatable, Sendable {
+        public var leftWing: CGFloat
+        public var rightWing: CGFloat
+        public var notchWidth: CGFloat
+        public var height: CGFloat
+
+        public init(leftWing: CGFloat, rightWing: CGFloat, notchWidth: CGFloat, height: CGFloat) {
+            self.leftWing = leftWing
+            self.rightWing = rightWing
+            self.notchWidth = notchWidth
+            self.height = height
+        }
+
+        public var size: CGSize {
+            CGSize(width: leftWing + notchWidth + rightWing, height: height)
+        }
+
+        /// Shift of the pill's centre from the screen's centre (positive = right)
+        public var offsetX: CGFloat { (rightWing - leftWing) / 2 }
+    }
+
+    /// Bottom corner radius of the notch-fused pill (not scaled: it follows the notch)
+    public static let notchPillBottomRadius: CGFloat = 12
+    /// Wing padding at 1.0x: towards the screen edge, and the gap left towards the notch. The gap
+    /// only adds to an unclamped wing's width; a clamped wing keeps `notchWingWidth - outer` for
+    /// its content, the same room as the old fixed wing.
+    public static let notchWingOuterPadding: CGFloat = 14
+    public static let notchWingInnerPadding: CGFloat = 8
+
+    /// Notch-fused pill for the given wing content widths (already scaled, 0 = the wing shows
+    /// nothing). The wings cover the menu bar on either side of the notch, and the status items
+    /// there cannot be seen or clicked under them, so a wing is only as wide as its content plus
+    /// padding, never wider than `layout.notchWingWidth` (the old fixed width). A wing with no
+    /// content keeps only a lip as wide as the bottom corner, so the pill still reads as one
+    /// shape with the notch.
+    public static func notchPill(
+        screen: ScreenInfo, layout: Layout = .standard,
+        leftContent: CGFloat, rightContent: CGFloat, scale: CGFloat = 1
+    ) -> NotchPill {
+        let padding = (notchWingOuterPadding + notchWingInnerPadding) * scale
+        func wing(_ content: CGFloat) -> CGFloat {
+            guard content > 0 else { return notchPillBottomRadius }
+            return max(notchPillBottomRadius, min(content.rounded(.up) + padding, layout.notchWingWidth))
+        }
+        return NotchPill(
+            leftWing: wing(leftContent), rightWing: wing(rightContent),
+            notchWidth: screen.notchWidth ?? 196, height: screen.safeAreaTopInset)
+    }
+
     /// Width in the middle of the pill hidden by the physical notch (content layout must
     /// leave it empty); 0 without a notch
     public static func pillCenterGap(screen: ScreenInfo) -> CGFloat {
@@ -292,13 +344,14 @@ public enum IslandGeometry {
         )
     }
 
-    /// Explicit topInset variant (floating mode at a custom position uses topInset = 0)
+    /// Explicit topInset variant (floating mode at a custom position uses topInset = 0).
+    /// `offsetX` shifts the content off centre (a notch pill with uneven wings).
     public static func interactiveRect(
-        contentSize: CGSize, topInset: CGFloat, layout: Layout = .standard
+        contentSize: CGSize, topInset: CGFloat, layout: Layout = .standard, offsetX: CGFloat = 0
     ) -> CGRect {
         guard contentSize != .zero else { return .zero }
         return CGRect(
-            x: (layout.panelSize.width - contentSize.width) / 2,
+            x: (layout.panelSize.width - contentSize.width) / 2 + offsetX,
             y: layout.panelSize.height - topInset - contentSize.height,
             width: contentSize.width,
             height: contentSize.height
