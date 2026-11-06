@@ -350,8 +350,9 @@ in real time, and terminal attribution falls back to matching running processes.
 
 | Action | Effect |
 |---|---|
-| Click the capsule | Expand the running‑task list (incl. idle sessions) |
+| Click the capsule | Expand the running‑task list (incl. idle sessions), or reopen a folded question |
 | Click a card | Advance to the next notification / dismiss |
+| Click outside a question card | Fold it into the capsule (`?` mark) — nothing is answered; Claude keeps waiting |
 | Hover a card | Pause auto‑dismiss |
 | Drag the island | Move anywhere (incl. external displays); drop near top‑center to snap back |
 | ⏱ in the task list | Toggle elapsed ↔ start time |

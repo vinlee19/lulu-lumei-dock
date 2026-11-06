@@ -6,6 +6,15 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A question card gets out of the way when you click elsewhere.** Clicking
+  outside the island while Claude's question is up folds the card into the
+  capsule, which keeps a `? N` mark; click the capsule to bring it back right
+  where you left off, partly answered questions included. Nothing is answered
+  for you, so Claude's own dialog still works too. Before, the card stayed
+  open at the top of the screen until you answered it or gave it up.
+
 ## [0.42.1] - 2026-11-02
 
 ### Changed

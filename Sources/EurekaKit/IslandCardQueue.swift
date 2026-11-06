@@ -6,6 +6,9 @@ import Foundation
 public struct IslandCardQueue: Equatable, Sendable {
     public private(set) var current: IslandState.Card?
     public private(set) var pending: [IslandState.Card] = []
+    /// Questions the user folded into the pill with an outside click: still waiting on the hook
+    /// (nothing was written back), off stage until the pill is clicked. Arrival order is kept.
+    public private(set) var deferredQuestions: [PendingQuestion] = []
 
     /// Pending cap for "informational" cards (finished/notice): beyond it the oldest are
     /// dropped (the history page keeps everything). A burst of hundreds of finished events
@@ -73,16 +76,20 @@ public struct IslandCardQueue: Equatable, Sendable {
         }
     }
 
-    /// Ids of all question cards in the queue (current + pending)
+    /// Ids of all question cards in the queue (current + pending + folded). Folded questions must
+    /// be included, or reconciling with the hook's pending questions would enqueue them again as
+    /// new arrivals.
     public var questionIds: [String] {
-        ([current].compactMap { $0 } + pending).compactMap {
-            if case .question(let question) = $0 { return question.id }
+        let queued = ([current].compactMap { $0 } + pending).compactMap { card -> String? in
+            if case .question(let question) = card { return question.id }
             return nil
         }
+        return queued + deferredQuestions.map(\.id)
     }
 
-    /// Answered / dismissed / hook gave up: withdraw this question card
+    /// Answered / dismissed / hook gave up: withdraw this question card, wherever it is
     public mutating func removeQuestion(id: String) {
+        deferredQuestions.removeAll { $0.id == id }
         pending.removeAll {
             if case .question(let question) = $0 { return question.id == id }
             return false
@@ -90,6 +97,32 @@ public struct IslandCardQueue: Equatable, Sendable {
         if case .question(let question) = current, question.id == id {
             current = pending.isEmpty ? nil : pending.removeFirst()
         }
+    }
+
+    /// Outside click on a question card: fold it **and every question queued behind it** into the
+    /// pill (folding one only to have the next pop up at once would defeat the click). The card
+    /// stage goes to the next non-question card, if any. Nothing is answered; the hooks keep
+    /// waiting.
+    public mutating func deferQuestions() {
+        guard case .question(let shown) = current else { return }
+        var folded = [shown]
+        pending.removeAll { card in
+            guard case .question(let question) = card else { return false }
+            folded.append(question)
+            return true
+        }
+        deferredQuestions.append(contentsOf: folded)
+        current = pending.isEmpty ? nil : pending.removeFirst()
+    }
+
+    /// Pill clicked while questions are folded: put them back on stage in arrival order. Only
+    /// when nothing is on stage (the pill only shows then).
+    public mutating func resumeDeferredQuestions() {
+        guard current == nil, !deferredQuestions.isEmpty else { return }
+        let cards = deferredQuestions.map(IslandState.Card.question)
+        deferredQuestions = []
+        current = cards[0]
+        pending.insert(contentsOf: cards.dropFirst(), at: 0)
     }
 
     /// When informational cards exceed the cap, drop from the oldest; waiting/alert cards stay
