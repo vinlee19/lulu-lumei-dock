@@ -1112,6 +1112,17 @@ enum PreviewRenderer {
         snap("pages-limits", LimitsPanelView(service: limits, settings: settings), height: 700)
         snap("pages-limits-dark", LimitsPanelView(service: limits, settings: settings),
              dark: true, height: 700)
+        // Fixed snapshots exercising every row (scoped windows, plan badge, credits lines) that
+        // live data may not have
+        let limitsSample = RateLimitsService()
+        let samples = limitsPreviewSamples(now: Date())
+        limitsSample.loadPreview(
+            codex: samples.codex, grok: samples.grok, claude: samples.claude,
+            antigravity: samples.antigravity, opencodeGo: samples.opencodeGo)
+        snap("pages-limits-sample", LimitsPanelView(service: limitsSample, settings: settings),
+             height: 1240)
+        snap("pages-limits-sample-dark",
+             LimitsPanelView(service: limitsSample, settings: settings), dark: true, height: 1240)
 
         // MARK: Prompts (list + detail)
         snap("pages-prompts",
@@ -1606,5 +1617,115 @@ enum BadgeSheetRenderer {
         }
         try? png.write(to: URL(fileURLWithPath: path))
         print("已渲染 \(path)")
+    }
+}
+
+extension PreviewRenderer {
+    /// The Limits page from fixed samples only: no live service starts, so Claude, agy and
+    /// opencode are never called (unlike `--render-pages`, which drives the real page). One file
+    /// per OpenCode state - Go subscribed, no Go plan, signed out of Console - light and dark.
+    @MainActor
+    static func renderLimitsSamples(to directory: String, style: ThemeStyle = .classic) {
+        ThemeFonts.register()
+        let settings = AppSettings()
+        if let language = languageOverride { L10n.current = language }
+        // AppSettings.init resets ThemeStyle.current from the persisted preference
+        ThemeStyle.current = style
+        defer { ThemeStyle.current = .classic }
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let now = Date()
+        let samples = limitsPreviewSamples(now: now)
+        let variants: [(name: String, opencode: RateLimitSnapshot)] = [
+            ("limits-sample-subscribed", samples.opencodeGo),
+            ("limits-sample-no-plan",
+             RateLimitSnapshot(source: .opencode, asOf: now, planStatus: .noPlan)),
+            ("limits-sample-signed-out",
+             RateLimitSnapshot(source: .opencode, asOf: now, planStatus: .signedOut)),
+        ]
+        for variant in variants {
+            let service = RateLimitsService()
+            service.loadPreview(
+                codex: samples.codex, grok: samples.grok, claude: samples.claude,
+                antigravity: samples.antigravity, opencodeGo: variant.opencode)
+            for dark in [false, true] {
+                let hosting = NSHostingView(rootView: ZStack {
+                    style == .classic ? Color(nsColor: .windowBackgroundColor) : Theme.windowBackground
+                    LimitsPanelView(service: service, settings: settings)
+                })
+                hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                hosting.frame = CGRect(x: 0, y: 0, width: 780, height: 1320)
+                hosting.layoutSubtreeIfNeeded()
+                let name = variant.name + (dark ? "-dark" : "")
+                guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
+                    print("渲染失败: \(name)")
+                    continue
+                }
+                hosting.cacheDisplay(in: hosting.bounds, to: rep)
+                guard let png = rep.representation(using: .png, properties: [:]) else {
+                    print("渲染失败: \(name)")
+                    continue
+                }
+                try? png.write(to: dir.appendingPathComponent("\(name).png"))
+                print("已渲染 \(name).png")
+            }
+        }
+    }
+
+    /// Fixed limits for `pages-limits-sample`: a Team seat on the Max 5x tier with a scoped
+    /// weekly window and extra usage switched on, Codex holding credits, Grok on pay-as-you-go.
+    static func limitsPreviewSamples(now: Date) -> (
+        codex: RateLimitSnapshot, grok: RateLimitSnapshot, claude: RateLimitSnapshot,
+        antigravity: RateLimitSnapshot, opencodeGo: RateLimitSnapshot
+    ) {
+        let hour: TimeInterval = 3600
+        let codex = RateLimitSnapshot(
+            source: .codex, asOf: now, planType: "plus",
+            primary: RateLimitWindow(
+                usedPercent: 12, windowMinutes: 300, resetsAt: now.addingTimeInterval(3 * hour)),
+            secondary: RateLimitWindow(
+                usedPercent: 39, windowMinutes: 10080, resetsAt: now.addingTimeInterval(30 * hour)),
+            credits: RateLimitCredits(isEnabled: true, balance: 120))
+        let grok = RateLimitSnapshot(
+            source: .grok, asOf: now.addingTimeInterval(-40 * 60), planType: "SuperGrok",
+            primary: RateLimitWindow(
+                usedPercent: 75, windowMinutes: 10080, resetsAt: now.addingTimeInterval(72 * hour)),
+            credits: RateLimitCredits(
+                isEnabled: true, used: 3.2, limit: 20, balance: 5, currency: "USD"),
+            isStale: true)
+        let claude = RateLimitSnapshot(
+            source: .claude, asOf: now, planType: "Team · Max 5x",
+            primary: RateLimitWindow(
+                usedPercent: 1, windowMinutes: 300, resetsAt: now.addingTimeInterval(4 * hour)),
+            secondary: RateLimitWindow(
+                usedPercent: 18, windowMinutes: 10080, resetsAt: now.addingTimeInterval(130 * hour)),
+            scopedWindows: [
+                RateLimitWindow(
+                    usedPercent: 7, windowMinutes: 10080,
+                    resetsAt: now.addingTimeInterval(130 * hour),
+                    scope: "Fable", capShareOfParent: 50),
+            ],
+            credits: RateLimitCredits(
+                isEnabled: true, used: 12.3, limit: 50, currency: "USD"))
+        let weekly = now.addingTimeInterval(167 * hour)
+        let fiveHours = now.addingTimeInterval(5 * hour)
+        let antigravity = RateLimitSnapshot(
+            source: .antigravity, asOf: now.addingTimeInterval(-3 * 60),
+            scopedWindows: [
+                RateLimitWindow(usedPercent: 27, windowMinutes: 10080, resetsAt: weekly, scope: "Gemini Models"),
+                RateLimitWindow(usedPercent: 50, windowMinutes: 300, resetsAt: fiveHours, scope: "Gemini Models"),
+                RateLimitWindow(usedPercent: 0, windowMinutes: 10080, resetsAt: weekly, scope: "Claude and GPT models"),
+                RateLimitWindow(usedPercent: 88, windowMinutes: 300, resetsAt: fiveHours, scope: "Claude and GPT models"),
+                RateLimitWindow(usedPercent: 0, windowMinutes: 10080, resetsAt: weekly, scope: "Gemini 4 Argon"),
+            ])
+        let opencodeGo = RateLimitSnapshot(
+            source: .opencode, asOf: now, planType: "Go",
+            scopedWindows: [
+                RateLimitWindow(usedPercent: 12.5, windowMinutes: 0, resetsAt: now.addingTimeInterval(2 * hour)),
+                RateLimitWindow(usedPercent: 40, windowMinutes: 10080, resetsAt: now.addingTimeInterval(80 * hour)),
+                RateLimitWindow(usedPercent: 63, windowMinutes: 43200, resetsAt: now.addingTimeInterval(400 * hour)),
+            ])
+        return (codex, grok, claude, antigravity, opencodeGo)
     }
 }

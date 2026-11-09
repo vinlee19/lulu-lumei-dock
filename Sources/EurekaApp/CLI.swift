@@ -93,7 +93,10 @@ enum EurekaCLI {
         case "--build-pricing-catalog":
             buildPricingCatalog(args: Array(args.dropFirst()))
         case "--limits-snapshot":
-            limitsSnapshot(includeClaude: args.contains("--claude"))
+            limitsSnapshot(
+                includeClaude: args.contains("--claude"),
+                includeAntigravity: args.contains("--antigravity"),
+                includeOpencode: args.contains("--opencode"))
         case "--audit-snapshot":
             auditSnapshot(
                 riskOnly: args.contains("--risk-only"),
@@ -184,6 +187,30 @@ enum EurekaCLI {
             let dir = positional.first ?? "/tmp/eureka-pages"
             MainActor.assumeIsolated {
                 PreviewRenderer.renderPages(to: dir, style: ThemeStyle.resolve(styleRaw))
+            }
+        case "--render-limits-samples":
+            // Fixed samples only: never calls Claude / agy / opencode
+            var positional = [String]()
+            var styleRaw = "classic"
+            var index = 1
+            while index < args.count {
+                if args[index] == "--style", args.indices.contains(index + 1) {
+                    styleRaw = args[index + 1]
+                    index += 2
+                    continue
+                }
+                if args[index] == "--lang", args.indices.contains(index + 1) {
+                    if args[index + 1].lowercased().hasPrefix("zh") { PreviewRenderer.languageOverride = .simplifiedChinese }
+                    if args[index + 1].lowercased().hasPrefix("en") { PreviewRenderer.languageOverride = .english }
+                    index += 2
+                    continue
+                }
+                if !args[index].hasPrefix("--") { positional.append(args[index]) }
+                index += 1
+            }
+            MainActor.assumeIsolated {
+                PreviewRenderer.renderLimitsSamples(
+                    to: positional.first ?? "/tmp/eureka-limits", style: ThemeStyle.resolve(styleRaw))
             }
         case "--mcp-inspect":
             // Goes through the real probe path (remote handshake / stdio deep inspect), and the
@@ -440,13 +467,16 @@ enum EurekaCLI {
 
     /// Rate-limit snapshot (reads only local Codex by default; --claude also exercises the
     /// unofficial API)
-    private static func limitsSnapshot(includeClaude: Bool) {
+    private static func limitsSnapshot(
+        includeClaude: Bool, includeAntigravity: Bool, includeOpencode: Bool
+    ) {
         let semaphore = DispatchSemaphore(value: 0)
         Task {
             func describe(_ snapshot: RateLimitSnapshot?) -> String {
                 guard let snapshot else { return L10n.text("(No data → hidden in UI)", zhHans: "（无数据 → UI 隐藏）") }
                 var parts: [String] = []
                 if let plan = snapshot.planType { parts.append("plan=\(plan)") }
+                if let status = snapshot.planStatus { parts.append("status=\(status.rawValue)") }
                 if let primary = snapshot.primary {
                     let label = primary.windowMinutes == 10080 ? L10n.text("Week", zhHans: "周")
                         : primary.windowMinutes == 43200 ? L10n.text("Month", zhHans: "月")
@@ -458,6 +488,16 @@ enum EurekaCLI {
                 }
                 if let secondary = snapshot.secondary {
                     parts.append(L10n.format("Week=%@%%", zhHans: "周=%@%%", String(String(format: "%.1f", secondary.usedPercent))))
+                }
+                for scoped in snapshot.scopedWindows {
+                    let name = [scoped.scope, scoped.label ?? (scoped.windowMinutes == 300 ? "5h" : scoped.windowMinutes == 10080 ? "week" : scoped.windowMinutes == 43200 ? "month" : scoped.windowMinutes == 0 ? "rolling" : "\(scoped.windowMinutes)m")]
+                        .compactMap { $0 }.joined(separator: "/")
+                    var text = String(format: "scoped=%@:%.1f%%", name, scoped.usedPercent)
+                    if let cap = scoped.capShareOfParent { text += String(format: "(cap %.0f%%)", cap) }
+                    parts.append(text)
+                }
+                if let credits = snapshot.credits {
+                    parts.append("credits=\(RateLimitCreditsText.line(for: credits, source: snapshot.source).text)")
                 }
                 if snapshot.isStale { parts.append(L10n.format("(As of %@)", zhHans: "（截至 %@）", String(describing: snapshot.asOf))) }
                 return parts.joined(separator: " ")
@@ -475,6 +515,21 @@ enum EurekaCLI {
                 if let failure = provider.lastFailure {
                     print(L10n.format("Claude note: %@", zhHans: "Claude 提示: %@", String(failure)))
                 }
+            }
+            // Both run the user's own CLI (agy ~5 s); probes write only under the temp dir here
+            let probes = FileManager.default.temporaryDirectory
+                .appendingPathComponent("eureka-limit-probes", isDirectory: true)
+            if includeAntigravity {
+                let provider = AntigravityQuotaProvider(
+                    probeDirectory: probes.appendingPathComponent("agy", isDirectory: true))
+                print("Antigravity: \(describe(await provider.snapshot()))")
+                if let failure = provider.lastFailure { print("Antigravity note: \(failure)") }
+            }
+            if includeOpencode {
+                let provider = OpencodeGoProvider(
+                    probeDirectory: probes.appendingPathComponent("opencode", isDirectory: true))
+                print("OpenCode Go: \(describe(await provider.snapshot()))")
+                if let failure = provider.lastFailure { print("OpenCode Go note: \(failure)") }
             }
             semaphore.signal()
         }

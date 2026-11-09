@@ -87,24 +87,6 @@ enum CodexRolloutDecoderProxy {
         else { return [] }
 
         let asOf = (root["timestamp"] as? String).flatMap { isoFormatter.date(from: $0) } ?? Date()
-
-        func window(_ key: String) -> RateLimitWindow? {
-            guard let dict = limits[key] as? [String: Any],
-                  let usedPercent = dict["used_percent"] as? Double
-            else { return nil }
-            return RateLimitWindow(
-                usedPercent: usedPercent,
-                windowMinutes: dict["window_minutes"] as? Int ?? 0,
-                resetsAt: (dict["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
-            )
-        }
-
-        return [.rateLimits(RateLimitSnapshot(
-            source: .codex,
-            asOf: asOf,
-            planType: limits["plan_type"] as? String,
-            primary: window("primary"),
-            secondary: window("secondary")
-        ))]
+        return [.rateLimits(CodexRateLimitParsing.snapshot(limits: limits, asOf: asOf))]
     }
 }

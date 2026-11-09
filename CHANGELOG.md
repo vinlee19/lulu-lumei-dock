@@ -6,8 +6,40 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **More detail on the limits cards.** Claude shows its plan (for example
+  `Team · Max 5x`), each per-model weekly window the account has (such as
+  Fable, with its share of the weekly allowance), and whether extra usage is
+  on, how much of the monthly cap it has used, or why it is off. Codex shows
+  its credit balance and Grok its pay-as-you-go spend and prepaid balance when
+  there is any.
+- **Antigravity and OpenCode Go quotas on the limits page.** Antigravity shows
+  the weekly and 5-hour quota of each model group (Gemini, Claude and GPT,
+  Argon), read from agy's own `/usage` command; OpenCode Go shows its rolling,
+  weekly and monthly allowance from opencode's own server, or says that the
+  account has no Go plan or is not signed in to OpenCode Console. Both run
+  only when you open the page or press the new refresh button, at most every
+  two minutes, and never read either app's login.
+- **Each limits card says how fresh it is** ("Updated just now", "Updated 3
+  min. ago"), and reset times follow the interface language instead of the
+  system's.
+
 ### Fixed
 
+- **Claude limits show the real percentage.** The Claude card read the usage
+  API's 0–100 percentage as a 0–1 fraction whenever it was 1 or less, so a
+  window at 1% showed as 100% (in red, on the menu bar too) and then jumped
+  back to 2% as usage grew. Values are now taken as percentages throughout.
+- **Claude limits back off when the API rate-limits them.** Opening the limits
+  page repeatedly sent a request each time, and once the endpoint answered 429
+  the 5-minute refresh and every relaunch kept it rate-limited, so the Claude
+  card vanished for good. Requests are now at least a minute apart, a 429
+  waits for the server's `Retry-After` (or 5, 10, 20… up to 60 minutes) without
+  sending anything, the hint says when the next try is, and the last numbers
+  stay on screen, marked with their time, even across a restart. Claude
+  Code's own cached copy of the same numbers is read first, so while Claude
+  Code is running the app usually needs no request at all.
 - **A question card gets out of the way when you click elsewhere.** Clicking
   outside the island while Claude's question is up folds the card into the
   capsule, which keeps a `? N` mark; click the capsule to bring it back right

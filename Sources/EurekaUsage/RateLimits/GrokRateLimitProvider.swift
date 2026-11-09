@@ -74,7 +74,29 @@ public struct GrokRateLimitProvider: RateLimitProvider {
             planType: ctx["subscriptionTier"] as? String,
             primary: RateLimitWindow(
                 usedPercent: usedPercent, windowMinutes: windowMinutes, resetsAt: resetsAt),
-            secondary: nil)
+            secondary: nil,
+            credits: onDemand(config: config, enabled: ctx["onDemandEnabled"] as? Bool ?? false))
+    }
+
+    /// Pay-as-you-go: `onDemandUsed` / `onDemandCap` / `prepaidBalance` are `{val}` wrappers of
+    /// the grok CLI's `Cent` type (USD cents; it prints them as "Pay-as-you-go: … used of …
+    /// limit" and "Credits left"). proto3 drops zero values, so a missing field is 0.
+    /// nil when pay-as-you-go is off and every amount is zero.
+    static func onDemand(config: [String: Any], enabled: Bool) -> RateLimitCredits? {
+        func dollars(_ key: String) -> Double {
+            let cents = ((config[key] as? [String: Any])?["val"] as? NSNumber)?.doubleValue ?? 0
+            return cents / 100
+        }
+        let used = dollars("onDemandUsed")
+        let cap = dollars("onDemandCap")
+        let prepaid = dollars("prepaidBalance")
+        guard enabled || used > 0 || cap > 0 || prepaid > 0 else { return nil }
+        return RateLimitCredits(
+            isEnabled: enabled,
+            used: used,
+            limit: cap > 0 ? cap : nil,
+            balance: prepaid > 0 ? prepaid : nil,
+            currency: "USD")
     }
 
     // ts has fractional seconds (...Z), currentPeriod.end doesn't → try both
