@@ -164,22 +164,6 @@ public enum CodexRolloutDecoder {
     }
 
     static func rateLimitSnapshot(_ limits: [String: Any], asOf: Date) -> RateLimitSnapshot {
-        func window(_ key: String) -> RateLimitWindow? {
-            guard let dict = limits[key] as? [String: Any],
-                  let usedPercent = dict["used_percent"] as? Double
-            else { return nil }
-            return RateLimitWindow(
-                usedPercent: usedPercent,
-                windowMinutes: dict["window_minutes"] as? Int ?? 0,
-                resetsAt: (dict["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
-            )
-        }
-        return RateLimitSnapshot(
-            source: .codex,
-            asOf: asOf,
-            planType: limits["plan_type"] as? String,
-            primary: window("primary"),
-            secondary: window("secondary")
-        )
+        CodexRateLimitParsing.snapshot(limits: limits, asOf: asOf)
     }
 }
