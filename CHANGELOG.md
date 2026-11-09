@@ -6,6 +6,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-09
+
 ### Added
 
 - **More detail on the limits cards.** Claude shows its plan (for example
@@ -2346,7 +2348,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.42.1...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.43.0
 [0.42.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.1
 [0.42.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.0
 [0.41.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.41.0
