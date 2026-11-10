@@ -143,4 +143,14 @@ func mcpToolPermissionTests(_ t: TestRunner) {
         try expect(!MCPProbePolicy.shouldAutoProbe(
             cache: cache(age: 30, error: "x"), snapshots: [snapshot("ok", age: 30)], now: now))
     }
+
+    t.test("MCP 自动探测：仓库里的配置要先在 Claude 里批准") {
+        try expect(MCPProbePolicy.trustsForAutoProbe(scope: .global, claudeApproval: nil))
+        try expect(MCPProbePolicy.trustsForAutoProbe(scope: .local, claudeApproval: nil))
+        try expect(MCPProbePolicy.trustsForAutoProbe(scope: .project, claudeApproval: .approved))
+        try expect(!MCPProbePolicy.trustsForAutoProbe(scope: .project, claudeApproval: .unanswered))
+        try expect(!MCPProbePolicy.trustsForAutoProbe(scope: .project, claudeApproval: .rejected))
+        try expect(!MCPProbePolicy.trustsForAutoProbe(scope: .project, claudeApproval: nil),
+            "other agents record no approval")
+    }
 }

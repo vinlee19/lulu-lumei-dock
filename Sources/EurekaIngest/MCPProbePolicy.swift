@@ -12,6 +12,18 @@ public enum MCPProbePolicy {
     /// another request; wait this long before asking again
     public static let needsUserAfter: TimeInterval = 24 * 3600
 
+    /// Whether a server's config is trusted enough to be contacted or launched **without a
+    /// click**. Project-scope config is checked into a repository, so its author is whoever
+    /// wrote the repo: opening a page must not run their command. It is trusted only once the
+    /// user approved that server in Claude Code; other agents record no approval, so theirs
+    /// always wait for the button. Global and local config live in the user's own home.
+    public static func trustsForAutoProbe(
+        scope: MCPServerEntry.Scope,
+        claudeApproval: MCPToolPermissionIndex.ProjectServerApproval?
+    ) -> Bool {
+        scope != .project || claudeApproval == .approved
+    }
+
     /// - cache: the tool cache entry for this server name, if any
     /// - snapshots: last probe result of each of its config locations
     public static func shouldAutoProbe(

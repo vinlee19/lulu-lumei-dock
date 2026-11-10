@@ -189,6 +189,31 @@ func mcpOAuthTests(_ t: TestRunner) {
         let decoded = MCPOAuth.decodeTokenSet(encoded)
         try expectEqual(decoded, set, "Keychain 字符串必须无损 round-trip")
     }
+
+    t.test("MCP OAuth：令牌只发给签发它的源") {
+        try expectEqual(MCPOAuth.tokenOrigin(of: "HTTPS://MCP.Example.com:443/mcp?x=1"), "https://mcp.example.com")
+        try expectEqual(MCPOAuth.tokenOrigin(of: "http://localhost:8080/sse"), "http://localhost:8080")
+        try expectEqual(MCPOAuth.tokenOrigin(of: "file:///etc/passwd"), nil)
+        func token(_ resource: String?) -> MCPOAuth.TokenSet {
+            MCPOAuth.TokenSet(
+                accessToken: "at", tokenEndpoint: "https://auth/token", clientID: "abc",
+                obtainedAt: Date(timeIntervalSince1970: 1_700_000_000), resource: resource)
+        }
+        let bound = token("https://mcp.example.com")
+        try expect(MCPOAuth.tokenMayBeSent(bound, to: "https://mcp.example.com/v2", repoSupplied: true))
+        try expect(!MCPOAuth.tokenMayBeSent(bound, to: "https://evil.example.net/mcp", repoSupplied: false),
+            "same name, another host")
+        try expect(!MCPOAuth.tokenMayBeSent(bound, to: "http://mcp.example.com/mcp", repoSupplied: false),
+            "scheme downgrade")
+        try expect(MCPOAuth.tokenMayBeSent(token(nil), to: "https://mcp.example.com/mcp", repoSupplied: false),
+            "older token, user's own config")
+        try expect(!MCPOAuth.tokenMayBeSent(token(nil), to: "https://mcp.example.com/mcp", repoSupplied: true),
+            "older token never follows a repo-supplied URL")
+        // A token stored before the field existed still decodes
+        let legacy = #"{"accessToken":"at","tokenEndpoint":"https://auth/token","clientID":"abc","obtainedAt":1700000000}"#
+        try expectEqual(MCPOAuth.decodeTokenSet(legacy)?.resource, nil)
+        try expectEqual(MCPOAuth.decodeTokenSet(legacy)?.accessToken, "at")
+    }
 }
 
 /// Simple unwrap (this harness has no XCTUnwrap)

@@ -1785,7 +1785,9 @@ private struct MCPDetailView: View {
                 failureNotice(latest.snapshot)
             } else {
                 HStack(spacing: 10) {
-                    Text(L10n.text("The tool list has not been read yet.", zhHans: "还没有读取工具清单。"))
+                    Text(entries.contains(where: service.trustsForAutoProbe)
+                        ? L10n.text("The tool list has not been read yet.", zhHans: "还没有读取工具清单。")
+                        : L10n.text("This server comes from a file in the repository, so it is not read until you ask: reading it starts the command or contacts the URL that file names.", zhHans: "这个 server 来自仓库里的配置文件，所以不会自动读取：读取会启动该文件指定的命令或访问它指定的地址。"))
                         .font(Theme.font.themed(12))
                         .foregroundStyle(Theme.textSecondary)
                     PaneButton(L10n.text("Read it now", zhHans: "现在读取"), small: true) { service.probe(entries) }

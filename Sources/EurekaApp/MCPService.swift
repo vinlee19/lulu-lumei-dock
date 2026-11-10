@@ -593,7 +593,9 @@ final class MCPService: ObservableObject {
                 ) { message in
                     self?.oauthNotes[entryID] = message  // progress callback is already on the main thread
                 }
-                Self.storeTokenSet(tokenSet, named: entry.name)
+                var bound = tokenSet
+                bound.resource = MCPOAuth.tokenOrigin(of: serverURL)
+                Self.storeTokenSet(bound, named: entry.name)
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.mutateTokenNames { $0.insert(entry.name.lowercased()) }
@@ -716,7 +718,9 @@ final class MCPService: ObservableObject {
             guard let self, self.probeProgress == nil else { return }
             let entries = self.entries(named: name)
             guard !entries.contains(where: { self.probeResults[$0.id] == .checking }),
-                  let target = entries.first(where: { $0.enabled != false }),
+                  let target = entries.first(where: {
+                      $0.enabled != false && self.trustsForAutoProbe($0)
+                  }),
                   MCPProbePolicy.shouldAutoProbe(
                       cache: self.toolCache[name.lowercased()],
                       snapshots: entries.compactMap { self.probeSnapshots[$0.id] },
@@ -727,6 +731,18 @@ final class MCPService: ObservableObject {
         }
         pendingAutoProbe = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    /// See `MCPProbePolicy.trustsForAutoProbe`: repo-supplied config waits for a click unless
+    /// the user already approved that server in Claude Code
+    func trustsForAutoProbe(_ entry: MCPServerEntry) -> Bool {
+        var approval: MCPToolPermissionIndex.ProjectServerApproval?
+        if entry.scope == .project, entry.source == .claude {
+            let root = URL(fileURLWithPath: entry.configPath).deletingLastPathComponent().path
+            approval = toolPermissions.claudeProjectServerApproval(
+                server: entry.name, projectPath: root)
+        }
+        return MCPProbePolicy.trustsForAutoProbe(scope: entry.scope, claudeApproval: approval)
     }
 
     /// Whether any config location of this server is being probed right now
@@ -848,7 +864,9 @@ final class MCPService: ObservableObject {
         // With no explicit Authorization header, attach the token Eureka holds from browser OAuth
         let hasExplicitAuth = headers.keys.contains { $0.lowercased() == "authorization" }
         var storedToken: MCPOAuth.TokenSet?
-        if !hasExplicitAuth, let stored = loadTokenSet(named: entry.name) {
+        // Tokens are keyed by server name; only send one to the origin it was issued for
+        if !hasExplicitAuth, let stored = loadTokenSet(named: entry.name),
+           MCPOAuth.tokenMayBeSent(stored, to: urlText, repoSupplied: entry.scope == .project) {
             storedToken = stored
             headers["Authorization"] = "Bearer \(stored.accessToken)"
         }
@@ -872,9 +890,10 @@ final class MCPService: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             if case .success(let response) = MCPHTTP.perform(request, wait: 10),
                (200...299).contains(response.reply.statusCode ?? 0),
-               let renewed = MCPOAuth.parseTokenResponse(
+               var renewed = MCPOAuth.parseTokenResponse(
                    response.reply.data, tokenEndpoint: stored.tokenEndpoint,
                    clientID: stored.clientID) {
+                renewed.resource = stored.resource ?? MCPOAuth.tokenOrigin(of: urlText)
                 storeTokenSet(renewed, named: entry.name)
                 headers["Authorization"] = "Bearer \(renewed.accessToken)"
                 outcome = inspect()
