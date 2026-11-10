@@ -11,14 +11,29 @@ import Foundation
 /// looking only at HTTP 200 would misjudge any website as an MCP server (the v1 bug). Now a 2xx must also
 /// yield a parseable `result.protocolVersion`.
 public enum MCPProbe {
-    /// The latest **finalized** protocol version our implementation aligns with (officially
-    /// released 2026-07-28: stateless core, multi-round requests, header version negotiation).
-    /// initialize reports this version and records whatever the server negotiates down to (old
-    /// servers answering with an old version still connect); later requests carry the
-    /// `MCP-Protocol-Version: <negotiated version>` header per spec. The classic handshake sequence
-    /// stays compatible with the new spec; stateless core's single-request capability discovery is
-    /// a follow-up and does not affect probe correctness.
-    public static let latestProtocolVersion = "2026-07-28"
+    /// The protocol has two eras and the probe speaks both (`MCPInspector` picks one per server):
+    ///
+    /// - **Modern** (2026-07-28 onwards): stateless. There is no handshake and no session; every
+    ///   request carries its protocol version and client capabilities in `params._meta`, and
+    ///   `server/discover` replaces `initialize`.
+    /// - **Handshake** (2024-11-05 … 2025-11-25): `initialize` negotiates a version (the server
+    ///   answers with its own when it does not support ours), then `notifications/initialized`,
+    ///   then requests carrying the negotiated `MCP-Protocol-Version` header (2025-06-18+).
+    ///
+    /// Fields grew across revisions (tool annotations 2025-03-26; `title` / `outputSchema`
+    /// 2025-06-18; `serverInfo.description` 2025-11-25), so every parser here treats them as
+    /// optional and never rejects a response for lacking one.
+    public static let modernProtocolVersion = "2026-07-28"
+    /// The newest handshake-era revision; what `initialize` offers
+    public static let handshakeProtocolVersion = "2025-11-25"
+    /// The latest revision the probe aligns with
+    public static let latestProtocolVersion = modernProtocolVersion
+
+    /// A revision at or after the stateless redesign (revisions are ISO dates, so string order is
+    /// date order)
+    public static func isModern(_ version: String) -> Bool {
+        version >= modernProtocolVersion
+    }
 
     /// The server's self-description returned by the initialize handshake (serverInfo +
     /// capabilities in the protocol definition)
@@ -28,15 +43,23 @@ public enum MCPProbe {
         public var protocolVersion: String?
         /// Capability key names (tools / resources / prompts / logging…), sorted
         public var capabilities: [String]
+        /// `serverInfo.title`: the human-readable display name (2025-06-18+)
+        public var serverTitle: String?
+        /// `result.instructions`: the server's own description of what it offers and how to use
+        /// it. Untrusted text from the server; display only.
+        public var instructions: String?
 
         public init(
             serverName: String? = nil, serverVersion: String? = nil,
-            protocolVersion: String? = nil, capabilities: [String] = []
+            protocolVersion: String? = nil, capabilities: [String] = [],
+            serverTitle: String? = nil, instructions: String? = nil
         ) {
             self.serverName = serverName
             self.serverVersion = serverVersion
             self.protocolVersion = protocolVersion
             self.capabilities = capabilities
+            self.serverTitle = serverTitle
+            self.instructions = instructions
         }
 
         /// One-line summary (subtitle of the detail row): "v1.2 · Protocol 2025-03-26 ·
@@ -150,7 +173,100 @@ public enum MCPProbe {
             serverName: serverInfo?["name"] as? String,
             serverVersion: serverInfo?["version"] as? String,
             protocolVersion: protocolVersion,
-            capabilities: capabilities)
+            capabilities: capabilities,
+            serverTitle: nonBlank(serverInfo?["title"] as? String),
+            instructions: nonBlank(result["instructions"] as? String))
+    }
+
+    /// `server/discover` response → handshake info (modern era). `requested` is the version the
+    /// request declared, which is what later requests keep using. nil when the response is not a
+    /// DiscoverResult (`result.supportedVersions` is its distinguishing field).
+    public static func parseDiscoverResponse(
+        _ data: Data, contentType: String?, requested: String
+    ) -> HandshakeInfo? {
+        guard let payload = extractJSONPayload(data, contentType: contentType),
+              let root = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+              let result = root["result"] as? [String: Any],
+              let supported = result["supportedVersions"] as? [String], !supported.isEmpty
+        else { return nil }
+        let meta = result["_meta"] as? [String: Any]
+        let serverInfo = (meta?["io.modelcontextprotocol/serverInfo"] as? [String: Any])
+            ?? (result["serverInfo"] as? [String: Any])
+        let capabilities = (result["capabilities"] as? [String: Any])?.keys.sorted() ?? []
+        return HandshakeInfo(
+            serverName: serverInfo?["name"] as? String,
+            serverVersion: serverInfo?["version"] as? String,
+            protocolVersion: supported.contains(requested) ? requested : supported.max(),
+            capabilities: capabilities,
+            serverTitle: nonBlank(serverInfo?["title"] as? String),
+            instructions: nonBlank(result["instructions"] as? String))
+    }
+
+    /// A JSON-RPC error as far as version negotiation cares
+    public struct RPCError: Equatable, Sendable {
+        public var code: Int?
+        public var message: String?
+        /// `error.data.supported`: the revisions the server says it speaks. Sent with
+        /// `UnsupportedProtocolVersion` (-32022) by modern servers and, by convention, with
+        /// -32602 by handshake-era ones.
+        public var supportedVersions: [String]
+
+        /// The codes only a modern server uses (HeaderMismatch, MissingRequiredClientCapability,
+        /// UnsupportedProtocolVersion). The spec forbids keying the legacy fallback on any one
+        /// code, so everything outside this set means "not recognizably modern".
+        public var isRecognizedModern: Bool {
+            guard let code else { return false }
+            return (-32022 ... -32020).contains(code)
+        }
+    }
+
+    public static func parseRPCError(_ data: Data, contentType: String?) -> RPCError? {
+        guard let payload = extractJSONPayload(data, contentType: contentType),
+              let root = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+              let error = root["error"] as? [String: Any]
+        else { return nil }
+        let supported = ((error["data"] as? [String: Any])?["supported"] as? [String]) ?? []
+        return RPCError(
+            code: error["code"] as? Int,
+            message: nonBlank(error["message"] as? String),
+            supportedVersions: supported)
+    }
+
+    /// `result.resultType` (2026-07-28). Absent means "complete" — that is how every earlier
+    /// revision answers.
+    public static func resultType(_ data: Data, contentType: String?) -> String {
+        guard let payload = extractJSONPayload(data, contentType: contentType),
+              let root = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+              let result = root["result"] as? [String: Any],
+              let type = result["resultType"] as? String
+        else { return "complete" }
+        return type
+    }
+
+    private static func nonBlank(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    /// One input parameter of a tool (name / JSON type / required / description). The schema body
+    /// itself is still never kept.
+    public struct ParamInfo: Equatable, Sendable {
+        public var name: String
+        /// `type` from the property schema; a union is joined with " | "; nil when undeclared
+        public var type: String?
+        public var required: Bool
+        public var description: String?
+
+        public init(
+            name: String, type: String? = nil, required: Bool = false,
+            description: String? = nil
+        ) {
+            self.name = name
+            self.type = type
+            self.required = required
+            self.description = description
+        }
     }
 
     /// Display info for a single tool (2025-11-25: title / description / annotations /
@@ -168,11 +284,13 @@ public enum MCPProbe {
         /// Parameter names from inputSchema.properties (required ones get a `*` suffix; names only,
         /// schema bodies are not stored)
         public var params: [String]
+        /// The same parameters with type and description, sorted by name
+        public var paramDetails: [ParamInfo]
 
         public init(
             name: String, title: String? = nil, description: String? = nil,
             readOnly: Bool? = nil, destructive: Bool? = nil, hasOutputSchema: Bool = false,
-            params: [String] = []
+            params: [String] = [], paramDetails: [ParamInfo] = []
         ) {
             self.name = name
             self.title = title
@@ -181,6 +299,7 @@ public enum MCPProbe {
             self.destructive = destructive
             self.hasOutputSchema = hasOutputSchema
             self.params = params
+            self.paramDetails = paramDetails
         }
     }
 
@@ -211,8 +330,17 @@ public enum MCPProbe {
             let annotations = tool["annotations"] as? [String: Any]
             let schema = tool["inputSchema"] as? [String: Any]
             let required = Set((schema?["required"] as? [String]) ?? [])
-            let params = ((schema?["properties"] as? [String: Any])?.keys.sorted() ?? [])
+            let properties = (schema?["properties"] as? [String: Any]) ?? [:]
+            let params = properties.keys.sorted()
                 .map { required.contains($0) ? $0 + "*" : $0 }
+            let paramDetails = properties.keys.sorted().map { key -> ParamInfo in
+                let property = properties[key] as? [String: Any]
+                let type = (property?["type"] as? String)
+                    ?? (property?["type"] as? [String])?.joined(separator: " | ")
+                return ParamInfo(
+                    name: key, type: type, required: required.contains(key),
+                    description: nonBlank(property?["description"] as? String))
+            }
             return ToolInfo(
                 name: name,
                 title: tool["title"] as? String,
@@ -220,7 +348,7 @@ public enum MCPProbe {
                 readOnly: annotations?["readOnlyHint"] as? Bool,
                 destructive: annotations?["destructiveHint"] as? Bool,
                 hasOutputSchema: tool["outputSchema"] != nil,
-                params: params)
+                params: params, paramDetails: paramDetails)
         }
         return (parsed, result["nextCursor"] as? String)
     }
@@ -243,22 +371,51 @@ public enum MCPProbe {
         return (parsed, result["nextCursor"] as? String)
     }
 
-    /// A Streamable HTTP response may be SSE: take the first `data:` line; plain JSON is returned
-    /// as-is. Public so the app layer can reuse it (the tools/list schema text feeds token
-    /// estimation).
+    /// A Streamable HTTP response may be SSE: plain JSON is returned as-is; from an event stream
+    /// the first event that is a JSON-RPC **response** (carries `result` or `error`) wins, because
+    /// a server may send notifications or its own requests on the stream before answering. With
+    /// no such event the first one is returned, so callers still see what arrived. A 2025-03-26
+    /// batch (a JSON array) is reduced to its first response the same way. Public so the app layer
+    /// can reuse it (the tools/list schema text feeds token estimation).
     public static func extractJSONPayload(_ data: Data, contentType: String?) -> Data? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         let isSSE = (contentType?.lowercased().contains("text/event-stream") ?? false)
             || text.hasPrefix("event:") || text.hasPrefix("data:")
-        guard isSSE else { return data }
-        for line in text.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("data:") {
-                let json = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
-                return Data(json.utf8)
-            }
+        guard isSSE else { return firstResponse(inBatch: data) ?? data }
+        var parser = MCPSSEParser()
+        let events = parser.feed(data) + parser.finish()
+        var first: Data?
+        for event in events where !event.data.isEmpty {
+            let json = Data(event.data.utf8)
+            let candidate = firstResponse(inBatch: json) ?? json
+            if first == nil { first = candidate }
+            if isResponse(candidate) { return candidate }
         }
-        return nil
+        return first
+    }
+
+    private static func isResponse(_ json: Data) -> Bool {
+        guard let root = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any]
+        else { return false }
+        return root["result"] != nil || root["error"] != nil
+    }
+
+    /// JSON-RPC batching existed only in 2025-03-26: a batch body is an array of messages
+    private static func firstResponse(inBatch json: Data) -> Data? {
+        guard json.first(where: { !$0.isASCIIWhitespace }) == UInt8(ascii: "["),
+              let batch = (try? JSONSerialization.jsonObject(with: json)) as? [[String: Any]],
+              let response = batch.first(where: { $0["result"] != nil || $0["error"] != nil })
+        else { return nil }
+        return try? JSONSerialization.data(withJSONObject: response)
+    }
+
+    /// `error.message` of a JSON-RPC error response, for telling the user why a list call failed
+    public static func parseErrorMessage(_ data: Data, contentType: String?) -> String? {
+        guard let payload = extractJSONPayload(data, contentType: contentType),
+              let root = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+              let error = root["error"] as? [String: Any]
+        else { return nil }
+        return nonBlank(error["message"] as? String)
     }
 
     /// Parsed WWW-Authenticate challenge from a 401/403 (RFC 9728 + RFC 6750). `scopes` comes from
@@ -318,12 +475,17 @@ public enum MCPProbe {
     public static func resolveCommand(
         _ command: String,
         pathVariable: String = ProcessInfo.processInfo.environment["PATH"] ?? "",
+        workingDirectory: URL? = nil,
         fileManager: FileManager = .default
     ) -> String? {
         let trimmed = command.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
         if trimmed.contains("/") {
-            let expanded = (trimmed as NSString).expandingTildeInPath
+            var expanded = (trimmed as NSString).expandingTildeInPath
+            // A relative path in a project-scoped config is relative to that project
+            if !expanded.hasPrefix("/"), let workingDirectory {
+                expanded = workingDirectory.appendingPathComponent(expanded).standardizedFileURL.path
+            }
             return fileManager.isExecutableFile(atPath: expanded) ? expanded : nil
         }
         for dir in pathVariable.split(separator: ":") where !dir.isEmpty {
@@ -336,24 +498,59 @@ public enum MCPProbe {
 
     // MARK: - Request bodies (JSON-RPC 2.0)
 
-    /// MCP `initialize` probe request body (reports the latest finalized version; records whatever
-    /// the server negotiates down to)
-    public static func initializeRequestBody() -> Data {
+    /// JSON-RPC ids the probe uses, one per method (pagination reuses the method's id: requests
+    /// are strictly sequential)
+    public enum RequestID {
+        public static let initialize = 1
+        public static let toolsList = 2
+        public static let resourcesList = 3
+        public static let promptsList = 4
+        public static let discover = 10
+    }
+
+    private static let clientInfo: [String: Any] = ["name": "eureka-probe", "version": "1.0"]
+
+    /// The per-request metadata every modern request must carry (protocol version and client
+    /// capabilities are required, client info is recommended)
+    private static func modernMeta(_ version: String) -> [String: Any] {
+        [
+            "io.modelcontextprotocol/protocolVersion": version,
+            "io.modelcontextprotocol/clientInfo": clientInfo,
+            "io.modelcontextprotocol/clientCapabilities": [String: Any](),
+        ]
+    }
+
+    /// `server/discover` (modern era): the single request that replaces the handshake
+    public static func discoverRequestBody(version: String = modernProtocolVersion) -> Data {
         let payload: [String: Any] = [
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": RequestID.discover,
+            "method": "server/discover",
+            "params": ["_meta": modernMeta(version)],
+        ]
+        return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+    }
+
+    /// MCP `initialize` request body (handshake era). Offers the newest handshake revision by
+    /// default; the server answers with whatever it negotiates down to.
+    public static func initializeRequestBody(
+        version: String = handshakeProtocolVersion
+    ) -> Data {
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": RequestID.initialize,
             "method": "initialize",
             "params": [
-                "protocolVersion": latestProtocolVersion,
-                "capabilities": [:],
-                "clientInfo": ["name": "eureka-probe", "version": "1.0"],
+                "protocolVersion": version,
+                "capabilities": [String: Any](),
+                "clientInfo": clientInfo,
             ],
         ]
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 
     /// Handshake-complete notification (the spec requires sending it before other requests; a
-    /// notification without an id)
+    /// notification without an id). Handshake era only.
     public static func initializedNotificationBody() -> Data {
         let payload: [String: Any] = [
             "jsonrpc": "2.0",
@@ -362,30 +559,50 @@ public enum MCPProbe {
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 
-    /// tools/list request body (a non-empty cursor fetches the next page)
-    public static func toolsListRequestBody(cursor: String? = nil) -> Data {
-        listRequestBody(method: "tools/list", id: 2, cursor: cursor)
+    /// tools/list request body (a non-empty cursor fetches the next page). `modernVersion` set =
+    /// modern era: the request carries `_meta`; nil = handshake era, no `_meta`.
+    public static func toolsListRequestBody(
+        cursor: String? = nil, modernVersion: String? = nil
+    ) -> Data {
+        listRequestBody(
+            method: "tools/list", id: RequestID.toolsList, cursor: cursor,
+            modernVersion: modernVersion)
     }
 
     /// resources/list request body (only for counting, so the first page is enough)
-    public static func resourcesListRequestBody(cursor: String? = nil) -> Data {
-        listRequestBody(method: "resources/list", id: 3, cursor: cursor)
+    public static func resourcesListRequestBody(
+        cursor: String? = nil, modernVersion: String? = nil
+    ) -> Data {
+        listRequestBody(
+            method: "resources/list", id: RequestID.resourcesList, cursor: cursor,
+            modernVersion: modernVersion)
     }
 
     /// prompts/list request body (only for counting, so the first page is enough)
-    public static func promptsListRequestBody(cursor: String? = nil) -> Data {
-        listRequestBody(method: "prompts/list", id: 4, cursor: cursor)
+    public static func promptsListRequestBody(
+        cursor: String? = nil, modernVersion: String? = nil
+    ) -> Data {
+        listRequestBody(
+            method: "prompts/list", id: RequestID.promptsList, cursor: cursor,
+            modernVersion: modernVersion)
     }
 
-    private static func listRequestBody(method: String, id: Int, cursor: String?) -> Data {
+    private static func listRequestBody(
+        method: String, id: Int, cursor: String?, modernVersion: String?
+    ) -> Data {
         var payload: [String: Any] = [
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
         ]
-        if let cursor {
-            payload["params"] = ["cursor": cursor]
-        }
+        var params: [String: Any] = [:]
+        if let cursor { params["cursor"] = cursor }
+        if let modernVersion { params["_meta"] = modernMeta(modernVersion) }
+        if !params.isEmpty { payload["params"] = params }
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
+}
+
+private extension UInt8 {
+    var isASCIIWhitespace: Bool { self == 0x20 || self == 0x09 || self == 0x0A || self == 0x0D }
 }

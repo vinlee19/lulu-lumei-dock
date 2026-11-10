@@ -428,13 +428,18 @@ struct MCPServerListRow: View {
     private var meta: String {
         var parts: [String] = []
         let first = primary.source.displayName
-        if sources.count > 1 {
+        let cache = service.toolCache[primary.name.lowercased()]
+        if let what = cache?.instructionsHeadline ?? cache?.serverTitle {
+            // The server's own one-line description beats naming the agents (their logos are
+            // already on the tile)
+            parts.append(what)
+        } else if sources.count > 1 {
             parts.append(L10n.format("%1$@ + %2$@ more tools", zhHans: "%1$@ 等 %3$@ 个工具",
                                      first, String(sources.count - 1), String(sources.count)))
         } else {
             parts.append(first)
         }
-        if let tools = service.toolCache[primary.name.lowercased()] {
+        if let tools = cache {
             // "Tools" already names the agent CLIs in this line; say MCP tools explicitly.
             parts.append(L10n.format("%@ MCP tools", zhHans: "%@ 个 MCP 工具", String(tools.toolCount)))
         }

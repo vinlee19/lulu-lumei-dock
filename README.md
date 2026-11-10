@@ -391,13 +391,17 @@ All data lives in `~/Library/Application Support/Eureka/`:
 **Privacy:** automatic update checks contact this repository's GitHub Releases feed and can be disabled.
 The model price catalogs are fetched once a day from `raw.githubusercontent.com` (jsDelivr as mirror) and
 `models.dev` — plain GETs of public files, no user data — and can be turned off in Settings → Advanced → 模型价格.
-The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. The MCP tab's
-"检测连接" probe fires only when you click it and only contacts the server URL configured for that entry
-(with its own configured headers); it speaks MCP 2026-07-28 (sending the negotiated `MCP-Protocol-Version`
-header and following `tools/list` pagination), and for servers that advertise them it fetches only the
-*names and descriptions* of tools/prompts/resources — never their bodies. For stdio servers the probe
-briefly launches the configured command (the same one your CLIs run every session) to read those lists
-over stdin/stdout, then terminates it — also click-only, never automatic. The MCP tab's browser OAuth flow is also click-only:
+The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. The MCP tab
+reads what a server offers — its own description plus the *names, descriptions and parameter names* of its
+tools/prompts/resources, never their bodies — when you click "重新检测", or once when you open that
+server's detail page and nothing fresh is cached (never in the background, never for the whole list). A
+probe only contacts the server URL configured for that entry (with its own configured headers). Every
+published protocol revision is supported: stateless `server/discover` for MCP 2026-07-28, the `initialize`
+handshake for 2025-11-25 and earlier (with version negotiation either way), and the deprecated HTTP+SSE
+transport of 2024-11-05, whose message endpoint must be on the configured URL's origin. For stdio servers
+the probe briefly launches the configured command (the same one your CLIs run every session) with your
+shell's `PATH` to read those lists over stdin/stdout, then terminates it. Per-tool "allowed / asks /
+denied" labels are read from Claude Code's and Codex's own settings and are never written back. The MCP tab's browser OAuth flow is also click-only:
 it contacts the authorization server that the MCP server itself advertises (OAuth AS metadata or OIDC
 discovery), and the resulting token is stored only in the macOS Keychain (used solely for Eureka's own
 probing — it never logs in any CLI). Core activity, session and usage data stays local unless you

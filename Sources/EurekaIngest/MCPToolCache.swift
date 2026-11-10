@@ -5,8 +5,9 @@ import Foundation
 /// (2) `ContextBreakdownEstimator`, which replaces the guessed 1500-per-server constant with real
 /// schema token counts.
 ///
-/// Stores only tool **names/titles/descriptions (truncated)/annotations/counts/token estimates/handshake
-/// metadata**: no schema bodies, no config values, so no secret exposure surface. The file lives in App
+/// Stores only tool **names/titles/descriptions (truncated)/parameter names, types and
+/// descriptions/annotations/counts/token estimates/handshake metadata and the server's
+/// instructions**: no schema bodies, no config values, so no secret exposure surface. The file lives in App
 /// Support (alongside pricing.json / context-windows.json).
 public struct MCPToolCacheEntry: Codable, Equatable, Sendable {
     public var toolCount: Int
@@ -29,6 +30,16 @@ public struct MCPToolCacheEntry: Codable, Equatable, Sendable {
     public var prompts: [MCPNamedSummary]?
     /// Resource list (name + description; URIs/bodies are not stored)
     public var resources: [MCPNamedSummary]?
+    /// `serverInfo.name` / `serverInfo.title` from the handshake (the config name is the user's
+    /// own label and often differs)
+    public var serverName: String?
+    public var serverTitle: String?
+    /// The server's `instructions` (capped by the writer): what it offers, in its own words.
+    /// Untrusted text; display only.
+    public var instructions: String?
+    /// Set when the handshake succeeded but tools/list did not: the lists in this entry are then
+    /// whatever an earlier probe stored, and this says why they could not be refreshed
+    public var toolsError: String?
     public var measuredAt: Date
 
     public init(
@@ -37,6 +48,8 @@ public struct MCPToolCacheEntry: Codable, Equatable, Sendable {
         capabilities: [String] = [], tools: [MCPToolSummary]? = nil,
         resourceCount: Int? = nil, promptCount: Int? = nil,
         prompts: [MCPNamedSummary]? = nil, resources: [MCPNamedSummary]? = nil,
+        serverName: String? = nil, serverTitle: String? = nil,
+        instructions: String? = nil, toolsError: String? = nil,
         measuredAt: Date
     ) {
         self.toolCount = toolCount
@@ -50,7 +63,24 @@ public struct MCPToolCacheEntry: Codable, Equatable, Sendable {
         self.promptCount = promptCount
         self.prompts = prompts
         self.resources = resources
+        self.serverName = serverName
+        self.serverTitle = serverTitle
+        self.instructions = instructions
+        self.toolsError = toolsError
         self.measuredAt = measuredAt
+    }
+
+    /// First non-empty line of the instructions with Markdown heading marks stripped — the
+    /// one-line "what this server is" for list rows
+    public var instructionsHeadline: String? {
+        guard let instructions else { return nil }
+        for line in instructions.split(whereSeparator: \.isNewline) {
+            let text = line.trimmingCharacters(in: .whitespaces)
+                .drop { $0 == "#" }
+                .trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty { return text }
+        }
+        return nil
     }
 }
 
@@ -65,11 +95,13 @@ public struct MCPToolSummary: Codable, Equatable, Sendable {
     public var hasOutputSchema: Bool?
     /// Parameter names (required ones get a `*` suffix; added in v2.8, names only, no schema body)
     public var params: [String]?
+    /// Parameters with type and description (old caches without this key still decode)
+    public var paramDetails: [MCPToolParamSummary]?
 
     public init(
         name: String, title: String? = nil, description: String? = nil,
         readOnly: Bool? = nil, destructive: Bool? = nil, hasOutputSchema: Bool? = nil,
-        params: [String]? = nil
+        params: [String]? = nil, paramDetails: [MCPToolParamSummary]? = nil
     ) {
         self.name = name
         self.title = title
@@ -78,6 +110,24 @@ public struct MCPToolSummary: Codable, Equatable, Sendable {
         self.destructive = destructive
         self.hasOutputSchema = hasOutputSchema
         self.params = params
+        self.paramDetails = paramDetails
+    }
+}
+
+/// One tool parameter for display (description truncated by the writer)
+public struct MCPToolParamSummary: Codable, Equatable, Sendable {
+    public var name: String
+    public var type: String?
+    public var required: Bool
+    public var description: String?
+
+    public init(
+        name: String, type: String? = nil, required: Bool = false, description: String? = nil
+    ) {
+        self.name = name
+        self.type = type
+        self.required = required
+        self.description = description
     }
 }
 

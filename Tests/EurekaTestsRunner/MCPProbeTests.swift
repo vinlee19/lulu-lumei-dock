@@ -25,16 +25,18 @@ func mcpProbeTests(_ t: TestRunner) {
         try expect(info.summary.contains("协议 2025-03-26"))
     }
 
-    t.test("版本协商：initialize 报最新定稿版本，server 回落旧版照常连通") {
-        // We declare 2026-07-28 (finalized); a server that supports only an older version should
-        // answer with its own
+    t.test("版本协商：initialize 报握手时代最新版本，server 回落旧版照常连通") {
+        // 2026-07-28 is stateless and has no handshake, so `initialize` must never offer it
         try expectEqual(MCPProbe.latestProtocolVersion, "2026-07-28")
+        try expectEqual(MCPProbe.handshakeProtocolVersion, "2025-11-25")
+        try expect(MCPProbe.isModern("2026-07-28") && MCPProbe.isModern("2027-01-01"))
+        try expect(!MCPProbe.isModern("2025-11-25") && !MCPProbe.isModern("2024-11-05"))
         let body = MCPProbe.initializeRequestBody()
         let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let params = object?["params"] as? [String: Any]
         try expectEqual(
-            params?["protocolVersion"] as? String, "2026-07-28",
-            "initialize 必须声明我们支持的最高版本")
+            params?["protocolVersion"] as? String, "2025-11-25",
+            "initialize 声明握手时代的最高版本")
         // Server answers 2025-03-26 → record the negotiated fallback; still counts as connected
         // (later requests send the fallback version header)
         let status = MCPProbe.classify(
@@ -191,6 +193,9 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(inspection.tools.map(\.name), ["echo"])
         try expectEqual(inspection.tools.first?.description, "回显输入文本")
         try expectEqual(inspection.tools.first?.params, ["text*"])
+        try expectEqual(inspection.tools.first?.paramDetails.first?.description, "要回显的文本")
+        try expectEqual(inspection.handshake.serverTitle, "Mock Server")
+        try expectEqual(inspection.handshake.instructions, "# Mock\nEchoes text back.")
         try expectEqual(inspection.prompts.map(\.name), ["review"])
         try expectEqual(inspection.prompts.first?.description, "评审提示")
         try expectEqual(inspection.resources.map(\.name), ["readme"])
@@ -237,7 +242,20 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(initBody?["method"] as? String, "initialize")
         try expectEqual(
             (initBody?["params"] as? [String: Any])?["protocolVersion"] as? String,
-            MCPProbe.latestProtocolVersion, "必须报最新定稿版本（server 自己会协商回落）")
+            MCPProbe.handshakeProtocolVersion, "握手报握手时代最新版本（server 自己会协商回落）")
+        let discover = try JSONSerialization.jsonObject(
+            with: MCPProbe.discoverRequestBody()) as? [String: Any]
+        try expectEqual(discover?["method"] as? String, "server/discover")
+        let discoverMeta = (discover?["params"] as? [String: Any])?["_meta"] as? [String: Any]
+        try expectEqual(
+            discoverMeta?["io.modelcontextprotocol/protocolVersion"] as? String,
+            MCPProbe.modernProtocolVersion)
+        let modernList = try JSONSerialization.jsonObject(
+            with: MCPProbe.toolsListRequestBody(cursor: "c", modernVersion: "2026-07-28"))
+            as? [String: Any]
+        let modernParams = modernList?["params"] as? [String: Any]
+        try expectEqual(modernParams?["cursor"] as? String, "c")
+        try expect(modernParams?["_meta"] != nil, "新版 list 请求必须带 _meta")
         let notify = try JSONSerialization.jsonObject(
             with: MCPProbe.initializedNotificationBody()) as? [String: Any]
         try expectEqual(notify?["method"] as? String, "notifications/initialized")
@@ -338,9 +356,19 @@ func mcpProbeTests(_ t: TestRunner) {
         try expectEqual(loaded["notion"]?.resourceCount, 7)
         try expectEqual(loaded["notion"]?.prompts?.first?.name, "review")
         try expectEqual(loaded["notion"]?.resources?.first?.name, "readme")
+        var described = entry
+        described.serverTitle = "Notion"
+        described.instructions = "\n## Notion workspace\nSearch and edit pages."
+        described.toolsError = "timeout"
+        described.tools?[0].paramDetails = [
+            MCPToolParamSummary(name: "query", type: "string", required: true, description: "q")]
+        MCPToolCache.upsert(name: "described", entry: described, at: url)
+        try expectEqual(MCPToolCache.load(from: url)["described"], described, "新字段 round-trip")
+        try expectEqual(described.instructionsHeadline, "Notion workspace", "列表行用首个非空行，去掉 # 标记")
+        try expect(entry.instructionsHeadline == nil)
         // upsert leaves other keys alone
         MCPToolCache.upsert(name: "other", entry: entry, at: url)
-        try expectEqual(MCPToolCache.load(from: url).count, 2)
+        try expectEqual(MCPToolCache.load(from: url).count, 3)
 
         // A v2.4 cache (no tools/count keys) must still decode
         let legacy = """
@@ -354,5 +382,6 @@ func mcpProbeTests(_ t: TestRunner) {
         let migrated = MCPToolCache.load(from: legacyURL)
         try expectEqual(migrated["legacy"]?.toolCount, 1)
         try expect(migrated["legacy"]?.tools == nil)
+        try expect(migrated["legacy"]?.instructions == nil, "旧缓存没有介绍字段，照常解码")
     }
 }

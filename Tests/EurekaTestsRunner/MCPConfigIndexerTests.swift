@@ -34,6 +34,34 @@ func mcpConfigIndexerTests(_ t: TestRunner) {
         try expectEqual(linear.envKeys, ["Authorization"], "headers 只收键名")
     }
 
+    t.test("claude 本地作用域：projects[<路径>].mcpServers 单独收录，只读、带项目路径") {
+        let data = try fixtureData("mcp-claude.json")
+        let local = MCPConfigIndexer.parseClaudeLocalServers(
+            data, configPath: "/tmp/.claude.json")
+        try expect(local.contains { $0.name == "project-only" }, "claude mcp add 默认写在这里")
+        for entry in local {
+            try expectEqual(entry.scope, .local)
+            try expect(entry.projectPath?.hasPrefix("/") == true)
+            try expectEqual(
+                entry.projectName, URL(fileURLWithPath: entry.projectPath ?? "").lastPathComponent)
+            try expect(entry.id.contains("#"), "同一文件里同名 server 按项目区分")
+        }
+        // Same secret red line as the top level
+        let joined = flatten(local)
+        try expect(!joined.contains("sk-"), "密钥值不得出现")
+        // Checkouts that no longer exist are not listed
+        try expectEqual(MCPConfigIndexer.parseClaudeLocalServers(
+            data, configPath: "/tmp/.claude.json", projectExists: { _ in false }).count, 0)
+        // Top-level entries keep their scope and id shape
+        let global = MCPConfigIndexer.parseJSONServers(
+            data, source: .claude, configPath: "/tmp/.claude.json")
+        try expectEqual(global.first?.scope, .global)
+        try expectEqual(global.first?.id, "claude:/tmp/.claude.json:context7")
+        let project = MCPConfigIndexer.parseJSONServers(
+            data, source: .claude, configPath: "/repo/.mcp.json", projectName: "repo")
+        try expectEqual(project.first?.scope, .project)
+    }
+
     t.test("密钥红线：env/headers/query 的值绝不出现在任何字段") {
         let data = try fixtureData("mcp-claude.json")
         let entries = MCPConfigIndexer.parseJSONServers(

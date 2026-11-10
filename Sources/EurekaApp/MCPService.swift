@@ -19,8 +19,7 @@ final class MCPService: ObservableObject {
     /// When the last scan finished. nil = never scanned (the criterion `refresh` uses)
     @Published private(set) var lastScanAt: Date?
     @Published private(set) var lastError: String?
-    /// Connection-check results (key = entry.id); only filled when the user clicks "Check
-    /// connection", never probed automatically
+    /// Connection-check results of this run (key = entry.id)
     @Published private(set) var probeResults: [String: ProbeState] = [:]
     /// Tool-probe cache (key = lowercased server name): tool list and schema tokens measured via
     /// tools/list
@@ -40,6 +39,9 @@ final class MCPService: ObservableObject {
     /// UserDefaults) — the spec-sanctioned way out when the AS doesn't support dynamic registration
     /// (registration priority #1: pre-registered credentials)
     @Published private(set) var preRegisteredClientIDs: [String: String] = [:]
+    /// What Claude Code and Codex are configured to allow for MCP tools (read-only; see
+    /// `MCPToolPermissionIndex`)
+    @Published private(set) var toolPermissions = MCPToolPermissionIndex()
     @Published var searchText = "" {
         didSet { rebuild() }
     }
@@ -59,7 +61,11 @@ final class MCPService: ObservableObject {
     /// fallback; idempotent). force = true: unconditional full rescan, used only by the refresh
     /// button.
     func refresh(force: Bool = false) {
-        guard force || lastScanAt == nil else { return }
+        guard force || lastScanAt == nil else {
+            // Already scanned: still pick up probe results another process wrote
+            reloadCachesIfChanged()
+            return
+        }
         guard !scanning else { return }
         if force { ProjectScopeDiscovery.invalidateCache() }
         scanning = true
@@ -67,6 +73,8 @@ final class MCPService: ObservableObject {
             guard let self else { return }
             let roots = ProjectScopeDiscovery.repoRoots(resolver: self.resolver)
             let servers = MCPConfigIndexer.index(projectRoots: roots)
+            let permissions = MCPToolPermissionIndex.load(projectRoots: roots)
+            let stamp = Self.cacheStamp()
             let cache = MCPToolCache.load()
             let snapshots = MCPProbeCache.load()
             let tokenNames = Set(
@@ -78,6 +86,8 @@ final class MCPService: ObservableObject {
                 self.repoRoots = roots
                 self.toolCache = cache
                 self.probeSnapshots = snapshots
+                self.loadedCacheStamp = stamp
+                self.toolPermissions = permissions
                 self.oauthTokenNames = tokenNames
                 self.preRegisteredClientIDs = clientIDs
                 self.scanning = false
@@ -262,6 +272,7 @@ final class MCPService: ObservableObject {
         queue.async { [weak self] in
             var failure: String?
             do {
+                try Self.refuseReadOnly(entry)
                 let url = URL(fileURLWithPath: entry.configPath)
                 let original = ConfigFile.read(url)
                 let updated: String
@@ -412,7 +423,8 @@ final class MCPService: ObservableObject {
     ) {
         queue.async { [weak self] in
             let key = name.lowercased()
-            let targets = self?.allServers.filter { $0.name.lowercased() == key } ?? []
+            let targets = self?.allServers
+                .filter { $0.name.lowercased() == key && !Self.isReadOnly($0) } ?? []
             var results: [String: String?] = [:]
             for entry in targets {
                 let label = "\(entry.source.displayName) · \(entry.configPath)"
@@ -433,7 +445,18 @@ final class MCPService: ObservableObject {
     }
 
     /// Single-location delete core (shared by remove and removeEverywhere)
+    /// Every write path calls this first. A local-scope entry shares its file with the global
+    /// config, where the top-level container may hold a *different* server of the same name —
+    /// the editors address servers by name in that container, so a write would hit the wrong one.
+    private static func refuseReadOnly(_ entry: MCPServerEntry) throws {
+        guard isReadOnly(entry) else { return }
+        throw MCPEditError.unsupportedTarget(L10n.text(
+            "Local-scope servers are managed by `claude mcp`; Eureka does not rewrite them",
+            zhHans: "本地作用域的 server 由 `claude mcp` 管理，Eureka 不改写"))
+    }
+
     private static func removeOne(_ entry: MCPServerEntry) throws {
+        try refuseReadOnly(entry)
         let url = URL(fileURLWithPath: entry.configPath)
         let original = ConfigFile.read(url)
         let updated: String
@@ -454,6 +477,7 @@ final class MCPService: ObservableObject {
         queue.async { [weak self] in
             var ok = false
             do {
+                try Self.refuseReadOnly(entry)
                 let url = URL(fileURLWithPath: entry.configPath)
                 let original = ConfigFile.read(url)
                 let updated: String
@@ -606,7 +630,7 @@ final class MCPService: ObservableObject {
         oauthTokenNames = names
     }
 
-    // MARK: - Connection check (only started on user click, never probed automatically)
+    // MARK: - Connection check (on user click, or once when a server's detail page opens)
 
     /// Cancellation ticket: each new batch gets a new ticket, and an old batch stops once it sees
     /// it was cancelled (thread-safe; issued on main, queried on queue)
@@ -625,16 +649,28 @@ final class MCPService: ObservableObject {
     private var probeTicket: ProbeTicket?
     /// Batch-check progress (nil = no batch check running)
     @Published private(set) var probeProgress: (done: Int, total: Int)?
+    /// What a stdio server wrote to stderr on its last failed probe (key = entry.id). Memory
+    /// only: it can quote anything the command prints, so it is never written to disk.
+    @Published private(set) var probeDiagnostics: [String: String] = [:]
+    private var pendingAutoProbe: DispatchWorkItem?
+    /// Off for offscreen rendering: a view "appearing" there must never start a process or a
+    /// request
+    var autoProbeEnabled = true
 
-    /// Check a set of config locations: remote sends an MCP initialize probe (headers go only to
-    /// that server's own URL — the intended use of those credentials; the response body is never
-    /// read, stored, or logged); stdio checks the command is reachable (pure syscalls, no process
-    /// spawned). Results go into probeResults and the UI shows them as chips. Runs serially,
-    /// publishing progress after each location; calling again or cancelProbe() cancels the
-    /// unfinished old batch.
+    /// Check a set of config locations. Remote: reads the server's self-description and lists
+    /// over HTTP (headers go only to that server's own URL — the intended use of those
+    /// credentials; response bodies only feed the parser). stdio: briefly launches the configured
+    /// command and reads the same over stdin/stdout. Runs serially, publishing each result as it
+    /// lands; calling again or cancelProbe() cancels the unfinished old batch.
     func probe(_ entries: [MCPServerEntry]) {
+        probeTicket?.cancel()
         let ticket = ProbeTicket()
         probeTicket = ticket
+        let ids = Set(entries.map(\.id))
+        // Whatever the cancelled batch had not reached is no longer being checked
+        for (id, state) in probeResults where state == .checking && !ids.contains(id) {
+            probeResults.removeValue(forKey: id)
+        }
         for entry in entries {
             probeResults[entry.id] = .checking
         }
@@ -642,294 +678,229 @@ final class MCPService: ObservableObject {
         queue.async { [weak self] in
             var done = 0
             for entry in entries {
-                guard !ticket.isCancelled else {
-                    DispatchQueue.main.async { self?.probeProgress = nil }
-                    return
-                }
-                let (status, authScheme) = Self.probeOne(entry)
-                // Persist the snapshot (auth method folded in): shown directly next time the page
-                // opens (even after restart), so the user isn't left guessing
-                let snapshot = MCPProbeSnapshot(
-                    status: status, authScheme: authScheme, checkedAt: Date())
-                MCPProbeCache.upsert(key: entry.id, snapshot: snapshot)
+                guard !ticket.isCancelled else { return }
+                self?.runProbe(entry)
                 done += 1
+                let finished = done
                 DispatchQueue.main.async {
                     guard !ticket.isCancelled else { return }
-                    self?.probeResults[entry.id] = .done(status)
-                    self?.probeSnapshots[entry.id] = snapshot
-                    self?.probeProgress = (done, entries.count)
+                    self?.probeProgress = (finished, entries.count)
                 }
             }
-            // tools/list may have just been persisted → refresh the tool cache (tool-count chip /
-            // ctx overhead update with it)
-            let cache = MCPToolCache.load()
             DispatchQueue.main.async {
                 guard !ticket.isCancelled else { return }
-                self?.toolCache = cache
                 self?.probeProgress = nil
             }
         }
     }
 
-    /// Cancel the running batch check (single-location "Re-check" uses the same cancel path; no
-    /// side effects)
+    /// Cancel the running batch check. Entries already probed keep their results (and whatever
+    /// they wrote to the tool cache is reloaded).
     func cancelProbe() {
         probeTicket?.cancel()
+        probeTicket = nil
         probeProgress = nil
         for (id, state) in probeResults where state == .checking {
             probeResults.removeValue(forKey: id)
         }
+        reloadCachesIfChanged()
     }
 
-    private struct RPCResponse {
-        var statusCode: Int
-        var data: Data
-        var contentType: String?
-        var wwwAuthenticate: String?
-        var sessionID: String?
+    /// Opening a server's detail page probes it once when there is nothing fresh to show (see
+    /// `MCPProbePolicy`). One config location is enough — the tool list is shared by name — and
+    /// the call is debounced so arrowing through the list does not start a process per row.
+    func probeIfNeeded(name: String) {
+        guard autoProbeEnabled else { return }
+        pendingAutoProbe?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.probeProgress == nil else { return }
+            let entries = self.entries(named: name)
+            guard !entries.contains(where: { self.probeResults[$0.id] == .checking }),
+                  let target = entries.first(where: { $0.enabled != false }),
+                  MCPProbePolicy.shouldAutoProbe(
+                      cache: self.toolCache[name.lowercased()],
+                      snapshots: entries.compactMap { self.probeSnapshots[$0.id] },
+                      now: Date())
+            else { return }
+            self.probeResults[target.id] = .checking
+            self.queue.async { [weak self] in self?.runProbe(target) }
+        }
+        pendingAutoProbe = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
-    /// A single JSON-RPC POST (blocks on the queue, using the semaphore technique from
-    /// EurekaSync/HTTPTransport). Headers go only to the URL this server configured; the response
-    /// body only feeds the parser and is never stored or logged. protocolVersion: per the spec,
-    /// requests after initialization **MUST** carry the `MCP-Protocol-Version` header (value = the
-    /// version negotiated in the handshake; without it the server assumes 2025-03-26).
-    private static func performRPC(
-        url: URL, headers: [String: String], body: Data, sessionID: String? = nil,
-        protocolVersion: String? = nil, contentType: String = "application/json"
-    ) -> Result<RPCResponse, Error> {
-        var request = URLRequest(url: url, timeoutInterval: 5)
-        request.httpMethod = "POST"
-        request.httpBody = body
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
-        if let sessionID {
-            request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
+    /// Whether any config location of this server is being probed right now
+    func isProbing(name: String) -> Bool {
+        entries(named: name).contains { probeResults[$0.id] == .checking }
+    }
+
+    /// One probe, on `queue`: persist the snapshot, then publish status, diagnostics and the
+    /// refreshed tool cache together so the page never shows "connected" without its tools
+    private func runProbe(_ entry: MCPServerEntry) {
+        let result = Self.probeOne(entry)
+        // Persist the snapshot (auth method folded in): shown directly next time the page opens
+        // (even after restart), so the user isn't left guessing
+        let snapshot = MCPProbeSnapshot(
+            status: result.status, authScheme: result.authScheme, checkedAt: Date())
+        MCPProbeCache.upsert(key: entry.id, snapshot: snapshot)
+        let cache = MCPToolCache.load()
+        let stamp = Self.cacheStamp()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.probeResults[entry.id] = .done(result.status)
+            self.probeSnapshots[entry.id] = snapshot
+            self.probeDiagnostics[entry.id] = result.diagnostics
+            self.toolCache = cache
+            self.loadedCacheStamp = stamp
         }
-        if let protocolVersion {
-            request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
-        }
-        for (key, value) in headers {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-        let semaphore = DispatchSemaphore(value: 0)
-        var outcome: Result<RPCResponse, Error> = .failure(URLError(.timedOut))
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error {
-                outcome = .failure(error)
-            } else if let http = response as? HTTPURLResponse {
-                outcome = .success(RPCResponse(
-                    statusCode: http.statusCode,
-                    data: data ?? Data(),
-                    contentType: http.value(forHTTPHeaderField: "Content-Type"),
-                    wwwAuthenticate: http.value(forHTTPHeaderField: "WWW-Authenticate"),
-                    sessionID: http.value(forHTTPHeaderField: "Mcp-Session-Id")))
-            } else {
-                outcome = .failure(URLError(.badServerResponse))
+    }
+
+    // MARK: Cache freshness (another process — `--mcp-inspect` — may have written the files)
+
+    private var loadedCacheStamp: Date?
+
+    private static func cacheStamp() -> Date? {
+        [MCPToolCache.defaultURL(), MCPProbeCache.defaultURL()]
+            .compactMap {
+                (try? FileManager.default.attributesOfItem(atPath: $0.path))?[.modificationDate]
+                    as? Date
             }
-            semaphore.signal()
-        }
-        task.resume()
-        _ = semaphore.wait(timeout: .now() + 8)
-        return outcome
+            .max()
     }
 
-    /// One initialize + classification (shared by probing and the refresh retry)
-    private static func performHandshake(
-        url: URL, headers: [String: String]
-    ) -> (MCPProbe.Status, RPCResponse?) {
-        let result = performRPC(
-            url: url, headers: headers, body: MCPProbe.initializeRequestBody())
-        switch result {
-        case .failure(let error):
-            return (.unreachable((error as? URLError)?.localizedDescription
-                ?? error.localizedDescription), nil)
-        case .success(let response):
-            return (MCPProbe.classify(
-                statusCode: response.statusCode,
-                body: response.data,
-                contentType: response.contentType,
-                wwwAuthenticate: response.wwwAuthenticate), response)
+    /// Re-read both caches when either file changed on disk since they were last loaded
+    func reloadCachesIfChanged() {
+        let loaded = loadedCacheStamp
+        queue.async { [weak self] in
+            guard let stamp = Self.cacheStamp(), stamp != loaded else { return }
+            let cache = MCPToolCache.load()
+            let snapshots = MCPProbeCache.load()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.toolCache = cache
+                // Results of probes still in flight are newer than the file
+                self.probeSnapshots = snapshots.merging(self.probeSnapshots) { disk, memory in
+                    memory.checkedAt > disk.checkedAt ? memory : disk
+                }
+                self.loadedCacheStamp = stamp
+            }
         }
     }
 
-    /// One full probe: (1) initialize as a **real handshake** (a 2xx only counts as connected once
-    /// a protocolVersion is parsed, removing the "any 200 = connected" false positive; offers
-    /// 2025-11-25 and records any negotiated fallback) → (2) initialized notification
-    /// → (3) tools/list **following pagination** (with title/description/annotations) → (4) only if
-    /// capabilities declare them, count the first page of resources/prompts. Every list call
-    /// carries the negotiated `MCP-Protocol-Version` header. Returns (status, folded auth method)
-    /// for the snapshot to persist.
-    private static func probeOne(_ entry: MCPServerEntry) -> (MCPProbe.Status, String?) {
+    private struct ProbeOutcome {
+        var status: MCPProbe.Status
+        /// Folded auth method, for the snapshot
+        var authScheme: String?
+        /// stderr tail of a failed stdio launch
+        var diagnostics: String?
+    }
+
+    /// Project root a project-scoped server runs in (its command and arguments are usually
+    /// relative to it); nil for global config
+    private static func workingDirectory(for entry: MCPServerEntry) -> URL? {
+        if let path = entry.projectPath { return URL(fileURLWithPath: path) }
+        guard entry.projectName != nil else { return nil }
+        let config = URL(fileURLWithPath: entry.configPath)
+        let parent = config.deletingLastPathComponent()
+        // <repo>/.mcp.json vs <repo>/.cursor/mcp.json
+        return parent.lastPathComponent.hasPrefix(".")
+            ? parent.deletingLastPathComponent() : parent
+    }
+
+    /// One full probe. `MCPInspector` handles every protocol revision (stateless
+    /// `server/discover` for 2026-07-28, the `initialize` handshake before it, version
+    /// negotiation either way); this function only picks the transport and handles credentials.
+    private static func probeOne(_ entry: MCPServerEntry) -> ProbeOutcome {
         let definition = try? readDefinition(of: entry)
-        // stdio: deep inspection (v2.8) — briefly launch the configured command and handshake over
-        // stdin/stdout to get the tool/prompt/resource lists, exiting once read. Only happens on
-        // user click; env values go only to the child process (their intended use) and are never
+        // stdio: briefly launch the configured command and read over stdin/stdout, exiting once
+        // read. env values go only to the child process (their intended use) and are never
         // persisted or logged. The auth method is routed by env key names, not folded.
         if entry.transport == "stdio" || (definition?.transport == .stdio) {
             guard let command = definition?.command
                 ?? entry.commandSummary?.split(separator: " ").first.map(String.init)
-            else { return (.commandMissing, nil) }
-            switch MCPStdioProbe.inspect(
+            else { return ProbeOutcome(status: .commandMissing) }
+            let report = MCPStdioProbe.inspectDetailed(
                 command: command, args: definition?.args ?? [],
-                env: definition?.env ?? [:]) {
+                env: definition?.env ?? [:],
+                // A GUI process has the bare launchd PATH; the server needs the user's
+                environment: LoginShellEnvironment.shared.environment(),
+                workingDirectory: workingDirectory(for: entry))
+            switch report.result {
             case .failure(.commandMissing):
-                return (.commandMissing, nil)
+                return ProbeOutcome(status: .commandMissing)
             case .failure(.launchFailed(let reason)):
-                return (.unreachable(L10n.format("Failed to start: %@", zhHans: "启动失败：%@", String(reason))), nil)
+                return ProbeOutcome(
+                    status: .unreachable(L10n.format("Failed to start: %@", zhHans: "启动失败：%@", String(reason))),
+                    diagnostics: report.stderrTail)
             case .failure(.handshakeFailed(let reason)):
-                return (.unreachable(reason), nil)
+                return ProbeOutcome(status: .unreachable(reason), diagnostics: report.stderrTail)
             case .success(let inspection):
-                storeInspection(
-                    name: entry.name, info: inspection.handshake,
-                    tools: inspection.tools,
-                    prompts: inspection.handshake.capabilities.contains("prompts")
-                        ? inspection.prompts : nil,
-                    resources: inspection.handshake.capabilities.contains("resources")
-                        ? inspection.resources : nil,
-                    schemaTokens: inspection.schemaTokens)
-                return (.connected(inspection.handshake), nil)
+                storeInspection(name: entry.name, inspection: inspection)
+                return ProbeOutcome(
+                    status: .connected(inspection.handshake),
+                    diagnostics: inspection.toolsError == nil ? nil : report.stderrTail)
             }
         }
         guard let urlText = definition?.url, let url = URL(string: urlText) else {
-            return (.unreachable(L10n.text("Invalid URL", zhHans: "URL 无效")), nil)
+            return ProbeOutcome(status: .unreachable(L10n.text("Invalid URL", zhHans: "URL 无效")))
         }
         var headers = definition?.headers ?? [:]
-        // v2.5: with no explicit Authorization header, attach the token Eureka holds from browser
-        // OAuth
+        // With no explicit Authorization header, attach the token Eureka holds from browser OAuth
         let hasExplicitAuth = headers.keys.contains { $0.lowercased() == "authorization" }
         var storedToken: MCPOAuth.TokenSet?
         if !hasExplicitAuth, let stored = loadTokenSet(named: entry.name) {
             storedToken = stored
             headers["Authorization"] = "Bearer \(stored.accessToken)"
         }
-        var (status, response) = performHandshake(url: url, headers: headers)
+        func inspect() -> MCPInspector.Outcome {
+            let channel = MCPHTTPChannel(
+                url: url, headers: headers, declaredSSE: entry.transport == "sse")
+            defer { channel.close() }
+            return MCPInspector.inspect(channel)
+        }
+        var outcome = inspect()
         // access token expired and a refresh token exists → refresh and retry once
-        if case .unauthorized = status, let stored = storedToken,
+        if case .failed(.unauthorized) = outcome, let stored = storedToken,
            let refresh = stored.refreshToken,
-           let tokenURL = URL(string: stored.tokenEndpoint),
-           case .success(let refreshResponse) = performRPC(
-               url: tokenURL, headers: [:],
-               body: MCPOAuth.refreshRequestBody(
-                   refreshToken: refresh, clientID: stored.clientID, resource: urlText),
-               contentType: "application/x-www-form-urlencoded"),
-           (200...299).contains(refreshResponse.statusCode),
-           let renewed = MCPOAuth.parseTokenResponse(
-               refreshResponse.data, tokenEndpoint: stored.tokenEndpoint,
-               clientID: stored.clientID) {
-            storeTokenSet(renewed, named: entry.name)
-            headers["Authorization"] = "Bearer \(renewed.accessToken)"
-            (status, response) = performHandshake(url: url, headers: headers)
-        }
-        let authScheme = MCPAuthRouter.scheme(
-            for: status, usedToken: storedToken != nil, hadExplicitAuth: hasExplicitAuth)
-        guard case .connected(let info) = status, let initResponse = response else {
-            return (status, authScheme)
-        }
-
-        let session = initResponse.sessionID
-        let negotiated = info.protocolVersion
-        _ = performRPC(
-            url: url, headers: headers,
-            body: MCPProbe.initializedNotificationBody(), sessionID: session,
-            protocolVersion: negotiated)
-        // Shared list-call body: one page request + parse (the response body only feeds the parser,
-        // never stored or logged)
-        func fetchPage<T>(
-            body: Data, parse: (Data, String?) -> T?
-        ) -> T? {
-            guard case .success(let pageResponse) = performRPC(
-                    url: url, headers: headers, body: body, sessionID: session,
-                    protocolVersion: negotiated),
-                  (200...299).contains(pageResponse.statusCode)
-            else { return nil }
-            return parse(pageResponse.data, pageResponse.contentType)
-        }
-
-        // tools/list follows nextCursor (guardrails: ≤20 pages and ≤1000 tools); the schema tax
-        // accumulates across pages
-        var tools: [MCPProbe.ToolInfo] = []
-        var schemaTokens = 0
-        var cursor: String?
-        var fetchedAny = false
-        for _ in 0..<20 {
-            guard case .success(let pageResponse) = performRPC(
-                    url: url, headers: headers,
-                    body: MCPProbe.toolsListRequestBody(cursor: cursor), sessionID: session,
-                    protocolVersion: negotiated),
-                  (200...299).contains(pageResponse.statusCode),
-                  let page = MCPProbe.parseToolsList(
-                      pageResponse.data, contentType: pageResponse.contentType)
-            else { break }
-            fetchedAny = true
-            tools += page.tools
-            let payload = MCPProbe.extractJSONPayload(
-                pageResponse.data, contentType: pageResponse.contentType)
-            schemaTokens += payload.flatMap { String(data: $0, encoding: .utf8) }
-                .map { TokenEstimator.estimate($0) } ?? 0
-            cursor = page.nextCursor
-            guard cursor != nil, tools.count < 1000 else { break }
-        }
-        if fetchedAny {
-            // resources/prompts: only asked if the capability is declared; names + descriptions
-            // from the first page (no bodies/URIs read)
-            var resources: [MCPProbe.NamedItem]?
-            var prompts: [MCPProbe.NamedItem]?
-            if info.capabilities.contains("resources") {
-                resources = fetchPage(body: MCPProbe.resourcesListRequestBody()) {
-                    MCPProbe.parseNamedList($0, contentType: $1, key: "resources")
-                }?.items
+           let tokenURL = URL(string: stored.tokenEndpoint) {
+            var request = URLRequest(url: tokenURL, timeoutInterval: 8)
+            request.httpMethod = "POST"
+            request.httpBody = MCPOAuth.refreshRequestBody(
+                refreshToken: refresh, clientID: stored.clientID, resource: urlText)
+            request.setValue(
+                "application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            if case .success(let response) = MCPHTTP.perform(request, wait: 10),
+               (200...299).contains(response.reply.statusCode ?? 0),
+               let renewed = MCPOAuth.parseTokenResponse(
+                   response.reply.data, tokenEndpoint: stored.tokenEndpoint,
+                   clientID: stored.clientID) {
+                storeTokenSet(renewed, named: entry.name)
+                headers["Authorization"] = "Bearer \(renewed.accessToken)"
+                outcome = inspect()
             }
-            if info.capabilities.contains("prompts") {
-                prompts = fetchPage(body: MCPProbe.promptsListRequestBody()) {
-                    MCPProbe.parseNamedList($0, contentType: $1, key: "prompts")
-                }?.items
-            }
-            storeInspection(
-                name: entry.name, info: info, tools: tools,
-                prompts: prompts, resources: resources, schemaTokens: schemaTokens)
         }
-        return (status, authScheme)
+        let status: MCPProbe.Status
+        switch outcome {
+        case .inspected(let inspection):
+            storeInspection(name: entry.name, inspection: inspection)
+            status = .connected(inspection.handshake)
+        case .failed(let failure):
+            status = failure
+        }
+        return ProbeOutcome(
+            status: status,
+            authScheme: MCPAuthRouter.scheme(
+                for: status, usedToken: storedToken != nil, hadExplicitAuth: hasExplicitAuth))
     }
 
-    /// Probe result → tool cache (shared by remote and stdio deep inspection; descriptions
-    /// truncated, lists capped, schema bodies and any config values never enter the cache)
-    private static func storeInspection(
-        name: String, info: MCPProbe.HandshakeInfo, tools: [MCPProbe.ToolInfo],
-        prompts: [MCPProbe.NamedItem]?, resources: [MCPProbe.NamedItem]?,
-        schemaTokens: Int
-    ) {
-        func summarize(_ items: [MCPProbe.NamedItem]?) -> [MCPNamedSummary]? {
-            items.map { list in
-                list.prefix(100).map {
-                    MCPNamedSummary(
-                        name: $0.name,
-                        description: $0.description.map { String($0.prefix(200)) })
-                }
-            }
-        }
-        MCPToolCache.upsert(name: name, entry: MCPToolCacheEntry(
-            toolCount: tools.count,
-            toolNames: tools.map(\.name),
-            schemaTokens: schemaTokens,
-            serverVersion: info.serverVersion,
-            protocolVersion: info.protocolVersion,
-            capabilities: info.capabilities,
-            tools: tools.map { tool in
-                MCPToolSummary(
-                    name: tool.name,
-                    title: tool.title,
-                    description: tool.description.map { String($0.prefix(200)) },
-                    readOnly: tool.readOnly,
-                    destructive: tool.destructive,
-                    hasOutputSchema: tool.hasOutputSchema ? true : nil,
-                    params: tool.params.isEmpty ? nil : tool.params)
-            },
-            resourceCount: resources?.count,
-            promptCount: prompts?.count,
-            prompts: summarize(prompts),
-            resources: summarize(resources),
-            measuredAt: Date()))
+    /// Probe result → tool cache (shared by every transport; truncation and caps live in
+    /// `MCPToolCacheEntry.init(inspection:previous:now:)`)
+    private static func storeInspection(name: String, inspection: MCPInspector.Inspection) {
+        let previous = MCPToolCache.load()[name.lowercased()]
+        MCPToolCache.upsert(
+            name: name,
+            entry: MCPToolCacheEntry(inspection: inspection, previous: previous, now: Date()))
     }
 
     // MARK: - Write core (called on queue)
@@ -989,8 +960,23 @@ final class MCPService: ObservableObject {
         }
     }
 
+    /// Local-scope servers live inside the user's `~/.claude.json` under a per-project subtree
+    /// that only `claude mcp` manages; Eureka lists and probes them but never rewrites them
+    static func isReadOnly(_ entry: MCPServerEntry) -> Bool { entry.scope == .local }
+
     private static func readDefinition(of entry: MCPServerEntry) throws -> MCPServerDefinition {
-        let text = ConfigFile.read(URL(fileURLWithPath: entry.configPath))
+        var text = ConfigFile.read(URL(fileURLWithPath: entry.configPath))
+        if entry.scope == .local {
+            // Hand the editor just that project's subtree: it has the same shape as the top level
+            guard let path = entry.projectPath,
+                  let root = (try? JSONSerialization.jsonObject(with: Data(text.utf8)))
+                    as? [String: Any],
+                  let project = (root["projects"] as? [String: Any])?[path] as? [String: Any],
+                  let data = try? JSONSerialization.data(
+                      withJSONObject: ["mcpServers": project["mcpServers"] ?? [String: Any]()])
+            else { throw MCPEditError.notFound(entry.name) }
+            text = String(decoding: data, as: UTF8.self)
+        }
         switch readDialect(for: entry) {
         case .toml:
             return try MCPServerEditor.readDefinitionTOML(text, name: entry.name)

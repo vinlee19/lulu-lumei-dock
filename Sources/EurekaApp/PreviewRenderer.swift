@@ -586,6 +586,7 @@ enum PreviewRenderer {
         // MCP page: list / icons / detail (cross-source matrix + every config location). Scanning
         // takes milliseconds, so a short wait suffices.
         let mcp = MCPService()
+        mcp.autoProbeEnabled = false
         mcp.refresh()
         let mcpDeadline = Date().addingTimeInterval(30)
         while mcp.scanning, Date() < mcpDeadline {
@@ -624,6 +625,29 @@ enum PreviewRenderer {
                  MCPView(service: mcp, usageService: usage, initialDetailName: entry.name), width: 1270)
         }
         snap("knowledge-mcp-wide-dark", MCPView(service: mcp, usageService: usage), dark: true, width: 1270)
+        // Detail states that depend on the probe cache: a server that sent its own instructions,
+        // one that sent none (tool overview instead), and one never read / last failed.
+        let named = mcp.servers.map(\.name)
+        if let described = named.first(where: { mcp.toolCache[$0.lowercased()]?.instructions != nil }) {
+            snap("knowledge-mcp-wide-detail-intro",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: described), width: 1270)
+            snap("knowledge-mcp-wide-detail-intro-dark",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: described),
+                 dark: true, width: 1270)
+        }
+        if let plain = named.first(where: {
+            guard let cache = mcp.toolCache[$0.lowercased()] else { return false }
+            return cache.instructions == nil && cache.toolCount > 3
+        }) {
+            snap("knowledge-mcp-wide-detail-overview",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: plain), width: 1270)
+        }
+        if let unread = mcp.servers.first(where: {
+            mcp.toolCache[$0.name.lowercased()] == nil && mcp.probeSnapshots[$0.id] != nil
+        }) ?? mcp.servers.first(where: { mcp.toolCache[$0.name.lowercased()] == nil }) {
+            snap("knowledge-mcp-wide-detail-unread",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: unread.name), width: 1270)
+        }
 
         // Themed pop-ups. The panel itself can't be captured offscreen, so this draws the same
         // surface and rows `themedPopup` puts in it: the source filter, a detail "More" list,

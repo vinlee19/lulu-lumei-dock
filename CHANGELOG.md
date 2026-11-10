@@ -6,6 +6,33 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The MCP page says what each server is for.** A server's detail now opens
+  with its own description (the `instructions` it sends to every agent), or an
+  overview built from its tool list when it sends none, followed by the full
+  tool list: complete descriptions, parameters with types, and what Claude
+  Code and Codex are set to do with each tool (allowed, asks, denied, off —
+  read from their settings, never changed). Opening a server reads this once
+  when nothing fresh is cached; a failure is explained where the tools would
+  be, with the command's last output for stdio servers.
+- **Servers added with `claude mcp add` are listed.** Claude Code's per-project
+  (local scope) servers in `~/.claude.json` appear alongside global and
+  `.mcp.json` ones. They can be checked but not edited here.
+- **Every MCP protocol revision is spoken.** Stateless servers (2026-07-28,
+  `server/discover`), handshake servers (2025-11-25 back to 2024-11-05, with
+  version negotiation) and the old HTTP+SSE transport are all probed.
+
+### Fixed
+
+- **Checking a stdio MCP server from the app works.** The app looked for
+  `npx` / `uvx` on its own bare PATH and reported "Command missing"; it now
+  uses your shell's PATH and runs project servers in their project folder.
+- An MCP server that connected but failed to list its tools no longer shows
+  "Connected" with an empty list or "no tools": the reason is shown and the
+  last good list is kept. Check results written by `--mcp-inspect` appear
+  without a relaunch, and status labels follow a language change.
+
 ## [0.44.0] - 2026-11-21
 
 ### Added

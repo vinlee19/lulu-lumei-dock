@@ -8,7 +8,24 @@ import Foundation
 /// and URLs also drop query/fragment (the query may carry a token). Index results live only in memory: not
 /// in SQLite, not in the full-text index, not in cloud backup.
 public struct MCPServerEntry: Equatable, Sendable, Identifiable {
-    public var id: String { "\(source.rawValue):\(configPath):\(name)" }
+    /// Where a server is configured, in Claude Code's terms (other agents only have the first two)
+    public enum Scope: String, Sendable {
+        /// The agent's user-level config: available in every project
+        case global
+        /// A file checked into the repo (`<repo>/.mcp.json`, `<repo>/.cursor/mcp.json`)
+        case project
+        /// Private to one project but stored in the user's own `~/.claude.json`
+        /// (`projects[<path>].mcpServers` — where `claude mcp add` writes by default)
+        case local
+    }
+
+    /// One file can hold the same name once per project (local scope), so the project path is
+    /// part of the identity there
+    public var id: String {
+        scope == .local
+            ? "\(source.rawValue):\(configPath)#\(projectPath ?? ""):\(name)"
+            : "\(source.rawValue):\(configPath):\(name)"
+    }
     public var source: AgentSource
     public var name: String
     /// Transport: stdio / http / sse (an explicit config declaration wins; a url without a
@@ -26,11 +43,16 @@ public struct MCPServerEntry: Equatable, Sendable, Identifiable {
     /// Enabled state: only opencode / grok configs have an `enabled` field; other sources are nil
     /// (no such semantics)
     public var enabled: Bool?
+    public var scope: Scope
+    /// Absolute path of the owning project (local scope only; project scope derives it from
+    /// `configPath`)
+    public var projectPath: String?
 
     public init(
         source: AgentSource, name: String, transport: String,
         commandSummary: String?, urlSummary: String?, envKeys: [String],
-        projectName: String?, configPath: String, enabled: Bool? = nil
+        projectName: String?, configPath: String, enabled: Bool? = nil,
+        scope: Scope? = nil, projectPath: String? = nil
     ) {
         self.source = source
         self.name = name
@@ -41,11 +63,14 @@ public struct MCPServerEntry: Equatable, Sendable, Identifiable {
         self.projectName = projectName
         self.configPath = configPath
         self.enabled = enabled
+        self.scope = scope ?? (projectName == nil ? .global : .project)
+        self.projectPath = projectPath
     }
 }
 
 /// Read-only index of MCP server configs, covering 9 sources whose config paths were verified
-/// locally: claude (`~/.claude.json` top level + `<repo>/.mcp.json`), codex / grok (config.toml
+/// locally: claude (`~/.claude.json` top level and its per-project `projects[<path>].mcpServers`
+/// + `<repo>/.mcp.json`), codex / grok (config.toml
 /// `[mcp_servers.*]`), gemini / qwen (settings.json), cursor (`~/.cursor/mcp.json`), kimi
 /// (standalone `~/.kimi-code/mcp.json`, with config.toml scanning kept as a fallback), opencode
 /// (the `mcp` key of `~/.config/opencode/opencode.json`; the sibling `config.json` is a decoy with
@@ -101,10 +126,16 @@ public enum MCPConfigIndexer {
             entries += parseTOMLServers(text, source: source, configPath: url.path)
         }
 
-        // claude global: top-level mcpServers in ~/.claude.json (per-project entries under the
-        // projects subtree are not collected, matching the ctx estimate); project level:
+        // claude global: top-level mcpServers in ~/.claude.json; local scope: the same file's
+        // projects[<path>].mcpServers (the default target of `claude mcp add`); project level:
         // <repo>/.mcp.json
         json(globalConfigURL(for: .claude, home: home), source: .claude)
+        if let url = globalConfigURL(for: .claude, home: home),
+           let data = fm.contents(atPath: url.path) {
+            entries += parseClaudeLocalServers(data, configPath: url.path) {
+                fm.fileExists(atPath: $0)
+            }
+        }
         for (root, name) in projectRoots {
             json(root.appendingPathComponent(".mcp.json"), source: .claude, projectName: name)
             // cursor's project-level convention <repo>/.cursor/mcp.json (documented, same shape as
@@ -140,7 +171,35 @@ public enum MCPConfigIndexer {
     ) -> [MCPServerEntry] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let servers = root[container] as? [String: Any] else { return [] }
-        return servers.sorted { $0.key < $1.key }.map { name, value in
+        return entries(
+            from: servers, source: source, configPath: configPath, projectName: projectName)
+    }
+
+    /// Claude Code local scope: `projects[<absolute path>].mcpServers` inside `~/.claude.json`.
+    /// Projects whose directory is gone are skipped (`projectExists`), so a long-lived config
+    /// does not fill the list with servers of deleted checkouts. Same secret red line: key names
+    /// only.
+    public static func parseClaudeLocalServers(
+        _ data: Data, configPath: String, projectExists: (String) -> Bool = { _ in true }
+    ) -> [MCPServerEntry] {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let projects = root["projects"] as? [String: Any] else { return [] }
+        return projects.keys.sorted().flatMap { path -> [MCPServerEntry] in
+            guard let servers = (projects[path] as? [String: Any])?["mcpServers"]
+                    as? [String: Any], !servers.isEmpty, projectExists(path)
+            else { return [] }
+            return entries(
+                from: servers, source: .claude, configPath: configPath,
+                projectName: URL(fileURLWithPath: path).lastPathComponent,
+                scope: .local, projectPath: path)
+        }
+    }
+
+    private static func entries(
+        from servers: [String: Any], source: AgentSource, configPath: String,
+        projectName: String?, scope: MCPServerEntry.Scope? = nil, projectPath: String? = nil
+    ) -> [MCPServerEntry] {
+        servers.sorted { $0.key < $1.key }.map { name, value in
             let dict = value as? [String: Any] ?? [:]
             // command: a string (mainstream) or an array (opencode's local form, executable + args)
             var command = dict["command"] as? String
@@ -168,7 +227,8 @@ public enum MCPConfigIndexer {
                 envKeys: keys.sorted(),
                 projectName: projectName,
                 configPath: configPath,
-                enabled: dict["enabled"] as? Bool)
+                enabled: dict["enabled"] as? Bool,
+                scope: scope, projectPath: projectPath)
         }
     }
 
