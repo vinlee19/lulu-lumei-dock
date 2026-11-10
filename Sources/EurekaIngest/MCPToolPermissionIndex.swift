@@ -187,14 +187,20 @@ public struct MCPToolPermissionIndex: Equatable, Sendable {
     }
 
     /// Approval of a project `.mcp.json` server. A rejection in any applicable file wins.
+    ///
+    /// `userLevelOnly` is for decisions that act on the answer (auto-probing) rather than
+    /// display it: files under `<repo>/.claude/` can be committed by the repo's author, who
+    /// could approve their own server, so only `~/.claude/settings.json` may grant there.
+    /// Rejections still count from every file — they can only restrict.
     public func claudeProjectServerApproval(
-        server: String, projectPath: String
+        server: String, projectPath: String, userLevelOnly: Bool = false
     ) -> ProjectServerApproval {
         let applicable = claudeApprovals.filter {
             $0.projectPath == nil || $0.projectPath == projectPath
         }
         if applicable.contains(where: { $0.disabled.contains(server) }) { return .rejected }
-        if applicable.contains(where: { $0.enableAll || $0.enabled.contains(server) }) {
+        let granting = userLevelOnly ? applicable.filter { $0.projectPath == nil } : applicable
+        if granting.contains(where: { $0.enableAll || $0.enabled.contains(server) }) {
             return .approved
         }
         return .unanswered

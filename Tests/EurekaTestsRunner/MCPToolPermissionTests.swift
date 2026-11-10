@@ -60,6 +60,18 @@ func mcpToolPermissionTests(_ t: TestRunner) {
             Data(#"{"enableAllProjectMcpServers":true}"#.utf8),
             path: "/b/.claude/settings.local.json", projectName: "b", projectPath: "/b")
         try expectEqual(index.claudeProjectServerApproval(server: "db", projectPath: "/a"), .approved)
+        // Files inside the repo cannot grant when the answer is acted on
+        try expectEqual(index.claudeProjectServerApproval(
+            server: "db", projectPath: "/a", userLevelOnly: true), .unanswered)
+        try expectEqual(index.claudeProjectServerApproval(
+            server: "anything", projectPath: "/b", userLevelOnly: true), .unanswered)
+        try expectEqual(index.claudeProjectServerApproval(
+            server: "blocked", projectPath: "/a", userLevelOnly: true), .rejected)
+        var home = MCPToolPermissionIndex()
+        home.addClaudeSettings(
+            Data(#"{"enabledMcpjsonServers":["db"]}"#.utf8), path: "/home/.claude/settings.json")
+        try expectEqual(home.claudeProjectServerApproval(
+            server: "db", projectPath: "/a", userLevelOnly: true), .approved)
         try expectEqual(index.claudeProjectServerApproval(server: "blocked", projectPath: "/a"), .rejected)
         try expectEqual(index.claudeProjectServerApproval(server: "other", projectPath: "/a"), .unanswered)
         try expectEqual(index.claudeProjectServerApproval(server: "anything", projectPath: "/b"), .approved)

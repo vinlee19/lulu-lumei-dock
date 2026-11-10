@@ -734,13 +734,14 @@ final class MCPService: ObservableObject {
     }
 
     /// See `MCPProbePolicy.trustsForAutoProbe`: repo-supplied config waits for a click unless
-    /// the user already approved that server in Claude Code
+    /// the user's own `~/.claude/settings.json` approves that server (settings files inside the
+    /// repo are repo-supplied too and cannot vouch for it)
     func trustsForAutoProbe(_ entry: MCPServerEntry) -> Bool {
         var approval: MCPToolPermissionIndex.ProjectServerApproval?
         if entry.scope == .project, entry.source == .claude {
             let root = URL(fileURLWithPath: entry.configPath).deletingLastPathComponent().path
             approval = toolPermissions.claudeProjectServerApproval(
-                server: entry.name, projectPath: root)
+                server: entry.name, projectPath: root, userLevelOnly: true)
         }
         return MCPProbePolicy.trustsForAutoProbe(scope: entry.scope, claudeApproval: approval)
     }

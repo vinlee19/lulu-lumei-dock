@@ -15,7 +15,8 @@ public enum MCPProbePolicy {
     /// Whether a server's config is trusted enough to be contacted or launched **without a
     /// click**. Project-scope config is checked into a repository, so its author is whoever
     /// wrote the repo: opening a page must not run their command. It is trusted only once the
-    /// user approved that server in Claude Code; other agents record no approval, so theirs
+    /// user's home-level Claude settings approve that server (pass an approval read with
+    /// `userLevelOnly`); other agents record no approval, so theirs
     /// always wait for the button. Global and local config live in the user's own home.
     public static func trustsForAutoProbe(
         scope: MCPServerEntry.Scope,
