@@ -13,17 +13,47 @@ import Foundation
 ///    key, recursively) contributes its plaintext values to the file's secret set;
 /// 2. a line holding such a record is replaced by a stub that keeps only its identity
 ///    (`type: "eureka-redacted"`, id, sessionId, timestamp); on every other line each string value
-///    **and key** has the file's secrets masked and then passes through `AuditRedactor`
+///    **and key** has the file's secrets masked (see `Masks` for how short values are matched) and
+///    then passes through `AuditRedactor`
 ///    (authorization headers, API-key shapes, `…TOKEN=` assignments, URL credentials, PEM keys),
 ///    and the line is serialized again. Redacting values one by one keeps every line valid JSON:
 ///    run over the raw line, the assignment rule's "value runs to the next space" would swallow a
 ///    string's closing quote and the fields after it.
 /// A line that doesn't parse is replaced by a stub too, rather than uploaded unchecked.
 public enum WorkBuddyTranscriptScrubber {
-    /// Detected values shorter than this are not masked file-wide: masking every "abc" would wreck
-    /// the copy, and WorkBuddy's detector flags keys and tokens, which are far longer (40 bytes in
-    /// the only local sample). The line that records them is still dropped whole.
-    static let minimumSecretLength = 6
+    /// How the file's detected values are matched. Every value is masked wherever a string is
+    /// exactly that value. Beyond that, short values would wreck the copy if replaced inside other
+    /// words, so the match narrows with length:
+    /// - 6+ characters: every occurrence, anywhere (keys and tokens; the only local sample is 40);
+    /// - 3–5 characters: only where the value stands alone, not touching an ASCII letter, digit or
+    ///   `_` on either side;
+    /// - 1–2 characters: exact whole-string matches only. Such a value keeps no secret worth the
+    ///   name, while masking every standalone "a" or "12" would erase the transcript.
+    /// The line that records them is dropped whole in every case.
+    struct Masks {
+        var exact: Set<String> = []
+        var anywhere: [String] = []
+        var standalone: [NSRegularExpression] = []
+
+        static let anywhereLength = 6
+        static let standaloneLength = 3
+
+        init(_ secrets: Set<String>) {
+            exact = secrets
+            anywhere = secrets.filter { $0.count >= Self.anywhereLength }
+                .sorted { $0.count > $1.count }
+            // The value is escaped, so nothing in it is read as regex syntax
+            standalone = secrets
+                .filter { (Self.standaloneLength..<Self.anywhereLength).contains($0.count) }
+                .sorted { $0.count > $1.count }
+                .compactMap {
+                    try? NSRegularExpression(
+                        pattern: "(?<![A-Za-z0-9_])"
+                            + NSRegularExpression.escapedPattern(for: $0)
+                            + "(?![A-Za-z0-9_])")
+                }
+        }
+    }
 
     public static func scrub(_ data: Data) -> Data {
         var lines: [Data?] = []
@@ -44,8 +74,7 @@ public enum WorkBuddyTranscriptScrubber {
             guard let object else { continue }
             collectProtected(object, into: &secrets)
         }
-        let masks = secrets.filter { $0.count >= minimumSecretLength }
-            .sorted { $0.count > $1.count }
+        let masks = Masks(secrets)
 
         // Pass 2: stub protected or unparsable lines, mask the rest
         var output = Data(capacity: data.count)
@@ -60,7 +89,7 @@ public enum WorkBuddyTranscriptScrubber {
         return output
     }
 
-    static func scrubLine(_ line: Data, object: [String: Any]?, masks: [String]) -> Data {
+    static func scrubLine(_ line: Data, object: [String: Any]?, masks: Masks) -> Data {
         guard let object else { return stub(from: nil) }
         var found = Set<String>()
         if collectProtected(object, into: &found) { return stub(from: object) }
@@ -118,7 +147,7 @@ public enum WorkBuddyTranscriptScrubber {
             ?? Data(#"{"type":"eureka-redacted"}"#.utf8)
     }
 
-    static func redact(_ value: Any, masks: [String]) -> Any {
+    static func redact(_ value: Any, masks: Masks) -> Any {
         switch value {
         case let string as String:
             return clean(string, masks: masks)
@@ -139,10 +168,19 @@ public enum WorkBuddyTranscriptScrubber {
         }
     }
 
-    private static func clean(_ text: String, masks: [String]) -> String {
+    private static func clean(_ text: String, masks: Masks) -> String {
+        if masks.exact.contains(text)
+            || masks.exact.contains(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return AuditRedactor.mask
+        }
         var text = text
-        for secret in masks where text.contains(secret) {
+        for secret in masks.anywhere where text.contains(secret) {
             text = text.replacingOccurrences(of: secret, with: AuditRedactor.mask)
+        }
+        let template = NSRegularExpression.escapedTemplate(for: AuditRedactor.mask)
+        for regex in masks.standalone {
+            text = regex.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: template)
         }
         return AuditRedactor.redact(detail: text, tool: "").text
     }
