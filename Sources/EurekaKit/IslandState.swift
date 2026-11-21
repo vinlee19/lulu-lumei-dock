@@ -46,7 +46,7 @@ public struct IslandState: Equatable, Sendable {
 
 extension IslandState.Card {
     /// **Extra** seconds before auto-dismiss, added on top of the user's base setting
-    /// (`autoDismissSeconds`, 3–15s in Settings). nil = never auto-dismiss.
+    /// (`autoDismissSeconds`, 3–15s in Settings, default 5). nil = never auto-dismiss.
     ///
     /// Relative offsets instead of hardcoded absolute seconds per card: the slider is what
     /// carries the user's intent. With hardcoded values, a user who sets it to 15s would see
@@ -54,7 +54,10 @@ extension IslandState.Card {
     public var autoDismissExtraSeconds: TimeInterval? {
         switch self {
         case .finished: return 0  // baseline value; the slider applies directly
-        case .waiting: return 4   // permission/input requests need a clear look: default 6+4=10s
+        // Also the bare slider value: it used to get +4 (10s by default), which left the card
+        // covering the top of the screen long after it was read. The task stays marked waiting
+        // on the pill, and hovering still holds the card open.
+        case .waiting: return 0
         case .notice: return 5    // wellbeing copy gets ample reading time
         case .alert: return 6     // security alerts stay longer (audit page / Notification Center keep a record)
         case .question: return nil  // withdrawn only when answered / dismissed / the hook gives up

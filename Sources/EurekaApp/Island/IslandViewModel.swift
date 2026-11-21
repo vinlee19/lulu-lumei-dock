@@ -65,7 +65,7 @@ final class IslandViewModel: ObservableObject {
     var uiScale: CGFloat { IslandGeometry.scaleFactor(for: screen) }
     /// **Base** auto-dismiss seconds for cards (adjustable 3-15s in Settings).
     /// Each card kind adds its own offset on top, see `IslandState.Card.autoDismissExtraSeconds`.
-    var autoDismissSeconds: TimeInterval = 6
+    var autoDismissSeconds: TimeInterval = AppSettings.defaultAutoDismissSeconds
 
     /// Presentation-change callback (the panel controller shows/hides the window from it)
     var onDisplayChange: (@MainActor (Display) -> Void)?
