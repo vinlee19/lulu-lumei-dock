@@ -142,9 +142,9 @@ func workBuddyScrubberTests(_ t: TestRunner) {
         let secret = "ak-9f8e7d6c5b4a3210"
         let prompt = #"{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"<user_query>用这个 key \#(secret) 调一下</user_query>"}]}"#
         let toolOutput = #"{"type":"function_call_result","id":"r0","output":{"\#(secret)":"key as a field name"}}"#
-        let protected = #"{"type":"function_call_result","id":"r1","output":{"text":"x"},"__codebuddyLocal":{"sensitiveProtection":{"items":[{"plaintext":"\#(secret)","ciphertext":"c"},{"plaintext":"abc"}]}}}"#
+        let protected = #"{"type":"function_call_result","id":"r1","output":{"text":"x"},"__codebuddyLocal":{"sensitiveProtection":{"items":[{"plaintext":"\#(secret)","ciphertext":"c"},{"plaintext":"pin42"},{"plaintext":"ok"}]}}}"#
         let mention = #"{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"WorkBuddy keeps a sensitiveProtection record"}]}"#
-        let shortValue = #"{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"abc stays"}]}"#
+        let shortValue = #"{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"pin is pin42, spin42x stays, ok then"}],"note":"ok"}"#
         let output = WorkBuddyTranscriptScrubber.scrub(
             Data([prompt, toolOutput, protected, mention, shortValue].joined(separator: "\n").utf8))
         let text = String(decoding: output, as: UTF8.self)
@@ -154,7 +154,10 @@ func workBuddyScrubberTests(_ t: TestRunner) {
         try expectEqual(parsed[0]["type"] as? String, "message", "提问行保留，只遮明文")
         try expectEqual(parsed[2]["type"] as? String, "eureka-redacted")
         try expectEqual(parsed[3]["type"] as? String, "message", "按键名识别保护记录，正文提到字段名不算")
-        try expect(text.contains("abc stays"), "太短的值不做全文遮盖")
+        try expect(!text.contains("pin is pin42"), "3–5 位的值独立出现时要遮: \(text)")
+        try expect(text.contains("spin42x stays"), "嵌在别的词里的短值不动")
+        try expect(text.contains("ok then"), "1–2 位的值不做全文遮盖")
+        try expectEqual(parsed[4]["note"] as? String, "[REDACTED]", "整值等于秘密时任何长度都遮")
         try expect(!text.hasSuffix("\n"), "原文没有结尾换行就不加")
     }
 }
