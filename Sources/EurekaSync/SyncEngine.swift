@@ -216,6 +216,11 @@ public final class SyncEngine {
             defer { try? FileManager.default.removeItem(at: snapshot) }
             return try Data(contentsOf: snapshot)
         }
-        return try Data(contentsOf: URL(fileURLWithPath: candidate.localPath))
+        let data = try Data(contentsOf: URL(fileURLWithPath: candidate.localPath))
+        // WorkBuddy transcripts can hold secrets in plain text; only a scrubbed copy goes up
+        if candidate.category == SyncRoots.workBuddyProjectsCategory {
+            return WorkBuddyTranscriptScrubber.scrub(data)
+        }
+        return data
     }
 }

@@ -104,6 +104,15 @@ public enum AgentDefinitionIndexer {
         indexAgents(systemRoots: [systemRoot], source: .cursor, projectRoots: projectRoots)
     }
 
+    /// WorkBuddy subagents: `~/.workbuddy/agents/<name>.md` and `<repo>/.workbuddy/agents/<name>.md`
+    /// (its engine is CodeBuddy Code, which reads Claude-shape agent files from its config dir and
+    /// the project config dir `.workbuddy`). None existed locally to check against.
+    public static func indexWorkBuddyAgents(
+        systemRoot: URL, projectRoots: [ProjectScopedRoot] = []
+    ) -> [AgentDefinition] {
+        indexAgents(systemRoots: [systemRoot], source: .workbuddy, projectRoots: projectRoots)
+    }
+
     private static func indexAgents(
         systemRoots: [URL], source: AgentSource, projectRoots: [ProjectScopedRoot]
     ) -> [AgentDefinition] {
@@ -188,7 +197,11 @@ public enum AgentDefinitionIndexer {
     /// `<installPath>/agents/*.md` (including the disabled area), tagging each with `pluginName`
     /// (the "name" part of the plugin key `name@marketplace`, matching `plugin:agent` at call
     /// time).
-    public static func indexPluginAgents(pluginsRoot: URL) -> [AgentDefinition] {
+    /// WorkBuddy keeps its plugins in the same layout (`~/.workbuddy/plugins`), passed with
+    /// `source: .workbuddy`.
+    public static func indexPluginAgents(
+        pluginsRoot: URL, source: AgentSource = .claude
+    ) -> [AgentDefinition] {
         let installedURL = pluginsRoot.appendingPathComponent("installed_plugins.json")
         guard let data = try? Data(contentsOf: installedURL),
               let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -202,9 +215,9 @@ public enum AgentDefinitionIndexer {
                 else { continue }
                 let agentsRoot = URL(fileURLWithPath: installPath, isDirectory: true)
                     .appendingPathComponent("agents", isDirectory: true)
-                var group = scanAgentRoot(agentsRoot, source: .claude, enabled: true, scope: .system)
+                var group = scanAgentRoot(agentsRoot, source: source, enabled: true, scope: .system)
                 group += scanAgentRoot(
-                    disabledRoot(for: agentsRoot), source: .claude, enabled: false, scope: .system)
+                    disabledRoot(for: agentsRoot), source: source, enabled: false, scope: .system)
                 for index in group.indices { group[index].pluginName = pluginName }
                 result += group
             }

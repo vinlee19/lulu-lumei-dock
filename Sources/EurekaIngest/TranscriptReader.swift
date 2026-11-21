@@ -101,6 +101,9 @@ public enum TranscriptReader {
             return loadOpencode(
                 dbPath: session.transcriptPath, sessionId: session.id,
                 maxMessages: maxMessages)
+        case .workbuddy:
+            return loadCodeBuddy(
+                path: session.transcriptPath, maxMessages: maxMessages, dialect: .workbuddy)
         }
     }
 
@@ -181,7 +184,12 @@ public enum TranscriptReader {
     /// assistant message; function_call → 🔧 tool note; function_call_result becomes an error
     /// note only on failure (status != completed); reasoning / file-history-snapshot / ai-title /
     /// summary are skipped.
-    public static func loadCodeBuddy(path: String, maxMessages: Int) -> Result {
+    /// WorkBuddy (`dialect: .workbuddy`) reads the same lines: the user side keeps only the
+    /// `<user_query>` of real prompts (not the injected context or compaction summaries), wrapped
+    /// tools show the tool they run, and a turn that ended on an error shows it.
+    public static func loadCodeBuddy(
+        path: String, maxMessages: Int, dialect: CodeBuddyDialect = .codebuddyCode
+    ) -> Result {
         var messages: [TranscriptMessage] = []
         var truncated = false
 
@@ -191,16 +199,23 @@ public enum TranscriptReader {
                 return false
             }
             let timestamp = CodeBuddyTranscriptDecoder.timestamp(root)
-            if let text = CodeBuddyTranscriptDecoder.userText(root) {
+            if let text = CodeBuddyTranscriptDecoder.userText(root, dialect: dialect) {
                 messages.append(TranscriptMessage(
                     id: messages.count, role: .user, text: text, timestamp: timestamp))
             } else if let text = CodeBuddyTranscriptDecoder.assistantText(root) {
                 messages.append(TranscriptMessage(
                     id: messages.count, role: .assistant, text: text, timestamp: timestamp))
+            } else if dialect == .workbuddy, let end = dialect.turnEnd(root),
+                      end.outcome != .success {
+                let label = end.outcome.label
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .error,
+                    text: end.detail.map { "\(label): \($0)" } ?? label, timestamp: timestamp))
             } else if let call = CodeBuddyTranscriptDecoder.toolCall(root) {
+                let name = dialect.effectiveToolName(name: call.name, args: call.args)
                 messages.append(TranscriptMessage(
                     id: messages.count, role: .toolNote,
-                    text: "🔧 \(call.name)", timestamp: timestamp))
+                    text: "🔧 \(name)", timestamp: timestamp))
             } else if root["type"] as? String == "function_call_result",
                       root["status"] as? String != "completed" {
                 let name = root["name"] as? String ?? L10n.text("Tool", zhHans: "工具")

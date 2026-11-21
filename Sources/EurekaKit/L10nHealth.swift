@@ -14,11 +14,13 @@ extension L10n {
         "用量扫描 Qwen": "Usage scan Qwen",
         "用量扫描 Hermes": "Usage scan Hermes",
         "用量扫描 CodeBuddy": "Usage scan CodeBuddy",
+        "用量扫描 WorkBuddy": "Usage scan WorkBuddy",
         "用量扫描 Cursor": "Usage scan Cursor",
         "用量扫描 ZCode": "Usage scan ZCode",
         "用量扫描 Antigravity（实验）": "Usage scan Antigravity (experimental)",
         "审计扫描 Codex": "Audit scan Codex",
         "审计扫描 CodeBuddy": "Audit scan CodeBuddy",
+        "审计扫描 WorkBuddy": "Audit scan WorkBuddy",
         "审计扫描 Qoder": "Audit scan Qoder",
         "审计扫描 Cursor": "Audit scan Cursor",
         "审计扫描 Grok": "Audit scan Grok",
@@ -39,6 +41,8 @@ extension L10n {
         "qwen 事件监视": "Qwen event watch",
         "zcode 事件监视": "ZCode event watch",
         "codebuddy 事件监视": "CodeBuddy event watch",
+        "workbuddy 事件监视": "WorkBuddy event watch",
+        "WorkBuddy 授权监视": "WorkBuddy permission watch",
         "qoder 事件监视": "Qoder event watch",
     ]
 

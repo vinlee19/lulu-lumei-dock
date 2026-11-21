@@ -28,6 +28,8 @@ public struct SyncCandidate: Equatable {
 /// Every root path in backup scope (injected by the app via the existing resolvers; the module
 /// itself never reads env → easy to test)
 public struct SyncRoots {
+    /// Category whose files are scrubbed before upload (see `WorkBuddyTranscriptScrubber`)
+    public static let workBuddyProjectsCategory = "workbuddy/projects"
     public var claudeHome: URL       // ~/.claude (CLAUDE.md + memories/)
     public var claudeProjects: URL   // ~/.claude/projects (transcripts + project memory)
     public var claudeSkills: URL     // ~/.claude/skills
@@ -92,6 +94,20 @@ public struct SyncRoots {
     /// Same reasoning as the comment on `cursorSkills`: the session store sits next to the
     /// credentials, so none of it is included.
     public var traeRoots: [(root: URL, category: String)] = []
+    /// `~/.workbuddy/projects` (session `*.jsonl` + `<sessionId>/subagents/`). Uploaded only
+    /// through `WorkBuddyTranscriptScrubber` (`SyncEngine.readData`): WorkBuddy stores detected
+    /// secrets in plain text inside its transcripts.
+    public var workBuddyProjects: URL?
+    /// `~/.workbuddy/skills` (whole skill directories, like the other sources)
+    public var workBuddySkills: URL?
+    /// WorkBuddy markdown roots: (local root, remote category), markdown only. Injected by the
+    /// app (`SyncService.workBuddyRoots`): `memory/`, each persona workspace, `rules/`, and every
+    /// working folder's `.workbuddy/memory`.
+    ///
+    /// ⚠️ **A whitelist, and only ever a whitelist.** Never add `~/.workbuddy` itself: it holds
+    /// `keyblob`, `login-device-nonce`, `security/`, `cli-env/`, connector credentials, the
+    /// Electron session store, and `mcp.json` / `models.json` / `settings.json` with API keys.
+    public var workBuddyRoots: [(root: URL, category: String)] = []
     /// ZCode roots that may be backed up. ⚠️ **A whitelist, and only ever a whitelist**:
     ///   - `~/.zcode/v2` holds credentials.json (auth): never included;
     ///   - `~/.zcode/cli/db` is the session database itself (WAL-active, and redundant with the
@@ -424,6 +440,21 @@ public enum SyncSourceCatalog {
             } else {
                 walk(root: root, category: category, priority: 0, include: markdownOnly)
             }
+        }
+
+        // workbuddy: transcripts (scrubbed on upload, see workBuddyProjects), skills, and the
+        // whitelisted markdown roots; nothing else under ~/.workbuddy
+        if let workBuddyProjects = roots.workBuddyProjects {
+            walk(root: workBuddyProjects, category: SyncRoots.workBuddyProjectsCategory,
+                 priority: 1, include: jsonlOnly)
+        }
+        if let workBuddySkills = roots.workBuddySkills {
+            walk(root: workBuddySkills, category: "workbuddy/skills", priority: 0, include: always)
+            walk(root: disabledSibling(of: workBuddySkills),
+                 category: "workbuddy/skills.eureka-disabled", priority: 0, include: always)
+        }
+        for (root, category) in roots.workBuddyRoots {
+            walk(root: root, category: category, priority: 0, include: markdownOnly)
         }
 
         // Eureka analytics snapshot (standalone SQLite of the three fact tables, produced by

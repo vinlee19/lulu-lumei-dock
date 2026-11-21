@@ -174,6 +174,9 @@ final class MCPService: ObservableObject {
             return nil
         case .zcode: return L10n.text("MCP is registered by plugins; no user-level configuration", zhHans: "MCP 由插件注册，无用户级配置")
         case .trae: return L10n.text("Configuration shares a directory with credentials; reading and writing are disabled", zhHans: "配置与凭证同目录，不读不写")
+        // WorkBuddy generates each session's MCP config itself; an edit here would be overwritten
+        // or ignored
+        case .workbuddy: return L10n.text("WorkBuddy generates each session's MCP configuration; change servers in WorkBuddy", zhHans: "WorkBuddy 每次会话自行生成 MCP 配置，请在 WorkBuddy 中修改")
         default: return L10n.text("No known MCP configuration convention", zhHans: "无已知 MCP 配置约定")
         }
     }

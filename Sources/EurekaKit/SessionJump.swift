@@ -9,18 +9,23 @@ import Foundation
 ///   through to the Code home page.
 /// - Codex Desktop: `codex://threads/<id>`, where the id is the rollout `session_meta` id (the
 ///   app's own "copy link" builds it the same way).
+/// - WorkBuddy: `workbuddy://chat/<sessionId>` (its tray and notifications open conversations this
+///   way); the id is the transcript's session id, so no lookup is needed.
 public enum SessionAppLink: Equatable, Sendable {
     case claudeDesktop(localSessionId: String)
     case codexDesktop(threadId: String)
+    case workBuddy(sessionId: String)
 
     public static let claudeDesktopBundleId = "com.anthropic.claudefordesktop"
     public static let codexDesktopBundleId = "com.openai.codex"
+    public static let workBuddyBundleId = "com.tencent.workbuddy.mac"
 
     /// The app that handles this link
     public var bundleId: String {
         switch self {
         case .claudeDesktop: return Self.claudeDesktopBundleId
         case .codexDesktop: return Self.codexDesktopBundleId
+        case .workBuddy: return Self.workBuddyBundleId
         }
     }
 
@@ -39,6 +44,9 @@ public enum SessionAppLink: Equatable, Sendable {
         case .codexDesktop(let threadId):
             guard Self.isUUID(threadId) else { return nil }
             return URL(string: "codex://threads/\(threadId.lowercased())")
+        case .workBuddy(let sessionId):
+            guard Self.isUUID(sessionId) else { return nil }
+            return URL(string: "workbuddy://chat/\(sessionId.lowercased())")
         }
     }
 
@@ -52,7 +60,7 @@ public enum SessionAppLink: Equatable, Sendable {
         }
     }
 
-    /// Claude CLI and Codex session ids are both UUIDs
+    /// Claude CLI, Codex and WorkBuddy session ids are all UUIDs
     public static func isUUID(_ value: String) -> Bool {
         value.count == 36 && UUID(uuidString: value) != nil
     }

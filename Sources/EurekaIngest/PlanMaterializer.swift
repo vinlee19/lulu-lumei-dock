@@ -710,6 +710,10 @@ public enum PlanMaterializer {
         collect(dir: qoderDir, source: .qoder, into: &result, sessionMap: sessionMap(dir: qoderDir))
         let cursorDir = stagingRoot.appendingPathComponent("cursor", isDirectory: true)
         collect(dir: cursorDir, source: .cursor, into: &result, sessionMap: sessionMap(dir: cursorDir))
+        // WorkBuddy todo lists (see PlanMaterializer+WorkBuddy)
+        let workBuddyDir = stagingRoot.appendingPathComponent("workbuddy", isDirectory: true)
+        collect(dir: workBuddyDir, source: .workbuddy, into: &result,
+                sessionMap: sessionMap(dir: workBuddyDir))
         return result.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
@@ -956,7 +960,7 @@ public enum PlanMaterializer {
 
     /// Skips the write when content matches disk (keeps mtime stable); otherwise writes atomically.
     @discardableResult
-    private static func writeIfChanged(_ content: String, to url: URL) -> Bool {
+    static func writeIfChanged(_ content: String, to url: URL) -> Bool {
         if let existing = try? String(contentsOf: url, encoding: .utf8), existing == content {
             return false
         }

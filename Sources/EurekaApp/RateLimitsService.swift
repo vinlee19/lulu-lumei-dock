@@ -15,6 +15,8 @@ import Foundation
 final class RateLimitsService: ObservableObject {
     @Published private(set) var codex: RateLimitSnapshot?
     @Published private(set) var grok: RateLimitSnapshot?
+    /// WorkBuddy per-model quota echoed into its transcripts (free models only; nil otherwise)
+    @Published private(set) var workbuddy: RateLimitSnapshot?
     @Published private(set) var claude: RateLimitSnapshot?
     /// Antigravity quota from `agy /usage` (on demand only)
     @Published private(set) var antigravity: RateLimitSnapshot?
@@ -63,6 +65,9 @@ final class RateLimitsService: ObservableObject {
     // Grok quota works like Codex: local log snapshot, zero network, hidden on failure → no opt-in
     // needed
     private let grokProvider = GrokRateLimitProvider(logURL: GrokPaths.unifiedLog())
+    // WorkBuddy: the quota its server echoes into transcripts; zero network, hidden when absent
+    private let workBuddyProvider = WorkBuddyQuotaProvider(
+        projectsRoot: WorkBuddyPaths.projectsRoot())
     private let claudeProvider = ClaudeOAuthUsageProvider()
     private let antigravityProvider = AntigravityQuotaProvider(
         probeDirectory: RateLimitsService.probeRoot.appendingPathComponent("agy", isDirectory: true))
@@ -130,11 +135,13 @@ final class RateLimitsService: ObservableObject {
     /// without real credits. Refresh becomes a no-op and nothing is persisted.
     func loadPreview(
         codex: RateLimitSnapshot?, grok: RateLimitSnapshot?, claude: RateLimitSnapshot?,
-        antigravity: RateLimitSnapshot? = nil, opencodeGo: RateLimitSnapshot? = nil
+        antigravity: RateLimitSnapshot? = nil, opencodeGo: RateLimitSnapshot? = nil,
+        workbuddy: RateLimitSnapshot? = nil
     ) {
         previewFrozen = true
         self.codex = codex
         self.grok = grok
+        self.workbuddy = workbuddy
         self.claude = claude
         self.antigravity = antigravity
         self.opencodeGo = opencodeGo
@@ -154,11 +161,13 @@ final class RateLimitsService: ObservableObject {
             guard let self else { return }
             let codexSnapshot = await self.codexProvider.snapshot()
             let grokSnapshot = await self.grokProvider.snapshot()
+            let workBuddySnapshot = await self.workBuddyProvider.snapshot()
             let claudeSnapshot = wantClaude ? await self.claudeProvider.snapshot() : nil
             let hint = wantClaude ? self.claudeProvider.lastFailure : nil
             await MainActor.run {
                 self.codex = codexSnapshot
                 self.grok = grokSnapshot
+                self.workbuddy = workBuddySnapshot
                 self.claude = claudeSnapshot
                 self.claudeFailureHint = hint
                 if wantClaude { self.saveClaudeState() }

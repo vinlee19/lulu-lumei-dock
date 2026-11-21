@@ -11,8 +11,18 @@ import EurekaStore
 /// tokens are real spend and are attributed to the parent session id; prompts count only in the
 /// main session file. Reads incrementally from an inode+offset watermark (jsonl is single-writer
 /// append-only, no cross-file duplicate lines, so no dedup_keys).
+///
+/// WorkBuddy (`dialect: .workbuddy`, `~/.workbuddy/projects`) embeds the same engine; the rules
+/// that differ come from `CodeBuddyDialect` (shared with the ingest side): usage is read from every
+/// line that carries it (a final step without a tool call keeps it on the assistant message), and
+/// prompts are counted only at real turn starts. Scheduled automation runs are counted like any
+/// other session: their tokens are real spend, even though the sessions themselves are kept out of
+/// history. The per-task working folders WorkBuddy creates (`~/WorkBuddy/<timestamp>`) are
+/// attributed to one project named "WorkBuddy" instead of a project per timestamp.
 public final class CodeBuddyUsageScanner {
     private let projectsRoot: URL
+    private let dialect: CodeBuddyDialect
+    private let workspaceRoot: String?
     private let store: EurekaStore
     /// The last slice read left more of the file unread (see `ScanSlices`)
     private var hasMoreSlices = false
@@ -35,9 +45,21 @@ public final class CodeBuddyUsageScanner {
 
     /// projectsRoot is passed in by the caller (app/CLI use `CodeBuddyPaths.projectsRoot()`, tests
     /// use a temp dir) — EurekaUsage does not depend on EurekaIngest, so there is no default here.
-    public init(projectsRoot: URL, store: EurekaStore) {
+    public init(
+        projectsRoot: URL, store: EurekaStore,
+        dialect: CodeBuddyDialect = .codebuddyCode, workspaceRoot: URL? = nil
+    ) {
         self.projectsRoot = projectsRoot
+        self.dialect = dialect
+        self.workspaceRoot = workspaceRoot.map { $0.standardizedFileURL.path }
         self.store = store
+    }
+
+    private func projectName(forCwd cwd: String) -> String? {
+        if let workspaceRoot, cwd == workspaceRoot || cwd.hasPrefix(workspaceRoot + "/") {
+            return "WorkBuddy"
+        }
+        return projectResolver.projectName(forCwd: cwd)
     }
 
     /// Returns the number of usage records added this pass
@@ -106,6 +128,8 @@ public final class CodeBuddyUsageScanner {
         hasMoreSlices = !chunk.reachedEnd
 
         var records: [UsageRecord] = []
+        // The engine writes each step's usage once; this only guards a line that repeats it
+        var seenSteps: Set<String> = []
         var promptCount = 0
         // Tool/skill calls: each carries its real timestamp (used for MAX of tool_calls.last_ts)
         var toolBumps: [(day: String, kind: String, name: String, ts: Double)] = []
@@ -117,29 +141,35 @@ public final class CodeBuddyUsageScanner {
                 let type = root["type"] as? String
             else { continue }
             if extra.project == nil, let cwd = root["cwd"] as? String {
-                extra.project = projectResolver.projectName(forCwd: cwd)
+                extra.project = projectName(forCwd: cwd)
+            }
+            // Real user prompts (codebuddyCode: not a skipRun meta line; workbuddy: a turn start);
+            // prompts count only in the main session file
+            if extra.isMain == true, dialect.startsTurn(root) {
+                promptCount += 1
+            }
+            if let step = dialect.usage(root),
+               step.messageId.map({ seenSteps.insert($0).inserted }) ?? true {
+                records.append(UsageRecord(
+                    source: dialect.source,
+                    // model lives in providerData.model (e.g. "glm-5.2", stored verbatim)
+                    model: step.model ?? dialect.unknownModel,
+                    project: extra.project,
+                    sessionId: extra.sessionId,
+                    timestamp: eventDate(root),
+                    inputTokens: step.input,
+                    outputTokens: step.output,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: step.cacheRead))
             }
 
             switch type {
-            case "message":
-                // Real user prompts (skipRun marks meta lines such as local command echoes);
-                // prompts count only in the main session file
-                guard extra.isMain == true,
-                      root["role"] as? String == "user",
-                      (root["providerData"] as? [String: Any])?["skipRun"] as? Bool != true,
-                      let blocks = root["content"] as? [[String: Any]],
-                      blocks.contains(where: {
-                          $0["type"] as? String == "input_text"
-                              && (($0["text"] as? String)?
-                                  .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                      })
-                else { continue }
-                promptCount += 1
-
             case "function_call":
                 let date = eventDate(root)
-                if let name = root["name"] as? String, !name.isEmpty {
-                    let args = parseArguments(root["arguments"] as? String)
+                if let rawName = root["name"] as? String, !rawName.isEmpty {
+                    var args = parseArguments(root["arguments"] as? String)
+                    let name = dialect.effectiveToolName(name: rawName, args: args)
+                    if name != rawName { args = args["params"] as? [String: Any] ?? [:] }
                     let day = Self.dayFormatter.string(from: date)
                     let ts = date.timeIntervalSince1970
                     // kind classification matches the Kimi scanner (keeps skill analytics / plugin
@@ -159,36 +189,6 @@ public final class CodeBuddyUsageScanner {
                         toolBumps.append((day, "tool", name, ts))
                     }
                 }
-                // Tokens: providerData.usage / message.usage (camelCase is the main format,
-                // snake_case the fallback)
-                let providerData = root["providerData"] as? [String: Any]
-                let message = root["message"] as? [String: Any]
-                guard let usage = (providerData?["usage"] ?? message?["usage"]) as? [String: Any]
-                else { continue }
-                let rawInput = intValue(usage, ["inputTokens", "input_tokens"])
-                let output = intValue(usage, ["outputTokens", "output_tokens"])
-                var cached = intValue(usage, ["cache_read_input_tokens", "cached_tokens"])
-                if cached == 0,
-                   let details = usage["inputTokensDetails"] as? [[String: Any]] {
-                    cached = details.reduce(0) { $0 + intValue($1, ["cached_tokens"]) }
-                }
-                guard rawInput > 0 || output > 0 || cached > 0 else { continue }
-                // camelCase inputTokens includes cache reads (OpenAI convention) → subtract them;
-                // snake_case input_tokens excludes them (Claude convention) → use as-is
-                let input = usage["inputTokens"] != nil ? max(0, rawInput - cached) : rawInput
-                records.append(UsageRecord(
-                    source: .codebuddy,
-                    // model lives in providerData.model (e.g. "glm-5.2", stored verbatim)
-                    model: ((providerData?["model"] ?? message?["model"]) as? String)
-                        ?? "codebuddy/unknown",
-                    project: extra.project,
-                    sessionId: extra.sessionId,
-                    timestamp: date,
-                    inputTokens: input,
-                    outputTokens: output,
-                    cacheCreationTokens: 0,
-                    cacheReadTokens: cached))
-
             default:
                 break
             }
@@ -201,7 +201,7 @@ public final class CodeBuddyUsageScanner {
             inserted = try store.usage.insert(records)
             for bump in toolBumps {
                 try store.toolCalls.bump(
-                    day: bump.day, source: .codebuddy, kind: bump.kind, name: bump.name,
+                    day: bump.day, source: dialect.source, kind: bump.kind, name: bump.name,
                     ts: bump.ts)
             }
             try store.scanState.setFileState(

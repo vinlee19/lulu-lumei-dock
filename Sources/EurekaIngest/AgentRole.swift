@@ -105,6 +105,8 @@ public func normalizeModelName(_ raw: String?) -> String {
     if m.contains("grok") { return "Grok" }
     if m.contains("qwen") { return "Qwen" }
     if m.hasPrefix("glm") { return "GLM" }       // CodeBuddy (Zhipu GLM family, e.g. glm-5.2)
+    if m.hasPrefix("hy") { return "Hunyuan" }    // WorkBuddy (Tencent Hunyuan: hy4, hy4-free)
+    if m.hasPrefix("deepseek") { return "DeepSeek" }  // WorkBuddy (deepseek-v4.1-flash)
     if m.hasPrefix("qmodel") { return "QModel" } // Qoder (qmodel_*)
     // provider/model form (e.g. anthropic/claude-... or openai:...): capitalize the last segment
     let tail = raw.split(whereSeparator: { $0 == "/" || $0 == ":" }).last.map(String.init) ?? raw

@@ -13,14 +13,24 @@ import Foundation
 /// ai-title/summary → titleUpdate (only retitles existing tasks, never creates phantom tasks).
 /// Context usage: the normalized usage on function_call lines (reusing the decoder's usage
 /// extraction; input + cacheRead ≈ current context size) ÷ the ContextWindows window.
+///
+/// The same tailer runs WorkBuddy (`dialect: .workbuddy`, `~/.workbuddy/projects`), which embeds
+/// this engine. Its differences: turn rules from `CodeBuddyDialect`; an AskUserQuestion call waits
+/// for input; `lookup` reads WorkBuddy's own database for the title, the session's real context
+/// window and whether it is a scheduled automation run. Automation runs and WorkBuddy's internal
+/// host / warm-up sessions are excluded: they emit no event at all, because TaskStore registers a
+/// task for any activity or waiting event of a session it doesn't know.
 public final class CodeBuddyChatTailer {
     public typealias Handler = (TaskEvent, _ isStale: Bool) -> Void
 
     private let projectsRoot: URL
+    private let dialect: CodeBuddyDialect
+    private let lookup: CodeBuddySessionLookup?
+    private let healthName: String
     private let staleThreshold: TimeInterval
     private let recentWindow: TimeInterval
     private let handler: Handler
-    private let queue = DispatchQueue(label: "com.vinlee.eureka.codebuddy-tailer")
+    private let queue: DispatchQueue
     private var timer: DispatchSourceTimer?
 
     private var offsets: [String: UInt64] = [:]
@@ -35,28 +45,46 @@ public final class CodeBuddyChatTailer {
         var running = false
         /// Start of the current turn (taskStarted time); subagent snapshots are clipped to it
         var turnStartedAt: Date?
+        /// The product's database knows the session's context window (WorkBuddy)
+        var contextWindow: Int?
+        /// Scheduled automation run / internal session: tracked for offsets, never emitted
+        var excluded = false
+        /// Whether `excluded` is settled (by the database, the id, or the first prompt)
+        var exclusionDecided = false
     }
     private var contexts: [String: FileContext] = [:]
     private var lastContextPercent: [String: Double] = [:]
     /// Last subagent snapshot emitted per session (re-emitted on change; TaskStore dedups again)
     private var lastSubagents: [String: [SubagentInfo]] = [:]
 
-    static let healthName = "codebuddy 事件监视"
+    /// Health-registry key per product (stable keys, displayed through `L10n.healthTitle`)
+    static func healthName(for dialect: CodeBuddyDialect) -> String {
+        switch dialect {
+        case .codebuddyCode: return "codebuddy 事件监视"
+        case .workbuddy: return "workbuddy 事件监视"
+        }
+    }
 
     public init(
         projectsRoot: URL = CodeBuddyPaths.projectsRoot(),
+        dialect: CodeBuddyDialect = .codebuddyCode,
+        lookup: CodeBuddySessionLookup? = nil,
         staleThreshold: TimeInterval = 300,
         recentWindow: TimeInterval = 2 * 86400,
         handler: @escaping Handler
     ) {
         self.projectsRoot = projectsRoot
+        self.dialect = dialect
+        self.lookup = lookup
+        self.healthName = Self.healthName(for: dialect)
+        self.queue = DispatchQueue(label: "com.vinlee.eureka.\(dialect.source.rawValue)-tailer")
         self.staleThreshold = staleThreshold
         self.recentWindow = recentWindow
         self.handler = handler
     }
 
     public func start(pollInterval: TimeInterval = 2) {
-        HealthRegistry.shared.register(Self.healthName, expectedInterval: pollInterval)
+        HealthRegistry.shared.register(healthName, expectedInterval: pollInterval)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: pollInterval)
         timer.setEventHandler { [weak self] in self?.scanOnce() }
@@ -71,7 +99,7 @@ public final class CodeBuddyChatTailer {
 
     /// Public for tests and for the synchronous call at launch
     public func scanOnce() {
-        HealthRegistry.shared.beat(Self.healthName)
+        HealthRegistry.shared.beat(healthName)
         for url in recentSessionFiles() {
             tail(url)
         }
@@ -131,19 +159,22 @@ public final class CodeBuddyChatTailer {
                 case .taskStarted:
                     ctx.running = true
                     ctx.turnStartedAt = event.timestamp
+                    refreshHints(into: &ctx)
                 case .taskFinished:
                     ctx.running = false
+                    refreshHints(into: &ctx)
                 default:
                     break
                 }
-                HealthRegistry.shared.event(Self.healthName)
+                guard !ctx.excluded else { continue }
+                HealthRegistry.shared.event(healthName)
                 let isStale = Date().timeIntervalSince(event.timestamp) > staleThreshold
                 handler(event, isStale)
             }
         }
         contexts[path] = ctx
         offsets[path] = offset + UInt64(complete.count)
-        if let lastUsage {
+        if let lastUsage, !ctx.excluded {
             emitContext(for: url, context: ctx, usage: lastUsage)
         }
     }
@@ -153,16 +184,28 @@ public final class CodeBuddyChatTailer {
         if ctx.sessionStartedAt == nil {
             ctx.sessionStartedAt = CodeBuddyTranscriptDecoder.timestamp(root)
         }
-        // Title priority: ai-title > summary > first user text
+        // WorkBuddy scheduled runs: settled by the database when it knows the session, otherwise
+        // by the first prompt, which wraps the query in <automation_system_reminder>
+        if dialect == .workbuddy, !ctx.exclusionDecided, dialect.startsTurn(root) {
+            ctx.excluded = CodeBuddyDialect.inputText(root)?
+                .contains(CodeBuddyDialect.automationPromptMarker) == true
+            ctx.exclusionDecided = true
+        }
+        // Title priority: database title (3) > ai-title / session-meta (2) > summary (1) > first
+        // user text (0)
         switch root["type"] as? String {
-        case "ai-title", "summary":
-            let rank = root["type"] as? String == "ai-title" ? 2 : 1
-            if rank > ctx.titleRank, let title = CodeBuddyTranscriptDecoder.title(root) {
+        case "ai-title", "summary", "session-meta":
+            let rank = CodeBuddyTranscriptDecoder.titleRank(root)
+            // CodeBuddy keeps the first title of a rank; WorkBuddy's session-meta is a timeline
+            // whose newest entry is the current title
+            let replaces = dialect == .workbuddy ? rank >= ctx.titleRank : rank > ctx.titleRank
+            if replaces, let title = CodeBuddyTranscriptDecoder.title(root, dialect: dialect) {
                 ctx.title = title
                 ctx.titleRank = rank
             }
         case "message":
-            if ctx.titleRank < 0, let text = CodeBuddyTranscriptDecoder.userText(root),
+            if ctx.titleRank < 0,
+               let text = CodeBuddyTranscriptDecoder.userText(root, dialect: dialect),
                let title = summarizeTitle(text) {
                 ctx.title = title
                 ctx.titleRank = 0
@@ -172,9 +215,25 @@ public final class CodeBuddyChatTailer {
         }
     }
 
+    /// Reads the product's own record of the session (WorkBuddy's database): the title it shows,
+    /// the context window and the automation flag. Called when a file is first seen and at turn
+    /// boundaries, not on every poll. A failed or missing read leaves everything as it was.
+    private func refreshHints(into ctx: inout FileContext) {
+        guard let hints = lookup?(ctx.sessionId) else { return }
+        if let isAutomation = hints.isAutomation, !ctx.exclusionDecided {
+            ctx.excluded = isAutomation
+            ctx.exclusionDecided = true
+        }
+        if let title = hints.title.flatMap({ summarizeTitle($0) }) {
+            ctx.title = title
+            ctx.titleRank = 3
+        }
+        if let window = hints.contextWindow, window > 0 { ctx.contextWindow = window }
+    }
+
     private func event(from root: [String: Any], context ctx: FileContext) -> TaskEvent? {
         guard var event = CodeBuddyTranscriptDecoder.decode(
-            root: root, sessionId: ctx.sessionId, cwd: ctx.cwd)
+            root: root, sessionId: ctx.sessionId, cwd: ctx.cwd, dialect: dialect)
         else { return nil }
         // taskFinished gets its title from the context (the line carries none)
         if case .taskFinished(let outcome, nil, let detail) = event.kind {
@@ -187,7 +246,8 @@ public final class CodeBuddyChatTailer {
     /// Context-usage side channel for function_call lines: reuses the decoder's normalized usage;
     /// input + cacheRead = the full prompt including cache reads ≈ current context size
     private func contextUsage(_ root: [String: Any]) -> (model: String?, used: Int)? {
-        guard let (model, usage) = CodeBuddyTranscriptDecoder.usage(root) else { return nil }
+        guard let (model, usage) = CodeBuddyTranscriptDecoder.usage(root, dialect: dialect)
+        else { return nil }
         let used = usage.input + usage.cacheRead
         return used > 0 ? (model, used) : nil
     }
@@ -202,12 +262,15 @@ public final class CodeBuddyChatTailer {
         for chatURL: URL, context ctx: FileContext,
         usage: (model: String?, used: Int)
     ) {
-        let percent = min(100, ContextWindows.percent(used: usage.used, model: usage.model))
+        // WorkBuddy's database stores the window the session actually runs with; prefer it over
+        // the per-model table
+        let percent = min(100, ctx.contextWindow.map { Double(usage.used) / Double($0) * 100 }
+            ?? ContextWindows.percent(used: usage.used, model: usage.model))
         if let last = lastContextPercent[chatURL.path], abs(last - percent) < 0.5 { return }
         lastContextPercent[chatURL.path] = percent
-        HealthRegistry.shared.event(Self.healthName)
+        HealthRegistry.shared.event(healthName)
         handler(TaskEvent(
-            source: .codebuddy, sessionId: ctx.sessionId,
+            source: dialect.source, sessionId: ctx.sessionId,
             kind: .contextUpdate(percent: percent),
             timestamp: Date(), cwd: ctx.cwd,
             sessionStartedAt: ctx.sessionStartedAt), false)
@@ -245,6 +308,7 @@ public final class CodeBuddyChatTailer {
         }
 
         var ctx = context(for: url)
+        refreshHints(into: &ctx)
         var lastStarted: TaskEvent?
         var lastFinished: TaskEvent?
         var lastUsage: (model: String?, used: Int)?
@@ -269,6 +333,7 @@ public final class CodeBuddyChatTailer {
             && (lastFinished.map { $0.timestamp < lastStarted!.timestamp } ?? true)
         ctx.turnStartedAt = lastStarted?.timestamp
         contexts[path] = ctx
+        guard !ctx.excluded else { return }
 
         func titleEvent(from base: TaskEvent) {
             guard let title = ctx.title, !title.isEmpty else { return }
@@ -303,7 +368,7 @@ public final class CodeBuddyChatTailer {
     /// sessions); emits only when the snapshot changes (TaskStore dedups again); clears the cache
     /// on going idle so the next turn emits afresh.
     private func emitSubagentUpdates() {
-        for (path, ctx) in contexts {
+        for (path, ctx) in contexts where !ctx.excluded {
             guard ctx.running else {
                 lastSubagents[path] = []
                 continue
@@ -312,12 +377,13 @@ public final class CodeBuddyChatTailer {
             let subagents = CodeBuddySubagentScanner.scan(
                 sessionDir: file.deletingPathExtension(),
                 parentTranscript: file,
-                turnStartedAt: ctx.turnStartedAt)
+                turnStartedAt: ctx.turnStartedAt,
+                dialect: dialect)
             guard subagents != (lastSubagents[path] ?? []) else { continue }
             lastSubagents[path] = subagents
-            HealthRegistry.shared.event(Self.healthName)
+            HealthRegistry.shared.event(healthName)
             handler(TaskEvent(
-                source: .codebuddy, sessionId: ctx.sessionId,
+                source: dialect.source, sessionId: ctx.sessionId,
                 kind: .subagentsUpdated(subagents),
                 timestamp: Date(), cwd: ctx.cwd,
                 sessionStartedAt: ctx.sessionStartedAt), false)
@@ -325,9 +391,14 @@ public final class CodeBuddyChatTailer {
     }
 
     private func context(for url: URL) -> FileContext {
-        contexts[url.path] ?? FileContext(
-            sessionId: url.deletingPathExtension().lastPathComponent,
-            cwd: nil, sessionStartedAt: nil, title: nil)
+        if let existing = contexts[url.path] { return existing }
+        let sessionId = url.deletingPathExtension().lastPathComponent
+        var ctx = FileContext(sessionId: sessionId, cwd: nil, sessionStartedAt: nil, title: nil)
+        if dialect == .workbuddy, CodeBuddyDialect.isWorkBuddyInternalSession(sessionId) {
+            ctx.excluded = true
+            ctx.exclusionDecided = true
+        }
+        return ctx
     }
 
     private func fileSize(_ path: String) -> UInt64? {

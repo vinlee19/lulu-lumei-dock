@@ -5,7 +5,7 @@
 **把本地 AI 编码助手装进 macOS 菜单栏的一座「灵动岛」。**
 
 把任务活动实时呈现,配上 ccusage 级精度的用量账本、订阅限额余量,以及会话 / 技能 / agent / 记忆管理、
-操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor · Trae**,全在一处。
+操作审计与云端备份 —— 覆盖 **Claude Code · Codex CLI · opencode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · WorkBuddy · Qoder · Cursor · Trae**,全在一处。
 
 `Swift 5.10 + SwiftPM` · `唯一第三方依赖为 Sparkle` · `核心数据留在本地` · 用 Command Line Tools 即可构建(无需完整 Xcode)
 
@@ -58,7 +58,7 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 旁的一座「灵动岛」,并提供一个完整面板——用量分析、订阅限额,以及会话 / 技能 / agent / 记忆的管理。
 
 开箱支持十四种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
-Qwen Code、Hermes Agent、CodeBuddy、Qoder、Cursor、Trae、ZCode**,核心功能**零网络**:
+Qwen Code、Hermes Agent、CodeBuddy、WorkBuddy、Qoder、Cursor、Trae、ZCode**,核心功能**零网络**:
 一切都靠读取本地 transcript / rollout / session / 数据库文件推导。唯一的联网功能是 Claude 订阅限额(非官方
 接口,默认关闭,可在设置里 opt‑in)。此外，更新器默认会访问本仓库的 GitHub Releases feed 检查新版，
 可在「设置 → 关于」关闭。
@@ -108,7 +108,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
   (选「始终允许」)。
 
 **审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带风险标记。
-覆盖 Claude Code 与 Codex(hook/notify 通道)、Trae(hook 通道),以及 CodeBuddy、Qoder(transcript 扫描)与 Cursor(SQLite 扫描)。
+覆盖 Claude Code 与 Codex(hook/notify 通道)、Trae(hook 通道),以及 CodeBuddy、WorkBuddy、Qoder(transcript 扫描)与 Cursor(SQLite 扫描)。
 
 **备份** —— 可选:把本地数据备份到 S3 兼容的云存储(SigV4 签名)。
 
@@ -129,6 +129,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 | **Antigravity** | ✅ | 仅活动量¹ | — | ✅ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅(技能) |
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅(记忆) |
+| **WorkBuddy** | ✅⁶ | ✅⁶ | ✅(本地,仅免费模型)⁶ | ✅⁶ | ✅(技能/记忆/规则/Agent/计划)⁶ |
 | **Qoder** | ✅ | —² | — | ✅ | ✅(记忆/计划) |
 | **Cursor** | ✅³ | ✅(不计费)³ | — | ✅ | ✅ |
 | **Trae** | 仅 hooks⁴ | —⁴ | — | ✅(来自记忆库)⁴ | ✅(技能/记忆/规则/计划) |
@@ -200,6 +201,16 @@ append-only 的模型 IO 流水(`rollout/model-io-sess_<id>.jsonl`),逐请求带
 模型目录);技能在共享的 `~/.agents/skills`(SKILL.md,与 Claude 同构)。
 备份是严格白名单,只收 `cli/rollout`、`cli/agents` 与 `~/.agents/skills`:
 `~/.zcode/v2`(凭证)与会话库本体**绝不**纳入。
+
+⁶ WorkBuddy(腾讯的桌面 agent)在应用里跑的是 CodeBuddy Code 引擎,数据都在 `~/.workbuddy`,
+按 CodeBuddy 的格式读,但"一轮何时结束、哪些行算提问"用它自己的规则。**不安装 hooks**:WorkBuddy
+在 hook 程序缺失或失败时会拦下工具调用,留下的条目可能让它没法用。实时卡片来自会话记录、它的
+审计日志(等待授权)和它自己的数据库(标题、上下文窗口)。**定时任务会话哪里都不显示**——岛、历史、
+会话页、搜索、审计、计划都没有——但 token 照常计入用量。限额显示 WorkBuddy 服务端写进会话记录的
+按模型额度(仅免费模型有);积分余额只在应用内可见。"打开会话"按钮用 WorkBuddy 自己的
+`workbuddy://chat/<id>` 链接;不能在这里删除会话。备份会上传会话记录,但先脱敏(WorkBuddy 会把
+检测到的敏感信息明文存在记录里),另外备份记忆、persona、规则与技能;`~/.workbuddy` 其余内容含凭证,
+绝不纳入。
 
 ## 快速上手
 

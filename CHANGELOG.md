@@ -6,6 +6,27 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **WorkBuddy is supported.** Tencent's WorkBuddy desktop app appears on the
+  island, in history, sessions, usage, audit, plans, skills, memory,
+  instructions, MCP and agents, with its own logo. Its turns, tool calls,
+  questions waiting for an answer and permission prompts show up live; titles
+  and context use come from WorkBuddy's own records; its todo lists appear on
+  the Plans page; the open-session button jumps straight into the
+  conversation in WorkBuddy. Nothing is installed into WorkBuddy: it blocks a
+  tool call when a hook command is missing or fails, so Eureka only reads the
+  files WorkBuddy already writes.
+- **WorkBuddy's scheduled tasks stay out of the way.** Automation runs never
+  pop a card and are left out of history, sessions, search, audit and plans;
+  their tokens still count in usage.
+- **WorkBuddy's free-model quota on the limits page**, read from its session
+  logs when one is active. The credit balance stays in the app.
+- **Backup covers WorkBuddy** — memory, persona, rules, skills and session
+  logs. Session logs are scrubbed before upload: WorkBuddy stores the secrets
+  it detects in plain text there, so those lines are dropped and keys,
+  tokens and passwords elsewhere are masked.
+
 ### Changed
 
 - **Island cards hide after 5 seconds by default, waiting cards included.** A

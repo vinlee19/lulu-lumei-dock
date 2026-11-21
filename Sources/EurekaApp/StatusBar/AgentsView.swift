@@ -192,6 +192,7 @@ struct AgentsView: View {
         items += service.cursorAgents.map(item)
         items += service.kimiBuiltinAgents.map(item)
         items += service.zcodeAgents.map(item)
+        items += service.workBuddyAgents.map(item)
         items += service.codexProfiles.map { profile in
             AgentItem(
                 id: "codex:\(profile.name)", source: .codex, name: profile.name, description: nil,

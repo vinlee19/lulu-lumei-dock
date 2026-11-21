@@ -18,8 +18,13 @@ import EurekaStore
 /// - The sessionId inside subagent lines is the subagent's own id (observed), so attribution to the
 ///   parent session must be derived from the path (the parent directory name of
 ///   `<slug>/<sessionId>/subagents/`), same convention as CodeBuddyUsageScanner.
+/// WorkBuddy runs through the same scanner (`dialect: .workbuddy`): `DeferExecuteTool` is unwrapped
+/// to the tool it runs, and scheduled automation runs are left out of the audit trail (only their
+/// tokens are recorded, by the usage scanner).
 public final class CodeBuddyAuditScanner {
     private let projectsRoot: URL
+    private let dialect: CodeBuddyDialect
+    private let lookup: CodeBuddySessionLookup?
     private let store: EurekaStore
     /// The last slice read left more of the file unread (see `ScanSlices`)
     private var hasMoreSlices = false
@@ -31,13 +36,19 @@ public final class CodeBuddyAuditScanner {
     private struct FileExtra: Codable {
         var sessionId: String?
         var cwd: String?
+        /// WorkBuddy scheduled run / internal session; nil until settled
+        var excluded: Bool?
     }
 
     public init(
         projectsRoot: URL, store: EurekaStore, pipeline: AuditPipeline,
+        dialect: CodeBuddyDialect = .codebuddyCode,
+        lookup: CodeBuddySessionLookup? = nil,
         staleThreshold: TimeInterval = 300
     ) {
         self.projectsRoot = projectsRoot
+        self.dialect = dialect
+        self.lookup = lookup
         self.store = store
         self.pipeline = pipeline
         self.staleThreshold = staleThreshold
@@ -106,6 +117,13 @@ public final class CodeBuddyAuditScanner {
         if extra.sessionId == nil {
             resolveOwnership(fileURL: url, into: &extra)
         }
+        if dialect == .workbuddy, extra.excluded == nil, let sessionId = extra.sessionId {
+            if CodeBuddyDialect.isWorkBuddyInternalSession(sessionId) {
+                extra.excluded = true
+            } else if let isAutomation = lookup?(sessionId)?.isAutomation {
+                extra.excluded = isAutomation
+            }
+        }
         guard info.size > offset else { return 0 }
         guard let chunk = JSONLinesReader.read(path: path, from: offset) else { return 0 }
         hasMoreSlices = !chunk.reachedEnd
@@ -116,9 +134,18 @@ public final class CodeBuddyAuditScanner {
             for line in chunk.lines {
                 guard
                     let object = try? JSONSerialization.jsonObject(with: line),
-                    let root = object as? [String: Any],
+                    let root = object as? [String: Any]
+                else { continue }
+                // Without a database answer, a WorkBuddy session's first prompt tells whether it
+                // is a scheduled run (see CodeBuddyDialect)
+                if dialect == .workbuddy, extra.excluded == nil, dialect.startsTurn(root) {
+                    extra.excluded = CodeBuddyDialect.inputText(root)?
+                        .contains(CodeBuddyDialect.automationPromptMarker) == true
+                }
+                guard
+                    extra.excluded != true,
                     root["type"] as? String == "function_call",
-                    let name = root["name"] as? String, !name.isEmpty,
+                    let rawName = root["name"] as? String, !rawName.isEmpty,
                     let sessionId = extra.sessionId
                 else { continue }
                 if let cwd = root["cwd"] as? String { extra.cwd = cwd }
@@ -132,10 +159,13 @@ public final class CodeBuddyAuditScanner {
                    let parsed = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) {
                     args = parsed as? [String: Any] ?? [:]
                 }
-                let op = AuditExtractor.claude(name: name, input: args)
+                let name = dialect.effectiveToolName(name: rawName, args: args)
+                let input = name == rawName
+                    ? args : (args["params"] as? [String: Any]) ?? [:]
+                let op = AuditExtractor.claude(name: name, input: input)
                 let event = AuditEvent(
                     opId: (root["callId"] as? String) ?? Self.synthOpId(path: path, line: line),
-                    source: .codebuddy, sessionId: sessionId, timestamp: timestamp,
+                    source: dialect.source, sessionId: sessionId, timestamp: timestamp,
                     kind: op.kind, tool: op.name, detail: op.detail, cwd: extra.cwd)
                 let result = try pipeline.ingest(event, isStale: isStale)
                 if result.inserted { inserted += 1 }

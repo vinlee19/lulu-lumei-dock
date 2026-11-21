@@ -261,6 +261,9 @@ final class SyncService: ObservableObject {
                  category: folder.remoteCategory)
             }
         roots.traeRoots = Self.traeRoots()
+        roots.workBuddyProjects = WorkBuddyPaths.projectsRoot()
+        roots.workBuddySkills = WorkBuddyPaths.skillsRoot()
+        roots.workBuddyRoots = Self.workBuddyRoots()
         if FileManager.default.fileExists(atPath: snapshotURL.path) {
             roots.eurekaSnapshot = snapshotURL
         }
@@ -400,6 +403,26 @@ final class SyncService: ObservableObject {
     /// (may contain API keys); `Application Support/Trae CN` holds Cookies and the SQLCipher-encrypted
     /// session DB -- none of them may be included. Built-in skills (`builtin_skills`, `builtin/global/skills`)
     /// ship with the client and are read-only, so there's no value in backing them up either.
+    /// WorkBuddy markdown roots for backup (whitelist; see `SyncRoots.workBuddyRoots`). Persona
+    /// workspaces are uploaded without their folder name, which carries the account id; working
+    /// folders keep theirs (a timestamp).
+    static func workBuddyRoots() -> [(root: URL, category: String)] {
+        var roots: [(root: URL, category: String)] = [
+            (WorkBuddyPaths.memoryRoot(), "workbuddy/memory"),
+            (WorkBuddyPaths.rulesRoot(), "workbuddy/rules"),
+        ]
+        for (index, persona) in WorkBuddyPaths.personaRoots().enumerated() {
+            roots.append((persona, index == 0 ? "workbuddy/persona" : "workbuddy/persona-\(index + 1)"))
+        }
+        for memory in WorkBuddyPaths.workspaceMemoryRoots() {
+            // <folder>/.workbuddy/memory → the folder name
+            let folder = memory.deletingLastPathComponent().deletingLastPathComponent()
+                .lastPathComponent
+            roots.append((memory, "workbuddy/workspace-memory/\(folder)"))
+        }
+        return roots
+    }
+
     static func traeRoots() -> [(root: URL, category: String)] {
         var result: [(root: URL, category: String)] = []
         for channel in TraePaths.installedChannels() {

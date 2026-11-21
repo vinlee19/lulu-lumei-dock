@@ -217,6 +217,7 @@ final class UsageService: ObservableObject {
     private var qwenScanner: QwenUsageScanner?
     private var hermesScanner: HermesUsageScanner?
     private var codeBuddyScanner: CodeBuddyUsageScanner?
+    private var workBuddyScanner: CodeBuddyUsageScanner?
     private var cursorScanner: CursorUsageScanner?
     private var zcodeScanner: ZcodeUsageScanner?
     /// Antigravity (experimental, off by default): each pass decides whether to scan based on the
@@ -239,6 +240,7 @@ final class UsageService: ObservableObject {
     private static let qwenHealthName = "用量扫描 Qwen"
     private static let hermesHealthName = "用量扫描 Hermes"
     private static let codeBuddyHealthName = "用量扫描 CodeBuddy"
+    private static let workBuddyHealthName = "用量扫描 WorkBuddy"
     private static let cursorHealthName = "用量扫描 Cursor"
     private static let zcodeHealthName = "用量扫描 ZCode"
     private static let antigravityHealthName = "用量扫描 Antigravity（实验）"
@@ -253,6 +255,7 @@ final class UsageService: ObservableObject {
         HealthRegistry.shared.register(Self.qwenHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.hermesHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.workBuddyHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.cursorHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.zcodeHealthName, expectedInterval: 60)
         queue.async { [weak self] in
@@ -282,6 +285,10 @@ final class UsageService: ObservableObject {
                 // (qoder's CN backend reports all-zero tokens, so it has no usage scanner)
                 self.codeBuddyScanner = CodeBuddyUsageScanner(
                     projectsRoot: CodeBuddyPaths.projectsRoot(), store: store)
+                // workbuddy: the same engine under ~/.workbuddy; scheduled runs count too
+                self.workBuddyScanner = CodeBuddyUsageScanner(
+                    projectsRoot: WorkBuddyPaths.projectsRoot(), store: store,
+                    dialect: .workbuddy, workspaceRoot: WorkBuddyPaths.workspaceRoot())
                 // cursor: tokens are in state.vscdb's assistant bubbles, with cache attributed by
                 // adjacent differencing (cost is always 0 -- the cursor/ prefix is marked unknown
                 // in pricing.json, see the scanner's header comment)
@@ -931,6 +938,9 @@ final class UsageService: ObservableObject {
             let codeBuddyNew = try autoreleasepool { try codeBuddyScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.codeBuddyHealthName)
             if codeBuddyNew > 0 { HealthRegistry.shared.event(Self.codeBuddyHealthName) }
+            let workBuddyNew = try autoreleasepool { try workBuddyScanner?.scanOnce() ?? 0 }
+            HealthRegistry.shared.beat(Self.workBuddyHealthName)
+            if workBuddyNew > 0 { HealthRegistry.shared.event(Self.workBuddyHealthName) }
             let cursorNew = try autoreleasepool { try cursorScanner?.scanOnce() ?? 0 }
             HealthRegistry.shared.beat(Self.cursorHealthName)
             if cursorNew > 0 { HealthRegistry.shared.event(Self.cursorHealthName) }

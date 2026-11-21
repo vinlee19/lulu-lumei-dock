@@ -23,7 +23,7 @@ engineering loop lives in [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFL
 
 - **Types**: `feat` `fix` `docs` `refactor` `perf` `test` `chore` `ci`
 - **Scopes** (pick the area touched): `ui` `island` `claude` `codex` `opencode`
-  `grok` `kimi` `antigravity` `hermes` `codebuddy` `qoder` `cursor` `trae` `ingest` `usage` `store` `sync` `install`
+  `grok` `kimi` `antigravity` `hermes` `codebuddy` `workbuddy` `qoder` `cursor` `trae` `ingest` `usage` `store` `sync` `install`
   `updates` `packaging` `ci` `changelog`
 - Summary: imperative mood, lowercase, no trailing period, ≤ 72 chars.
 - Body (optional): bullet points explaining **what** and **why**, wrapped at ~80 chars.

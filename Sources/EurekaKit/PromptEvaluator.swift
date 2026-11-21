@@ -19,7 +19,7 @@ public enum PromptEvalCapability: Equatable, Sendable {
         switch source {
         case .claude, .codex, .qoder:
             return .full
-        case .opencode, .zcode, .kimi, .qwen, .hermes, .cursor, .codebuddy:
+        case .opencode, .zcode, .kimi, .qwen, .hermes, .cursor, .codebuddy, .workbuddy:
             return .trajectory
         case .gemini, .grok:
             return .followupOnly

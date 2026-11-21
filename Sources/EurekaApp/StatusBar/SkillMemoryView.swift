@@ -220,6 +220,7 @@ struct SkillMemoryView: View {
                 Button(L10n.text("Qoder skill", zhHans: "Qoder 技能")) { startCreate(.qoder, isSkill: true, L10n.text("Qoder skill", zhHans: "Qoder 技能")) }
                 Button(L10n.text("Trae skill", zhHans: "Trae 技能")) { startCreate(.trae, isSkill: true, L10n.text("Trae skill", zhHans: "Trae 技能")) }
                 Button(L10n.text("ZCode skill", zhHans: "ZCode 技能")) { startCreate(.zcode, isSkill: true, L10n.text("ZCode skill", zhHans: "ZCode 技能")) }
+                Button(L10n.text("WorkBuddy skill", zhHans: "WorkBuddy 技能")) { startCreate(.workbuddy, isSkill: true, L10n.text("WorkBuddy skill", zhHans: "WorkBuddy 技能")) }
             } else if mode == .memory {
                 Button(L10n.text("Claude memory", zhHans: "Claude 记忆")) { startCreate(.claude, isSkill: false, L10n.text("Claude memory", zhHans: "Claude 记忆")) }
                 Button(L10n.text("OpenCode memory", zhHans: "OpenCode 记忆")) { startCreate(.opencode, isSkill: false, L10n.text("OpenCode memory", zhHans: "OpenCode 记忆")) }

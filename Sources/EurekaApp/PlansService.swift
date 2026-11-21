@@ -63,6 +63,8 @@ final class PlansService: ObservableObject {
             // cursor has no plans directory; plans are the session's todos -> synthesized (same as
             // codex's update_plan)
             PlanMaterializer.materializeCursor(into: staging)
+            // workbuddy: its todo lists (tasks/<sessionId>/<N>.json), same synthesis route
+            PlanMaterializer.materializeWorkBuddy(into: staging)
             self.publishPhase(L10n.text("Indexing plans…", zhHans: "正在索引计划…"))
             // Hermes plans: profile-level ~/.hermes/plans + each repo's <repo>/.hermes/plans (the
             // `plan` skill writes the in-project one by default); both are real .md, no

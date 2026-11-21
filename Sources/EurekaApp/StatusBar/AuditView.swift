@@ -429,7 +429,7 @@ struct AuditView: View {
         noticeCard(
             icon: "exclamationmark.triangle.fill", tint: Theme.gold,
             text: L10n.text("Claude hooks are not installed, so Claude actions are not being audited yet", zhHans: "Claude hooks 未安装，Claude 的操作暂未被审计采集")
-                + L10n.text(" (Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen are unaffected;", zhHans: "（Codex / CodeBuddy / Qoder / Cursor / Grok / Qwen 不受影响；")
+                + L10n.text(" (Codex / CodeBuddy / WorkBuddy / Qoder / Cursor / Grok / Qwen are unaffected;", zhHans: "（Codex / CodeBuddy / WorkBuddy / Qoder / Cursor / Grok / Qwen 不受影响；")
                 + L10n.text(" Trae also depends on hooks — see Settings → Integrations).", zhHans: "Trae 同样依赖 hooks，见 设置 → 集成）。"),
             // The install / uninstall result must be echoed back: otherwise a refusal (unparseable
             // config / hand-edited path) gives no feedback
