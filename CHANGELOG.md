@@ -6,6 +6,15 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Island cards hide after 5 seconds by default, waiting cards included.** A
+  "waiting for input" card used to stay 4 seconds longer than the Auto-hide
+  setting (10 seconds by default) and sat over the top of the screen long
+  after it was read; it now hides with the setting, like a finished card. The
+  default setting goes from 6 to 5 seconds; a value you picked yourself is
+  kept, and hovering still holds a card open.
+
 ## [0.43.0] - 2026-11-09
 
 ### Added

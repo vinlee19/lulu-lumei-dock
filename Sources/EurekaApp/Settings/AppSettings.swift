@@ -57,9 +57,12 @@ final class AppSettings: ObservableObject {
     @Published var soundChoices: [String: String] {
         didSet { defaults.set(soundChoices, forKey: "soundChoices") }
     }
+    /// Base seconds before an island card hides itself (Settings slider, 3–15). Only a value the
+    /// user picked is stored, so changing the default also moves everyone who never touched it.
     @Published var autoDismissSeconds: Double {
         didSet { defaults.set(autoDismissSeconds, forKey: "autoDismissSeconds") }
     }
+    static let defaultAutoDismissSeconds: Double = 5
     /// Island time display: false = elapsed duration, true = start date and time
     @Published var showStartTime: Bool {
         didSet { defaults.set(showStartTime, forKey: "islandShowStartTime") }
@@ -281,7 +284,8 @@ final class AppSettings: ObservableObject {
         soundAlertsEnabled = defaults.object(forKey: "soundAlertsEnabled") as? Bool ?? true
         soundVolume = defaults.object(forKey: "soundVolume") as? Double ?? 0.8
         soundChoices = defaults.dictionary(forKey: "soundChoices") as? [String: String] ?? [:]
-        autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double ?? 6
+        autoDismissSeconds = defaults.object(forKey: "autoDismissSeconds") as? Double
+            ?? Self.defaultAutoDismissSeconds
         showStartTime = defaults.bool(forKey: "islandShowStartTime")
         menuBarShowsLimit = defaults.object(forKey: "menuBarShowsLimit") as? Bool ?? true
         wellnessEnabled = defaults.object(forKey: "wellnessEnabled") as? Bool ?? true

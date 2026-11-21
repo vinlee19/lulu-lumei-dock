@@ -399,9 +399,9 @@ func cardQueueTests(_ t: TestRunner) {
 
     // MARK: - Auto-dismiss duration (both timers in IslandViewModel share this one rule)
 
-    t.test("四类卡的自动收起偏移：完成 +0 / 等待 +4 / 提示 +5 / 告警 +6") {
+    t.test("四类卡的自动收起偏移：完成 +0 / 等待 +0 / 提示 +5 / 告警 +6") {
         try expectEqual(finished("a").autoDismissExtraSeconds, 0)
-        try expectEqual(waiting("a").autoDismissExtraSeconds, 4)
+        try expectEqual(waiting("a").autoDismissExtraSeconds, 0)
         try expectEqual(notice("n").autoDismissExtraSeconds, 5)
         try expectEqual(alert("op-1").autoDismissExtraSeconds, 6)
     }
@@ -416,17 +416,28 @@ func cardQueueTests(_ t: TestRunner) {
         }
     }
 
-    t.test("偏移叠加在用户设置的基准秒数上，而不是写死绝对值") {
-        // The Settings slider (3-15s) is what carries the user's intent: with a base of 6 the
-        // waiting card gets 10s, with a base of 12 it gets 16s. Hardcoding 10s would make "the
-        // waiting card dismisses faster than the finished card" once the slider is at 15.
+    t.test("等待卡按设置的秒数收起，不再额外多停") {
+        // The Settings slider (3-15s, default 5) is what carries the user's intent. The waiting
+        // card used to get +4 on top (10s at the old default of 6), which kept it over the top of
+        // the screen long after it was read; it now hides exactly when the finished card does.
         guard let waitingExtra = waiting("a").autoDismissExtraSeconds,
               let finishedExtra = finished("a").autoDismissExtraSeconds
         else { throw ExpectationError(description: "完成卡与等待卡都应有偏移值") }
-        try expectEqual(6 + waitingExtra, 10)
-        try expect(
-            waitingExtra > finishedExtra,
-            "等待卡该比完成卡多停一会（授权请求要看清）")
+        try expectEqual(waitingExtra, finishedExtra)
+        for base in [3.0, 5.0, 15.0] {
+            try expectEqual(base + waitingExtra, base, "基准 \(base) 秒时等待卡应停 \(base) 秒")
+        }
+    }
+
+    t.test("提示与告警的偏移仍叠加在基准秒数上，而不是写死绝对值") {
+        // Hardcoding absolute seconds would make "the alert hides sooner than the finished card"
+        // once the slider is at 15; offsets keep every card ordered whatever the base is.
+        guard let finishedExtra = finished("a").autoDismissExtraSeconds,
+              let noticeExtra = notice("n").autoDismissExtraSeconds,
+              let alertExtra = alert("op-1").autoDismissExtraSeconds
+        else { throw ExpectationError(description: "完成卡、提示卡与告警卡都应有偏移值") }
+        try expect(noticeExtra > finishedExtra, "健康提示要留出阅读时间")
+        try expect(alertExtra > noticeExtra, "安全告警停得最久")
     }
 }
 
