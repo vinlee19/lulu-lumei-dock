@@ -268,6 +268,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(auditRetentionDays, forKey: "auditRetentionDays") }
     }
     @Published private(set) var launchAtLogin: Bool
+    /// Registered, but macOS keeps it off: the item is switched off under System Settings >
+    /// General > Login Items (BTM disposition `disallowed`). `register()` doesn't throw then; the
+    /// status just stays `.requiresApproval`, so without this the toggle snapped back with no word
+    /// of why. Only the user can allow it there.
+    @Published private(set) var launchAtLoginNeedsApproval: Bool
     @Published private(set) var launchAtLoginHint: String?
 
     private let defaults: UserDefaults
@@ -332,6 +337,7 @@ final class AppSettings: ObservableObject {
         auditRetentionDays = defaults.object(forKey: "auditRetentionDays") as? Int ?? 90
         auditArchiveEnabled = defaults.bool(forKey: AuditArchiveSettings.key)
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        launchAtLoginNeedsApproval = SMAppService.mainApp.status == .requiresApproval
         // Sync interface style and language at startup (didSet doesn't fire in init, so sync
         // explicitly once every property is initialized)
         ThemeStyle.current = ThemeStyle.resolve(themeStyle)
@@ -353,15 +359,28 @@ final class AppSettings: ObservableObject {
             } else {
                 try SMAppService.mainApp.unregister()
             }
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            refreshLaunchAtLoginStatus()
             launchAtLoginHint = nil
         } catch {
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            refreshLaunchAtLoginStatus()
             launchAtLoginHint = L10n.format(
                 "Registration failed (%@). Run make install into ~/Applications first, or add the app under System Settings > General > Login Items.",
                 zhHans: "注册失败（%@）。请先 make install 安装到 ~/Applications 后再开启，或在 系统设置 > 通用 > 登录项 手动添加。",
                 error.localizedDescription)
         }
+    }
+
+    /// Re-reads the system's answer: on launch, when Settings appears, and when the app becomes
+    /// active again (the user may have just allowed it in System Settings)
+    func refreshLaunchAtLoginStatus() {
+        let status = SMAppService.mainApp.status
+        launchAtLogin = status == .enabled
+        launchAtLoginNeedsApproval = status == .requiresApproval
+    }
+
+    /// System Settings > General > Login Items, where only the user can allow the item
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }
 

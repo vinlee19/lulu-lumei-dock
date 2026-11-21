@@ -21,6 +21,11 @@ this project uses [Semantic Versioning](https://semver.org/).
   its click reaction, so the window only moved from the empty edge around it,
   if at all. Dragging anywhere on the companion now moves it and the spot is
   remembered; a click still pokes it and the right-click menu still opens.
+- **"Launch at login" says why it won't turn on.** When the item is switched
+  off under System Settings > General > Login Items, macOS accepts the
+  request but keeps it off, so the switch flipped back without a word. It now
+  says so, with a button that opens Login Items, and picks up the change when
+  you come back.
 
 ## [0.43.0] - 2026-11-09
 

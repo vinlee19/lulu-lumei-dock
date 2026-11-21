@@ -271,11 +271,31 @@ struct SettingsView: View {
                     get: { settings.launchAtLogin },
                     set: { settings.setLaunchAtLogin($0) }
                 ))
+                if settings.launchAtLoginNeedsApproval {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(L10n.text(
+                            "macOS is keeping it off: allow lulu-lumei-dock under System Settings > General > Login Items.",
+                            zhHans: "macOS 把它关在了登录项里：请在 系统设置 > 通用 > 登录项 中允许 lulu-lumei-dock。"))
+                            .font(Theme.font.themed(10))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(L10n.text("Open Login Items", zhHans: "打开登录项")) {
+                            settings.openLoginItemsSettings()
+                        }
+                        .controlSize(.small)
+                    }
+                }
                 if let hint = settings.launchAtLoginHint {
                     Text(hint)
                         .font(Theme.font.themed(10))
                         .foregroundStyle(.orange)
                 }
+            }
+            .onAppear { settings.refreshLaunchAtLoginStatus() }
+            // Coming back from System Settings: pick up the change without reopening the page
+            .onReceive(NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification)) { _ in
+                settings.refreshLaunchAtLoginStatus()
             }
 
             healthCard
