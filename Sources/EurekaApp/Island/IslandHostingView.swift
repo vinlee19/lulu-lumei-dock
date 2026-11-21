@@ -14,8 +14,7 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     var onHoverChange: @MainActor (Bool) -> Void = { _ in }
 
     private var trackingArea: NSTrackingArea?
-    private var mouseDownLocation: NSPoint?
-    private var didDrag = false
+    private var dragTracker = PanelDragTracker()
 
     /// The injected rect has a bottom-left origin; NSHostingView is flipped (top-left origin), so
     /// in-view checks must flip it, or the hit area lands in the empty bottom of the panel (every
@@ -40,35 +39,26 @@ final class IslandHostingView<Content: View>: NSHostingView<Content> {
     // MARK: - Drag detection (taps go to SwiftUI: in-island buttons and background taps coexist naturally)
 
     override func mouseDown(with event: NSEvent) {
-        mouseDownLocation = event.locationInWindow
-        didDrag = false
+        dragTracker.mouseDown(event)
         super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
         defer { super.mouseDragged(with: event) }
-        guard let start = mouseDownLocation, !didDrag else { return }
-        let dx = event.locationInWindow.x - start.x
-        let dy = event.locationInWindow.y - start.y
-        if dx * dx + dy * dy > 16 {
-            didDrag = true
-            // Hand off to the window server to drag the whole panel (position persistence is in the
-            // controller's didMove observer). performDrag swallows the following
-            // mouseUp/mouseExited -- hover must be reset manually, or auto-dismiss stays paused
-            // forever and the island sticks on stale content (once caused a whole night without
-            // updates). It also swallows mouseUp → SwiftUI's tap gesture won't misfire after a
-            // drag.
-            if insideInteractive {
-                insideInteractive = false
-                onHoverChange(false)
-            }
-            window?.performDrag(with: event)
+        guard dragTracker.shouldBeginDrag(event) else { return }
+        // Hand off to the window server to drag the whole panel (position persistence is in the
+        // controller's didMove observer). performDrag swallows the following mouseUp/mouseExited
+        // -- hover must be reset manually, or auto-dismiss stays paused forever and the island
+        // sticks on stale content (once caused a whole night without updates).
+        if insideInteractive {
+            insideInteractive = false
+            onHoverChange(false)
         }
+        window?.performDrag(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
-        mouseDownLocation = nil
-        didDrag = false
+        dragTracker.mouseUp()
         super.mouseUp(with: event)
     }
 

@@ -32,7 +32,7 @@ enum MascotSize: String, CaseIterable {
     static func resolve(_ raw: String) -> MascotSize { MascotSize(rawValue: raw) ?? .medium }
 }
 
-/// Desktop mascot NSPanel controller: transparent floating window, background drag to move,
+/// Desktop mascot NSPanel controller: transparent floating window, drag anywhere to move,
 /// position persistence, context menu. Visibility is driven by AppSettings.mascotEnabled (a
 /// lightweight mirror of the Dynamic Island).
 @MainActor
@@ -70,7 +70,9 @@ final class MascotPanelController {
         panel.hasShadow = false  // SwiftUI draws the shadow
         panel.hidesOnDeactivate = false
         panel.isMovable = true
-        panel.isMovableByWindowBackground = true  // Drag the card to move it
+        // Off on purpose: the card's tap gesture takes the mouseDown, so the background flag never
+        // moved the window. MascotHostingView starts the drag itself.
+        panel.isMovableByWindowBackground = false
         panel.animationBehavior = .none
         panel.isReleasedWhenClosed = false
     }
@@ -81,7 +83,7 @@ final class MascotPanelController {
             animationRuntime: animationRuntime,
             onHide: { [weak self] in self?.onRequestHide() },
             onOpenSettings: { [weak self] in self?.onOpenSettings() })
-        panel.contentView = NSHostingView(rootView: root)
+        panel.contentView = MascotHostingView(rootView: root)
         animationRuntime.start()
         viewModel.start()
         NotificationCenter.default.addObserver(
@@ -240,6 +242,32 @@ final class MascotPanelController {
         MainActor.assumeIsolated {
             if panel.isVisible { reposition() }
         }
+    }
+}
+
+/// Hosts the companion: a press that travels past `PanelDragTracker.threshold` drags the panel
+/// (the controller's didMove observer saves where it lands); a shorter one stays a click, so the
+/// card's poke tap and the context menu keep working.
+private final class MascotHostingView<Content: View>: NSHostingView<Content> {
+    private var dragTracker = PanelDragTracker()
+
+    /// The panel never becomes key, so without this the first press would only focus it
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        dragTracker.mouseDown(event)
+        super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        defer { super.mouseDragged(with: event) }
+        guard dragTracker.shouldBeginDrag(event) else { return }
+        window?.performDrag(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragTracker.mouseUp()
+        super.mouseUp(with: event)
     }
 }
 

@@ -15,6 +15,13 @@ this project uses [Semantic Versioning](https://semver.org/).
   default setting goes from 6 to 5 seconds; a value you picked yourself is
   kept, and hovering still holds a card open.
 
+### Fixed
+
+- **The desktop companion can be dragged.** Pressing on the character went to
+  its click reaction, so the window only moved from the empty edge around it,
+  if at all. Dragging anywhere on the companion now moves it and the spot is
+  remembered; a click still pokes it and the right-click menu still opens.
+
 ## [0.43.0] - 2026-11-09
 
 ### Added
