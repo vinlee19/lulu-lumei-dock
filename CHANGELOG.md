@@ -6,6 +6,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-21
+
 ### Added
 
 - **WorkBuddy is supported.** Tencent's WorkBuddy desktop app appears on the
@@ -2390,7 +2392,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.43.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.44.0
 [0.43.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.43.0
 [0.42.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.1
 [0.42.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.0
