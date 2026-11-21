@@ -137,4 +137,24 @@ func workBuddyScrubberTests(_ t: TestRunner) {
         try expectEqual(parsed[2]["type"] as? String, "eureka-redacted", "解析不了的行不原样上传")
         try expect(text.hasSuffix("\n"), "保留结尾换行")
     }
+
+    t.test("受保护的明文在其他行（含键名）也被遮掉；只是提到字段名的行不会被整行丢掉") {
+        let secret = "ak-9f8e7d6c5b4a3210"
+        let prompt = #"{"type":"message","role":"user","id":"u1","content":[{"type":"input_text","text":"<user_query>用这个 key \#(secret) 调一下</user_query>"}]}"#
+        let toolOutput = #"{"type":"function_call_result","id":"r0","output":{"\#(secret)":"key as a field name"}}"#
+        let protected = #"{"type":"function_call_result","id":"r1","output":{"text":"x"},"__codebuddyLocal":{"sensitiveProtection":{"items":[{"plaintext":"\#(secret)","ciphertext":"c"},{"plaintext":"abc"}]}}}"#
+        let mention = #"{"type":"message","role":"assistant","id":"a1","content":[{"type":"output_text","text":"WorkBuddy keeps a sensitiveProtection record"}]}"#
+        let shortValue = #"{"type":"message","role":"assistant","id":"a2","content":[{"type":"output_text","text":"abc stays"}]}"#
+        let output = WorkBuddyTranscriptScrubber.scrub(
+            Data([prompt, toolOutput, protected, mention, shortValue].joined(separator: "\n").utf8))
+        let text = String(decoding: output, as: UTF8.self)
+        try expect(!text.contains(secret), "受保护的明文不能出现在任何一行: \(text)")
+        let parsed = lines(output)
+        try expectEqual(parsed.count, 5)
+        try expectEqual(parsed[0]["type"] as? String, "message", "提问行保留，只遮明文")
+        try expectEqual(parsed[2]["type"] as? String, "eureka-redacted")
+        try expectEqual(parsed[3]["type"] as? String, "message", "按键名识别保护记录，正文提到字段名不算")
+        try expect(text.contains("abc stays"), "太短的值不做全文遮盖")
+        try expect(!text.hasSuffix("\n"), "原文没有结尾换行就不加")
+    }
 }
