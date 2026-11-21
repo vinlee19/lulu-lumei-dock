@@ -219,6 +219,11 @@ final class SessionBrowserService: ObservableObject {
             indexed += HermesSessionIndexer.indexAll(window: window, maxSessions: maxSessions)
             indexed += CodeBuddySessionIndexer.index(
                 projectsRoot: CodeBuddyPaths.projectsRoot(), window: window, maxSessions: maxSessions)
+            // workbuddy: same engine and layout; titles from its database, scheduled runs left out
+            indexed += CodeBuddySessionIndexer.index(
+                projectsRoot: WorkBuddyPaths.projectsRoot(), dialect: .workbuddy,
+                lookup: WorkBuddySessionCatalog.shared.lookup,
+                window: window, maxSessions: maxSessions)
             indexed += QoderSessionIndexer.index(
                 projectsRoot: QoderPaths.projectsRoot(), window: window, maxSessions: maxSessions)
             // zcode: every session lives in cli/db/db.sqlite (shared DB, no transcript files)
@@ -559,6 +564,10 @@ final class SessionBrowserService: ObservableObject {
                         ? KimiConfigWindows.window(forModel: model) : nil)
                     ?? (session.source == .zcode
                         ? ZcodeConfigWindows.window(forModel: model ?? zcodeLast?.model) : nil)
+                    // WorkBuddy's database records the window each session runs with
+                    ?? (session.source == .workbuddy
+                        ? WorkBuddySessionCatalog.shared.hints(for: session.id)?.contextWindow
+                        : nil)
                 breakdown = ContextBreakdownEstimator.estimate(
                     source: session.source,
                     cwd: session.cwd,
@@ -630,6 +639,14 @@ final class SessionBrowserService: ObservableObject {
         case .zcode:
             // ZCode has no known per-session resume flag, so only open the workspace directory
             return session.cwd.map { "open '\($0)'" } ?? "open ."
+        case .workbuddy:
+            // WorkBuddy is a desktop app with no CLI on PATH; its own deep link opens the
+            // conversation. The link is built only from a validated UUID (the id comes from a
+            // file name and ends up in a shell command).
+            guard let link = SessionAppLink.workBuddy(sessionId: session.id).url else {
+                return "open -a WorkBuddy"
+            }
+            return "open '\(link.absoluteString)'"
         }
         guard let cwd = session.cwd else { return resume }
         return "cd '\(cwd)' && " + resume

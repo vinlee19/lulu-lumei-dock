@@ -110,6 +110,15 @@ final class SkillMemoryService: ObservableObject {
             for root in TraePaths.bundledSkillsRoots() {
                 bundledRoots.append((root, .trae))
             }
+            // workbuddy: skills of its built-in buddies and of installed plugins ship with the app
+            // or the plugin → read-only
+            for root in WorkBuddyPaths.buddySkillRoots() {
+                bundledRoots.append((root, .workbuddy))
+            }
+            for root in SkillMemoryIndexer.pluginSkillsRoots(
+                cache: WorkBuddyPaths.pluginsRoot().appendingPathComponent("cache")) {
+                bundledRoots.append((root, .workbuddy))
+            }
             let skills = SkillMemoryIndexer.indexSkills(
                 claudeSkillsRoot: SkillMemoryIndexer.claudeSkillsRoot(),
                 codexSkillsRoot: SkillMemoryIndexer.codexSkillsRoot(),
@@ -132,6 +141,7 @@ final class SkillMemoryService: ObservableObject {
                     from: ConfigFile.read(HermesPaths.configFile())),
                 cursorSkillsRoot: CursorPaths.skillsRoot(),
                 codeBuddySkillsRoot: CodeBuddyPaths.skillsRoot(),
+                workBuddySkillsRoot: WorkBuddyPaths.skillsRoot(),
                 qoderSkillsRoot: QoderPaths.skillsRoot(),
                 // zcode skills live in the shared ~/.agents/skills (shared with the desktop app)
                 zcodeSkillsRoot: ZcodePaths.skillsRoot(),
@@ -151,6 +161,8 @@ final class SkillMemoryService: ObservableObject {
                 qwenHome: QwenPaths.configHome(),
                 hermesHome: HermesPaths.configHome(),
                 codeBuddyMemoryRoot: CodeBuddyPaths.memoryRoot(),
+                workBuddyHome: WorkBuddyPaths.configHome(),
+                workBuddyWorkspaceMemoryRoots: WorkBuddyPaths.workspaceMemoryRoots(),
                 qoderMemoriesRoot: QoderPaths.memoriesRoot(),
                 // Only CN has a memory library; user-written rules exist in both channels
                 traeMemoryRoot: TraePaths.memoryRoot(),
@@ -412,6 +424,8 @@ final class SkillMemoryService: ObservableObject {
             return TraePaths.userSkillsRoots().first ?? TraePaths.skillsRoot(.cn)
         case .zcode:
             return ZcodePaths.skillsRoot()
+        case .workbuddy:
+            return WorkBuddyPaths.skillsRoot()
         }
     }
 
@@ -765,6 +779,13 @@ final class SkillMemoryService: ObservableObject {
                 // zcode: no global memory file layout observed (~/.zcode has no AGENTS.md-like
                 // file) - no entry point (same rule as antigravity: better to create nothing than a
                 // file the CLI doesn't recognize)
+                DispatchQueue.main.async { completion?(false) }
+                return
+            case .workbuddy:
+                // WorkBuddy writes its own memory: one profile per account
+                // (`memory/<userId>_memory.md`, versioned, with a `.bak` it restores from) and
+                // per-folder daily logs. A file created here would sit outside what it loads, so
+                // there is no entry point (same rule as zcode / antigravity).
                 DispatchQueue.main.async { completion?(false) }
                 return
             }

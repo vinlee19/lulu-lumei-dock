@@ -1,13 +1,13 @@
 import Foundation
 
 /// Working directories of recent sessions (reused by project-level skill / project-level agent
-/// discovery). Reuses the session indexes of all 13 agent sources to get the **real cwd** from
+/// discovery). Reuses the session indexes of the agent sources to get the **real cwd** from
 /// transcript heads — directory names like `~/.claude/projects/<encoded>` encode the cwd lossily
 /// (both `/` and `.` become `-`) and cannot be reversed, so the cwd parsed by the indexers must
 /// be used.
 public enum ProjectRoots {
-    /// Deduplicated recent session cwds (most recently active first), aggregated over all 13 sources:
-    /// Claude / Codex / opencode / hermes / Kimi / Gemini / Qwen / Grok / CodeBuddy / Qoder /
+    /// Deduplicated recent session cwds (most recently active first), aggregated over Claude /
+    /// Codex / opencode / hermes / Kimi / Gemini / Qwen / Grok / CodeBuddy / WorkBuddy / Qoder /
     /// Antigravity / Cursor / Trae. Only this way do repos used solely with sources such as
     /// kimi/qoder/codebuddy get their project-level skills/memory/agents/plans scanned.
     /// Cursor's cwd is not in the session; it is resolved via workspaceStorage's workspace.json
@@ -29,6 +29,8 @@ public enum ProjectRoots {
         qwenProjectsRoot: URL = QwenPaths.projectsRoot(),
         grokSessionsRoot: URL = GrokPaths.sessionsRoot(),
         codeBuddyProjectsRoot: URL = CodeBuddyPaths.projectsRoot(),
+        workBuddyProjectsRoot: URL = WorkBuddyPaths.projectsRoot(),
+        workBuddyLookup: CodeBuddySessionLookup? = WorkBuddySessionCatalog.shared.lookup,
         qoderProjectsRoot: URL = QoderPaths.projectsRoot(),
         antigravityConversationsRoot: URL = AntigravityPaths.conversationsRoot(),
         cursorStateDB: URL = CursorPaths.globalStateDB(),
@@ -51,6 +53,9 @@ public enum ProjectRoots {
             sessionsRoot: grokSessionsRoot, maxSessions: maxSessions)
         sessions += CodeBuddySessionIndexer.index(
             projectsRoot: codeBuddyProjectsRoot, maxSessions: maxSessions)
+        sessions += CodeBuddySessionIndexer.index(
+            projectsRoot: workBuddyProjectsRoot, dialect: .workbuddy, lookup: workBuddyLookup,
+            maxSessions: maxSessions)
         sessions += QoderSessionIndexer.index(
             projectsRoot: qoderProjectsRoot, maxSessions: maxSessions)
         sessions += AntigravitySessionIndexer.index(

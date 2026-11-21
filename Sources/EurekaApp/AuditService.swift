@@ -6,7 +6,7 @@ import EurekaSync
 import Foundation
 
 /// Security audit service: owns a dedicated SQLite connection + AuditPipeline + the
-/// Codex/CodeBuddy/Qoder audit scanners. Claude and Trae operations arrive via EventPipeline's side
+/// Codex/CodeBuddy/WorkBuddy/Qoder audit scanners. Claude and Trae operations arrive via EventPipeline's side
 /// channel (ingestHook); the rest rely on periodic jsonl scans. store/pipeline/scanner are only
 /// touched on the internal serial queue; @Published is only updated on the main thread.
 final class AuditService: ObservableObject {
@@ -45,6 +45,7 @@ final class AuditService: ObservableObject {
     private var pipeline: AuditPipeline?
     private var codexScanner: CodexAuditScanner?
     private var codeBuddyScanner: CodeBuddyAuditScanner?
+    private var workBuddyScanner: CodeBuddyAuditScanner?
     private var qoderScanner: QoderAuditScanner?
     private var cursorScanner: CursorAuditScanner?
     private var grokScanner: GrokAuditScanner?
@@ -55,6 +56,7 @@ final class AuditService: ObservableObject {
 
     private static let codexHealthName = "审计扫描 Codex"
     private static let codeBuddyHealthName = "审计扫描 CodeBuddy"
+    private static let workBuddyHealthName = "审计扫描 WorkBuddy"
     private static let qoderHealthName = "审计扫描 Qoder"
     private static let cursorHealthName = "审计扫描 Cursor"
     private static let grokHealthName = "审计扫描 Grok"
@@ -63,6 +65,7 @@ final class AuditService: ObservableObject {
     func start() {
         HealthRegistry.shared.register(Self.codexHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.codeBuddyHealthName, expectedInterval: 60)
+        HealthRegistry.shared.register(Self.workBuddyHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.qoderHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.cursorHealthName, expectedInterval: 60)
         HealthRegistry.shared.register(Self.grokHealthName, expectedInterval: 60)
@@ -80,6 +83,11 @@ final class AuditService: ObservableObject {
                 self.codeBuddyScanner = CodeBuddyAuditScanner(
                     projectsRoot: CodeBuddyPaths.projectsRoot(),
                     store: store, pipeline: pipeline)
+                // Scheduled automation runs stay out of the trail (only their tokens count)
+                self.workBuddyScanner = CodeBuddyAuditScanner(
+                    projectsRoot: WorkBuddyPaths.projectsRoot(),
+                    store: store, pipeline: pipeline, dialect: .workbuddy,
+                    lookup: WorkBuddySessionCatalog.shared.lookup)
                 self.qoderScanner = QoderAuditScanner(
                     projectsRoot: QoderPaths.projectsRoot(),
                     store: store, pipeline: pipeline)
@@ -95,6 +103,7 @@ final class AuditService: ObservableObject {
                     store: store, pipeline: pipeline)
                 self.scanCodex()
                 self.scanCodeBuddy()
+                self.scanWorkBuddy()
                 self.scanQoder()
                 self.scanCursor()
                 self.scanGrok()
@@ -104,13 +113,15 @@ final class AuditService: ObservableObject {
                 self.publish { $0.lastError = L10n.format("Failed to open audit database: %@", zhHans: "审计库打开失败: %@", String(describing: error)) }
             }
         }
-        // 2s near-real-time scan of Codex/CodeBuddy/Qoder/Cursor/Grok/Qwen + pruning when due
+        // 2s near-real-time scan of Codex/CodeBuddy/WorkBuddy/Qoder/Cursor/Grok/Qwen + pruning
+        // when due
         let timer = DispatchSource.makeTimerSource(queue: queue)
         // leeway lets the system coalesce wakeups to save power
         timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
         timer.setEventHandler { [weak self] in
             self?.scanCodex()
             self?.scanCodeBuddy()
+            self?.scanWorkBuddy()
             self?.scanQoder()
             self?.scanCursor()
             self?.scanGrok()
@@ -263,6 +274,17 @@ final class AuditService: ObservableObject {
             if new > 0 { HealthRegistry.shared.event(Self.codeBuddyHealthName) }
         } catch {
             HealthRegistry.shared.failure(Self.codeBuddyHealthName, note: "\(error)")
+        }
+    }
+
+    private func scanWorkBuddy() {
+        guard captureEnabled, let scanner = workBuddyScanner else { return }
+        HealthRegistry.shared.beat(Self.workBuddyHealthName)
+        do {
+            let new = try scanner.scanOnce { [weak self] alert in self?.emit(alert) }
+            if new > 0 { HealthRegistry.shared.event(Self.workBuddyHealthName) }
+        } catch {
+            HealthRegistry.shared.failure(Self.workBuddyHealthName, note: "\(error)")
         }
     }
 

@@ -5,12 +5,18 @@ import Foundation
 /// stem; title = latest ai-title > latest summary > summary of the first real user text; cwd from
 /// the per-line cwd field; created/updated from the first/last line timestamp (epoch ms). Schema
 /// verified against real sessions (2026-07, ~/.codebuddy).
+/// WorkBuddy (`dialect: .workbuddy`): the title WorkBuddy shows comes from its database through
+/// `lookup` (its transcripts carry a title for only a few sessions); scheduled automation runs and
+/// internal host / warm-up sessions are left out of the list (their tokens still count, through
+/// the usage scanner).
 public enum CodeBuddySessionIndexer {
     private static let headBytes = 256 * 1024
     private static let tailBytes = 64 * 1024
 
     public static func index(
         projectsRoot: URL = CodeBuddyPaths.projectsRoot(),
+        dialect: CodeBuddyDialect = .codebuddyCode,
+        lookup: CodeBuddySessionLookup? = nil,
         window: TimeInterval = 30 * 86400,
         maxSessions: Int = 300,
         now: Date = Date()
@@ -31,7 +37,7 @@ public enum CodeBuddySessionIndexer {
                     .contentModificationDate, now.timeIntervalSince(mtime) >= window {
                     continue
                 }
-                guard let info = sessionInfo(file: file),
+                guard let info = sessionInfo(file: file, dialect: dialect, lookup: lookup),
                       now.timeIntervalSince(info.lastActiveAt) < window
                 else { continue }
                 results.append(info)
@@ -40,11 +46,23 @@ public enum CodeBuddySessionIndexer {
         return Array(results.sorted { $0.lastActiveAt > $1.lastActiveAt }.prefix(maxSessions))
     }
 
-    static func sessionInfo(file: URL) -> AgentSessionInfo? {
+    static func sessionInfo(
+        file: URL, dialect: CodeBuddyDialect = .codebuddyCode,
+        lookup: CodeBuddySessionLookup? = nil
+    ) -> AgentSessionInfo? {
         guard let values = try? file.resourceValues(
             forKeys: [.fileSizeKey, .contentModificationDateKey]) else { return nil }
         let sessionId = file.deletingPathExtension().lastPathComponent
         let size = UInt64(values.fileSize ?? 0)
+        let hints = lookup?(sessionId)
+        if dialect == .workbuddy {
+            if CodeBuddyDialect.isWorkBuddyInternalSession(sessionId)
+                || hints?.isAutomation == true {
+                return nil
+            }
+        }
+        // Without a database answer, the first prompt tells (see CodeBuddyDialect)
+        var automationDecided = hints?.isAutomation != nil
 
         var cwd: String?
         var startedAt: Date?
@@ -67,17 +85,26 @@ public enum CodeBuddySessionIndexer {
                     if startedAt == nil {
                         startedAt = CodeBuddyTranscriptDecoder.timestamp(object)
                     }
+                    if dialect == .workbuddy, !automationDecided, dialect.startsTurn(object) {
+                        if CodeBuddyDialect.inputText(object)?
+                            .contains(CodeBuddyDialect.automationPromptMarker) == true {
+                            return nil
+                        }
+                        automationDecided = true
+                    }
                     switch object["type"] as? String {
-                    case "ai-title", "summary":
-                        let rank = object["type"] as? String == "ai-title" ? 2 : 1
+                    case "ai-title", "summary", "session-meta":
+                        let rank = CodeBuddyTranscriptDecoder.titleRank(object)
                         if rank >= titleRank,
-                           let candidate = CodeBuddyTranscriptDecoder.title(object) {
+                           let candidate = CodeBuddyTranscriptDecoder.title(
+                            object, dialect: dialect) {
                             title = candidate
                             titleRank = rank
                         }
                     case "message":
                         if firstUserText == nil,
-                           let userText = CodeBuddyTranscriptDecoder.userText(object) {
+                           let userText = CodeBuddyTranscriptDecoder.userText(
+                            object, dialect: dialect) {
                             firstUserText = userText
                         }
                     default:
@@ -97,10 +124,11 @@ public enum CodeBuddySessionIndexer {
                         with: Data(line.utf8)) as? [String: Any]
                     else { continue }
                     switch object["type"] as? String {
-                    case "ai-title", "summary":
-                        let rank = object["type"] as? String == "ai-title" ? 2 : 1
+                    case "ai-title", "summary", "session-meta":
+                        let rank = CodeBuddyTranscriptDecoder.titleRank(object)
                         if rank >= titleRank,
-                           let candidate = CodeBuddyTranscriptDecoder.title(object) {
+                           let candidate = CodeBuddyTranscriptDecoder.title(
+                            object, dialect: dialect) {
                             title = candidate
                             titleRank = rank
                         }
@@ -112,6 +140,10 @@ public enum CodeBuddySessionIndexer {
         }
         if titleRank < 0, let firstUserText {
             title = summarizeTitle(firstUserText)
+        }
+        // The title WorkBuddy itself shows (custom or generated) wins
+        if let databaseTitle = hints?.title.flatMap({ summarizeTitle($0) }) {
+            title = databaseTitle
         }
         // Empty sessions with neither real user input nor a title stay out of the list
         guard title != nil else { return nil }
@@ -125,7 +157,7 @@ public enum CodeBuddySessionIndexer {
         }
 
         return AgentSessionInfo(
-            source: .codebuddy,
+            source: dialect.source,
             id: sessionId,
             cwd: cwd,
             name: title,

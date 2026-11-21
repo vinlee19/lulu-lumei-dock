@@ -193,10 +193,12 @@ Codex rollout token_count ─────────→ UsageEngine / RateLimit
 
 - **记忆** = agent 自己攒下来的：Claude/Qwen 的项目记忆库、`~/.claude/memories`、
   Codex `memories/` 顶层三份、Hermes `memories/{MEMORY,USER}.md`、grok/codebuddy/qoder 的记忆目录、
-  Trae `~/.trae-cn/memory/{user_profile.md, projects/<encoded>/{project_memory.md, <YYYYMMDD>/topics.md}}`。
+  Trae `~/.trae-cn/memory/{user_profile.md, projects/<encoded>/{project_memory.md, <YYYYMMDD>/topics.md}}`、
+  WorkBuddy `~/.workbuddy/memory/<userId>_memory.md` + persona `MEMORY.md` + 各工作目录 `.workbuddy/memory/**`。
 - **指令** = 用户写给 agent 的规则：`CLAUDE.md` / `AGENTS.md`（含 `AGENTS.override.md` 优先级）/
   `GEMINI.md` / `QWEN.md` / `<repo>/.cursor/rules/*.mdc` / Hermes `SOUL.md`（人格身份）/
-  Trae `<dataFolder>/user_rules.md` + `<dataFolder>/user_rules/*.md` + `<repo>/.trae/rules/*.md`。
+  Trae `<dataFolder>/user_rules.md` + `<dataFolder>/user_rules/*.md` + `<repo>/.trae/rules/*.md` /
+  WorkBuddy persona `SOUL/IDENTITY/USER/BOOTSTRAP.md` + `~/.workbuddy/rules/**` + `<repo>/.workbuddy/rules/**`。
 - 两者混在一个数字里会让「记忆有多少」失去意义（本机 105 记忆 vs 19 指令），所以分页签、分统计口径。
   Hermes 是唯一需要在同一目录里分开判的：`memories/MEMORY.md` 与 `USER.md` 是它自记 → 记忆；
   `SOUL.md` 是人格设定 → 指令。

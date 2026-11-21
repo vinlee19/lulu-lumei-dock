@@ -23,6 +23,10 @@ public enum AgentSessionDiscovery {
             tmpRoot: GeminiPaths.tmpRoot(), projectsFile: GeminiPaths.projectsFile())
         sessions += QwenSessionIndexer.index(projectsRoot: QwenPaths.projectsRoot())
         sessions += CodeBuddySessionIndexer.index(projectsRoot: CodeBuddyPaths.projectsRoot())
+        // Scheduled WorkBuddy runs are left out here too: no full-text or per-turn index for them
+        sessions += CodeBuddySessionIndexer.index(
+            projectsRoot: WorkBuddyPaths.projectsRoot(), dialect: .workbuddy,
+            lookup: WorkBuddySessionCatalog.shared.lookup)
         sessions += QoderSessionIndexer.index(projectsRoot: QoderPaths.projectsRoot())
         return sessions
     }

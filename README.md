@@ -6,7 +6,7 @@
 
 Surfaces live task activity, a ccusage-accurate usage ledger, subscription rate‑limit
 gauges, session/skill/agent/memory management, an audit trail and cloud backup — for
-**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · Qoder · Cursor · Trae · ZCode**, all in one overlay.
+**Claude Code · Codex CLI · OpenCode · Grok · Antigravity · Kimi Code · Gemini CLI · Qwen Code · Hermes Agent · CodeBuddy · WorkBuddy · Qoder · Cursor · Trae · ZCode**, all in one overlay.
 
 `Swift 5.10 + SwiftPM` · `Sparkle is the only third‑party dependency` · `all data stays local`
 · builds with Command Line Tools (no full Xcode needed)
@@ -63,7 +63,7 @@ agents and turns them into a live **Dynamic Island** overlay near the notch, plu
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
 It works with thirteen agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
-Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, Qoder, Cursor, Trae, and ZCode** — and needs **no network** for its core features: everything is
+Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, WorkBuddy, Qoder, Cursor, Trae, and ZCode** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session / database files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
 other network feature and remains opt-in/off by default.
@@ -186,7 +186,7 @@ removals are yours and survive re‑extraction. The tab is built around reuse, n
 
 **Audit** — an append‑only trail of agent tool calls (full commands / file paths, no output bodies),
 with risk flagging. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
-Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).
+WorkBuddy, Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
 Optionally also archives the audit trail as daily **Parquet** files
@@ -215,6 +215,7 @@ many concurrent sessions, or late‑night runs.
 | **Qwen Code** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 | **Hermes Agent** | ✅² | ✅ | — | ✅ | ✅ (skills/memory/plans) |
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅ (memory) |
+| **WorkBuddy** | ✅⁷ | ✅⁷ | ✅ (local, free models)⁷ | ✅⁷ | ✅ (skills/memory/rules/agents/plans)⁷ |
 | **Qoder** | ✅ | —³ | — | ✅ | ✅ (memory/plans) |
 | **Cursor** | ✅⁴ | ✅ (no cost)⁴ | — | ✅ | ✅ |
 | **Trae** | hooks only⁵ | —⁵ | — | ✅ (from memory)⁵ | ✅ (skills/memory/rules/plans) |
@@ -330,6 +331,19 @@ like opencode. Context-window percentages use the per-model `limit.context` from
 layout as Claude).
 Backup is a strict whitelist of `cli/rollout`, `cli/agents` and `~/.agents/skills`:
 `~/.zcode/v2` (credentials) and the session database itself are **never** included.
+
+⁷ WorkBuddy (Tencent's desktop agent) runs the CodeBuddy Code engine inside the app and keeps
+everything under `~/.workbuddy`, so it is read like CodeBuddy with its own rules for where a turn
+ends and which lines are prompts. **No hooks are installed**: WorkBuddy blocks a tool call when a
+hook command is missing or fails, so a leftover entry could break it. Live cards come from the
+transcripts, its audit log (permission prompts) and its own database (titles, context window).
+**Scheduled automation runs are not shown anywhere** — not on the island, in history, sessions,
+search, audit or plans — but their tokens are counted. Rate limits show the per-model quota
+WorkBuddy's server writes into transcripts (free models only); the credit balance stays in the
+app. The open-session button uses WorkBuddy's own `workbuddy://chat/<id>` link; sessions can't be
+deleted from here. Backup uploads transcripts only after scrubbing them (WorkBuddy stores detected
+secrets in plain text there), plus memory, persona, rules and skills; the rest of `~/.workbuddy`
+holds credentials and is never included.
 
 ## Quick start
 

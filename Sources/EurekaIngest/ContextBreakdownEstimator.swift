@@ -116,6 +116,27 @@ public struct AgentContextProfile: Equatable, Sendable {
                 baselineSystemPromptTokens: defaultSystemPromptBaseline,
                 baselineBuiltinToolTokens: defaultBuiltinToolBaseline,
                 perMCPServerTokens: defaultPerMCPServerTokens)
+        case .workbuddy:
+            // The CodeBuddy Code engine under ~/.workbuddy (project dir `.workbuddy`). Its memory
+            // profile is named after the account (`memory/<userId>_memory.md`). Each prompt also
+            // carries several KB of injected context blocks, and the engine ships a Claude-sized
+            // tool set; overshoot is harmless, reconcile scales to the real total.
+            let memoryDir = home.appendingPathComponent(".workbuddy/memory")
+            let profiles = ((try? FileManager.default.contentsOfDirectory(
+                atPath: memoryDir.path)) ?? [])
+                .filter { $0.hasSuffix("_memory.md") }
+                .map { memoryDir.appendingPathComponent($0).path }
+            return AgentContextProfile(
+                skillDirs: [home.appendingPathComponent(".workbuddy/skills").path]
+                    + at(cwd, ".workbuddy/skills"),
+                mcpConfigFiles: [home.appendingPathComponent(".workbuddy/mcp.json").path]
+                    + at(cwd, ".mcp.json"),
+                memoryFiles: profiles + at(cwd, "CODEBUDDY.md") + at(cwd, "AGENTS.md"),
+                agentDirs: [home.appendingPathComponent(".workbuddy/agents").path]
+                    + at(cwd, ".workbuddy/agents"),
+                baselineSystemPromptTokens: 6_000,
+                baselineBuiltinToolTokens: 12_000,
+                perMCPServerTokens: defaultPerMCPServerTokens)
         default:
             // Sources with no config convention: no dirs, only the baselines + conversation
             // messages

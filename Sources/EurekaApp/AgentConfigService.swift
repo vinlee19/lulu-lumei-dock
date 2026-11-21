@@ -23,6 +23,8 @@ final class AgentConfigService: ObservableObject {
     /// ZCode subagent profiles (aggregated from run records' profileSnapshot, read-only; no
     /// definition files on disk)
     @Published private(set) var zcodeAgents: [AgentDefinition] = []
+    /// WorkBuddy agents: its own agents dirs plus agents of its installed plugins
+    @Published private(set) var workBuddyAgents: [AgentDefinition] = []
     @Published private(set) var codexProfiles: [CodexProfile] = []
     @Published private(set) var scanning = false
     /// Phase text while scanning; set to nil when done (the search field's small spinner is too
@@ -45,6 +47,7 @@ final class AgentConfigService: ObservableObject {
     private var allBuiltinAgents: [AgentDefinition] = []
     private var allKimiBuiltinAgents: [AgentDefinition] = []
     private var allZcodeAgents: [AgentDefinition] = []
+    private var allWorkBuddyAgents: [AgentDefinition] = []
     private var allProfiles: [CodexProfile] = []
 
     private var codexConfigURL: URL { EurekaCLI.codexConfigURL }
@@ -68,6 +71,7 @@ final class AgentConfigService: ObservableObject {
             var opencodeProjectRoots: [ProjectScopedRoot] = []
             var grokProjectRoots: [ProjectScopedRoot] = []
             var cursorProjectRoots: [ProjectScopedRoot] = []
+            var workBuddyProjectRoots: [ProjectScopedRoot] = []
             for (root, name) in ProjectScopeDiscovery.repoRoots(resolver: self.resolver) {
                 claudeProjectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".claude/agents", isDirectory: true),
@@ -81,6 +85,9 @@ final class AgentConfigService: ObservableObject {
                 cursorProjectRoots.append(ProjectScopedRoot(
                     root: root.appendingPathComponent(".cursor/agents", isDirectory: true),
                     source: .cursor, projectName: name))
+                workBuddyProjectRoots.append(ProjectScopedRoot(
+                    root: root.appendingPathComponent(".workbuddy/agents", isDirectory: true),
+                    source: .workbuddy, projectName: name))
             }
             let agents = AgentDefinitionIndexer.indexClaudeAgents(
                 systemRoot: AgentDefinitionIndexer.claudeAgentsRoot(),
@@ -100,6 +107,10 @@ final class AgentConfigService: ObservableObject {
             let kimiBuiltins = AgentDefinitionIndexer.builtinKimiAgents()
             let zcodeAgents = AgentDefinitionIndexer.indexZcodeObservedAgents(
                 agentsRoot: ZcodePaths.agentsRoot())
+            let workBuddyAgents = AgentDefinitionIndexer.indexWorkBuddyAgents(
+                systemRoot: WorkBuddyPaths.agentsRoot(), projectRoots: workBuddyProjectRoots)
+                + AgentDefinitionIndexer.indexPluginAgents(
+                    pluginsRoot: WorkBuddyPaths.pluginsRoot(), source: .workbuddy)
             let profiles = CodexProfileEditor.read(from: ConfigFile.read(self.codexConfigURL))
             DispatchQueue.main.async {
                 self.allAgents = agents
@@ -110,6 +121,7 @@ final class AgentConfigService: ObservableObject {
                 self.allBuiltinAgents = builtinAgents
                 self.allKimiBuiltinAgents = kimiBuiltins
                 self.allZcodeAgents = zcodeAgents
+                self.allWorkBuddyAgents = workBuddyAgents
                 self.allProfiles = profiles
                 self.scanning = false
                 self.scanPhase = nil
@@ -130,6 +142,7 @@ final class AgentConfigService: ObservableObject {
             builtinAgents = allBuiltinAgents
             kimiBuiltinAgents = allKimiBuiltinAgents
             zcodeAgents = allZcodeAgents
+            workBuddyAgents = allWorkBuddyAgents
             codexProfiles = allProfiles
             return
         }
@@ -146,6 +159,7 @@ final class AgentConfigService: ObservableObject {
         builtinAgents = allBuiltinAgents.filter(matchAgent)
         kimiBuiltinAgents = allKimiBuiltinAgents.filter(matchAgent)
         zcodeAgents = allZcodeAgents.filter(matchAgent)
+        workBuddyAgents = allWorkBuddyAgents.filter(matchAgent)
         codexProfiles = allProfiles.filter {
             [$0.name, $0.model, $0.personality, $0.reasoningEffort]
                 .compactMap { $0?.lowercased() }.joined(separator: " ").contains(query)

@@ -14,6 +14,10 @@ import EurekaKit
 ///   callId; a running agent's current tool is found by prefix-matching its prompt against each
 ///   subfile's first user message (observed to match one-to-one) and taking the last function_call
 ///   name in its tail window. agent id = callId.
+/// WorkBuddy (`dialect: .workbuddy`) uses `TaskCreate` for its todo list, so only Agent /
+/// AgentSwarm count there (`CodeBuddyDialect.subagentTools`). No WorkBuddy subagent transcript
+/// existed to check the first-message shape against, so its match is a substring search of the
+/// raw first message (it may be wrapped in context blocks) rather than a prefix match.
 public enum CodeBuddySubagentScanner {
     /// `sessionDir` = `<slug>/<sessionId>/` (the directory next to `<sessionId>.jsonl`).
     /// `parentTranscript` = `<sessionId>.jsonl` (its tail window is read for function_call/result
@@ -26,7 +30,8 @@ public enum CodeBuddySubagentScanner {
         sessionDir: URL,
         parentTranscript: URL?,
         turnStartedAt: Date? = nil,
-        tailBytes: Int = 1048576
+        tailBytes: Int = 1048576,
+        dialect: CodeBuddyDialect = .codebuddyCode
     ) -> [SubagentInfo] {
         guard let parentTranscript,
               let data = tail(of: parentTranscript, bytes: tailBytes)
@@ -51,7 +56,7 @@ public enum CodeBuddySubagentScanner {
             case "function_call":
                 guard
                     let name = root["name"] as? String,
-                    ["TaskCreate", "Agent", "AgentSwarm"].contains(name),
+                    dialect.subagentTools.contains(name),
                     let callId = root["callId"] as? String, !callId.isEmpty
                 else { continue }
                 let ts = CodeBuddyTranscriptDecoder.timestamp(root)
@@ -95,9 +100,13 @@ public enum CodeBuddySubagentScanner {
 
             var currentActivity: String?
             if status == .running, let prompt = spawn.prompt, !prompt.isEmpty {
-                if transcripts == nil { transcripts = subagentTranscripts(in: subagentsDir) }
+                if transcripts == nil {
+                    transcripts = subagentTranscripts(in: subagentsDir, dialect: dialect)
+                }
                 let needle = String(prompt.prefix(64))
-                if let match = transcripts?.first(where: { $0.firstPrompt.hasPrefix(needle) }) {
+                let matches: (String) -> Bool = dialect == .workbuddy
+                    ? { $0.contains(needle) } : { $0.hasPrefix(needle) }
+                if let match = transcripts?.first(where: { matches($0.firstPrompt) }) {
                     currentActivity = lastToolUse(in: match.url, tailBytes: 32768)
                 }
             }
@@ -125,7 +134,9 @@ public enum CodeBuddySubagentScanner {
 
     /// First user body of each agent-*.jsonl under subagents/ (used to locate a callId's transcript
     /// by prompt prefix)
-    private static func subagentTranscripts(in dir: URL) -> [(firstPrompt: String, url: URL)] {
+    private static func subagentTranscripts(
+        in dir: URL, dialect: CodeBuddyDialect
+    ) -> [(firstPrompt: String, url: URL)] {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil))?
             .filter { $0.lastPathComponent.hasPrefix("agent-") && $0.pathExtension == "jsonl" } ?? []
@@ -134,7 +145,8 @@ public enum CodeBuddySubagentScanner {
             guard let head = head(of: file, bytes: 8192),
                   let line = head.split(separator: UInt8(ascii: "\n")).first,
                   let root = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                  let text = CodeBuddyTranscriptDecoder.userText(root)
+                  let text = dialect == .workbuddy
+                    ? CodeBuddyDialect.inputText(root) : CodeBuddyTranscriptDecoder.userText(root)
             else { continue }
             out.append((text, file))
         }

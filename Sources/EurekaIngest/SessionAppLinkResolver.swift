@@ -21,9 +21,9 @@ public enum SessionAppLinkResolver {
                 "Library/Application Support/Claude/claude-code-sessions", isDirectory: true)
     }
 
-    /// Only these two sources have a desktop app to open; the rest need no file reads
+    /// Only these sources have a desktop app to open; the rest need no file reads
     public static func canResolve(_ source: AgentSource) -> Bool {
-        source == .claude || source == .codex
+        source == .claude || source == .codex || source == .workbuddy
     }
 
     public static func resolve(
@@ -39,6 +39,9 @@ public enum SessionAppLinkResolver {
         case .codex:
             return isCodexDesktopThread(sessionId: sessionId, sessionsRoot: codexSessionsRoot)
                 ? .codexDesktop(threadId: sessionId) : nil
+        case .workbuddy:
+            // Every WorkBuddy session lives in the app; its id is the deep link's id
+            return SessionAppLink.isUUID(sessionId) ? .workBuddy(sessionId: sessionId) : nil
         default:
             return nil
         }

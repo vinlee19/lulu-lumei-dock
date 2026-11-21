@@ -25,6 +25,9 @@ struct LimitsPanelView: View {
                 if let grok = service.grok {
                     LimitCard(snapshot: grok, forecasts: service.forecasts)
                 }
+                if let workbuddy = service.workbuddy {
+                    LimitCard(snapshot: workbuddy, forecasts: service.forecasts)
+                }
 
                 if let opencodeGo = service.opencodeGo {
                     LimitCard(snapshot: opencodeGo, forecasts: service.forecasts)
@@ -67,7 +70,7 @@ struct LimitsPanelView: View {
                 }
                 AntigravityOptInRow(settings: settings, service: service)
 
-                Text(L10n.text("Codex/Grok limits come from a local log snapshot (no network). Claude limits come first from Claude Code's own cached answer (~/.claude.json, no request) and fall back to an unofficial API, paced and backing off when rate-limited. Antigravity quotas (agy /usage) and the OpenCode Go allowance (opencode's own server, shown while the opencode service runs; without a Go plan or Console sign-in the card says so) come from each CLI itself and are fetched only when this page opens or you press refresh. Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae have no local limit source (Kimi quota is only on its membership page; Hermes bills through each provider subscription; Cursor quota is only on the website and in the IDE, with no local snapshot; Trae's session database is SQLCipher-encrypted, so no usage can be read locally), so they are not shown.", zhHans: "Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额优先读 Claude Code 自己缓存的最近结果（~/.claude.json，零请求），过旧时才走非官方接口，并限速、遇到限流自动退避。Antigravity 额度（agy /usage）与 OpenCode Go 额度（opencode 自己的服务，opencode 后台服务在运行时显示；没订阅或没登录 Console 时卡片会说明）由各自 CLI 提供，只在打开本页或点刷新时获取。Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。"))
+                Text(L10n.text("Codex/Grok limits come from a local log snapshot (no network). Claude limits come first from Claude Code's own cached answer (~/.claude.json, no request) and fall back to an unofficial API, paced and backing off when rate-limited. Antigravity quotas (agy /usage) and the OpenCode Go allowance (opencode's own server, shown while the opencode service runs; without a Go plan or Console sign-in the card says so) come from each CLI itself and are fetched only when this page opens or you press refresh. WorkBuddy shows the per-model quota its server writes into the session logs (free models only; the credit balance is only in the app). Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae have no local limit source (Kimi quota is only on its membership page; Hermes bills through each provider subscription; Cursor quota is only on the website and in the IDE, with no local snapshot; Trae's session database is SQLCipher-encrypted, so no usage can be read locally), so they are not shown.", zhHans: "Codex/Grok 限额来自本地日志快照（零网络请求）；Claude 限额优先读 Claude Code 自己缓存的最近结果（~/.claude.json，零请求），过旧时才走非官方接口，并限速、遇到限流自动退避。Antigravity 额度（agy /usage）与 OpenCode Go 额度（opencode 自己的服务，opencode 后台服务在运行时显示；没订阅或没登录 Console 时卡片会说明）由各自 CLI 提供，只在打开本页或点刷新时获取。WorkBuddy 显示其服务端写进会话日志的按模型额度（仅免费模型有；积分余额只在应用内可见）。Kimi / Gemini / Qwen / Hermes / CodeBuddy / Qoder / Cursor / Trae 无本地限额数据源（Kimi 配额仅官网会员页可见；Hermes 经各 provider 订阅计费；Cursor 配额只在官网与 IDE 内可见，本地不落配额快照；Trae 的会话库经 SQLCipher 加密，本地读不到任何用量），故不显示。"))
                     .font(Theme.font.themed(10))
                     .foregroundStyle(.tertiary)
             }

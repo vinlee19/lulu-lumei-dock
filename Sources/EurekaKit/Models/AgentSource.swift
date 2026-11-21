@@ -16,6 +16,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
     case cursor
     case trae
     case zcode
+    case workbuddy
 
     public var displayName: String {
         switch self {
@@ -33,6 +34,7 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
         case .cursor: return "Cursor"
         case .trae: return "Trae"
         case .zcode: return "ZCode"
+        case .workbuddy: return "WorkBuddy"
         }
     }
 
@@ -49,7 +51,12 @@ public enum AgentSource: String, Codable, Sendable, CaseIterable {
     /// would take every session with it, and writing DELETE into a live DB touches WAL, foreign-key
     /// cascades and FTS triggers (this app is always read-only on external DBs). The service layer
     /// and the UI share this one check so the UI never offers a delete button that can't work.
+    ///
+    /// WorkBuddy keeps one transcript file per session, but its own database (`workbuddy.db`
+    /// `sessions` rows) and side stores (`changes-index`, `file-history`, `artifact-index`,
+    /// `tasks`) all point at the session; trashing the transcript alone would leave WorkBuddy
+    /// showing a conversation whose history is gone.
     public var supportsSessionDeletion: Bool {
-        !usesSharedSessionDatabase
+        !usesSharedSessionDatabase && self != .workbuddy
     }
 }

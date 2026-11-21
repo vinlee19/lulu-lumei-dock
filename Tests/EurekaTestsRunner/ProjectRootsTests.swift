@@ -91,6 +91,8 @@ private func recentCwdsFrom(base: URL) -> [String] {
         qwenProjectsRoot: base.appendingPathComponent("qwen", isDirectory: true),
         grokSessionsRoot: base.appendingPathComponent("grok", isDirectory: true),
         codeBuddyProjectsRoot: base.appendingPathComponent("codebuddy", isDirectory: true),
+        workBuddyProjectsRoot: base.appendingPathComponent("workbuddy", isDirectory: true),
+        workBuddyLookup: nil,
         qoderProjectsRoot: base.appendingPathComponent("qoder", isDirectory: true),
         antigravityConversationsRoot: base.appendingPathComponent("antigravity", isDirectory: true),
         cursorStateDB: base.appendingPathComponent("cursor/User/globalStorage/state.vscdb"),

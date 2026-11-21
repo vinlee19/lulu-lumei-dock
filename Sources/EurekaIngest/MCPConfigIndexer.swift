@@ -71,6 +71,10 @@ public enum MCPConfigIndexer {
         case .opencode:
             return home.appendingPathComponent(".config/opencode/opencode.json")
         case .zcode: return home.appendingPathComponent(".zcode/cli/config.json")
+        // Read-only: WorkBuddy hands each session its own generated config
+        // (`--strict-mcp-config`), so this list is the user's servers, not what a session loads
+        // verbatim. `~/.workbuddy-ai/mcp.json` is a byte-identical copy and is not read twice.
+        case .workbuddy: return home.appendingPathComponent(".workbuddy/mcp.json")
         default: return nil
         }
     }
@@ -119,6 +123,7 @@ public enum MCPConfigIndexer {
         toml(globalConfigURL(for: .grok, home: home), source: .grok)
         json(globalConfigURL(for: .opencode, home: home), source: .opencode, container: "mcp")
         json(globalConfigURL(for: .zcode, home: home), source: .zcode)
+        json(globalConfigURL(for: .workbuddy, home: home), source: .workbuddy)
 
         return entries.sorted {
             ($0.name.lowercased(), $0.source.rawValue, $0.configPath)

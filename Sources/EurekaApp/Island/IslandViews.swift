@@ -470,6 +470,9 @@ extension AgentSource {
                 ? NSColor(srgbRed: 0.894, green: 0.894, blue: 0.909, alpha: 1)
                 : NSColor(srgbRed: 0.102, green: 0.102, blue: 0.118, alpha: 1)
         }))
+        // WorkBuddy's mark is a green gradient tile (#01C886 → #0EC8A9); the deeper end reads on
+        // both light and dark
+        case .workbuddy: return Color(red: 0.004, green: 0.784, blue: 0.525)  // #01C886
         }
     }
 }
@@ -708,6 +711,9 @@ enum SourceLogo {
         // ZCode (Z.ai) official mark is monochrome currentColor → two variants: dark ink for light,
         // light grey for dark
         case .zcode: name = dark ? "logo-zcode-dark" : "logo-zcode"
+        // WorkBuddy's official mark is a full-colour tile (lobe-icons workbuddy-color), visible on
+        // light and dark → one asset
+        case .workbuddy: name = "logo-workbuddy"
         case .opencode: return nil  // No asset: SourceBadge takes the code-drawn branch
         }
         lock.lock()
@@ -795,6 +801,10 @@ struct SourceBadge: View {
             // Fallback Z silhouette (the official Z is built from three chevron bands; solid
             // silhouette at 9pt)
             ZcodeMarkShape().fill(source.brandColor)
+        case .workbuddy:
+            // Fallback rounded tile (the official mark is a rounded gradient square; only when
+            // logo-workbuddy.svg is missing)
+            RoundedRectangle(cornerRadius: size * 0.22).fill(source.brandColor)
         case .opencode:
             EmptyView()
         }

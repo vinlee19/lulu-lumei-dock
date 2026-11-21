@@ -245,6 +245,11 @@ public enum SkillMemoryIndexer {
             roots.append(ProjectScopedRoot(
                 root: root.appendingPathComponent(".codebuddy/skills", isDirectory: true),
                 source: .codebuddy, projectName: name))
+            // WorkBuddy's engine reads project skills from `<cwd>/.workbuddy/skills`
+            // (CODEBUDDY_PROJECT_CONFIG_DIR=.workbuddy)
+            roots.append(ProjectScopedRoot(
+                root: root.appendingPathComponent(".workbuddy/skills", isDirectory: true),
+                source: .workbuddy, projectName: name))
             roots.append(ProjectScopedRoot(
                 root: root.appendingPathComponent(".qoder/skills", isDirectory: true),
                 source: .qoder, projectName: name))
@@ -300,9 +305,15 @@ public enum SkillMemoryIndexer {
     public static func claudePluginSkillsRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
+        pluginSkillsRoots(cache: claudeHome(environment: environment)
+            .appendingPathComponent("plugins/cache", isDirectory: true))
+    }
+
+    /// Skill roots of every plugin in a Claude-layout plugin cache
+    /// (`<cache>/<marketplace>/<plugin>[/<version>]/skills`). WorkBuddy's engine keeps its plugins
+    /// in the same layout under `~/.workbuddy/plugins/cache`.
+    public static func pluginSkillsRoots(cache: URL) -> [URL] {
         let fm = FileManager.default
-        let cache = claudeHome(environment: environment)
-            .appendingPathComponent("plugins/cache", isDirectory: true)
         func subdirs(_ url: URL) -> [URL] {
             ((try? fm.contentsOfDirectory(
                 at: url, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
@@ -350,6 +361,9 @@ public enum SkillMemoryIndexer {
         hermesDisabledSkills: Set<String> = [],
         cursorSkillsRoot: URL? = nil,
         codeBuddySkillsRoot: URL? = nil,
+        /// workbuddy: `~/.workbuddy/skills` (Claude-shape SKILL.md); its buddy-store and plugin
+        /// skills are read-only and go through `bundledRoots`
+        workBuddySkillsRoot: URL? = nil,
         qoderSkillsRoot: URL? = nil,
         /// zcode: skills live in the shared `~/.agents/skills` (SKILL.md has the same shape as
         /// Claude's)
@@ -435,6 +449,13 @@ public enum SkillMemoryIndexer {
                 codeBuddySkillsRoot, source: .codebuddy, enabled: true, scope: .system)
             result += scanSkillRoot(
                 disabledRoot(for: codeBuddySkillsRoot), source: .codebuddy, enabled: false,
+                scope: .system)
+        }
+        if let workBuddySkillsRoot {
+            result += scanSkillRoot(
+                workBuddySkillsRoot, source: .workbuddy, enabled: true, scope: .system)
+            result += scanSkillRoot(
+                disabledRoot(for: workBuddySkillsRoot), source: .workbuddy, enabled: false,
                 scope: .system)
         }
         // qoder: ~/.qoder-cn/skills (same shape as codebuddy; Qoder is not installed on this
@@ -597,6 +618,11 @@ public enum SkillMemoryIndexer {
         qwenHome: URL? = nil,
         hermesHome: URL? = nil,
         codeBuddyMemoryRoot: URL? = nil,
+        /// `~/.workbuddy`: the account memory profile (`memory/<userId>_memory.md`), the persona
+        /// workspaces (`user-<userId>-personal/`) and user rules (`rules/**/*.md`)
+        workBuddyHome: URL? = nil,
+        /// Every WorkBuddy working folder's `.workbuddy/memory` (daily logs, automation records)
+        workBuddyWorkspaceMemoryRoots: [URL] = [],
         qoderMemoriesRoot: URL? = nil,
         /// `~/.trae-cn/memory` (only the CN build has a memory library)
         traeMemoryRoot: URL? = nil,
@@ -803,6 +829,49 @@ public enum SkillMemoryIndexer {
             }
         }
 
+        // workbuddy writes all of these itself → Memory, except the persona's definition files
+        // and user rules → Instructions:
+        //   memory/<userId>_memory.md          ← account profile (WorkBuddy keeps a .bak beside it)
+        //   user-<userId>-personal/MEMORY.md   ← the persona's long-term memory
+        //   user-<userId>-personal/{SOUL,IDENTITY,USER,BOOTSTRAP}.md ← who the persona is
+        //   rules/**/*.md                      ← user rules
+        //   <folder>/.workbuddy/memory/**/*.md ← per-folder daily logs and automation records
+        if let workBuddyHome {
+            let global = L10n.text("Global", zhHans: "全局")
+            for file in enumerateMarkdown(
+                workBuddyHome.appendingPathComponent("memory", isDirectory: true)) {
+                add(file, source: .workbuddy, scope: global, kind: .userManaged)
+            }
+            for persona in subdirectories(of: workBuddyHome)
+            where persona.lastPathComponent.hasPrefix("user-")
+                && persona.lastPathComponent.hasSuffix("-personal") {
+                add(persona.appendingPathComponent("MEMORY.md"), source: .workbuddy,
+                    scope: "MEMORY", kind: .userManaged)
+                for name in ["SOUL", "IDENTITY", "USER", "BOOTSTRAP"] {
+                    add(persona.appendingPathComponent("\(name).md"), source: .workbuddy,
+                        scope: name, kind: .instructions)
+                }
+            }
+            for rule in enumerateRules(
+                workBuddyHome.appendingPathComponent("rules", isDirectory: true)) {
+                add(rule.url, source: .workbuddy, scope: rule.scope, kind: .instructions)
+            }
+        }
+        for memoryRoot in workBuddyWorkspaceMemoryRoots {
+            // <folder>/.workbuddy/memory → the folder name is the project
+            let folder = memoryRoot.deletingLastPathComponent().deletingLastPathComponent()
+                .lastPathComponent
+            let prefix = memoryRoot.standardizedFileURL.path + "/"
+            for file in enumerateMarkdown(memoryRoot) {
+                let relative = file.standardizedFileURL.path.hasPrefix(prefix)
+                    ? String(file.standardizedFileURL.path.dropFirst(prefix.count))
+                    : file.lastPathComponent
+                add(file, source: .workbuddy,
+                    scope: (relative as NSString).deletingPathExtension,
+                    projectName: folder, kind: .userManaged)
+            }
+        }
+
         // qoder global memory memories/<user-hash>/global/<category>/**/*.md:
         // scope is the category path relative to global/ (falls back to the file name when there is
         // no category)
@@ -904,6 +973,12 @@ public enum SkillMemoryIndexer {
                 scope: name, projectName: name, kind: .instructions)
             add(root.appendingPathComponent(".kimi-code/AGENTS.md"),
                 source: .kimi, scope: name, projectName: name, kind: .instructions)
+            // WorkBuddy project rules <repo>/.workbuddy/rules/**/*.md
+            for rule in enumerateRules(
+                root.appendingPathComponent(".workbuddy/rules", isDirectory: true)) {
+                add(rule.url, source: .workbuddy, scope: rule.scope,
+                    projectName: name, kind: .instructions)
+            }
         }
 
         // Codex project instructions are discovered only along the root → cwd chain of actual

@@ -48,6 +48,10 @@ final class CLIToolsService: ObservableObject {
                 return L10n.text(
                     "Download and install ZCode from https://z.ai (the CLI is bundled with the desktop app)",
                     zhHans: "从 https://z.ai 下载安装 ZCode（CLI 随桌面版分发）")
+            case "workbuddy":
+                return L10n.text(
+                    "Install the WorkBuddy desktop app from Tencent (its agent runs inside the app; there is no command line)",
+                    zhHans: "安装腾讯 WorkBuddy 桌面版（agent 在应用内运行，没有命令行）")
             default:
                 return installCommand
             }
@@ -129,6 +133,12 @@ final class CLIToolsService: ObservableObject {
              command: "zcode", npmPackage: "",
              installCommand: "Download and install ZCode from https://z.ai (the CLI is bundled with the desktop app)",
              updateCommand: ""),
+        // WorkBuddy runs its agent inside /Applications/WorkBuddy.app with no command on PATH;
+        // the version comes from the bundle like ZCode's, and the app updates itself
+        Tool(id: "workbuddy", name: "WorkBuddy", source: .workbuddy,
+             command: "workbuddy", npmPackage: "",
+             installCommand: "Install the WorkBuddy desktop app from Tencent (its agent runs inside the app; there is no command line)",
+             updateCommand: ""),
     ]
     @Published private(set) var detected = false
 
@@ -148,7 +158,10 @@ final class CLIToolsService: ObservableObject {
                 if tool.id == "zcode" {
                     // ZCode CLI ships with the app and has no command on PATH → read ZCode.app's
                     // version
-                    version = Self.zcodeBundleVersion()
+                    version = Self.bundleVersion(
+                        app: URL(fileURLWithPath: "/Applications/ZCode.app"))
+                } else if tool.id == "workbuddy" {
+                    version = Self.bundleVersion(app: WorkBuddyPaths.appBundle)
                 } else {
                     version = Self.localVersion(command: tool.command)
                 }
@@ -163,9 +176,9 @@ final class CLIToolsService: ObservableObject {
         }
     }
 
-    /// CFBundleShortVersionString of /Applications/ZCode.app (nil when not installed)
-    private static func zcodeBundleVersion() -> String? {
-        let url = URL(fileURLWithPath: "/Applications/ZCode.app/Contents/Info.plist")
+    /// CFBundleShortVersionString of an app bundle (nil when not installed)
+    private static func bundleVersion(app: URL) -> String? {
+        let url = app.appendingPathComponent("Contents/Info.plist")
         guard let dict = NSDictionary(contentsOf: url) as? [String: Any],
               let version = dict["CFBundleShortVersionString"] as? String,
               !version.isEmpty

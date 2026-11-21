@@ -683,6 +683,7 @@ final class IslandViewModel: ObservableObject {
         switch jump?.target {
         case .appLink(.claudeDesktop(let localSessionId))?: target = "claude-desktop(\(localSessionId))"
         case .appLink(.codexDesktop(let threadId))?: target = "codex-desktop(\(threadId))"
+        case .appLink(.workBuddy(let sessionId))?: target = "workbuddy(\(sessionId))"
         case .hostApp(let binding)?: target = "host-app(\(binding.bundleId ?? binding.app ?? "?"))"
         case nil: target = "none"
         }

@@ -359,6 +359,9 @@ enum EurekaCLI {
                 stateDBs: { HermesPaths.allStateDBs() }, store: store)
             let codebuddy = CodeBuddyUsageScanner(
                 projectsRoot: CodeBuddyPaths.projectsRoot(), store: store)
+            let workbuddy = CodeBuddyUsageScanner(
+                projectsRoot: WorkBuddyPaths.projectsRoot(), store: store,
+                dialect: .workbuddy, workspaceRoot: WorkBuddyPaths.workspaceRoot())
             let cursor = CursorUsageScanner(
                 dbPath: CursorPaths.globalStateDB(), store: store,
                 workspaceStorageRoot: CursorPaths.workspaceStorageRoot(),
@@ -380,6 +383,7 @@ enum EurekaCLI {
             let newQwen = try qwen.scanOnce()
             let newHermes = try hermes.scanOnce()
             let newCodeBuddy = try codebuddy.scanOnce()  // qoder has no tokens (CN backend reports all zeros), not scanned
+            let newWorkBuddy = try workbuddy.scanOnce()
             let newCursor = try cursor.scanOnce()  // cursor has tokens but no prices (cost is always 0)
             let newZcode = try zcode.scanOnce()
             // Antigravity (experimental): the CLI debug entry always scans (in the app it is gated
@@ -389,10 +393,11 @@ enum EurekaCLI {
                 cwdResolver: { AntigravityPaths.cwd(dbURL: $0) }).scanOnce()
             try? zcode.recordPromptCounts()
             FileHandle.standardError.write(Data(
-                L10n.format("Scan complete: claude +%@ records, codex +%@ records, OpenCode +%@ records, grok tools/usage +%@, kimi +%@ records, gemini +%@ records, qwen +%@ records, hermes +%@ records, codebuddy +%@ records, cursor +%@ records, zcode +%@ records, antigravity +%@ records\n", zhHans: "扫描完成：claude +%@ 条，codex +%@ 条，OpenCode +%@ 条，grok 工具/用量 +%@，kimi +%@ 条，gemini +%@ 条，qwen +%@ 条，hermes +%@ 条，codebuddy +%@ 条，cursor +%@ 条，zcode +%@ 条，antigravity +%@ 条\n",
+                L10n.format("Scan complete: claude +%@ records, codex +%@ records, OpenCode +%@ records, grok tools/usage +%@, kimi +%@ records, gemini +%@ records, qwen +%@ records, hermes +%@ records, codebuddy +%@ records, workbuddy +%@ records, cursor +%@ records, zcode +%@ records, antigravity +%@ records\n", zhHans: "扫描完成：claude +%@ 条，codex +%@ 条，OpenCode +%@ 条，grok 工具/用量 +%@，kimi +%@ 条，gemini +%@ 条，qwen +%@ 条，hermes +%@ 条，codebuddy +%@ 条，workbuddy +%@ 条，cursor +%@ 条，zcode +%@ 条，antigravity +%@ 条\n",
                     String(newClaude), String(newCodex), String(newOpencode), String(newGrok),
                     String(newKimi), String(newGemini), String(newQwen), String(newHermes),
-                    String(newCodeBuddy), String(newCursor), String(newZcode), String(newAntigravity)).utf8))
+                    String(newCodeBuddy), String(newWorkBuddy), String(newCursor), String(newZcode),
+                    String(newAntigravity)).utf8))
 
             let now = Date()
             let today = try store.usage.totalsByModel(

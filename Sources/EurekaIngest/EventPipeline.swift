@@ -29,6 +29,7 @@ public final class EventPipeline {
     private var cursorTailer: CursorStateTailer?
     private var cursorTranscriptTailer: CursorTranscriptTailer?
     private var zcodeTailer: ZcodeRolloutTailer?
+    private var workBuddyChannel: WorkBuddyLiveChannel?
 
     /// Latest Codex rate-limit snapshot (consumed by the M6 panel)
     public private(set) var latestCodexRateLimits: RateLimitSnapshot?
@@ -55,6 +56,8 @@ public final class EventPipeline {
         cursorCLIHome: URL = CursorPaths.cliHome(),
         zcodeRolloutRoot: URL = ZcodePaths.rolloutRoot(),
         zcodeDbPath: URL = ZcodePaths.db(),
+        workBuddyProjectsRoot: URL = WorkBuddyPaths.projectsRoot(),
+        workBuddyAuditLogRoot: URL = WorkBuddyPaths.auditLogRoot(),
         auditHandler: AuditHandler? = nil,
         handler: @escaping Handler
     ) {
@@ -169,6 +172,13 @@ public final class EventPipeline {
             [weak self] event, isStale in
             self?.ingest(event, isStale: isStale)
         }
+        // workbuddy: no hooks on purpose (its engine blocks on a missing hook); transcripts +
+        // audit log + its database instead, scheduled runs excluded (see WorkBuddyLiveChannel)
+        workBuddyChannel = WorkBuddyLiveChannel(
+            projectsRoot: workBuddyProjectsRoot, auditLogRoot: workBuddyAuditLogRoot) {
+            [weak self] event, isStale in
+            self?.ingest(event, isStale: isStale)
+        }
     }
 
     public func start() {
@@ -186,6 +196,7 @@ public final class EventPipeline {
         cursorTailer?.start(pollInterval: 2)
         cursorTranscriptTailer?.start(pollInterval: 2)
         zcodeTailer?.start(pollInterval: 2)
+        workBuddyChannel?.start(pollInterval: 2)
         // Always-on Claude transcript watch (including state rebuild on the launch scan): old
         // sessions started before hooks were installed emit no hook events, so this is their only
         // visible channel
@@ -212,6 +223,7 @@ public final class EventPipeline {
         cursorTailer?.stop()
         cursorTranscriptTailer?.stop()
         zcodeTailer?.stop()
+        workBuddyChannel?.stop()
         claudeWatcher?.stop()
     }
 

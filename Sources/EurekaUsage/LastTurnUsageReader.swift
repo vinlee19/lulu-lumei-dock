@@ -28,7 +28,9 @@ public enum LastTurnUsageReader {
             return lastGeminiUsage(path: transcriptPath)
         case .qwen:
             return lastQwenUsage(path: transcriptPath)
-        case .codebuddy:
+        case .codebuddy, .workbuddy:
+            // WorkBuddy embeds the same engine: the last usage-bearing line's inputTokens
+            // (cache included) is the context size
             return lastCodeBuddyUsage(path: transcriptPath)
         case .grok:
             // grok's updates.jsonl only has per-turn totals (the sum of several model calls in a

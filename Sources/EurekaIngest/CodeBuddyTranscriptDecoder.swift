@@ -16,31 +16,38 @@ import EurekaKit
 /// - `ai-title`: `{aiTitle:"..."}` (AI-generated session title)
 /// Unknown types are ignored, never thrown. The caller supplies session id / cwd from the path and
 /// line fields.
+///
+/// WorkBuddy embeds the same engine and writes the same family under `~/.workbuddy`, plus
+/// `session-meta` (title timeline) and `credit-usage` lines. Where the two read differently (turn
+/// start/end, prompt text, usage lines, subagent tools) the rule comes from `CodeBuddyDialect`;
+/// every entry point defaults to `.codebuddyCode`, which keeps CodeBuddy's 2026-07 behaviour.
 public enum CodeBuddyTranscriptDecoder {
     // MARK: - Lifecycle decoding
 
     /// Decodes one line → domain event (0 or 1)
     public static func decode(
-        line: Data, sessionId: String, cwd: String?
+        line: Data, sessionId: String, cwd: String?,
+        dialect: CodeBuddyDialect = .codebuddyCode
     ) -> TaskEvent? {
         guard
             let object = try? JSONSerialization.jsonObject(with: line),
             let root = object as? [String: Any]
         else { return nil }
-        return decode(root: root, sessionId: sessionId, cwd: cwd)
+        return decode(root: root, sessionId: sessionId, cwd: cwd, dialect: dialect)
     }
 
     /// Decodes an already-parsed line (shared with side-channel extraction after the tailer's
     /// single JSON parse)
     public static func decode(
-        root: [String: Any], sessionId: String, cwd: String?
+        root: [String: Any], sessionId: String, cwd: String?,
+        dialect: CodeBuddyDialect = .codebuddyCode
     ) -> TaskEvent? {
         guard let type = root["type"] as? String else { return nil }
         let ts = timestamp(root) ?? Date()
         let lineCwd = (root["cwd"] as? String) ?? cwd
 
         func event(_ kind: TaskEvent.Kind) -> TaskEvent {
-            TaskEvent(source: .codebuddy, sessionId: sessionId, kind: kind,
+            TaskEvent(source: dialect.source, sessionId: sessionId, kind: kind,
                       timestamp: ts, cwd: lineCwd)
         }
 
@@ -48,48 +55,65 @@ public enum CodeBuddyTranscriptDecoder {
         case "message":
             switch root["role"] as? String {
             case "user":
-                // skipRun = a local command echo / system-injected meta line, not a real new turn
-                if (root["providerData"] as? [String: Any])?["skipRun"] as? Bool == true {
-                    return nil
-                }
-                guard let text = userText(root) else { return nil }
-                return event(.taskStarted(title: summarizeTitle(text)))
+                // codebuddyCode: skipRun marks a local command echo / system-injected meta line;
+                // workbuddy: only startsNewUserRequest starts a turn (see CodeBuddyDialect)
+                guard dialect.startsTurn(root) else { return nil }
+                return event(.taskStarted(title: userText(root, dialect: dialect)
+                    .flatMap { summarizeTitle($0) }))
             case "assistant":
-                guard root["status"] as? String == "completed" else { return nil }
-                return event(.taskFinished(outcome: .success, title: nil, detail: nil))
+                guard let end = dialect.turnEnd(root) else { return nil }
+                return event(.taskFinished(outcome: end.outcome, title: nil, detail: end.detail))
             default:
                 return nil
             }
 
         case "function_call":
-            return event(.activity(tool: root["name"] as? String))
+            if dialect == .workbuddy, root["name"] as? String == "AskUserQuestion" {
+                // The engine blocks until the person answers in WorkBuddy; the matching
+                // function_call_result (below) resumes the task
+                let question = toolCall(root).flatMap { firstQuestion($0.args) }
+                return event(.waiting(reason: .idle, message: question))
+            }
+            guard let call = toolCall(root) else { return event(.activity(tool: nil)) }
+            return event(.activity(
+                tool: dialect.effectiveToolName(name: call.name, args: call.args)))
 
-        case "ai-title", "summary":
+        case "function_call_result":
+            // Only the question's answer matters to the lifecycle: it ends the wait
+            guard dialect == .workbuddy, root["name"] as? String == "AskUserQuestion"
+            else { return nil }
+            return event(.activity(tool: nil))
+
+        case "ai-title", "summary", "session-meta":
             // titleUpdate only retitles an existing task (TaskStore never creates one for it),
             // so it is safe for unknown sessions and never creates phantom tasks
-            guard let title = title(root) else { return nil }
+            guard let title = title(root, dialect: dialect) else { return nil }
             return event(.titleUpdate(title: title))
 
         default:
-            // reasoning / function_call_result / file-history-snapshot / unknown: ignored
+            // reasoning / file-history-snapshot / credit-usage / unknown: ignored
             return nil
         }
     }
 
+    /// First question text of an AskUserQuestion call (`{questions: [{question, …}]}`)
+    static func firstQuestion(_ args: [String: Any]) -> String? {
+        guard let questions = args["questions"] as? [[String: Any]],
+              let text = (questions.first?["question"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty
+        else { return nil }
+        return String(text.prefix(200))
+    }
+
     // MARK: - Side-channel extraction (reused by tailer/scanner/indexer; all tolerate missing fields)
 
-    /// Body of a message+user line (concatenated content input_text); nil for skipRun/empty body
-    public static func userText(_ root: [String: Any]) -> String? {
-        guard root["type"] as? String == "message",
-              root["role"] as? String == "user",
-              (root["providerData"] as? [String: Any])?["skipRun"] as? Bool != true,
-              let blocks = root["content"] as? [[String: Any]]
-        else { return nil }
-        let text = blocks
-            .compactMap { $0["type"] as? String == "input_text" ? $0["text"] as? String : nil }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+    /// Body of a message+user line (concatenated content input_text); nil for skipRun/empty body.
+    /// WorkBuddy: only the `<user_query>` of a turn start or steer message (see CodeBuddyDialect).
+    public static func userText(
+        _ root: [String: Any], dialect: CodeBuddyDialect = .codebuddyCode
+    ) -> String? {
+        dialect.userText(root)
     }
 
     /// Body of a message+assistant line (concatenated content output_text); nil otherwise
@@ -105,16 +129,31 @@ public enum CodeBuddyTranscriptDecoder {
         return text.isEmpty ? nil : text
     }
 
-    /// Title text of an ai-title / summary line; nil for other types
-    public static func title(_ root: [String: Any]) -> String? {
+    /// Title text of an ai-title / summary line; nil for other types. WorkBuddy also keeps a title
+    /// timeline in `session-meta.meta["codebuddy.ai/sessionTitle"]` (`[{type:"ai-title",
+    /// aiTitle}]`, newest last); it writes `ai-title` lines for only a few sessions.
+    public static func title(
+        _ root: [String: Any], dialect: CodeBuddyDialect = .codebuddyCode
+    ) -> String? {
         switch root["type"] as? String {
         case "ai-title":
             return (root["aiTitle"] as? String).flatMap { summarizeTitle($0) }
         case "summary":
             return (root["summary"] as? String).flatMap { summarizeTitle($0) }
+        case "session-meta" where dialect == .workbuddy:
+            let meta = root["meta"] as? [String: Any]
+            let timeline = meta?["codebuddy.ai/sessionTitle"] as? [[String: Any]]
+            return timeline?.last.flatMap { $0["aiTitle"] as? String }
+                .flatMap { summarizeTitle($0) }
         default:
             return nil
         }
+    }
+
+    /// Title rank used when several sources compete: ai-title / session-meta (2) > summary (1);
+    /// the first user text is 0 and the WorkBuddy database title outranks them all
+    static func titleRank(_ root: [String: Any]) -> Int {
+        root["type"] as? String == "summary" ? 1 : 2
     }
 
     /// (tool name, parsed arguments) of a function_call line; arguments is a JSON string
@@ -130,41 +169,14 @@ public enum CodeBuddyTranscriptDecoder {
         return (name, args)
     }
 
-    /// Normalized usage carried by a function_call line; nil when there is no usage or it is all
-    /// zero. The observed main format is camelCase (inputTokens includes the cached part → input =
-    /// inputTokens − cached, cacheRead = cached); snake_case (input_tokens etc., Claude-style
-    /// excluding cache → no subtraction) is the fallback.
-    public static func usage(_ root: [String: Any]) -> (model: String?, usage: Usage)? {
-        guard root["type"] as? String == "function_call" else { return nil }
-        let providerData = root["providerData"] as? [String: Any]
-        let message = root["message"] as? [String: Any]
-        guard let dict = (providerData?["usage"] ?? message?["usage"]) as? [String: Any]
-        else { return nil }
-        let model = (providerData?["model"] ?? message?["model"]) as? String
-
-        func int(_ dict: [String: Any], _ keys: [String]) -> Int {
-            for key in keys {
-                if let number = dict[key] as? NSNumber { return number.intValue }
-            }
-            return 0
-        }
-
-        let rawInput = int(dict, ["inputTokens", "input_tokens"])
-        let output = int(dict, ["outputTokens", "output_tokens"])
-        // camelCase: cache reads in inputTokensDetails[0].cached_tokens;
-        // snake_case: flat cache_read_input_tokens / cached_tokens
-        var cached = int(dict, ["cache_read_input_tokens", "cached_tokens"])
-        if cached == 0,
-           let details = dict["inputTokensDetails"] as? [[String: Any]] {
-            cached = details.reduce(0) { $0 + int($1, ["cached_tokens"]) }
-        }
-        // camelCase inputTokens includes cache reads (OpenAI convention); snake_case does not
-        // (Claude convention)
-        let includesCache = dict["inputTokens"] != nil
-        let input = includesCache ? max(0, rawInput - cached) : rawInput
-        let usage = Usage(input: input, output: output, cacheRead: cached)
-        guard usage.total > 0 else { return nil }
-        return (model, usage)
+    /// Normalized usage carried by a line (codebuddyCode: function_call lines only); nil when there
+    /// is no usage or it is all zero. The rules live in `CodeBuddyDialect.usage`, shared with the
+    /// usage scanner.
+    public static func usage(
+        _ root: [String: Any], dialect: CodeBuddyDialect = .codebuddyCode
+    ) -> (model: String?, usage: Usage)? {
+        guard let step = dialect.usage(root) else { return nil }
+        return (step.model, Usage(input: step.input, output: step.output, cacheRead: step.cacheRead))
     }
 
     /// Normalized token usage (CodeBuddy has no cache-creation concept)
