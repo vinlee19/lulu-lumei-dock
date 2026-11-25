@@ -6,6 +6,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-25
+
 ### Added
 
 - **The MCP page says what each server is for.** A server's detail now opens
@@ -2435,7 +2437,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   gauges, and session / skill / memory / agent management for Claude Code,
   Codex CLI, opencode, Grok, and Antigravity.
 
-[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.44.0...HEAD
+[Unreleased]: https://github.com/vinlee19/lulu-lumei-dock/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.45.0
 [0.44.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.44.0
 [0.43.0]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.43.0
 [0.42.1]: https://github.com/vinlee19/lulu-lumei-dock/releases/tag/v0.42.1
