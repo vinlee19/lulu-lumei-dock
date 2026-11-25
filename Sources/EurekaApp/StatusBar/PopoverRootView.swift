@@ -11,9 +11,9 @@ final class PopoverNavigation: ObservableObject {
     /// sidebar's bottom brand area must jump straight to Settings → About, and cross-page jumps are
     /// this class's job anyway.
     @Published var settingsSection: SettingsView.SettingsSection = .general
-    /// The type each hub last showed. The sidebar has one "Capabilities" and one "Knowledge"
+    /// The type each hub last showed. The sidebar has one "Extensions" and one "Knowledge"
     /// entry; clicking either returns to its last type instead of always landing on the first.
-    @Published var lastCapabilityTab: PopoverRootView.Tab = .skills
+    @Published var lastExtensionTab: PopoverRootView.Tab = .skills
     @Published var lastKnowledgeTab: PopoverRootView.Tab = .memory
 }
 
@@ -64,17 +64,21 @@ struct PopoverRootView: View {
 
         /// Name shown in the sidebar and on tabs. rawValue keeps its original Chinese text so the
         /// existing enum identity doesn't change.
+        ///
+        /// The hub types keep their English names in every language: they are the words the
+        /// agents themselves use (`/skills`, `.claude/agents` subagents, `memory/`), so the
+        /// navigation matches what users see there. Chinese sentences keep the Chinese nouns.
         var title: String {
             switch self {
             case .history: return L10n.text("History", zhHans: "历史")
             case .sessions: return L10n.text("Sessions", zhHans: "会话")
-            case .skills: return L10n.text("Skills", zhHans: "技能")
-            case .memory: return L10n.text("Memory", zhHans: "记忆")
-            case .instructions: return L10n.text("Instructions", zhHans: "指令")
-            case .plans: return L10n.text("Plans", zhHans: "计划")
-            case .agents: return L10n.text("Agents", zhHans: "子代理")
+            case .skills: return "Skills"
+            case .memory: return "Memory"
+            case .instructions: return "Instructions"
+            case .plans: return "Plans"
+            case .agents: return "Subagents"
             case .mcp: return "MCP"
-            case .prompts: return L10n.text("Prompts", zhHans: "提示词")
+            case .prompts: return "Prompts"
             case .usage: return L10n.text("Usage", zhHans: "用量")
             case .limits: return L10n.text("Limits", zhHans: "限额")
             case .audit: return L10n.text("Audit", zhHans: "审计")
@@ -105,25 +109,26 @@ struct PopoverRootView: View {
         /// squares); the selected item is emphasized by a purple capsule
         var tileColor: Color? { nil }
 
-        /// What an agent can do: skills, MCP servers, subagents. One sidebar entry, anchored on
-        /// `.skills`.
-        static let capabilityTabs: [Tab] = [.skills, .mcp, .agents]
-        /// What an agent knows and reads into every session: memories it wrote and instructions
-        /// the user wrote. One sidebar entry, anchored on `.memory`. Plans and prompts are
-        /// neither: both are what sessions produced (prompts are extracted from transcripts), so
-        /// they sit with sessions in the Activity group.
-        static let knowledgeTabs: [Tab] = [.memory, .instructions]
-        var isCapability: Bool { Self.capabilityTabs.contains(self) }
+        /// What extends an agent: skills, MCP servers, subagents. One sidebar entry, anchored on
+        /// `.skills`. Not called "Plugins": in Claude Code and Codex a plugin is a concrete
+        /// bundle of skills, servers, agents and hooks, and that name stays free for it.
+        static let extensionTabs: [Tab] = [.skills, .mcp, .agents]
+        /// What an agent knows or has written down: memories it kept, instructions the user
+        /// wrote, plans it made and the prompts it was given. One sidebar entry, anchored on
+        /// `.memory`; users look for plans and prompts here rather than beside the history.
+        static let knowledgeTabs: [Tab] = [.memory, .instructions, .plans, .prompts]
+        var isExtension: Bool { Self.extensionTabs.contains(self) }
         var isKnowledge: Bool { Self.knowledgeTabs.contains(self) }
         /// The hub this tab belongs to (its type switcher's segments), or nil for plain pages.
         var hubTabs: [Tab]? {
-            isCapability ? Self.capabilityTabs : (isKnowledge ? Self.knowledgeTabs : nil)
+            isExtension ? Self.extensionTabs : (isKnowledge ? Self.knowledgeTabs : nil)
         }
-        var sidebarAnchor: Tab { isCapability ? .skills : (isKnowledge ? .memory : self) }
+        var sidebarAnchor: Tab { isExtension ? .skills : (isKnowledge ? .memory : self) }
+        /// Hub names stay English in every language, like the types inside them.
         var sidebarTitle: String {
             switch self {
-            case .skills: return L10n.text("Capabilities", zhHans: "能力")
-            case .memory: return L10n.text("Knowledge", zhHans: "知识")
+            case .skills: return "Extensions"
+            case .memory: return "Knowledge"
             default: return title
             }
         }
@@ -142,9 +147,10 @@ struct PopoverRootView: View {
         /// names are read for the current language each time and can't go into a static let.
         static var sidebarGroups: [(label: String, tabs: [Tab])] {
             [
-                (L10n.text("Activity", zhHans: "活动"), [.history, .sessions, .plans, .prompts]),
+                (L10n.text("Activity", zhHans: "活动"), [.history, .sessions]),
                 // Two hubs (anchors `.skills` and `.memory`); each type switcher lives on its page.
-                (L10n.text("Agent", zhHans: "Agent"), [.skills, .memory]),
+                // English in every language, like the hub names under it.
+                ("Library", [.skills, .memory]),
                 (L10n.text("Security", zhHans: "安全"), [.audit]),
                 (L10n.text("Usage", zhHans: "用量"), [.usage, .limits]),
                 (L10n.text("System", zhHans: "系统"), [.settings]),
@@ -194,7 +200,7 @@ struct PopoverRootView: View {
         // Usage "by session" ranking → Sessions tab with the session selected (select is
         // idempotent, assuming a single instance; AppDelegate creates only one PopoverRootView)
         .onChange(of: navigation.tab) { _, tab in
-            if tab.isCapability { navigation.lastCapabilityTab = tab }
+            if tab.isExtension { navigation.lastExtensionTab = tab }
             if tab.isKnowledge { navigation.lastKnowledgeTab = tab }
         }
         .onReceive(NotificationCenter.default.publisher(for: .eurekaRevealSession)) { note in
@@ -279,7 +285,7 @@ struct PopoverRootView: View {
                 // to a single reveal lifecycle
                 skillMemoryService.focusPath = nil
                 plansService.focusPath = nil
-                let target = tab == .skills ? navigation.lastCapabilityTab
+                let target = tab == .skills ? navigation.lastExtensionTab
                     : (tab == .memory ? navigation.lastKnowledgeTab : tab)
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                     navigation.tab = target
@@ -315,13 +321,7 @@ struct PopoverRootView: View {
         case .sessions:
             SessionsView(service: sessionBrowser, settings: settings,
                          skillMemory: skillMemoryService, plans: plansService)
-        case .plans:
-            PlansView(service: plansService)
-        case .prompts:
-            PromptsView(
-                service: promptsService, sessionBrowser: sessionBrowser,
-                skillMemory: skillMemoryService)
-        case .skills, .memory, .instructions, .agents, .mcp:
+        case .skills, .memory, .instructions, .plans, .prompts, .agents, .mcp:
             KnowledgeHubView(
                 navigation: navigation, tabs: navigation.tab.hubTabs ?? [],
                 skillMemoryService: skillMemoryService, usageService: usageService,

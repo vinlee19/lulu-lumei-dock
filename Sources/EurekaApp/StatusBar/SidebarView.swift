@@ -38,16 +38,15 @@ struct SidebarView: View {
             // The item area must scroll. `MainWindowController` uses `hosting.sizingOptions = []`
             // -- overflowing content is **clipped** rather than growing the window, and
             // `window.minSize` 540 is the frame height including the title bar (the content area is
-            // only ~512). Measured: 12 items + 5 group labels + brand footer leave only a dozen or
-            // so pt of slack at 512; one more group or a larger system font size would clip the
-            // footer. Wrapped in a ScrollView nothing can be clipped no matter how many groups;
+            // only ~512). 10 items + 5 group labels + brand footer fit at 512 (12 items once left only
+            // a dozen or so pt of slack); a larger system font size could still clip the footer. Wrapped in a ScrollView nothing can be clipped no matter how many groups;
             // with slack the content naturally hugs the top.
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(PopoverRootView.Tab.sidebarGroups.enumerated()), id: \.offset) {
                         _, group in
                         // Group label (small grey emphasis, replacing a plain divider) Spacing is
-                        // derived from the minimum window height: **12** items + 5 group labels
+                        // derived from the minimum window height: **10** items + 5 group labels
                         // should all be visible within ~512pt of content height where possible (if
                         // not, nothing clips -- the outer ScrollView is the fallback). Adding the
                         // Instructions tab tightened this and SidebarNavButton's row height by 1pt
