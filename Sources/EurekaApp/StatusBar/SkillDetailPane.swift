@@ -31,7 +31,6 @@ struct SkillDetailPane: View {
     @State private var installTarget: AgentSource?
     @State private var installNote: String?
     @State private var showMore = false
-    @State private var showInstall = false
     @State private var sessionIndexVersion = 0
 
     private var hard: Bool { ThemeStyle.current.isHardEdged }
@@ -259,35 +258,6 @@ struct SkillDetailPane: View {
         }
     }
 
-    /// Pop-up of the tools that do not have this skill yet; picking one asks before copying.
-    private func installMenu(compact: Bool) -> some View {
-        Button {
-            showInstall.toggle()
-        } label: {
-            HStack(spacing: 5) {
-                Text(compact
-                    ? L10n.text("Install…", zhHans: "安装到…")
-                    : L10n.text("Install to other tools", zhHans: "安装到其他工具"))
-                    .font(Theme.font.themed(compact ? 11 : 12))
-                Image(systemName: "chevron.down").font(Theme.font.themed(9, .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            .foregroundStyle(.primary)
-            .modifier(PopupButtonChrome(height: compact ? 24 : 28, horizontalPadding: compact ? 9 : 11))
-        }
-        .buttonStyle(.plain)
-        .themedPopup(isPresented: $showInstall) {
-            PopupList(title: L10n.text("Copy this skill to", zhHans: "把这个技能复制到")) {
-                ForEach(unconfigured, id: \.self) { source in
-                    PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {
-                        showInstall = false
-                        installTarget = source
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Sections
 
     private var whatSection: some View {
@@ -485,23 +455,18 @@ struct SkillDetailPane: View {
     }
 
     private var installedSection: some View {
-        section(L10n.text("Installed in", zhHans: "装在哪里")) {
+        section(L10n.text("Installed in", zhHans: "装在哪里"), trailing: {
+            if !unconfigured.isEmpty {
+                InstallTargetsMenu(
+                    caption: L10n.text("Copy this skill to", zhHans: "把这个技能复制到"),
+                    sources: unconfigured
+                ) { installTarget = $0 }
+            }
+        }) {
             VStack(spacing: 0) {
                 ForEach(group.copies) { entry in
                     copyRow(entry)
                     if entry.id != group.copies.last?.id { Divider() }
-                }
-            }
-            if !unconfigured.isEmpty {
-                HStack(spacing: 6) {
-                    Text(L10n.text("Can also be installed to", zhHans: "还可以装到"))
-                        .font(Theme.font.themed(11.5))
-                        .foregroundStyle(Theme.textSecondary)
-                    ForEach(unconfigured.prefix(6), id: \.self) { source in
-                        SourceLogoTile(source: source, size: 22).opacity(0.45)
-                            .help(source.displayName)
-                    }
-                    installMenu(compact: true)
                 }
             }
             if let installNote {
@@ -690,6 +655,64 @@ struct PaneButton: View {
             PaneButtonLabel(title, icon: icon, kind: kind, small: small)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// "Install to other tools ▾": the one install control of the skill and MCP detail panes.
+/// Sits in the trailing slot of the "Installed in" section header and lists only the tools
+/// that can take the item; `extra` adds rows after a divider (MCP's project install) and
+/// `unavailable` folds the tools that can't into one caption instead of greyed-out tiles.
+struct InstallTargetsMenu<Extra: View>: View {
+    let caption: String
+    let sources: [AgentSource]
+    var unavailable: [(source: AgentSource, reason: String)] = []
+    /// Extra rows; call the passed closure to close the pop-up before acting.
+    @ViewBuilder var extra: (_ dismiss: @escaping () -> Void) -> Extra
+    let onPick: (AgentSource) -> Void
+
+    @State private var isOpen = false
+
+    var body: some View {
+        Button {
+            isOpen.toggle()
+        } label: {
+            PaneButtonLabel(L10n.text("Install to other tools", zhHans: "安装到其他工具"),
+                            chevron: true, small: true)
+        }
+        .buttonStyle(.plain)
+        .themedPopup(isPresented: $isOpen, alignment: .trailing) {
+            PopupList(title: caption) {
+                ForEach(sources, id: \.self) { source in
+                    PopupRow(source.displayName, leading: { SourceBadge(source: source, size: 14) }) {
+                        isOpen = false
+                        onPick(source)
+                    }
+                }
+                extra { isOpen = false }
+                if !unavailable.isEmpty {
+                    Divider().padding(.vertical, 3)
+                    Text(L10n.format("Can't be written to: %@", zhHans: "不支持写入：%@",
+                                     unavailable.map(\.source.displayName)
+                                         .joined(separator: L10n.text(", ", zhHans: "、"))))
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .help(unavailable.map { "\($0.source.displayName): \($0.reason)" }
+                            .joined(separator: "\n"))
+                }
+            }
+        }
+    }
+}
+
+extension InstallTargetsMenu where Extra == EmptyView {
+    init(caption: String, sources: [AgentSource],
+         unavailable: [(source: AgentSource, reason: String)] = [],
+         onPick: @escaping (AgentSource) -> Void) {
+        self.init(caption: caption, sources: sources, unavailable: unavailable,
+                  extra: { _ in EmptyView() }, onPick: onPick)
     }
 }
 
