@@ -913,17 +913,27 @@ struct LayoutToggle: View {
     var cases: [KnowledgeLayout] = KnowledgeLayout.withoutGraph
 
     var body: some View {
-        // Always icon + word: an icon alone made users guess what "the third one" does. The hub
-        // pages dropped their repeated title, which leaves room for the words at 840pt.
+        // Icon + word whenever they fit: an icon alone made users guess what "the third one"
+        // does. At the narrowest window the Memory toolbar (search, new, scan time, refresh and
+        // three modes) runs out of room and the words were clipped to one glyph each, so it
+        // falls back to icons there; the tooltips still name each mode.
+        ViewThatFits(in: .horizontal) {
+            tray(labeled: true)
+            tray(labeled: false)
+        }
+    }
+
+    private func tray(labeled: Bool) -> some View {
         CapsuleTabTray {
             ForEach(cases, id: \.self) { item in
                 CapsuleTabButton(
-                    title: item.title, icon: item.icon, fillWidth: false,
+                    title: labeled ? item.title : "", icon: item.icon, fillWidth: false,
                     isSelected: layout == item
                 ) { layout = item }
-                    .help(item.help)
+                    .help(item.title + " · " + item.help)
             }
         }
+        .fixedSize()
     }
 }
 
