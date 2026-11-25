@@ -46,11 +46,17 @@ public enum MCPOAuth {
         public var tokenEndpoint: String
         public var clientID: String
         public var obtainedAt: Date
+        /// Origin (`scheme://host[:port]`) of the server URL this token was issued for. Tokens
+        /// are stored per server **name**, and a name is not an identity: a repo's `.mcp.json`
+        /// can reuse a name with another URL. nil on tokens stored before this field existed.
+        public var resource: String?
 
         public init(
             accessToken: String, refreshToken: String? = nil, expiresIn: Int? = nil,
-            tokenEndpoint: String, clientID: String, obtainedAt: Date
+            tokenEndpoint: String, clientID: String, obtainedAt: Date,
+            resource: String? = nil
         ) {
+            self.resource = resource
             self.accessToken = accessToken
             self.refreshToken = refreshToken
             self.expiresIn = expiresIn
@@ -58,6 +64,27 @@ public enum MCPOAuth {
             self.clientID = clientID
             self.obtainedAt = obtainedAt
         }
+    }
+
+    /// `scheme://host[:port]` of a URL, lowercased, default ports dropped; nil unless http(s)
+    public static func tokenOrigin(of urlText: String) -> String? {
+        guard let url = URL(string: urlText), let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        let defaultPort = scheme == "https" ? 443 : 80
+        let port = url.port.flatMap { $0 == defaultPort ? nil : ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
+    }
+
+    /// Whether a stored token may be attached to a request for `urlText`. A token bound to an
+    /// origin goes only there. An unbound (older) token is sent only for config the user wrote
+    /// themselves (`repoSupplied == false`), never for a URL that came out of a repository.
+    public static func tokenMayBeSent(
+        _ token: TokenSet, to urlText: String, repoSupplied: Bool
+    ) -> Bool {
+        guard let target = tokenOrigin(of: urlText) else { return false }
+        if let bound = token.resource { return bound == target }
+        return !repoSupplied
     }
 
     public enum CallbackResult: Equatable, Sendable {

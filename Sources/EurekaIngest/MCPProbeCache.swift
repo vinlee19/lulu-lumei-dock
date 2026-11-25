@@ -19,12 +19,34 @@ public struct MCPProbeSnapshot: Codable, Equatable, Sendable {
     /// this key still decode). Lets MCPAuthRouter route the authorization flow with zero network,
     /// surviving restarts.
     public var authScheme: String?
+    /// Which status this was ("connected", "unauthorized", "httpError:502"…), so the label can be
+    /// shown in the current language instead of the one in use when the probe ran. Old caches
+    /// without this key still decode and fall back to the stored `label`.
+    public var kind: String?
     public var checkedAt: Date
+
+    /// The status label in the current interface language
+    public var displayLabel: String {
+        guard let kind else { return label }
+        let parts = kind.split(separator: ":", maxSplits: 1).map(String.init)
+        switch parts[0] {
+        case "connected": return MCPProbe.Status.connected(.init()).label
+        case "notMCP": return MCPProbe.Status.notMCP.label
+        case "unauthorized": return MCPProbe.Status.unauthorized(code: 401, authServer: nil).label
+        case "httpError":
+            return MCPProbe.Status.httpError(parts.count > 1 ? Int(parts[1]) ?? 0 : 0).label
+        case "unreachable": return MCPProbe.Status.unreachable("").label
+        case "commandFound": return MCPProbe.Status.commandFound("").label
+        case "commandMissing": return MCPProbe.Status.commandMissing.label
+        default: return label
+        }
+    }
 
     public init(
         label: String, tone: String, detail: String? = nil,
-        hint: String? = nil, authScheme: String? = nil, checkedAt: Date
+        hint: String? = nil, authScheme: String? = nil, kind: String? = nil, checkedAt: Date
     ) {
+        self.kind = kind
         self.label = label
         self.tone = tone
         self.detail = detail
@@ -36,6 +58,15 @@ public struct MCPProbeSnapshot: Codable, Equatable, Sendable {
     /// Derived from the probe status (single entry point; tests pin the fidelity of each branch)
     public init(status: MCPProbe.Status, authScheme: String? = nil, checkedAt: Date) {
         self.label = status.label
+        switch status {
+        case .connected: self.kind = "connected"
+        case .notMCP: self.kind = "notMCP"
+        case .unauthorized: self.kind = "unauthorized"
+        case .httpError(let code): self.kind = "httpError:\(code)"
+        case .unreachable: self.kind = "unreachable"
+        case .commandFound: self.kind = "commandFound"
+        case .commandMissing: self.kind = "commandMissing"
+        }
         switch status.tone {
         case .ok: self.tone = "ok"
         case .warning: self.tone = "warning"

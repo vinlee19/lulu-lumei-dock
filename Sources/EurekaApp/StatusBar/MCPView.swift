@@ -57,7 +57,7 @@ struct MCPView: View {
                 } else if wide {
                     splitLayout
                 } else if let name = detailName {
-                    detail(name)
+                    detail(name, inSplit: false)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 } else {
                     VStack(spacing: 0) {
@@ -87,10 +87,11 @@ struct MCPView: View {
         }
     }
 
-    private func detail(_ name: String) -> some View {
+    /// In the split layout the list stays visible, so the pane needs no way back
+    private func detail(_ name: String, inSplit: Bool) -> some View {
         MCPDetailView(
             service: service, usage: usageService, serverName: name,
-            onBack: { withAnimation(.easeOut(duration: 0.15)) { detailName = nil } },
+            onBack: inSplit ? nil : { withAnimation(.easeOut(duration: 0.15)) { detailName = nil } },
             onDeleteEntry: { deletingEntry = $0 },
             onEdit: { entry in
                 withAnimation(.easeOut(duration: 0.15)) {
@@ -118,7 +119,7 @@ struct MCPView: View {
                     .frame(width: SkillsSplitView.listWidth)
                 KnowledgePane {
                     if let name = detailName {
-                        detail(name).id(name)
+                        detail(name, inSplit: true).id(name)
                     } else {
                         MCPOverviewPane(service: service, usageService: usageService) { name in
                             withAnimation(.easeOut(duration: 0.15)) { detailName = name }
@@ -169,6 +170,18 @@ struct MCPView: View {
                 }
                 .padding(6)
             }
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                probeBar
+                if let error = service.lastError {
+                    Text(error)
+                        .font(Theme.font.themed(10))
+                        .foregroundStyle(Theme.goldFg)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
     }
 
@@ -273,8 +286,8 @@ struct MCPView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Transport distribution (brand gradient segments, following the Agents page's model
-    /// distribution)
+    /// Transport distribution (neutral shades: the brand colour is reserved for selection and
+    /// primary actions)
     private var transportSegments: [StatOverviewCard.Segment] {
         var counts: [String: Int] = [:]
         for entry in service.servers { counts[entry.transport, default: 0] += 1 }
@@ -282,7 +295,7 @@ struct MCPView: View {
         return counts.sorted { $0.value > $1.value }.enumerated().map { index, pair in
             StatOverviewCard.Segment(
                 label: pair.key, count: pair.value,
-                color: Theme.brand.opacity(shades[min(index, shades.count - 1)]))
+                color: Theme.textSecondary.opacity(shades[min(index, shades.count - 1)]))
         }
     }
 
@@ -371,7 +384,7 @@ struct MCPView: View {
                     }
                 }
                 if let error = service.lastError {
-                    Text(error).font(Theme.font.themed(10)).foregroundStyle(.orange)
+                    Text(error).font(Theme.font.themed(10)).foregroundStyle(Theme.goldFg)
                 }
             }
             .padding(22)
@@ -544,6 +557,7 @@ struct MCPListWell<Content: View>: View {
 /// compact 7pt grouped-table look.
 struct MCPToolRowView: View {
     let tool: MCPToolSummary
+    var access = MCPToolAccess()
     let expanded: Bool
     let onToggle: () -> Void
 
@@ -551,11 +565,13 @@ struct MCPToolRowView: View {
 
     var body: some View {
         let params = tool.params ?? []
+        let details = tool.paramDetails ?? []
         let expandable = !params.isEmpty || (tool.description?.count ?? 0) > 120
+            || !access.rules.isEmpty
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(tool.name)
-                    .font(Theme.font.themed(11, .medium))
+                    .font(Theme.font.code(11, .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if let title = tool.title, !title.isEmpty, title != tool.name {
@@ -567,6 +583,7 @@ struct MCPToolRowView: View {
                 if tool.readOnly == true { TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true) }
                 if tool.destructive == true { TagChip(L10n.text("Destructive", zhHans: "破坏性"), tint: mcpToneColor("bad")) }
                 if tool.hasOutputSchema == true { TagChip(L10n.text("Structured output", zhHans: "结构化输出"), neutral: true) }
+                ForEach(access.chips, id: \.self) { TagChip($0, neutral: true) }
                 Spacer(minLength: 0)
                 if expandable {
                     Image(systemName: "chevron.down")
@@ -582,7 +599,37 @@ struct MCPToolRowView: View {
                     .lineLimit(expanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: expanded)
             }
-            if expanded, !params.isEmpty {
+            if expanded, !details.isEmpty {
+                // Name, type and description per parameter (probed with a current build)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.text("Parameters", zhHans: "参数"))
+                        .font(Theme.font.themed(9.5))
+                        .foregroundStyle(.tertiary)
+                    ForEach(details, id: \.name) { param in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(param.name + (param.required ? "*" : ""))
+                                .font(Theme.font.code(10, .medium))
+                                .foregroundStyle(.primary)
+                            if let type = param.type {
+                                Text(type)
+                                    .font(Theme.font.code(9.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if let description = param.description {
+                                Text(mcpFlatDescription(description))
+                                    .font(Theme.font.themed(10))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    Text(L10n.text("* required", zhHans: "* 必填"))
+                        .font(Theme.font.themed(9))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.top, 2)
+            } else if expanded, !params.isEmpty {
+                // Cache written before parameter details were kept: names only
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(L10n.text("Parameters", zhHans: "参数"))
                         .font(Theme.font.themed(9.5))
@@ -594,6 +641,21 @@ struct MCPToolRowView: View {
                         .font(Theme.font.themed(9))
                         .foregroundStyle(.tertiary)
                 }
+            }
+            if expanded, !access.rules.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.text("Agent settings that apply", zhHans: "生效的 agent 设置"))
+                        .font(Theme.font.themed(9.5))
+                        .foregroundStyle(.tertiary)
+                    ForEach(access.rules, id: \.self) { rule in
+                        Text(rule)
+                            .font(Theme.font.code(9.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .padding(.top, 2)
             }
         }
         .padding(.horizontal, ThemeStyle.current.isHardEdged ? 10 : 8)
@@ -608,6 +670,60 @@ struct MCPToolRowView: View {
         }
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: expanded)
+    }
+}
+
+/// What Claude Code and Codex are configured to do with one tool, ready for display. Each side is
+/// nil when the server is not configured in that agent. Read-only: mirrors the agents' own
+/// settings (`MCPToolPermissionIndex`).
+struct MCPToolAccess {
+    var claude: MCPToolPermissionIndex.ClaudeAccess?
+    var codex: MCPToolPermissionIndex.CodexAccess?
+
+    /// Claude Code runs it without asking
+    var isAllowed: Bool { claude?.everywhere == .allowed }
+    /// Some agent blocks it, hides it, or asks every time
+    var isRestricted: Bool {
+        claude?.everywhere == .denied || claude?.everywhere == .ask || codex?.exposed == false
+    }
+
+    /// Short labels for the collapsed row. Nothing for the default behaviour, so a row without
+    /// chips means "no rule" and the list stays quiet.
+    var chips: [String] {
+        var chips: [String] = []
+        switch claude?.everywhere {
+        case .allowed: chips.append(L10n.text("Claude: allowed", zhHans: "Claude 已允许"))
+        case .ask: chips.append(L10n.text("Claude: asks", zhHans: "Claude 每次询问"))
+        case .denied: chips.append(L10n.text("Claude: denied", zhHans: "Claude 已禁止"))
+        case nil: break
+        }
+        if let codex {
+            if !codex.exposed {
+                chips.append(L10n.text("Codex: off", zhHans: "Codex 未启用"))
+            } else if let mode = codex.approvalMode {
+                // Shown as written in config.toml: the docs do not define every value
+                chips.append(L10n.format("Codex approval: %@", zhHans: "Codex 审批：%@", mode))
+            }
+        }
+        return chips
+    }
+
+    /// One line per matching Claude rule: decision, the rule as written, and where it lives
+    var rules: [String] {
+        (claude?.rules ?? []).map { rule in
+            let decision: String
+            switch rule.decision {
+            case .allowed: decision = "allow"
+            case .ask: decision = "ask"
+            case .denied: decision = "deny"
+            }
+            let home = NSHomeDirectory()
+            let path = rule.path.hasPrefix(home) ? "~" + rule.path.dropFirst(home.count) : rule.path
+            let scope = rule.projectName.map {
+                L10n.format(" (only in %@)", zhHans: "（仅 %@）", $0)
+            } ?? ""
+            return "\(decision)  \(rule.pattern)  ·  \(path)\(scope)"
+        }
     }
 }
 
@@ -776,8 +892,8 @@ private struct MCPRow: View {
                                     : mcpToneColor(snapshot.tone))
                                 .frame(width: 6, height: 6)
                                 .help(stale
-                                    ? L10n.format("Last probe: %@ (over 7 days ago — probe again)", zhHans: "上次检测：%@（已超过 7 天，建议重新检测）", String(snapshot.label))
-                                    : L10n.format("Last probe: %@", zhHans: "上次检测：%@", String(snapshot.label)))
+                                    ? L10n.format("Last probe: %@ (over 7 days ago — probe again)", zhHans: "上次检测：%@（已超过 7 天，建议重新检测）", String(snapshot.displayLabel))
+                                    : L10n.format("Last probe: %@", zhHans: "上次检测：%@", String(snapshot.displayLabel)))
                         }
                         Text(entry.name)
                             .font(Theme.font.themed(13, .medium))
@@ -793,7 +909,9 @@ private struct MCPRow: View {
                             TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                         }
                     }
-                    if let summary = entry.commandSummary ?? entry.urlSummary {
+                    // What the server says it is, when known; its command line otherwise
+                    if let summary = toolInfo?.instructionsHeadline ?? toolInfo?.serverTitle
+                        ?? entry.commandSummary ?? entry.urlSummary {
                         Text(summary)
                             .font(Theme.font.themed(10.5))
                             .foregroundStyle(.secondary)
@@ -843,7 +961,7 @@ private struct MCPStatsTrailing<Control: View>: View {
                 .frame(width: 112, alignment: .trailing)
             Text(usageText)
                 .font(Theme.font.themedMono(11, .semibold))
-                .foregroundStyle(callStat.map { $0.calls > 0 } == true ? AnyShapeStyle(Theme.brandFg) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(callStat.map { $0.calls > 0 } == true ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                 .lineLimit(1)
                 .frame(width: 84, alignment: .trailing)
             control()
@@ -930,7 +1048,8 @@ private struct MCPDetailView: View {
     @ObservedObject var service: MCPService
     @ObservedObject var usage: UsageService
     let serverName: String
-    let onBack: () -> Void
+    /// nil in the split layout, where the list is still on screen
+    let onBack: (() -> Void)?
     let onDeleteEntry: (MCPServerEntry) -> Void
     let onEdit: (MCPServerEntry) -> Void
     /// "Edit headers / environment variables" entry: opens the edit form with the matching
@@ -959,34 +1078,62 @@ private struct MCPDetailView: View {
     /// Idle cleanup (remove from every source) confirmation and feedback
     @State private var removeAllConfirm = false
     @State private var removeAllNote: String?
+    @State private var showMore = false
+    @State private var introExpanded = false
+    /// nil = follow the default (folded while the server is healthy)
+    @State private var connectionExpanded: Bool?
+    /// Tool list filter by what the agents allow: all / allowed / restricted
+    @State private var permissionFilter = "all"
 
     /// Live entries: the service rescans after delete / install, and this refreshes along with it
     private var entries: [MCPServerEntry] { service.entries(named: serverName) }
     private var primary: MCPServerEntry? { entries.first }
 
+    private var key: String { serverName.lowercased() }
+    private var cache: MCPToolCacheEntry? { service.toolCache[key] }
+    private var probing: Bool { service.isProbing(name: serverName) }
+    /// First config location Eureka may rewrite (local-scope ones are read-only)
+    private var editable: MCPServerEntry? { entries.first { !MCPService.isReadOnly($0) } }
+    private var hard: Bool { ThemeStyle.current.isHardEdged }
+    /// Most recent probe result across this server's config locations
+    private var latestSnapshot: (entry: MCPServerEntry, snapshot: MCPProbeSnapshot)? {
+        entries
+            .compactMap { entry in service.probeSnapshots[entry.id].map { (entry, $0) } }
+            .max { $0.1.checkedAt < $1.1.checkedAt }
+            .map { (entry: $0.0, snapshot: $0.1) }
+    }
+
+    /// One pane, sections separated by a rule and a title (the Skills detail shape): what the
+    /// server is and offers comes first, then how it is connected, used and installed.
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
+        Group {
             if entries.isEmpty {
                 EmptyStateView(
                     icon: ToolKind.mcp.icon, title: L10n.text("This server is no longer in any config", zhHans: "该 server 已不在任何配置中"),
-                    hint: nil, actionTitle: L10n.text("Back", zhHans: "返回"), action: onBack)
+                    hint: nil, actionTitle: onBack == nil ? nil : L10n.text("Back", zhHans: "返回"),
+                    action: onBack)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        definitionSection
+                        header
+                        statusLine
+                        actions
+                        introSection
+                        toolsSection
                         connectionSection
-                        runtimeSection
                         activitySection
-                        matrixSection
-                        occurrencesSection
+                        placementSection
+                        definitionSection
                     }
-                    .padding(Theme.spacing.page)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onAppear { loadActivity() }
+                .onAppear {
+                    loadActivity()
+                    service.probeIfNeeded(name: serverName)
+                }
             }
         }
     }
@@ -995,54 +1142,249 @@ private struct MCPDetailView: View {
         usage.loadMCPServerActivity(server: serverName) { activity = $0 }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 8) {
-            Button(action: onBack) {
-                HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(Theme.font.themed(10, .semibold))
-                    Text(L10n.text("Back", zhHans: "返回")).font(Theme.font.themed(11))
+    // MARK: Header / status / actions
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(Theme.font.themed(12, .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius.tile, style: .continuous)
+                                .fill(Theme.surfaceSecondary))
                 }
+                .buttonStyle(.plain)
+                .help(L10n.text("Back to the list", zhHans: "返回清单"))
             }
-            .buttonStyle(.borderless)
-            MCPIconTile(size: 26)
-            Text(serverName)
-                .font(Theme.font.themed(15, .bold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let transport = primary?.transport {
-                TagChip(transport, neutral: true)
+            MCPIconTile(size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(serverName)
+                    .font(Theme.font.themed(17, .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(scopeLine)
+                    .font(Theme.font.themed(11.5))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
-    // MARK: Definition card
+    /// "Display name · transport · which agents have it"
+    private var scopeLine: String {
+        var parts: [String] = []
+        if let title = cache?.serverTitle ?? cache?.serverName, title.lowercased() != key {
+            parts.append(title)
+        }
+        if let transport = primary?.transport { parts.append(transport) }
+        var seen = Set<AgentSource>()
+        let sources = entries.compactMap { seen.insert($0.source).inserted ? $0.source.displayName : nil }
+        parts.append(sources.joined(separator: L10n.text(", ", zhHans: "、")))
+        return parts.joined(separator: " · ")
+    }
 
-    @ViewBuilder
-    private var definitionSection: some View {
-        if let primary {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    sectionTitle(L10n.text("Definition", zhHans: "定义"))
-                    CardActionButton(icon: "doc.on.doc", size: 20,
-                                     help: L10n.text("Copy as mcpServers JSON (secret values omitted)", zhHans: "复制为 mcpServers JSON（不含密钥值）")) {
+    private var statusLine: some View {
+        HStack(spacing: 7) {
+            if probing {
+                ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 10, height: 10)
+                Text(L10n.text("Reading what this server offers…", zhHans: "正在读取这个 server 提供的内容…"))
+            } else if let latest = latestSnapshot {
+                Circle().fill(mcpToneColor(latest.snapshot.tone)).frame(width: 7, height: 7)
+                Text([
+                    latest.snapshot.displayLabel,
+                    latest.snapshot.detail,
+                    relativeFormatter.localizedString(for: latest.snapshot.checkedAt, relativeTo: Date())
+                        + (mcpSnapshotStale(latest.snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""),
+                ].compactMap { $0 }.joined(separator: " · "))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Circle().fill(Theme.disabledGray).frame(width: 7, height: 7)
+                Text(L10n.text("Not checked yet", zhHans: "尚未检测"))
+            }
+        }
+        .font(Theme.font.themed(11.5))
+        .foregroundStyle(Theme.textSecondary)
+    }
+
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 10, lineSpacing: 10) {
+                PaneButton(
+                    probing ? L10n.text("Checking…", zhHans: "检测中…") : L10n.text("Check again", zhHans: "重新检测"),
+                    icon: "waveform.path.ecg", kind: .primary
+                ) { service.probe(entries) }
+                    .disabled(probing)
+                    .help(primary?.transport == "stdio"
+                        ? L10n.text("Briefly starts the configured command to read its tools, then exits", zhHans: "会短暂启动配置的命令读取工具清单，读完即退出")
+                        : L10n.text("Asks the server for its description and tool list", zhHans: "向 server 读取介绍与工具清单"))
+                if let editable {
+                    PaneButton(L10n.text("Edit", zhHans: "编辑"), icon: "pencil") { onEdit(editable) }
+                }
+                moreMenu
+            }
+            if let note = copyNote ?? removeAllNote ?? installNote {
+                Text(note).font(Theme.font.themed(10.5)).foregroundStyle(Theme.textSecondary)
+            }
+        }
+        .themedConfirm(
+            L10n.format("Remove “%@” from every config?", zhHans: "从所有配置移除「%@」？", String(serverName)),
+            isPresented: $removeAllConfirm,
+            message: L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(removable.map(\.configPath).joined(separator: "\n"))),
+            confirm: L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(removable.count)),
+            destructive: true
+        ) { runRemoveEverywhere() }
+    }
+
+    private var removable: [MCPServerEntry] { entries.filter { !MCPService.isReadOnly($0) } }
+
+    private var moreMenu: some View {
+        Button {
+            showMore.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "ellipsis").font(Theme.font.themed(12, .semibold))
+                Text(L10n.text("More", zhHans: "更多")).font(Theme.font.themed(12.5))
+            }
+            .foregroundStyle(.primary)
+            .modifier(PopupButtonChrome(height: 30, horizontalPadding: 13))
+        }
+        .buttonStyle(.plain)
+        .themedPopup(isPresented: $showMore) {
+            PopupList {
+                if let primary {
+                    PopupRow(L10n.text("Copy as mcpServers JSON", zhHans: "复制为 mcpServers JSON"), systemImage: "doc.on.doc") {
+                        showMore = false
                         service.copyDefinitionJSON(primary) { ok in
                             copyNote = ok ? L10n.text("Copied (secret values left blank)", zhHans: "已复制（密钥值以空串占位）") : L10n.text("Copy failed", zhHans: "复制失败")
                             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { copyNote = nil }
                         }
                     }
-                    if let note = copyNote {
-                        Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
+                    PopupRow(L10n.text("Show config in Finder", zhHans: "在 Finder 中显示配置"), systemImage: "folder") {
+                        showMore = false
+                        service.reveal(path: primary.configPath)
                     }
                 }
+                if !removable.isEmpty {
+                    Divider().padding(.vertical, 3)
+                    PopupRow(L10n.text("Remove from all sources…", zhHans: "从所有源移除…"), systemImage: "trash", destructive: true) {
+                        showMore = false
+                        removeAllConfirm = true
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: What it provides (the server's own instructions; a tool overview when it sent none)
+
+    private var introSection: some View {
+        section(L10n.text("What it provides", zhHans: "它提供什么")) {
+            if let text = cache?.instructions, !text.isEmpty {
+                let long = text.count > 700 || text.split(whereSeparator: \.isNewline).count > 12
+                ZStack(alignment: .bottom) {
+                    MarkdownRichText(text: text)
+                        .frame(maxWidth: 680, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxHeight: introExpanded || !long ? nil : 190, alignment: .top)
+                        .clipped()
+                    if long && !introExpanded {
+                        if hard {
+                            Rectangle().fill(Theme.hairline).frame(height: 2)
+                        } else {
+                            LinearGradient(
+                                colors: [Theme.surface.opacity(0), Theme.surface],
+                                startPoint: .top, endPoint: .bottom)
+                                .frame(height: 48)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    if long {
+                        PaneButton(introExpanded
+                            ? L10n.text("Collapse", zhHans: "收起")
+                            : L10n.text("Show all", zhHans: "展开全文"), small: true) {
+                            withAnimation(.easeOut(duration: 0.15)) { introExpanded.toggle() }
+                        }
+                    }
+                    Text(L10n.text("Written by the server itself — the same instructions every agent reads when it connects.", zhHans: "由 server 自己提供——各 agent 连接它时读到的也是这段说明。"))
+                        .font(Theme.font.themed(11))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                }
+            } else if let cache {
+                Text(overview(of: cache))
+                    .font(Theme.font.themed(12.5))
+                    .lineSpacing(3)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: 620, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(L10n.text("This server sent no description of its own, so this is put together from its tool list.", zhHans: "这个 server 没有自带文字介绍，以上根据它的工具清单整理。"))
+                    .font(Theme.font.themed(11))
+                    .foregroundStyle(Theme.textTertiary)
+            } else {
+                Text(probing
+                    ? L10n.text("Reading the server’s description…", zhHans: "正在读取 server 的介绍…")
+                    : L10n.text("Nothing read from this server yet. Its description shows here after a successful check.", zhHans: "还没有从这个 server 读到内容，检测成功后介绍会显示在这里。"))
+                    .font(Theme.font.themed(12.5))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+
+    /// Fallback introduction built from what the probe measured: counts and the first few tools
+    private func overview(of cache: MCPToolCacheEntry) -> String {
+        var counts = [L10n.format("%@ tools", zhHans: "%@ 个工具", String(cache.toolCount))]
+        if let prompts = cache.promptCount, prompts > 0 {
+            counts.append(L10n.format("%@ prompts", zhHans: "%@ 个提示词", String(prompts)))
+        }
+        if let resources = cache.resourceCount, resources > 0 {
+            counts.append(L10n.format("%@ resources", zhHans: "%@ 个资源", String(resources)))
+        }
+        let name = cache.serverTitle ?? cache.serverName ?? serverName
+        var text = L10n.format("%1$@ provides %2$@.", zhHans: "%1$@ 提供 %2$@。",
+                               name, counts.joined(separator: L10n.text(", ", zhHans: "、")))
+        let tools = (cache.tools ?? []).prefix(3)
+        if !tools.isEmpty {
+            let lines = tools.map { tool -> String in
+                let label = tool.title ?? tool.name
+                guard let description = tool.description, !description.isEmpty else { return label }
+                let first = mcpFlatDescription(description)
+                    .split(whereSeparator: { ".。\n".contains($0) }).first.map(String.init) ?? ""
+                return first.isEmpty ? label : "\(label) — \(first)"
+            }
+            text += "\n" + lines.map { "• \($0)" }.joined(separator: "\n")
+            if cache.toolCount > tools.count {
+                text += "\n" + L10n.format("…and %@ more below.", zhHans: "……另有 %@ 个见下方。",
+                                           String(cache.toolCount - tools.count))
+            }
+        }
+        return text
+    }
+
+    // MARK: Definition
+
+    @ViewBuilder
+    private var definitionSection: some View {
+        if let primary {
+            section(L10n.text("Definition", zhHans: "定义")) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let command = primary.commandSummary {
                         labeledMono(L10n.text("Command", zhHans: "命令"), command)
                     }
                     if let url = primary.urlSummary {
                         labeledMono(L10n.text("URL", zhHans: "地址"), url)
+                    }
+                    if let version = cache?.serverVersion {
+                        labeledMono(L10n.text("Version", zhHans: "版本"), version)
+                    }
+                    if let proto = cache?.protocolVersion {
+                        labeledMono(L10n.text("Protocol", zhHans: "协议"), proto)
                     }
                     if !primary.envKeys.isEmpty {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1056,16 +1398,32 @@ private struct MCPDetailView: View {
                         }
                     }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.radius.container)
-                        .fill(Theme.surface)
-                        .themeCardShadow())
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radius.container)
-                        .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
             }
+        }
+    }
+
+    // MARK: Building blocks
+
+    private func section<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        section(title, trailing: { EmptyView() }, content: content)
+    }
+
+    private func section<Content: View, Trailing: View>(
+        _ title: String,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Divider()
+            HStack(spacing: 8) {
+                Text(title).font(Theme.font.themed(12.5, .semibold))
+                Spacer(minLength: 8)
+                trailing()
+            }
+            .padding(.top, 4)
+            content()
         }
     }
 
@@ -1073,7 +1431,7 @@ private struct MCPDetailView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             fieldLabel(label)
             Text(value)
-                .font(Theme.font.themed(11, .regular))
+                .font(Theme.font.code(11))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
@@ -1090,61 +1448,78 @@ private struct MCPDetailView: View {
     // MARK: Connection and authorization (v2.6: state shown directly, actions laid out — nothing
     // hidden in menus, no guessing for the user)
 
+    /// Folded while every checked location is healthy: nothing to do there, and the tools above
+    /// are what the page is for
+    private var connectionNeedsAttention: Bool {
+        guard let latest = latestSnapshot else { return true }
+        return latest.snapshot.tone != "ok" || cache?.toolsError != nil
+    }
+
+    private var connectionHints: [String] {
+        var seen = Set<String>()
+        return entries.compactMap { service.probeSnapshots[$0.id]?.hint }
+            .filter { seen.insert($0).inserted }
+    }
+
     private var connectionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                sectionTitle(L10n.text("Connection and auth", zhHans: "连接与授权"))
-                Spacer(minLength: 8)
-                SecondaryButton(title: L10n.text("Probe again", zhHans: "重新检测"), icon: "waveform.path.ecg") {
-                    service.probe(entries)
-                }
+        let expanded = connectionExpanded ?? connectionNeedsAttention
+        return section(L10n.text("Connection and auth", zhHans: "连接与授权"), trailing: {
+            PaneButton(expanded ? L10n.text("Hide", zhHans: "收起") : L10n.text("Show", zhHans: "展开"), small: true) {
+                withAnimation(.easeOut(duration: 0.15)) { connectionExpanded = !expanded }
             }
-            VStack(alignment: .leading, spacing: 10) {
-                // (1) Last probe (each config location shows its persisted snapshot directly; never
-                //     probed
-                // = the "not probed yet" label)
-                ForEach(entries) { entry in
-                    probeStatusRow(entry)
+        }) {
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    // (1) Last probe of each config location (persisted snapshot)
+                    ForEach(entries) { entry in
+                        probeStatusRow(entry)
+                    }
+                    // The same guidance usually applies to every location: say it once
+                    ForEach(connectionHints, id: \.self) { hint in
+                        Text(hint)
+                            .font(Theme.font.themed(10.5))
+                            .foregroundStyle(Theme.goldFg)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // (2) Auth flow, routed by the detected auth method: only OAuth gets browser
+                    //     authorization, header secrets get "Edit headers", stdio gets "Edit
+                    //     environment variables"
+                    MCPRowDivider()
+                    authRouteSection
+                    // (3) CLI-side authorization (one row per configured source)
+                    cliAuthRows
+                    Text(L10n.text("Check and auth requests go only to the address this server itself advertises.", zhHans: "检测与授权请求只发往该 server 自己披露的地址。"))
+                        .font(Theme.font.themed(9.5))
+                        .foregroundStyle(.tertiary)
                 }
-                // (2) Auth flow (v2.7: routed by the detected auth method — only OAuth gets browser
-                //    authorization, header secrets get "Edit headers", stdio gets "Edit environment
-                //    variables"; no more guessing for the user)
-                MCPRowDivider()
-                authRouteSection
-                // (3) CLI-side authorization (one row per configured source, with clickable text
-                //     buttons)
-                cliAuthRows
-                Text(L10n.text("The result is the last snapshot. Choose “Probe again” for a fresh one. Probe and auth requests go only to the address this server itself advertises.", zhHans: "检测结果为上次快照，点「重新检测」获取最新；检测与授权请求只发往该 server 自己披露的地址。")
-                    + (primary?.transport == "stdio"
-                        ? L10n.text(" A stdio probe briefly starts the configured command to read its capabilities, then exits.", zhHans: "stdio 检测会短暂启动配置的命令以读取能力清单，完成即退出。") : ""))
-                    .font(Theme.font.themed(9.5))
-                    .foregroundStyle(.tertiary)
+            } else {
+                Text(L10n.text("Connected, nothing to do here.", zhHans: "连接正常，这里没有需要处理的事。"))
+                    .font(Theme.font.themed(11.5))
+                    .foregroundStyle(Theme.textSecondary)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .fill(Theme.surface)
-                    .themeCardShadow())
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
         }
     }
 
     private func probeStatusRow(_ entry: MCPServerEntry) -> some View {
         HStack(spacing: 8) {
             SourceBadge(source: entry.source, size: 14)
-            Text(entry.source.displayName)
-                .font(Theme.font.themed(11, .medium))
-                .frame(width: 90, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.source.displayName)
+                    .font(Theme.font.themed(11, .medium))
+                // Tells apart two locations of the same agent (global vs one project)
+                Text(scopeLabel(entry))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .frame(width: 150, alignment: .leading)
             if service.probeResults[entry.id] == .checking {
                 ProgressView().controlSize(.small).scaleEffect(0.6)
                 Text(L10n.text("Probing…", zhHans: "检测中…")).font(Theme.font.themed(10.5)).foregroundStyle(.secondary)
             } else if let snapshot = service.probeSnapshots[entry.id] {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        TagChip(snapshot.label, tint: mcpToneColor(snapshot.tone))
+                        TagChip(snapshot.displayLabel, tint: mcpToneColor(snapshot.tone))
                         if let detail = snapshot.detail {
                             Text(detail)
                                 .font(Theme.font.themed(10))
@@ -1157,11 +1532,6 @@ private struct MCPDetailView: View {
                             + (mcpSnapshotStale(snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""))
                             .font(Theme.font.themed(9.5))
                             .foregroundStyle(.tertiary)
-                    }
-                    if let hint = snapshot.hint {
-                        Text(hint)
-                            .font(Theme.font.themed(9.5))
-                            .foregroundStyle(Theme.goldFg)
                     }
                 }
             } else {
@@ -1388,60 +1758,156 @@ private struct MCPDetailView: View {
     // MARK: Capabilities (tools / prompts / resources; what an MCP server provides is its core,
     // so this section is always present — no guessing for the user)
 
-    @ViewBuilder
-    private var runtimeSection: some View {
-        let cache = service.toolCache[serverName.lowercased()]
-        let stat = usage.mcpServerStats[serverName.lowercased()]
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                sectionTitle(L10n.text("Capabilities", zhHans: "能力"))
-                Text(L10n.text("Tools / prompts / resources, from the last “Probe again”", zhHans: "工具 / 提示词 / 资源，来自「重新检测」实测"))
-                    .font(Theme.font.themed(10))
-                    .foregroundStyle(.tertiary)
+    private var toolsSection: some View {
+        let stat = usage.mcpServerStats[key]
+        return section(L10n.text("Tools", zhHans: "工具"), trailing: {
+            if let cache, !probing {
+                Text(L10n.format("Read %@", zhHans: "读取于 %@", String(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))))
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(Theme.textTertiary)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                if let cache {
-                    capabilityBody(cache: cache, stat: stat)
-                } else {
-                    // Stays on this card even when never probed: tells the user where the
-                    // capability list comes from (discoverability)
-                    Text(L10n.text("Not probed yet — choose “Probe again” above for this server’s tools, prompts, and resources.", zhHans: "尚未检测——点上方「重新检测」获取该 server 的工具、提示词与资源清单。")
-                        + (primary?.transport == "stdio"
-                            ? L10n.text(" (a stdio probe briefly starts the configured command and exits after reading)", zhHans: "（stdio server 检测时会短暂启动配置的命令，读完即退出）") : ""))
-                        .font(Theme.font.themed(10.5))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let stat, stat.calls > 0 {
-                        TagChip(L10n.format("Total calls %@", zhHans: "累计调用 %@ 次", String(stat.calls)), neutral: true)
-                    }
+        }) {
+            if let cache {
+                if let error = cache.toolsError {
+                    notice(
+                        icon: "exclamationmark.triangle",
+                        title: L10n.text("Connected, but the tool list could not be read", zhHans: "已连接，但没能读取工具列表"),
+                        detail: cache.toolCount > 0
+                            ? L10n.format("%@ — showing the list from the last successful read.", zhHans: "%@——下面是上次成功读到的清单。", error)
+                            : error,
+                        diagnostics: diagnostics)
+                }
+                if probing { probingNotice }
+                capabilityBody(cache: cache, stat: stat)
+            } else if probing {
+                probingNotice
+            } else if let latest = latestSnapshot, latest.snapshot.tone != "ok" {
+                failureNotice(latest.snapshot)
+            } else {
+                HStack(spacing: 10) {
+                    Text(entries.contains(where: service.trustsForAutoProbe)
+                        ? L10n.text("The tool list has not been read yet.", zhHans: "还没有读取工具清单。")
+                        : L10n.text("This server comes from a file in the repository, so it is not read until you ask: reading it starts the command or contacts the URL that file names.", zhHans: "这个 server 来自仓库里的配置文件，所以不会自动读取：读取会启动该文件指定的命令或访问它指定的地址。"))
+                        .font(Theme.font.themed(12))
+                        .foregroundStyle(Theme.textSecondary)
+                    PaneButton(L10n.text("Read it now", zhHans: "现在读取"), small: true) { service.probe(entries) }
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .fill(Theme.surface)
-                    .themeCardShadow())
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius.container)
-                    .strokeBorder(Theme.cardBorder, lineWidth: Theme.cardBorderWidth))
         }
+    }
+
+    /// stderr of the last failed stdio launch, if any location has one
+    private var diagnostics: String? {
+        entries.compactMap { service.probeDiagnostics[$0.id] }.first
+    }
+
+    private var probingNotice: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small).scaleEffect(0.7)
+            Text(primary?.transport == "stdio"
+                ? L10n.text("Reading the tool list — the configured command is started briefly and exits once read.", zhHans: "正在读取工具清单——会短暂启动配置的命令，读完即退出。")
+                : L10n.text("Reading the tool list from the server…", zhHans: "正在向 server 读取工具清单…"))
+                .font(Theme.font.themed(11.5))
+                .foregroundStyle(Theme.textSecondary)
+        }
+    }
+
+    /// Why there is no tool list, with the next step right here instead of a section away
+    @ViewBuilder
+    private func failureNotice(_ snapshot: MCPProbeSnapshot) -> some View {
+        notice(
+            icon: snapshot.tone == "warning" ? "lock" : "exclamationmark.triangle",
+            title: L10n.format("No tool list: %@", zhHans: "没有读到工具清单：%@", snapshot.displayLabel),
+            detail: [snapshot.detail, snapshot.hint].compactMap { $0 }.joined(separator: "\n"),
+            diagnostics: diagnostics)
+        FlowLayout(spacing: 10, lineSpacing: 8) {
+            if let primary, authRoute == .oauthBrowser, !service.hasToken(for: primary) {
+                PaneButton(L10n.text("Authorize in browser", zhHans: "在浏览器中授权"), kind: .primary, small: true) {
+                    service.authorizeInBrowser(primary)
+                }
+            } else if let editable, case .staticHeader = authRoute {
+                PaneButton(L10n.text("Edit headers", zhHans: "编辑请求头"), kind: .primary, small: true) {
+                    onEditCredentials(editable)
+                }
+            }
+            PaneButton(L10n.text("Try again", zhHans: "重试"), small: true) { service.probe(entries) }
+        }
+    }
+
+    private func notice(
+        icon: String, title: String, detail: String, diagnostics: String?
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(Theme.font.themed(12))
+                .foregroundStyle(Theme.goldFg)
+                .frame(width: 16)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(Theme.font.themed(12, .medium))
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(Theme.font.themed(11))
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                if let diagnostics {
+                    Text(L10n.text("Last output of the command:", zhHans: "命令最后的输出："))
+                        .font(Theme.font.themed(10.5))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text(diagnostics)
+                        .font(Theme.font.code(10.5))
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radius.tile, style: .continuous)
+                                .fill(Theme.surfaceSecondary))
+                }
+            }
+        }
+    }
+
+    // MARK: What the agents allow (read-only, from each agent's own config)
+
+    private var hasClaude: Bool { entries.contains { $0.source == .claude } }
+    private var hasCodex: Bool { entries.contains { $0.source == .codex } }
+
+    private func access(for tool: String) -> MCPToolAccess {
+        MCPToolAccess(
+            claude: hasClaude
+                ? service.toolPermissions.claudeAccess(server: serverName, tool: tool) : nil,
+            codex: hasCodex
+                ? service.toolPermissions.codexAccess(server: serverName, tool: tool) : nil)
+    }
+
+    private func passesPermissionFilter(_ tool: MCPToolSummary) -> Bool {
+        switch permissionFilter {
+        case "allowed": return access(for: tool.name).isAllowed
+        case "restricted": return access(for: tool.name).isRestricted
+        default: return true
+        }
+    }
+
+    private func matchesSearch(_ tool: MCPToolSummary, _ query: String) -> Bool {
+        query.isEmpty
+            || tool.name.lowercased().contains(query)
+            || (tool.title ?? "").lowercased().contains(query)
+            || (tool.description ?? "").lowercased().contains(query)
     }
 
     @ViewBuilder
     private func capabilityBody(
         cache: MCPToolCacheEntry, stat: UsageService.MCPServerCallStat?
     ) -> some View {
-        // Overview chips: cost and metadata (counts live in the group tabs, not duplicated)
+        // Overview chips: cost and usage (counts live in the group tabs, not duplicated)
         HStack(spacing: 6) {
             if cache.schemaTokens > 0 {
-                TagChip(L10n.format("~%@ tokens per turn", zhHans: "每轮 ~%@ tokens", String(formatTokens(cache.schemaTokens))))
-            }
-            if let version = cache.serverVersion {
-                TagChip("v\(version)", neutral: true)
-            }
-            if let proto = cache.protocolVersion {
-                TagChip(L10n.format("Protocol %@", zhHans: "协议 %@", String(proto)), neutral: true)
+                TagChip(L10n.format("~%@ tokens per turn", zhHans: "每轮 ~%@ tokens", String(formatTokens(cache.schemaTokens))), neutral: true)
+                    .help(L10n.text("Roughly what this server’s tool definitions add to every turn’s context", zhHans: "这个 server 的工具定义每轮大约占用的上下文"))
             }
             if let stat, stat.calls > 0 {
                 TagChip(L10n.format("Total calls %@", zhHans: "累计调用 %@ 次", String(stat.calls)), neutral: true)
@@ -1458,6 +1924,30 @@ private struct MCPDetailView: View {
             }
             Spacer(minLength: 0)
         }
+        let tools = cache.tools ?? []
+        let allowedCount = tools.filter { access(for: $0.name).isAllowed }.count
+        let restrictedCount = tools.filter { access(for: $0.name).isRestricted }.count
+        if capabilityTab == "tools", allowedCount + restrictedCount > 0 {
+            HStack(spacing: 6) {
+                Text(L10n.text("Agent settings", zhHans: "agent 设置"))
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(Theme.textTertiary)
+                MCPCapabilitySegment(
+                    label: L10n.text("All", zhHans: "全部"), count: tools.count,
+                    isSelected: permissionFilter == "all") { permissionFilter = "all" }
+                if allowedCount > 0 {
+                    MCPCapabilitySegment(
+                        label: L10n.text("Allowed", zhHans: "已允许"), count: allowedCount,
+                        isSelected: permissionFilter == "allowed") { permissionFilter = "allowed" }
+                }
+                if restrictedCount > 0 {
+                    MCPCapabilitySegment(
+                        label: L10n.text("Restricted", zhHans: "受限"), count: restrictedCount,
+                        isSelected: permissionFilter == "restricted") { permissionFilter = "restricted" }
+                }
+                Spacer(minLength: 0)
+            }
+        }
         let activeCount = capabilityTab == "prompts"
             ? (cache.prompts?.count ?? 0)
             : capabilityTab == "resources" ? (cache.resources?.count ?? 0) : cache.toolCount
@@ -1469,36 +1959,44 @@ private struct MCPDetailView: View {
                 maxWidth: 380)
         }
         capabilityList(cache: cache)
+        if capabilityTab == "tools", hasClaude || hasCodex, !tools.isEmpty {
+            Text(permissionFootnote)
+                .font(Theme.font.themed(10.5))
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         if let hint = idleHint(cache: cache, stat: stat) {
             HStack(spacing: 10) {
                 Text(hint)
-                    .font(Theme.font.themed(10))
+                    .font(Theme.font.themed(10.5))
                     .foregroundStyle(Theme.goldFg)
-                Button(L10n.text("Remove from all sources…", zhHans: "从所有源移除…")) { removeAllConfirm = true }
-                    .font(Theme.font.themed(10, .semibold))
-                    .foregroundStyle(Theme.failureRed)
-                    .buttonStyle(.borderless)
-                if let note = removeAllNote {
-                    Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
+                if !removable.isEmpty {
+                    PaneButton(L10n.text("Remove from all sources…", zhHans: "从所有源移除…"), kind: .quiet, small: true) {
+                        removeAllConfirm = true
+                    }
                 }
             }
-            .themedConfirm(
-                L10n.format("Remove “%@” from every config?", zhHans: "从所有配置移除「%@」？", String(serverName)),
-                isPresented: $removeAllConfirm,
-                message: L10n.format("Will remove from:\n%@", zhHans: "将从以下位置移除：\n%@", String(entries.map(\.configPath).joined(separator: "\n"))),
-                confirm: L10n.format("Remove (%@ places, backup each before writing)", zhHans: "移除（%@ 处，写前各留备份）", String(entries.count)),
-                destructive: true
-            ) { runRemoveEverywhere() }
         }
-        Text(L10n.format("Probed %@", zhHans: "检测于 %@", String(relativeFormatter.localizedString(for: cache.measuredAt, relativeTo: Date()))))
-            .font(Theme.font.themed(9))
-            .foregroundStyle(.tertiary)
+    }
+
+    /// Explains the unmarked case so a missing chip is not read as "blocked"
+    private var permissionFootnote: String {
+        var parts: [String] = []
+        if hasClaude {
+            parts.append(L10n.text("Claude Code asks before the first use of a tool unless a permission rule says otherwise.", zhHans: "没有标注的工具，Claude Code 会在首次使用前询问。"))
+        }
+        if hasCodex {
+            parts.append(L10n.text("Codex exposes every tool unless its config lists enabled or disabled tools.", zhHans: "Codex 默认启用全部工具，除非配置里写了启用或停用列表。"))
+        }
+        parts.append(L10n.text("Read from each agent’s own settings; nothing is changed here.", zhHans: "以上读自各 agent 自己的设置，这里不做修改。"))
+        return parts.joined(separator: " ")
     }
 
     private func capabilitySegment(_ id: String, _ label: String, count: Int) -> some View {
         MCPCapabilitySegment(label: label, count: count, isSelected: capabilityTab == id) {
             capabilityTab = id
             capabilitySearch = ""
+            permissionFilter = "all"
         }
     }
 
@@ -1512,12 +2010,8 @@ private struct MCPDetailView: View {
         case "resources":
             return (cache.resources ?? []).filter { matches($0, query) }.count
         default:
-            return (cache.tools ?? []).filter { tool in
-                query.isEmpty
-                    || tool.name.lowercased().contains(query)
-                    || (tool.title ?? "").lowercased().contains(query)
-                    || (tool.description ?? "").lowercased().contains(query)
-            }.count
+            return (cache.tools ?? [])
+                .filter { matchesSearch($0, query) && passesPermissionFilter($0) }.count
         }
     }
 
@@ -1536,14 +2030,13 @@ private struct MCPDetailView: View {
             namedList(cache.resources ?? [], query: query, empty: L10n.text("This server provides no resources", zhHans: "该 server 未提供资源"))
         default:
             if let tools = cache.tools, !tools.isEmpty {
-                let filtered = tools.filter { tool in
-                    query.isEmpty
-                        || tool.name.lowercased().contains(query)
-                        || (tool.title ?? "").lowercased().contains(query)
-                        || (tool.description ?? "").lowercased().contains(query)
+                let filtered = tools.filter {
+                    matchesSearch($0, query) && passesPermissionFilter($0)
                 }
                 if filtered.isEmpty {
-                    Text(L10n.format("No tools match “%@”", zhHans: "没有匹配「%@」的工具", String(capabilitySearch)))
+                    Text(query.isEmpty
+                        ? L10n.text("No tools in this group", zhHans: "这一组里没有工具")
+                        : L10n.format("No tools match “%@”", zhHans: "没有匹配「%@」的工具", String(capabilitySearch)))
                         .font(Theme.font.themed(10)).foregroundStyle(.tertiary)
                 } else {
                     // Table well: outer frame + solid row rules (brutal = 2px ink), one cell per
@@ -1553,6 +2046,7 @@ private struct MCPDetailView: View {
                             if index > 0 { MCPRowDivider() }
                             MCPToolRowView(
                                 tool: tool,
+                                access: access(for: tool.name),
                                 expanded: expandedTools.contains(tool.name)
                             ) {
                                 if expandedTools.contains(tool.name) {
@@ -1632,33 +2126,23 @@ private struct MCPDetailView: View {
         activity?.series.reduce(0) { $0 + $1.count } ?? 0
     }
 
-    @ViewBuilder
     private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                sectionTitle(L10n.text("Call activity", zhHans: "调用活跃"))
-                if let stat = usage.mcpServerStats[serverName.lowercased()], stat.calls > 0 {
-                    Text(L10n.format("Last 30 days %@ · total %@ · latest %@", zhHans: "近 30 天 %@ 次 · 累计 %@ 次 · 最近 %@", String(recentCalls), String(stat.calls), String(relativeFormatter.localizedString(for: Date(timeIntervalSince1970: stat.lastTs), relativeTo: Date()))))
-                        .font(Theme.font.themed(10))
-                        .foregroundStyle(.tertiary)
-                } else {
-                    Text(L10n.text("No calls yet (scanners from 5 sources count kind='mcp')", zhHans: "暂无调用记录（5 个源的扫描器计入 kind='mcp'）"))
-                        .font(Theme.font.themed(10))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
+        section(L10n.text("Usage", zhHans: "使用情况")) {
+            if let stat = usage.mcpServerStats[key], stat.calls > 0 {
+                Text(L10n.format("Last 30 days %@ · total %@ · latest %@", zhHans: "近 30 天 %@ 次 · 累计 %@ 次 · 最近 %@", String(recentCalls), String(stat.calls), String(relativeFormatter.localizedString(for: Date(timeIntervalSince1970: stat.lastTs), relativeTo: Date()))))
+                    .font(Theme.font.themed(11.5))
+                    .foregroundStyle(Theme.textSecondary)
+            } else {
+                Text(L10n.text("No calls recorded yet.", zhHans: "还没有调用记录。"))
+                    .font(Theme.font.themed(11.5))
+                    .foregroundStyle(Theme.textSecondary)
             }
             if let activity, activity.series.contains(where: { $0.count > 0 }) {
                 activityBars(activity)
                 if !activity.topTools.isEmpty {
                     FlowLayout(spacing: 5, lineSpacing: 5) {
                         ForEach(activity.topTools, id: \.name) { tool in
-                            Text("\(tool.name) · \(tool.count)")
-                                .font(Theme.font.themed(9.5, .regular))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Theme.surfaceSecondary))
+                            TagChip("\(tool.name) · \(tool.count)", neutral: true)
                         }
                     }
                 }
@@ -1686,26 +2170,36 @@ private struct MCPDetailView: View {
 
     // MARK: Cross-source matrix (following the SkillDetailView.matrixSection template)
 
-    private var matrixSection: some View {
+    /// Where the server is configured, then where else it could go (the two used to be separate
+    /// cards that listed the same sources twice)
+    private var placementSection: some View {
         let configuredSources = Set(entries.map(\.source))
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                sectionTitle(L10n.text("Configured in", zhHans: "配置于"))
-                Text(L10n.format("%@ tools, %@ configured", zhHans: "%@ 个工具中 %@ 个已配置", String(AgentSource.allCases.count), String(configuredSources.count)))
-                    .font(Theme.font.themed(10))
-                    .foregroundStyle(.tertiary)
-                Text(L10n.text("· click an installable source to copy it there", zhHans: "· 点可安装的源一键复制过去"))
-                    .font(Theme.font.themed(10))
-                    .foregroundStyle(.tertiary)
-            }
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(AgentSource.allCases, id: \.self) { source in
-                    matrixTile(source, configured: configuredSources.contains(source))
+        return section(L10n.text("Installed in", zhHans: "安装位置"), trailing: {
+            Text(L10n.format("%@ places", zhHans: "%@ 处", String(entries.count)))
+                .font(Theme.font.themed(10.5))
+                .foregroundStyle(Theme.textTertiary)
+        }) {
+            KnowledgeListContainer {
+                VStack(spacing: 0) {
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        occurrenceRow(entry)
+                        if index < entries.count - 1 {
+                            Divider().opacity(0.4).padding(.leading, 44)
+                        }
+                    }
                 }
-                projectMatrixTile
             }
-            if let note = installNote {
-                Text(note).font(Theme.font.themed(10)).foregroundStyle(.secondary)
+            if primary?.scope != .local || entries.count > 1 {
+                Text(L10n.text("Copy to another agent", zhHans: "复制到其他 agent"))
+                    .font(Theme.font.themed(11, .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.top, 4)
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(AgentSource.allCases, id: \.self) { source in
+                        matrixTile(source, configured: configuredSources.contains(source))
+                    }
+                    projectMatrixTile
+                }
             }
         }
         .sheet(isPresented: $projectSheet) { projectInstallSheet }
@@ -1736,7 +2230,7 @@ private struct MCPDetailView: View {
             if configured {
                 Text(L10n.text("Configured", zhHans: "已配置"))
                     .font(Theme.font.themed(8, .medium))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.textSecondary)
             } else if installable {
                 Text(L10n.text("Install", zhHans: "安装"))
                     .font(Theme.font.themed(8, .semibold))
@@ -1796,7 +2290,7 @@ private struct MCPDetailView: View {
                 .foregroundStyle(.secondary)
             Text(projectConfigured ? L10n.text("Configured", zhHans: "已配置") : L10n.text("Install", zhHans: "安装"))
                 .font(Theme.font.themed(8, projectConfigured ? .medium : .semibold))
-                .foregroundStyle(projectConfigured ? .green : Theme.brandFg)
+                .foregroundStyle(projectConfigured ? Theme.textSecondary : Theme.brandFg)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
@@ -1886,56 +2380,42 @@ private struct MCPDetailView: View {
 
     // MARK: Config locations
 
-    private var occurrencesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                sectionTitle(L10n.text("Where it’s configured", zhHans: "各处配置"))
-                Text(L10n.text("· click a row to edit that definition", zhHans: "· 点击某行可编辑该处定义"))
-                    .font(Theme.font.themed(10))
-                    .foregroundStyle(.tertiary)
-            }
-            KnowledgeListContainer {
-                VStack(spacing: 0) {
-                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        occurrenceRow(entry)
-                        if index < entries.count - 1 {
-                            Divider().opacity(0.4).padding(.leading, 44)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private func occurrenceRow(_ entry: MCPServerEntry) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                SourceLogoTile(source: entry.source, size: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(entry.source.displayName)
-                            .font(Theme.font.themed(12, .medium))
-                        TagChip(entry.projectName ?? L10n.text("Global", zhHans: "全局"),
-                                neutral: entry.projectName == nil)
-                        if entry.enabled == false {
-                            TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
-                        }
-                        probeChip(for: entry)
+        let readOnly = MCPService.isReadOnly(entry)
+        return HStack(spacing: 10) {
+            SourceLogoTile(source: entry.source, size: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.source.displayName)
+                        .font(Theme.font.themed(12, .medium))
+                    TagChip(scopeLabel(entry), neutral: true)
+                    if entry.enabled == false {
+                        TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                     }
-                    Text(entry.configPath)
-                        .font(Theme.font.themed(9, .regular))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if let approval = approvalLabel(entry) {
+                        TagChip(approval, neutral: true)
+                    }
+                    probeChip(for: entry)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 8)
+                Text(readOnly
+                    ? L10n.format("%@ · managed with `claude mcp`", zhHans: "%@ · 用 `claude mcp` 管理", abbreviateHome(entry.configPath))
+                    : abbreviateHome(entry.configPath))
+                    .font(Theme.font.themed(9.5))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 8)
+            if !readOnly {
                 CardActionButton(icon: "square.and.pencil", help: L10n.text("Edit this definition", zhHans: "编辑该处定义")) {
                     onEdit(entry)
                 }
-                CardActionButton(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) {
-                    service.reveal(path: entry.configPath)
-                }
+            }
+            CardActionButton(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) {
+                service.reveal(path: entry.configPath)
+            }
+            if !readOnly {
                 CardActionButton(icon: "trash", color: Theme.failureRed,
                                  help: L10n.text("Remove from this config (backup before writing)", zhHans: "从该配置移除（写前留备份）")) {
                     onDeleteEntry(entry)
@@ -1945,8 +2425,34 @@ private struct MCPDetailView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        .onTapGesture { onEdit(entry) }
-        .help(L10n.text("Click to edit this definition", zhHans: "点击编辑该处定义"))
+        .onTapGesture { if !readOnly { onEdit(entry) } }
+        .help(readOnly
+            ? L10n.text("Stored in Claude Code’s per-project settings; change it with `claude mcp`", zhHans: "保存在 Claude Code 的按项目设置里，用 `claude mcp` 修改")
+            : L10n.text("Click to edit this definition", zhHans: "点击编辑该处定义"))
+    }
+
+    private func scopeLabel(_ entry: MCPServerEntry) -> String {
+        switch entry.scope {
+        case .global: return L10n.text("Global", zhHans: "全局")
+        case .project: return L10n.format("Project · %@", zhHans: "项目 · %@", entry.projectName ?? "")
+        case .local: return L10n.format("Local · %@", zhHans: "本地 · %@", entry.projectName ?? "")
+        }
+    }
+
+    /// Claude Code asks once before using a server from a repo's `.mcp.json`
+    private func approvalLabel(_ entry: MCPServerEntry) -> String? {
+        guard entry.source == .claude, entry.scope == .project else { return nil }
+        let root = URL(fileURLWithPath: entry.configPath).deletingLastPathComponent().path
+        switch service.toolPermissions.claudeProjectServerApproval(server: entry.name, projectPath: root) {
+        case .approved: return L10n.text("Approved in Claude", zhHans: "Claude 已批准")
+        case .rejected: return L10n.text("Rejected in Claude", zhHans: "Claude 已拒绝")
+        case .unanswered: return L10n.text("Claude will ask", zhHans: "Claude 待批准")
+        }
+    }
+
+    private func abbreviateHome(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     /// Status chip: probing → spinner; otherwise shows the **persisted snapshot** (survives
@@ -1957,7 +2463,7 @@ private struct MCPDetailView: View {
         if service.probeResults[entry.id] == .checking {
             ProgressView().controlSize(.small).scaleEffect(0.6)
         } else if let snapshot = service.probeSnapshots[entry.id] {
-            TagChip(snapshot.label, tint: mcpToneColor(snapshot.tone))
+            TagChip(snapshot.displayLabel, tint: mcpToneColor(snapshot.tone))
             Text(relativeFormatter.localizedString(for: snapshot.checkedAt, relativeTo: Date())
                 + (mcpSnapshotStale(snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""))
                 .font(Theme.font.themed(9))

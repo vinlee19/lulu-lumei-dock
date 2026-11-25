@@ -711,7 +711,7 @@ enum EurekaCLI {
                 print(L10n.format("[%@] Timed out without a result", zhHans: "[%@] 超时未出结果", String(entry.source.displayName)))
                 continue
             }
-            var line = "[\(entry.source.displayName)] \(snapshot.label)"
+            var line = "[\(entry.source.displayName)] \(snapshot.displayLabel)"
             if let detail = snapshot.detail { line += " · \(detail)" }
             if let scheme = snapshot.authScheme { line += L10n.format(" · Authentication=%@", zhHans: " · 鉴权=%@", String(scheme)) }
             print(line)
@@ -719,6 +719,16 @@ enum EurekaCLI {
         }
         guard let cache = MCPToolCache.load()[name.lowercased()] else { return }
         print(L10n.format("%@ tools · ~%@ tokens per turn · Protocol %@", zhHans: "工具 %@ 个 · 每轮 ~%@ tokens · 协议 %@", String(cache.toolCount), String(cache.schemaTokens), String(cache.protocolVersion ?? "-")))
+        if let title = cache.serverTitle ?? cache.serverName {
+            print(L10n.format("Server: %@", zhHans: "Server：%@", title))
+        }
+        if let instructions = cache.instructions {
+            print(L10n.format("Instructions (%@ characters): %@", zhHans: "介绍（%@ 字符）：%@",
+                              String(instructions.count), cache.instructionsHeadline ?? ""))
+        }
+        if let error = cache.toolsError {
+            print(L10n.format("Tool list not read: %@", zhHans: "未读到工具列表：%@", error))
+        }
         for tool in cache.tools ?? [] {
             let params = (tool.params?.isEmpty == false)
                 ? "(\(tool.params!.joined(separator: ", ")))" : ""
