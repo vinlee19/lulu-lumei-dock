@@ -1,8 +1,8 @@
 import EurekaKit
 import SwiftUI
 
-/// One hub page: Capabilities (Skills / MCP / Agents) or Knowledge (Memory / Instructions),
-/// chosen by `tabs`. Each has one sidebar entry; the type switcher sits in this
+/// One hub page: Extensions (Skills / MCP / Subagents) or Knowledge (Memory / Instructions /
+/// Plans / Prompts), chosen by `tabs`. Each has one sidebar entry; the type switcher sits in this
 /// page's top bar and writes straight to `navigation.tab`, so every existing deep link
 /// (`navigation.tab = .memory`, `focusPath`, ⌘K results) keeps working unchanged.
 ///
@@ -11,7 +11,7 @@ import SwiftUI
 /// are migrated one by one.
 struct KnowledgeHubView: View {
     @ObservedObject var navigation: PopoverNavigation
-    /// The segments of this hub's type switcher (`Tab.capabilityTabs` or `Tab.knowledgeTabs`).
+    /// The segments of this hub's type switcher (`Tab.extensionTabs` or `Tab.knowledgeTabs`).
     let tabs: [PopoverRootView.Tab]
 
     /// Every hub page puts its search first in its own toolbar row, at this width, so the field
@@ -41,9 +41,11 @@ struct KnowledgeHubView: View {
 
     private var topBar: some View {
         GeometryReader { geo in
-            // Three segments fit with titles at much narrower widths than seven did.
-            let density: BarDensity = geo.size.width >= 720 ? .full
-                : (geo.size.width >= 560 ? .medium : .compact)
+            // Four segments with titles and counts need about 470pt; the narrowest window leaves
+            // the hub 674pt, so titles normally stay visible and the fallbacks only cover very
+            // large system font sizes.
+            let density: BarDensity = geo.size.width >= 540 ? .full
+                : (geo.size.width >= 420 ? .medium : .compact)
             HStack(spacing: 10) {
                 KnowledgeTypeSegments(
                     tabs: tabs,
@@ -103,6 +105,12 @@ struct KnowledgeHubView: View {
             AgentsView(service: agentConfigService, usageService: usageService)
         case .mcp:
             MCPView(service: mcpService, usageService: usageService)
+        case .plans:
+            PlansView(service: plansService)
+        case .prompts:
+            PromptsView(
+                service: promptsService, sessionBrowser: sessionBrowser,
+                skillMemory: skillMemoryService)
         default:
             EmptyView()
         }

@@ -16,14 +16,16 @@ public enum CommandPalette {
     public enum Kind: Int, CaseIterable, Sendable {
         case session, skill, memory, instruction, plan, prompt
 
+        /// Category tag on each hit. The knowledge kinds use the sidebar's English type names in
+        /// every language, so a tag reads the same as the hub segment the hit opens.
         public var label: String {
             switch self {
             case .session: return L10n.text("Session", zhHans: "会话")
-            case .skill: return L10n.text("Skill", zhHans: "技能")
-            case .memory: return L10n.text("Memory", zhHans: "记忆")
-            case .instruction: return L10n.text("Instruction", zhHans: "指令")
-            case .plan: return L10n.text("Plan", zhHans: "计划")
-            case .prompt: return L10n.text("Prompt", zhHans: "Prompt")
+            case .skill: return "Skill"
+            case .memory: return "Memory"
+            case .instruction: return "Instruction"
+            case .plan: return "Plan"
+            case .prompt: return "Prompt"
             }
         }
 

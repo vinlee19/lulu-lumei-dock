@@ -489,7 +489,7 @@ enum PreviewRenderer {
         // Lazy containers/ScrollView, and dynamic NSColor and SF Symbols get distorted too; going
         // through AppKit layout and drawing is closer to the real window.
         @MainActor func snap<V: View>(_ name: String, _ view: V, dark: Bool = false,
-                                      width: CGFloat = 780) {
+                                      width: CGFloat = 780, height: CGFloat = 980) {
             // Lay a window background underneath: the page's surfaceSecondary is a translucent
             // overlay, so transparent PNG areas would be wrong without it
             let hosting = NSHostingView(rootView: ZStack {
@@ -497,7 +497,7 @@ enum PreviewRenderer {
                 view
             })
             hosting.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-            hosting.frame = CGRect(x: 0, y: 0, width: width, height: 980)
+            hosting.frame = CGRect(x: 0, y: 0, width: width, height: height)
             hosting.layoutSubtreeIfNeeded()
             guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
             else { print("渲染失败: \(name)"); return }
@@ -625,6 +625,17 @@ enum PreviewRenderer {
                  MCPView(service: mcp, usageService: usage, initialDetailName: entry.name), width: 1270)
         }
         snap("knowledge-mcp-wide-dark", MCPView(service: mcp, usageService: usage), dark: true, width: 1270)
+        // "Installed in" sits below the tool list, so render the server with the most config
+        // locations on a tall canvas to see its rows and the install pull-down.
+        if let spread = Dictionary(grouping: mcp.servers, by: { $0.name.lowercased() })
+            .max(by: { $0.value.count < $1.value.count })?.value.first {
+            snap("knowledge-mcp-wide-detail-placement",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: spread.name),
+                 width: 1270, height: 2600)
+            snap("knowledge-mcp-wide-detail-placement-dark",
+                 MCPView(service: mcp, usageService: usage, initialDetailName: spread.name),
+                 dark: true, width: 1270, height: 2600)
+        }
         // Detail states that depend on the probe cache: a server that sent its own instructions,
         // one that sent none (tool overview instead), and one never read / last failed.
         let named = mcp.servers.map(\.name)
@@ -741,7 +752,7 @@ enum PreviewRenderer {
              SessionsView(service: sessions, settings: settings, skillMemory: skillMemory, plans: plans),
              width: 675)
 
-        // Both hubs as the window shows them: sidebar (Capabilities + Knowledge entries) +
+        // Both hubs as the window shows them: sidebar (Extensions + Knowledge entries) +
         // type switcher + content. Services not scanned above are constructed idle; their
         // counts read 0 in the switcher, which is fine for a layout check.
         let prompts = PromptsService(sessionBrowser: sessions)
@@ -765,6 +776,9 @@ enum PreviewRenderer {
         snap("knowledge-hub-dark", hub(.skills), dark: true, width: 1270)
         snap("knowledge-hub-mcp", hub(.mcp), width: 1270)
         snap("knowledge-hub-knowledge", hub(.memory), width: 1270)
+        snap("knowledge-hub-knowledge-min", hub(.memory), width: 840)
+        snap("knowledge-hub-plans", hub(.plans), width: 1270)
+        snap("knowledge-hub-prompts", hub(.prompts), width: 1270)
     }
 
     /// Offscreen-renders the "shell": the sidebar (with the brand area) and the audit page, light

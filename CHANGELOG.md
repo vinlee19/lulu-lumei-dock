@@ -23,6 +23,22 @@ this project uses [Semantic Versioning](https://semver.org/).
   `server/discover`), handshake servers (2025-11-25 back to 2024-11-05, with
   version negotiation) and the old HTTP+SSE transport are all probed.
 
+### Changed
+
+- **The sidebar's library is named after what's in it.** The two entries in
+  the former "Agent" group are now **Extensions** (Skills, MCP, Subagents)
+  and **Knowledge** (Memory, Instructions, Plans, Prompts), under a group
+  called Library. Plans and Prompts moved out of Activity into Knowledge.
+  The type names stay in English in the Chinese interface too, matching the
+  words the agents use; sentences keep their Chinese wording.
+- **An MCP server's "Installed in" is a plain list.** Each config location is
+  one row with its status, an Edit button, a ⋯ menu (show in Finder, copy the
+  path, remove) and, where the agent's config supports it, an on/off switch;
+  the columns line up from row to row. Copying the server to another agent or
+  a project moved into one "Install to other tools" pull-down that lists only
+  the agents that can take it, replacing the grid of one tile per agent. The
+  skill detail uses the same pull-down.
+
 ### Fixed
 
 - **Checking a stdio MCP server from the app works.** The app looked for

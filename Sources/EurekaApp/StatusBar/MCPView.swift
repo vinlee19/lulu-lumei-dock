@@ -1,3 +1,4 @@
+import AppKit
 import EurekaIngest
 import EurekaInstall
 import EurekaKit
@@ -2168,37 +2169,61 @@ private struct MCPDetailView: View {
         .help(L10n.format("Calls per day over 30 days (peak %@/day)", zhHans: "近 30 天逐日调用（最高 %@ 次/天）", String(peak)))
     }
 
-    // MARK: Cross-source matrix (following the SkillDetailView.matrixSection template)
+    // MARK: Installed in (config locations as rows; other tools behind one pull-down)
 
-    /// Where the server is configured, then where else it could go (the two used to be separate
-    /// cards that listed the same sources twice)
+    /// Where the server is configured, one row per config location, and one "Install to other
+    /// tools" pull-down for where else it could go. Replaces a grid of one tile per agent:
+    /// tiles wrapped long names to different heights and made "configured", "install" and
+    /// "not writable" look alike.
     private var placementSection: some View {
         let configuredSources = Set(entries.map(\.source))
+        let candidates = AgentSource.allCases.filter { !configuredSources.contains($0) }
+        let transport = primary?.transport ?? "stdio"
+        let installable = candidates.filter {
+            MCPService.installBlockReason(transport: transport, to: $0) == nil
+        }
+        let unavailable = candidates.compactMap { source in
+            MCPService.installBlockReason(transport: transport, to: source).map { (source: source, reason: $0) }
+        }
+        let layout = PlacementColumns(
+            reservesEdit: entries.contains { !MCPService.isReadOnly($0) },
+            reservesToggle: entries.contains {
+                !MCPService.isReadOnly($0) && MCPService.supportsEnableToggle($0.source)
+            })
         return section(L10n.text("Installed in", zhHans: "安装位置"), trailing: {
-            Text(L10n.format("%@ places", zhHans: "%@ 处", String(entries.count)))
-                .font(Theme.font.themed(10.5))
-                .foregroundStyle(Theme.textTertiary)
+            HStack(spacing: 10) {
+                Text(L10n.format("%@ places", zhHans: "%@ 处", String(entries.count)))
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(Theme.textTertiary)
+                if primary?.scope != .local || entries.count > 1 {
+                    InstallTargetsMenu(
+                        caption: L10n.text("Copy this server to", zhHans: "把这个 server 复制到"),
+                        sources: installable,
+                        unavailable: unavailable,
+                        extra: { dismiss in
+                            if !installable.isEmpty { Divider().padding(.vertical, 3) }
+                            PopupRow(
+                                L10n.text("A project (.mcp.json)…", zhHans: "某个项目（.mcp.json）…"),
+                                systemImage: "folder.badge.plus",
+                                trailing: entries.contains { $0.projectName != nil }
+                                    ? L10n.text("in use", zhHans: "已有") : nil
+                            ) {
+                                dismiss()
+                                projectSheet = true
+                            }
+                        },
+                        onPick: { installTarget = $0 })
+                }
+            }
         }) {
             KnowledgeListContainer {
                 VStack(spacing: 0) {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        occurrenceRow(entry)
+                        occurrenceRow(entry, layout: layout)
                         if index < entries.count - 1 {
-                            Divider().opacity(0.4).padding(.leading, 44)
+                            Divider().opacity(0.4).padding(.leading, PlacementColumns.textInset)
                         }
                     }
-                }
-            }
-            if primary?.scope != .local || entries.count > 1 {
-                Text(L10n.text("Copy to another agent", zhHans: "复制到其他 agent"))
-                    .font(Theme.font.themed(11, .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.top, 4)
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(AgentSource.allCases, id: \.self) { source in
-                        matrixTile(source, configured: configuredSources.contains(source))
-                    }
-                    projectMatrixTile
                 }
             }
         }
@@ -2215,52 +2240,6 @@ private struct MCPDetailView: View {
         ) { runInstall() }
     }
 
-    @ViewBuilder
-    private func matrixTile(_ source: AgentSource, configured: Bool) -> some View {
-        let blockReason = configured
-            ? nil
-            : MCPService.installBlockReason(transport: primary?.transport ?? "stdio", to: source)
-        let installable = !configured && blockReason == nil
-        VStack(spacing: 4) {
-            SourceBadge(source: source, size: 22)
-                .opacity(configured ? 1 : (installable ? 0.6 : 0.28))
-            Text(source.displayName)
-                .font(Theme.font.themed(9))
-                .foregroundStyle(configured ? .secondary : .tertiary)
-            if configured {
-                Text(L10n.text("Configured", zhHans: "已配置"))
-                    .font(Theme.font.themed(8, .medium))
-                    .foregroundStyle(Theme.textSecondary)
-            } else if installable {
-                Text(L10n.text("Install", zhHans: "安装"))
-                    .font(Theme.font.themed(8, .semibold))
-                    .foregroundStyle(Theme.brandFg)
-            } else {
-                Text(L10n.text("Not writable", zhHans: "不可写"))
-                    .font(Theme.font.themed(8, .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .fill(configured ? Theme.brandFill(0.08) : Theme.surface))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .strokeBorder(
-                    configured ? Theme.brand.opacity(0.5) : Theme.cardBorder,
-                    lineWidth: configured ? 1 : 0.5))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
-        .onTapGesture {
-            guard installable else { return }
-            installTarget = source
-        }
-        .help(configured
-            ? L10n.format("%@ already has this server", zhHans: "%@ 已配置该 server", String(source.displayName))
-            : (blockReason ?? L10n.format("Write this server into %@’s MCP config", zhHans: "把该 server 写入 %@ 的 MCP 配置", String(source.displayName))))
-    }
-
     private func runInstall() {
         guard let installTo = installTarget, let primary else { return }
         installTarget = nil
@@ -2274,39 +2253,6 @@ private struct MCPDetailView: View {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { installNote = nil }
         }
-    }
-
-    /// Project-level tile: belongs to no single agent (claude's .mcp.json is MCP's official project
-    /// standard, cursor has an equivalent convention); it can be installed into another repo even
-    /// when already configured, so it's always clickable
-    private var projectMatrixTile: some View {
-        let projectConfigured = entries.contains { $0.projectName != nil }
-        return VStack(spacing: 4) {
-            Image(systemName: projectConfigured ? "folder.fill.badge.checkmark" : "folder.badge.plus")
-                .font(Theme.font.themed(12))
-                .foregroundStyle(projectConfigured ? .secondary : Theme.brandFg.opacity(0.8))
-            Text(L10n.text("Project", zhHans: "项目级"))
-                .font(Theme.font.themed(9))
-                .foregroundStyle(.secondary)
-            Text(projectConfigured ? L10n.text("Configured", zhHans: "已配置") : L10n.text("Install", zhHans: "安装"))
-                .font(Theme.font.themed(8, projectConfigured ? .medium : .semibold))
-                .foregroundStyle(projectConfigured ? Theme.textSecondary : Theme.brandFg)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .fill(projectConfigured ? Theme.brandFill(0.08) : Theme.surface))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radius.container)
-                .strokeBorder(
-                    projectConfigured ? Theme.brand.opacity(0.5) : Theme.cardBorder,
-                    lineWidth: projectConfigured ? 1 : 0.5))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.radius.container))
-        .onTapGesture { projectSheet = true }
-        .help(projectConfigured
-            ? L10n.text("Already in some repos; open to install into another project", zhHans: "已装到某些 repo；点开可再装到其它项目")
-            : L10n.text("Write this server into the selected repo’s .mcp.json (shared with the project)", zhHans: "把该 server 写入所选 repo 的 .mcp.json（随项目共享）"))
     }
 
     /// Repo picker sheet: recent projects (roots found by the scan) + browse fallback
@@ -2380,50 +2326,68 @@ private struct MCPDetailView: View {
 
     // MARK: Config locations
 
-    private func occurrenceRow(_ entry: MCPServerEntry) -> some View {
+    /// One config location: logo, name with its chips, the file path; then a right-hand
+    /// cluster of status, Edit, ⋯ and the on/off switch. Edit and the switch keep their slot on
+    /// rows that lack them (`PlacementColumns`), so every column lines up down the list.
+    private func occurrenceRow(_ entry: MCPServerEntry, layout: PlacementColumns) -> some View {
         let readOnly = MCPService.isReadOnly(entry)
+        let toggles = !readOnly && MCPService.supportsEnableToggle(entry.source)
         return HStack(spacing: 10) {
-            SourceLogoTile(source: entry.source, size: 24)
-            VStack(alignment: .leading, spacing: 2) {
+            SourceLogoTile(source: entry.source, size: PlacementColumns.logoSize)
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(entry.source.displayName)
-                        .font(Theme.font.themed(12, .medium))
+                        .font(Theme.font.themed(12.5, .medium))
+                        .lineLimit(1)
+                        .fixedSize()
                     TagChip(scopeLabel(entry), neutral: true)
+                    if readOnly {
+                        TagChip(L10n.text("Read-only", zhHans: "只读"), neutral: true)
+                    }
                     if entry.enabled == false {
                         TagChip(L10n.text("Disabled", zhHans: "已停用"), neutral: true)
                     }
                     if let approval = approvalLabel(entry) {
                         TagChip(approval, neutral: true)
                     }
-                    probeChip(for: entry)
                 }
                 Text(readOnly
                     ? L10n.format("%@ · managed with `claude mcp`", zhHans: "%@ · 用 `claude mcp` 管理", abbreviateHome(entry.configPath))
                     : abbreviateHome(entry.configPath))
-                    .font(Theme.font.themed(9.5))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.font.themed(10.5))
+                    .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 8)
-            if !readOnly {
-                CardActionButton(icon: "square.and.pencil", help: L10n.text("Edit this definition", zhHans: "编辑该处定义")) {
-                    onEdit(entry)
-                }
+            probeChip(for: entry)
+            if layout.reservesEdit {
+                PaneButton(L10n.text("Edit", zhHans: "编辑"), small: true) { onEdit(entry) }
+                    .opacity(readOnly ? 0 : 1)
+                    .disabled(readOnly)
+                    .accessibilityHidden(readOnly)
             }
-            CardActionButton(icon: "folder", help: L10n.text("Show in Finder", zhHans: "在 Finder 中显示")) {
-                service.reveal(path: entry.configPath)
-            }
-            if !readOnly {
-                CardActionButton(icon: "trash", color: Theme.failureRed,
-                                 help: L10n.text("Remove from this config (backup before writing)", zhHans: "从该配置移除（写前留备份）")) {
-                    onDeleteEntry(entry)
+            MCPPlacementMoreButton(
+                entry: entry, readOnly: readOnly, service: service,
+                onDelete: { onDeleteEntry(entry) })
+            if layout.reservesToggle {
+                Group {
+                    if toggles {
+                        MiniSwitch(isOn: entry.enabled ?? true) {
+                            service.setEnabled(entry, !(entry.enabled ?? true))
+                        }
+                        .help(entry.enabled == false
+                            ? L10n.format("Turn on in %@’s config (backup before writing)", zhHans: "在 %@ 的配置里启用（写前留备份）", entry.source.displayName)
+                            : L10n.format("Turn off in %@’s config (backup before writing)", zhHans: "在 %@ 的配置里停用（写前留备份）", entry.source.displayName))
+                    } else {
+                        Color.clear
+                    }
                 }
+                .frame(width: PlacementColumns.toggleWidth)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, PlacementColumns.horizontalPadding)
+        .frame(minHeight: 50)
         .contentShape(Rectangle())
         .onTapGesture { if !readOnly { onEdit(entry) } }
         .help(readOnly
@@ -2456,18 +2420,20 @@ private struct MCPDetailView: View {
     }
 
     /// Status chip: probing → spinner; otherwise shows the **persisted snapshot** (survives
-    /// restarts, shown directly since v2.6); older than 7 days adds a "stale" hint (the relative
-    /// time already reads "N days ago")
+    /// restarts, shown directly since v2.6). Its tooltip says when it was checked, plus an
+    /// "expired" hint past 7 days.
     @ViewBuilder
     private func probeChip(for entry: MCPServerEntry) -> some View {
         if service.probeResults[entry.id] == .checking {
-            ProgressView().controlSize(.small).scaleEffect(0.6)
+            ProgressView().controlSize(.small).scaleEffect(0.6).frame(width: 16, height: 16)
         } else if let snapshot = service.probeSnapshots[entry.id] {
+            // The check time lives in the tooltip: inline it pushed the Edit / ⋯ / switch
+            // columns out of line from row to row.
             TagChip(snapshot.displayLabel, tint: mcpToneColor(snapshot.tone))
-            Text(relativeFormatter.localizedString(for: snapshot.checkedAt, relativeTo: Date())
-                + (mcpSnapshotStale(snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""))
-                .font(Theme.font.themed(9))
-                .foregroundStyle(.tertiary)
+                .fixedSize()
+                .help(L10n.format("Checked %@", zhHans: "检查于 %@",
+                                  relativeFormatter.localizedString(for: snapshot.checkedAt, relativeTo: Date()))
+                    + (mcpSnapshotStale(snapshot) ? L10n.text(" · expired", zhHans: " · 已过期") : ""))
         }
     }
 
@@ -2475,6 +2441,68 @@ private struct MCPDetailView: View {
         Text(text)
             .font(Theme.font.themed(10, .semibold))
             .foregroundStyle(.secondary)
+    }
+}
+
+// MARK: - Installed-in row parts
+
+/// Column geometry of the "Installed in" rows. Edit and the switch reserve their width on every
+/// row once any row has them, so a read-only or switchless row does not shift ⋯ sideways.
+private struct PlacementColumns {
+    let reservesEdit: Bool
+    let reservesToggle: Bool
+
+    static let logoSize: CGFloat = 26
+    static let horizontalPadding: CGFloat = 12
+    /// Where the name column starts; row dividers begin here.
+    static var textInset: CGFloat { horizontalPadding + logoSize + 10 }
+    /// `MiniSwitch` is 30pt wide.
+    static let toggleWidth: CGFloat = 30
+}
+
+/// ⋯ on one config location: reveal, copy the path, remove. Its own view so each row keeps its
+/// own pop-up state.
+private struct MCPPlacementMoreButton: View {
+    let entry: MCPServerEntry
+    let readOnly: Bool
+    let service: MCPService
+    let onDelete: () -> Void
+
+    @State private var isOpen = false
+
+    var body: some View {
+        Button {
+            isOpen.toggle()
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(Theme.font.themed(11, .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 10)
+                .modifier(PopupButtonChrome(height: 24, horizontalPadding: 7))
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("More", zhHans: "更多"))
+        .themedPopup(isPresented: $isOpen, alignment: .trailing) {
+            PopupList {
+                PopupRow(L10n.text("Show in Finder", zhHans: "在 Finder 中显示"), systemImage: "folder") {
+                    isOpen = false
+                    service.reveal(path: entry.configPath)
+                }
+                PopupRow(L10n.text("Copy config path", zhHans: "复制配置路径"), systemImage: "doc.on.doc") {
+                    isOpen = false
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(entry.configPath, forType: .string)
+                }
+                if !readOnly {
+                    Divider().padding(.vertical, 3)
+                    PopupRow(L10n.text("Remove from this config…", zhHans: "从该配置移除…"),
+                             systemImage: "trash", destructive: true) {
+                        isOpen = false
+                        onDelete()
+                    }
+                }
+            }
+        }
     }
 }
 

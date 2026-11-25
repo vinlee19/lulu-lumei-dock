@@ -101,10 +101,13 @@ struct PromptsView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text(L10n.text("Prompts", zhHans: "Prompt 库")).font(Theme.font.themed(15, .bold))
+            // No page title: the hub's type switcher names the page. Search sits where every
+            // hub page puts it (`KnowledgeHubView.searchWidth`).
             SearchField(
                 placeholder: L10n.text("Search prompts", zhHans: "搜索提问"), text: $service.searchText,
-                scanning: service.scanning, resultCount: service.prompts.count)
+                scanning: service.scanning, resultCount: service.prompts.count,
+                maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             Button {
                 service.favoritesOnly.toggle()

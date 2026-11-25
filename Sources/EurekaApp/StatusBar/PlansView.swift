@@ -66,14 +66,17 @@ struct PlansView: View {
         }
     }
 
-    // MARK: - Top bar (title + search + refresh + layout toggle)
+    // MARK: - Top bar (search + refresh + layout toggle)
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("Plans").font(Theme.font.themed(15, .bold))
+            // No page title: the hub's type switcher names the page. Search sits where every
+            // hub page puts it (`KnowledgeHubView.searchWidth`).
             SearchField(
                 placeholder: L10n.text("Search plans", zhHans: "搜索计划"), text: $service.searchText,
-                scanning: service.scanning, resultCount: service.plans.count)
+                scanning: service.scanning, resultCount: service.plans.count,
+                maxWidth: KnowledgeHubView.searchWidth)
+                .frame(width: KnowledgeHubView.searchWidth)
             Spacer(minLength: 12)
             ScanStatusLabel(
                 scanning: service.scanning, phase: service.scanPhase,
