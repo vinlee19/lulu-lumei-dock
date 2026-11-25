@@ -40,6 +40,11 @@ this project uses [Semantic Versioning](https://semver.org/).
   a project moved into one "Install to other tools" pull-down that lists only
   the agents that can take it, replacing the grid of one tile per agent. The
   skill detail uses the same pull-down.
+- **Repo-supplied MCP servers are not started just by opening their page.** A
+  server from a repo's `.mcp.json` is probed automatically only once you've
+  approved it in `~/.claude/settings.json`; the button still reads it on
+  demand. Stored OAuth tokens are now sent only to the origin they were
+  issued for.
 
 ### Fixed
 
@@ -50,6 +55,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   "Connected" with an empty list or "no tools": the reason is shown and the
   last good list is kept. Check results written by `--mcp-inspect` appear
   without a relaunch, and status labels follow a language change.
+- The list / cards / relations switch drops to icons in the narrowest window
+  instead of clipping its labels to one character.
 
 ## [0.44.0] - 2026-11-21
 
