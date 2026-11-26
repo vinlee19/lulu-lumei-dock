@@ -15,6 +15,13 @@ this project uses [Semantic Versioning](https://semver.org/).
   conversation is titled with Antigravity's own title or its first prompt.
   Antigravity conversations are now part of full-text search.
 
+### Changed
+
+- **Empty sessions are left out of the session list.** A session where nothing
+  was asked and nothing was answered (opened and closed without a word) no
+  longer takes a row, for every agent. Sessions with only a prompt (an
+  interrupted turn) or only replies (a subagent) still show.
+
 ### Fixed
 
 - **Codex sessions closed since mid-2026 show up again.** Codex compresses a

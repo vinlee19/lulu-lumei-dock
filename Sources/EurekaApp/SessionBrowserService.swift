@@ -169,6 +169,21 @@ final class SessionBrowserService: ObservableObject {
     /// Tab-open refresh: skipped while a scan runs or one finished within `maxAge`. Every open used
     /// to queue a full re-index of every agent (twice, via `rangeAll`), the heaviest thing the
     /// Sessions tab does.
+    /// `SessionContentProbe` verdicts by `source:id`, valid while the session's activity time and
+    /// size are unchanged (only touched on `queue`)
+    private var contentVerdicts: [String: (lastActiveAt: Date, size: UInt64, verdict: Bool?)] = [:]
+
+    private func hasConversation(_ session: AgentSessionInfo) -> Bool? {
+        let key = "\(session.source.rawValue):\(session.id)"
+        if let cached = contentVerdicts[key], cached.lastActiveAt == session.lastActiveAt,
+           cached.size == session.sizeBytes {
+            return cached.verdict
+        }
+        let verdict = autoreleasepool { SessionContentProbe.hasConversation(session) }
+        contentVerdicts[key] = (session.lastActiveAt, session.sizeBytes, verdict)
+        return verdict
+    }
+
     func refreshIfStale(maxAge: TimeInterval = 60) {
         if scanning { return }
         if let lastIndexedAt, Date().timeIntervalSince(lastIndexedAt) < maxAge { return }
@@ -241,6 +256,9 @@ final class SessionBrowserService: ObservableObject {
             // duplicate ids in ForEach render blank rows)
             var seenIds = Set<String>()
             indexed = indexed.filter { seenIds.insert($0.id).inserted }
+            // Leave out sessions with neither a prompt nor a reply (opened and closed without a
+            // word); judged once per session version, see `hasConversation(_:)`
+            indexed = indexed.filter { self.hasConversation($0) != false }
 
             // Per-session cost: aggregate per session × model, then price through the pricing table
             var costMap: [String: SessionCost] = [:]
