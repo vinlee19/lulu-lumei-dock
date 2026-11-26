@@ -6,7 +6,7 @@ import Foundation
 /// → rebuild all docs of changed files.
 /// Only user / assistant text is indexed (tool trails are noisy and can be expanded on the session
 /// page). Shared-database sources (opencode / hermes / cursor: every session shares one .db, so
-/// fingerprints can't tell them apart) and antigravity (protobuf, no plaintext) aren't indexed yet.
+/// fingerprints can't tell them apart) aren't indexed yet.
 public final class TranscriptSearchIndexer {
     /// Per-message truncation limit (characters) so one huge message can't bloat the index
     static let maxDocChars = 8192
@@ -40,10 +40,9 @@ public final class TranscriptSearchIndexer {
         // Exclude SQLite-backed sources (opencode / hermes / cursor): this index is keyed by
         // transcriptPath (replaceDocs(path:) + prune(keeping:)), but all their sessions share one
         // .db path, so each session would overwrite the previous one's docs wholesale.
-        // antigravity has no readable transcript and is excluded too.
-        let supported = sessions.filter {
-            !$0.source.usesSharedSessionDatabase && $0.source != .antigravity
-        }
+        // Antigravity is fine: one conversation file per session, and the app rewrites it
+        // whenever the transcript grows, so its fingerprint tracks the text.
+        let supported = sessions.filter { !$0.source.usesSharedSessionDatabase }
         guard let fingerprints = try? store.search.fileFingerprints() else { return 0 }
         var rebuilt = 0
         lastPassTruncated = false

@@ -6,6 +6,15 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Antigravity conversations can be read.** Opening one shows its prompts,
+  replies, tool activity and errors, read from the transcript Antigravity keeps
+  next to each conversation, or from its own search index when there is no
+  transcript. Conversations from the Antigravity IDE are listed too, and every
+  conversation is titled with Antigravity's own title or its first prompt.
+  Antigravity conversations are now part of full-text search.
+
 ### Fixed
 
 - **Codex sessions closed since mid-2026 show up again.** Codex compresses a

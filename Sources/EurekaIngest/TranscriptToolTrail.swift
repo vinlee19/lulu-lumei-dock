@@ -71,6 +71,51 @@ public enum ToolStepExtractor {
         clip(AuditExtractor.codexCustomTool(name: name, input: input))
     }
 
+    // MARK: - Antigravity (tool_calls of a PLANNER_RESPONSE step in transcript_full.jsonl)
+
+    /// Antigravity tool names seen locally (2026-11), by kind; anything else is `.other`
+    private static let antigravityKinds: [String: ToolKind] = [
+        "run_command": .command,
+        "read_file": .read, "view_file": .read, "read_resource": .read,
+        "edit_file": .edit, "write_to_file": .edit, "write_file": .edit,
+        "replace_file_content": .edit,
+        "grep_search": .search, "find_by_name": .search, "list_dir": .search,
+        "search_web": .web, "read_url_content": .web,
+        "call_mcp_tool": .mcp,
+    ]
+
+    /// The argument that best describes each call, before the model's own `toolSummary`
+    private static let antigravityDetailKeys = [
+        "CommandLine", "AbsolutePath", "Path", "TargetFile", "Query", "query", "Pattern",
+        "DirectoryPath", "Url", "toolSummary",
+    ]
+
+    public static func antigravity(name: String, args: [String: Any]?) -> ToolStep {
+        let args = (args ?? [:]).mapValues(antigravityArgument)
+        let kind = antigravityKinds[name] ?? .other
+        if kind == .mcp {
+            let server = args["ServerName"] as? String ?? "?"
+            let tool = args["ToolName"] as? String ?? "?"
+            let detail = args["toolSummary"] as? String ?? args["Arguments"] as? String
+            return ToolStep(kind: .mcp, name: "\(server).\(tool)", detail: clip(detail))
+        }
+        let detail = antigravityDetailKeys.lazy.compactMap { args[$0] as? String }
+            .first { !$0.isEmpty }
+        return ToolStep(
+            kind: kind, name: name,
+            detail: kind == .command ? clipFirstLine(detail) : clip(detail))
+    }
+
+    /// `transcript.jsonl` stores each argument JSON-encoded once more (`"\"/path\""`);
+    /// `transcript_full.jsonl` stores the plain value. Both decode to the plain value.
+    private static func antigravityArgument(_ value: Any) -> Any {
+        guard let text = value as? String, text.count >= 2, text.hasPrefix("\""), text.hasSuffix("\""),
+              let data = text.data(using: .utf8),
+              let decoded = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+        else { return value }
+        return decoded
+    }
+
     /// Full-fidelity operation → display ToolStep: commands keep only the first line, everything
     /// else is truncated as a whole
     private static func clip(_ op: AuditExtractor.Operation) -> ToolStep {

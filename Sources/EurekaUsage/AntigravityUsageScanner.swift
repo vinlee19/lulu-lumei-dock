@@ -29,12 +29,8 @@ public final class AntigravityUsageScanner {
     private let cwdResolver: (URL) -> String?
     private let projectResolver = ProjectResolver()
 
-    private struct Fingerprint: Codable, Equatable {
-        var size: Int64
-        var mtime: Double
-        var walSize: Int64
-        var walMtime: Double
-    }
+    /// Persisted in `scan_files.extra`; the shared type keeps the same JSON keys
+    private typealias Fingerprint = SQLiteWALSnapshot.Fingerprint
 
     public init(conversationsRoot: URL, store: EurekaStore, cwdResolver: @escaping (URL) -> String?) {
         self.conversationsRoot = conversationsRoot
@@ -55,7 +51,7 @@ public final class AntigravityUsageScanner {
 
     private func scanDatabase(_ dbURL: URL) throws -> Int {
         let path = dbURL.path
-        guard let fingerprint = Self.fingerprint(dbURL) else { return 0 }
+        guard let fingerprint = SQLiteWALSnapshot.fingerprint(dbURL) else { return 0 }
         let saved = try store.scanState.fileState(path: path)
         let savedFingerprint = saved?.extra.flatMap {
             try? JSONDecoder().decode(Fingerprint.self, from: Data($0.utf8))
@@ -63,7 +59,7 @@ public final class AntigravityUsageScanner {
         guard savedFingerprint != fingerprint else { return 0 }
         var watermark = saved?.offset ?? -1
 
-        guard let snapshot = Self.snapshotCopy(dbURL) else { return 0 }
+        guard let snapshot = SQLiteWALSnapshot.copy(dbURL) else { return 0 }
         defer { try? FileManager.default.removeItem(at: snapshot.deletingLastPathComponent()) }
         guard let db = try? SQLiteDB(path: snapshot.path) else { return 0 }
 
@@ -154,37 +150,5 @@ public final class AntigravityUsageScanner {
             }
         }
         return result
-    }
-
-    /// Copy .db (+ -wal) into a dedicated temp dir; -shm is not copied (SQLite rebuilds it from the
-    /// wal on open)
-    static func snapshotCopy(_ dbURL: URL) -> URL? {
-        let fm = FileManager.default
-        let dir = fm.temporaryDirectory.appendingPathComponent("eureka-agy-\(UUID().uuidString)")
-        do {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            let target = dir.appendingPathComponent(dbURL.lastPathComponent)
-            try fm.copyItem(at: dbURL, to: target)
-            let wal = URL(fileURLWithPath: dbURL.path + "-wal")
-            if fm.fileExists(atPath: wal.path) {
-                try fm.copyItem(at: wal, to: URL(fileURLWithPath: target.path + "-wal"))
-            }
-            return target
-        } catch {
-            try? fm.removeItem(at: dir)
-            return nil
-        }
-    }
-
-    private static func fingerprint(_ dbURL: URL) -> Fingerprint? {
-        func stat(_ path: String) -> (Int64, Double)? {
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
-            let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-            let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-            return (size, mtime)
-        }
-        guard let main = stat(dbURL.path) else { return nil }
-        let wal = stat(dbURL.path + "-wal") ?? (0, 0)
-        return Fingerprint(size: main.0, mtime: main.1, walSize: wal.0, walMtime: wal.1)
     }
 }
