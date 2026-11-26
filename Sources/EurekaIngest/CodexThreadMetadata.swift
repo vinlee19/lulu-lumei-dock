@@ -1,3 +1,4 @@
+import EurekaStore
 import Foundation
 
 /// Streaming complete-line reader for Codex JSONL.
@@ -17,8 +18,9 @@ enum CodexJSONLReader {
         includeTrailingLine: Bool = false,
         _ body: (Data) -> Bool
     ) -> UInt64 {
-        guard let handle = FileHandle(forReadingAtPath: url.path) else { return 0 }
-        defer { try? handle.close() }
+        // A compressed rollout (`.jsonl.zst`) decodes transparently; offsets are then positions
+        // in the decompressed bytes
+        guard let source = RolloutByteSource(path: url.path) else { return 0 }
 
         let newline = UInt8(ascii: "\n")
         var buffer = Data()
@@ -38,7 +40,7 @@ enum CodexJSONLReader {
             }
         }
 
-        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+        while let chunk = source.read(upToCount: 1 << 20), !chunk.isEmpty {
             buffer.append(chunk)
 
             if droppingOversizeLine {

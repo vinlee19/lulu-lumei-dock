@@ -1,3 +1,4 @@
+import EurekaStore
 import Foundation
 import EurekaKit
 
@@ -79,18 +80,19 @@ public enum CodexSessionIndexer {
     /// split lines, find two fields - so one read + one `split` is enough. (The reader's own O(n^2)
     /// barely affects tailers: they only read newly appended bytes, so the buffer stays small.)
     static func headInfo(fileURL: URL) -> (id: String?, cwd: String?, name: String?, startedAt: Date?) {
-        guard let handle = FileHandle(forReadingAtPath: fileURL.path) else {
+        // `RolloutByteSource` also opens a compressed `.jsonl.zst` rollout; decoding stops as soon
+        // as the head is read, so the cost stays bounded by the same limits
+        guard let source = RolloutByteSource(path: fileURL.path) else {
             return (nil, nil, nil, nil)
         }
-        defer { try? handle.close() }
-        guard var head = try? handle.read(upToCount: Self.headProbeLimit), !head.isEmpty else {
+        guard var head = source.read(upToCount: Self.headProbeLimit), !head.isEmpty else {
             return (nil, nil, nil, nil)
         }
         var result = scan(head)
         // First level came up short (very long instructions on line one, or this session has no
         // user_message at all) → extend to the limit and rescan
         if result.id == nil || result.name == nil, head.count == Self.headProbeLimit,
-           let more = try? handle.read(upToCount: Self.headScanLimit - Self.headProbeLimit),
+           let more = source.read(upToCount: Self.headScanLimit - Self.headProbeLimit),
            !more.isEmpty {
             head.append(more)
             result = scan(head)
@@ -157,7 +159,7 @@ public enum CodexSessionIndexer {
 
     /// rollout-2026-06-08T23-36-02-<uuid>.jsonl → uuid
     private static func fallbackId(_ url: URL) -> String {
-        let stem = url.deletingPathExtension().lastPathComponent
+        let stem = RolloutByteSource.stem(of: url)
         let parts = stem.split(separator: "-")
         return parts.count >= 5 ? parts.suffix(5).joined(separator: "-") : stem
     }

@@ -1,0 +1,30 @@
+{
+  "multi-frame.zst": {
+    "sha256": "8461485bf2c075f2e19e41e0a28850ace136a45499d489d1d49af2a2c47cabb9",
+    "size": 420001
+  },
+  "prose-1-checksum.zst": {
+    "sha256": "6c6c6a6c2442118cc409ff56c57cded802eb291a29a4582d80d4c7aeb32ea4b5",
+    "size": 266816
+  },
+  "prose-19.zst": {
+    "sha256": "6c6c6a6c2442118cc409ff56c57cded802eb291a29a4582d80d4c7aeb32ea4b5",
+    "size": 266816
+  },
+  "random.zst": {
+    "sha256": "322ff7f9a802adc75e114310b63e261b4922b39b1d1db306b5b2dd4972026721",
+    "size": 65536
+  },
+  "rle.zst": {
+    "sha256": "af8a8bf6b1ad871feaaf00a50d15e259b3b9dd8f85657bc71588a73b81a00c5d",
+    "size": 400001
+  },
+  "stream-no-size.zst": {
+    "sha256": "c8bbf1d2d075bf8cde7536665c500bd9786521439496201ed8432189836f603d",
+    "size": 20000
+  },
+  "tiny.zst": {
+    "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+    "size": 6
+  }
+}
