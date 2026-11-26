@@ -3,10 +3,10 @@ import Foundation
 
 /// Prompt library collector: extracts user prompts (`role == .user`) from session transcripts.
 ///
-/// Reuses every source loader in `TranscriptReader` — 12 sources can be extracted directly
-/// (including the shared-DB opencode/hermes/cursor/zcode, queried by sessionId); antigravity
-/// (protobuf) and trae (SQLCipher) each return only a single toolNote, so naturally nothing
-/// is extracted from them.
+/// Reuses every source loader in `TranscriptReader` — every source but trae can be extracted
+/// (including the shared-DB opencode/hermes/cursor/zcode, queried by sessionId, and antigravity,
+/// read from its transcript jsonl or its own search index); trae (SQLCipher) returns only a single
+/// toolNote, so naturally nothing is extracted from it.
 public enum PromptExtractor {
     /// Single-session extraction: fully parses the transcript, filters user messages and applies
     /// three layers of noise removal (12.4% of the 2395 surveyed entries were pseudo-user
