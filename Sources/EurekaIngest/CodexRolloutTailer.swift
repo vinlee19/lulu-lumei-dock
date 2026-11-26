@@ -129,8 +129,13 @@ public final class CodexRolloutTailer {
     /// directory and refreshes its mtime, so the mtime filter never misses a re-activated session;
     /// files already tracked in offsets ignore the window and are always tailed. Cold history only
     /// costs a directory listing + stat per tick.
+    ///
+    /// Compressed rollouts (`.jsonl.zst`) are skipped: Codex compresses a rollout only once its
+    /// session closed and decompresses it back to `.jsonl` before appending again, so a live
+    /// session is always a plain file.
     private func recentRolloutFiles(now: Date = Date()) -> [URL] {
         CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot).compactMap { entry in
+            guard !entry.isCompressed else { return nil }
             if offsets[entry.url.path] != nil { return entry.url }
             guard let mtime = entry.mtime, now.timeIntervalSince(mtime) < recentWindow
             else { return nil }

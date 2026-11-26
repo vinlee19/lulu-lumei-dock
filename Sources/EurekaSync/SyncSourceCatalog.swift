@@ -270,8 +270,11 @@ public enum SyncSourceCatalog {
             category: "codex", relativePath: "AGENTS.override.md", priority: 0)
         walk(root: roots.codexHome.appendingPathComponent("memories", isDirectory: true),
              category: "codex/memories", priority: 0, include: markdownOnly)
-        walk(root: roots.codexSessions, category: "codex/sessions", priority: 1,
-             include: jsonlOnly)
+        // Codex compresses a closed session's rollout to `.jsonl.zst`; copied as is
+        walk(root: roots.codexSessions, category: "codex/sessions", priority: 1) { rel in
+            let lower = rel.lowercased()
+            return lower.hasSuffix(".jsonl") || lower.hasSuffix(".jsonl.zst")
+        }
         walk(root: roots.codexSkills, category: "codex/skills", priority: 0, include: always)
         walk(root: disabledSibling(of: roots.codexSkills),
              category: "codex/skills.eureka-disabled", priority: 0, include: always)

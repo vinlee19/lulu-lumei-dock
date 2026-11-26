@@ -6,6 +6,15 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Codex sessions closed since mid-2026 show up again.** Codex compresses a
+  session's history to `.jsonl.zst` when the session closes, and Eureka only
+  read uncompressed files, so the session list showed just the one or two
+  sessions still open (398 locally, 2 listed). Compressed sessions now appear
+  in the session list, details, search, plans and backups, and their usage is
+  read too; history already counted before compression is not counted twice.
+
 ## [0.45.0] - 2026-11-25
 
 ### Added

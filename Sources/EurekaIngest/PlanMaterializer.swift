@@ -193,9 +193,16 @@ public enum PlanMaterializer {
         }
         for case let rel as String in enumerator {
             let name = (rel as NSString).lastPathComponent
-            guard name.hasPrefix("rollout-"), name.hasSuffix(".jsonl") else { continue }
+            // A closed session's rollout is compressed to `.jsonl.zst`; while it is being
+            // decompressed for a resume both exist, and the plain one wins
+            guard name.hasPrefix("rollout-"),
+                  name.hasSuffix(".jsonl")
+                    || (name.hasSuffix(".jsonl.zst")
+                        && !fm.fileExists(atPath: sessionsRoot
+                            .appendingPathComponent(String(rel.dropLast(".zst".count))).path))
+            else { continue }
             let fileURL = sessionsRoot.appendingPathComponent(rel)
-            let stem = fileURL.deletingPathExtension().lastPathComponent
+            let stem = RolloutByteSource.stem(of: fileURL)
             let attrs = try? fm.attributesOfItem(atPath: fileURL.path)
             let size = (attrs?[.size] as? NSNumber)?.int64Value ?? -1
             let mtime = ((attrs?[.modificationDate] as? Date) ?? .distantPast)

@@ -1,4 +1,5 @@
 import EurekaKit
+import EurekaStore
 import Foundation
 
 /// Decides whether a session lives in a desktop app and, if so, returns its direct link
@@ -131,13 +132,12 @@ public enum SessionAppLinkResolver {
     /// capped at the session indexer's `headScanLimit`.
     static func isCodexDesktopThread(sessionId: String, sessionsRoot: URL) -> Bool {
         guard SessionAppLink.isUUID(sessionId) else { return false }
-        let suffix = "-\(sessionId).jsonl"
+        let suffix = "-\(sessionId)"
         guard let entry = CodexRolloutFiles.enumerate(sessionsRoot: sessionsRoot)
-            .first(where: { $0.url.lastPathComponent.hasSuffix(suffix) }),
-              let handle = FileHandle(forReadingAtPath: entry.url.path)
+            .first(where: { RolloutByteSource.stem(of: $0.url).hasSuffix(suffix) }),
+              let source = RolloutByteSource(path: entry.url.path)
         else { return false }
-        defer { try? handle.close() }
-        guard let head = try? handle.read(upToCount: CodexSessionIndexer.headScanLimit),
+        guard let head = source.read(upToCount: CodexSessionIndexer.headScanLimit),
               let lineEnd = head.firstIndex(of: UInt8(ascii: "\n")),
               let object = try? JSONSerialization.jsonObject(
                 with: head[head.startIndex..<lineEnd]) as? [String: Any],

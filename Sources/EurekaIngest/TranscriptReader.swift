@@ -1143,7 +1143,8 @@ public enum TranscriptReader {
     private static func forEachJSONLine(
         path: String, _ body: ([String: Any]) -> Bool
     ) {
-        guard let data = FileManager.default.contents(atPath: path) else { return }
+        // A compressed Codex rollout (`.jsonl.zst`) is decoded whole, like a plain file is read
+        guard let data = RolloutByteSource.contents(atPath: path) else { return }
         var start = data.startIndex
         while start < data.endIndex {
             let end = data[start...].firstIndex(of: UInt8(ascii: "\n")) ?? data.endIndex

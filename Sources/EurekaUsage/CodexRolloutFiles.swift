@@ -1,6 +1,7 @@
 import Foundation
 
-/// Recursive enumerator for every rollout-*.jsonl under ~/.codex/sessions.
+/// Recursive enumerator for every rollout-*.jsonl (and compressed rollout-*.jsonl.zst) under
+/// ~/.codex/sessions.
 /// Same logic as EurekaIngest.CodexRolloutFiles: EurekaUsage can't depend on EurekaIngest,
 /// so it carries its own copy (the cross-module convention of JSONLinesReader /
 /// CodexRolloutDecoderProxy).
@@ -12,6 +13,8 @@ enum CodexRolloutFiles {
     struct Entry {
         let url: URL
         let mtime: Date?
+        /// `rollout-*.jsonl.zst`: Codex compressed the rollout when the session closed
+        var isCompressed: Bool { url.pathExtension == "zst" }
     }
 
     /// Enumerates rollout-*.jsonl in every numeric YYYY/MM/DD directory under sessionsRoot
@@ -23,9 +26,8 @@ enum CodexRolloutFiles {
                     let files = (try? FileManager.default.contentsOfDirectory(
                         at: day, includingPropertiesForKeys: [.contentModificationDateKey]
                     )) ?? []
-                    for file in files
-                    where file.lastPathComponent.hasPrefix("rollout-")
-                        && file.pathExtension == "jsonl" {
+                    let names = Set(files.map(\.lastPathComponent))
+                    for file in files where isRollout(file.lastPathComponent, siblings: names) {
                         results.append(Entry(
                             url: file,
                             mtime: (try? file.resourceValues(
@@ -36,6 +38,17 @@ enum CodexRolloutFiles {
             }
         }
         return results
+    }
+
+    /// `rollout-*.jsonl`, or `rollout-*.jsonl.zst` unless the plain file sits next to it.
+    ///
+    /// Codex compresses a rollout to `.jsonl.zst` when the session closes and decompresses it
+    /// when the session resumes, so both can exist for a moment; the plain file is the live one.
+    static func isRollout(_ name: String, siblings: Set<String>) -> Bool {
+        guard name.hasPrefix("rollout-") else { return false }
+        if name.hasSuffix(".jsonl") { return true }
+        guard name.hasSuffix(".jsonl.zst") else { return false }
+        return !siblings.contains(String(name.dropLast(".zst".count)))
     }
 
     /// Lists subdirectories named with exactly N digits (YYYY = 4, MM/DD = 2); every other entry is

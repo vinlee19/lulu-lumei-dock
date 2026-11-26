@@ -1,3 +1,4 @@
+import EurekaStore
 import Foundation
 import EurekaKit
 
@@ -41,17 +42,27 @@ public struct CodexRateLimitProvider: RateLimitProvider {
         return newest?.url
     }
 
-    /// Last rate_limits entry in the file's trailing 64KB
+    /// Last rate_limits entry in the file's trailing 64KB.
+    ///
+    /// A compressed rollout (`.jsonl.zst`, the newest one once its session closed) can't be read
+    /// from the end, so it is decoded whole and the same tail is taken; only this one file is.
     public static func lastRateLimits(in url: URL) -> RateLimitSnapshot? {
-        guard
-            let handle = FileHandle(forReadingAtPath: url.path),
-            let size = try? handle.seekToEnd()
-        else { return nil }
-        defer { try? handle.close() }
-        let length = min(size, 65536)
-        guard (try? handle.seek(toOffset: size - length)) != nil,
-              let data = try? handle.readToEnd()
-        else { return nil }
+        let data: Data
+        if RolloutByteSource.isCompressed(url.path) {
+            guard let whole = RolloutByteSource.contents(atPath: url.path) else { return nil }
+            data = whole.suffix(65536)
+        } else {
+            guard
+                let handle = FileHandle(forReadingAtPath: url.path),
+                let size = try? handle.seekToEnd()
+            else { return nil }
+            defer { try? handle.close() }
+            let length = min(size, 65536)
+            guard (try? handle.seek(toOffset: size - length)) != nil,
+                  let tail = try? handle.readToEnd()
+            else { return nil }
+            data = tail
+        }
 
         var latest: RateLimitSnapshot?
         for line in data.split(separator: UInt8(ascii: "\n")) {
