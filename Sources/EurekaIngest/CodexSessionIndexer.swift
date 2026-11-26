@@ -6,7 +6,7 @@ import EurekaKit
 /// Resumed old sessions append in place under their creation-date dir, so the whole tree is
 /// enumerated and then filtered by an mtime window.
 /// The official thread_name wins; when missing, fall back to streaming session_meta and the first
-/// complete user_message.
+/// prompt (an `item_completed` `UserMessage` item, or a `user_message` line in older rollouts).
 public enum CodexSessionIndexer {
     public static func index(
         sessionsRoot: URL,
@@ -72,6 +72,11 @@ public enum CodexSessionIndexer {
     /// harmless.
     private static let metaMarker = Data("session_meta".utf8)
     private static let userMarker = Data("user_message".utf8)
+    /// The current format's prompt: `event_msg/item_completed` whose `item.type` is `UserMessage`.
+    /// Codex rewrote every older rollout into this format (its `legacy_to_paginated_v1`
+    /// migration), so locally no rollout has a `user_message` line any more; matching only that
+    /// left every session without a thread name titled "Session <id>" (57 of 398 had a title).
+    private static let userItemMarker = Data("\"UserMessage\"".utf8)
 
     /// Reads only the file head, **not via `CodexJSONLReader`**: that reader maintains offset
     /// bookkeeping and over-long-line semantics, and for every line copies the remaining buffer
@@ -122,7 +127,8 @@ public enum CodexSessionIndexer {
             guard !line.isEmpty else { continue }
             // Could this line carry a field we want? If not, skip even the JSON parse.
             let mayHaveMeta = id == nil && line.range(of: Self.metaMarker) != nil
-            let mayHaveUser = name == nil && line.range(of: Self.userMarker) != nil
+            let mayHaveUser = name == nil
+                && (line.range(of: Self.userMarker) != nil || line.range(of: Self.userItemMarker) != nil)
             guard mayHaveMeta || mayHaveUser else { continue }
             guard
                 let object = try? JSONSerialization.jsonObject(with: Data(line)),
@@ -144,10 +150,21 @@ public enum CodexSessionIndexer {
                 if let ts = payload["timestamp"] as? String ?? root["timestamp"] as? String {
                     startedAt = ClaudeSessionFirstTimestamp.parse(ts)
                 }
+                // A subagent's rollout starts with a copy of its parent's history, so its first
+                // prompt is the parent's (or a later parent message); its own identity names it
+                if name == nil { name = subagentTitle(payload) }
             case "event_msg":
-                if name == nil, payload["type"] as? String == "user_message",
+                guard name == nil else { break }
+                if payload["type"] as? String == "user_message",
                    let message = payload["message"] as? String {
                     name = summarizeTitle(message)
+                } else if payload["type"] as? String == "item_completed",
+                          let item = payload["item"] as? [String: Any],
+                          item["type"] as? String == "UserMessage",
+                          // Same text the session page shows: the "# Files mentioned by the
+                          // user: … ## My request:" envelope is unwrapped, images are named
+                          let text = TranscriptReader.codexItemVisibleText(item, userFacing: true) {
+                    name = summarizeTitle(text)
                 }
             default:
                 break
@@ -155,6 +172,23 @@ public enum CodexSessionIndexer {
             if id != nil, name != nil { break }
         }
         return (id, cwd, name, startedAt)
+    }
+
+    /// Title of a subagent rollout from its `session_meta`, nil for a top-level session:
+    /// `<agent_nickname> · <last agent_path component>` for a spawned agent (e.g. "Erdos ·
+    /// bind_outcome_audit"), and Codex's own name for the guardian that reviews approvals.
+    static func subagentTitle(_ meta: [String: Any]) -> String? {
+        let subagent = (meta["source"] as? [String: Any])?["subagent"] as? [String: Any]
+        guard meta["thread_source"] as? String == "subagent" || subagent != nil else { return nil }
+        if subagent?["other"] as? String == "guardian" {
+            return L10n.text("Guardian review", zhHans: "Guardian 审查")
+        }
+        let spawn = subagent?["thread_spawn"] as? [String: Any]
+        let nickname = (meta["agent_nickname"] as? String) ?? (spawn?["agent_nickname"] as? String)
+        let path = (meta["agent_path"] as? String) ?? (spawn?["agent_path"] as? String)
+        let task = path.flatMap { $0.split(separator: "/").last.map(String.init) }
+        let parts = [nickname, task].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// rollout-2026-06-08T23-36-02-<uuid>.jsonl → uuid

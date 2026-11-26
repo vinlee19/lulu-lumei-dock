@@ -30,6 +30,13 @@ this project uses [Semantic Versioning](https://semver.org/).
   sessions still open (398 locally, 2 listed). Compressed sessions now appear
   in the session list, details, search, plans and backups, and their usage is
   read too; history already counted before compression is not counted twice.
+- **Codex sessions are titled again.** Codex rewrote its rollouts into a newer
+  format that no longer has the line the title was taken from, so every
+  session without a name showed as "Session <id>" (only 57 of 398 had a title
+  locally; now 385 do, the rest being empty sessions). Titles come from the first prompt again, with attached-file
+  wrappers removed, and subagent sessions are named after the agent (for
+  example "Erdos · bind_outcome_audit") instead of a prompt copied from the
+  parent session.
 
 ## [0.45.0] - 2026-11-25
 
