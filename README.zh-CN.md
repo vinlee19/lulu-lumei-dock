@@ -57,11 +57,12 @@ xattr -dr com.apple.quarantine /Applications/lulu-lumei-dock.app
 `lulu-lumei-dock` 是一个原生 macOS 菜单栏应用:它监视本地 AI 编码助手的日志,把任务活动实时装进刘海
 旁的一座「灵动岛」,并提供一个完整面板——用量分析、订阅限额,以及会话 / 技能 / agent / 记忆的管理。
 
-开箱支持十四种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
+开箱支持十五种助手——**Claude Code、Codex CLI、opencode、Grok、Antigravity、Kimi Code、Gemini CLI、
 Qwen Code、Hermes Agent、CodeBuddy、WorkBuddy、Qoder、Cursor、Trae、ZCode**,核心功能**零网络**:
-一切都靠读取本地 transcript / rollout / session / 数据库文件推导。唯一的联网功能是 Claude 订阅限额(非官方
-接口,默认关闭,可在设置里 opt‑in)。此外，更新器默认会访问本仓库的 GitHub Releases feed 检查新版，
-可在「设置 → 关于」关闭。
+一切都靠读取本地 transcript / rollout / session / 数据库文件推导。联网的只有这些:Claude 订阅限额(非官方
+接口,默认关闭,可在设置里 opt‑in);每天拉一次公开的模型价目表(可在「设置 → 高级」关闭);打开或刷新限额页时
+运行 `agy` / `opencode` 自己查 Antigravity 与 OpenCode Go 的额度;以及更新器默认访问本仓库的 GitHub Releases
+feed 检查新版(可在「设置 → 关于」关闭)。
 
 而且**不装 hooks 也能用**——transcript/rollout 常驻监视兜底,装 hooks 之前开的老会话同样可见。
 
@@ -78,14 +79,20 @@ Qwen Code、Hermes Agent、CodeBuddy、WorkBuddy、Qoder、Cursor、Trae、ZCode
 - 时间显示可切换:已持续时长 ↔ 会话最初开始时间(跨 resume 链取真实创建时刻)。
 - 全岛统一的来源徽标(Claude 八芒星 / Codex 风车 / Grok 斜杠方 / opencode 终端 / Antigravity 人字)。
 
-**菜单栏** —— 例如 `▶2 · 37%`:活跃任务数 + 订阅限额取最大值(Codex 5h / Grok 周 / Claude),
+**菜单栏** —— 例如 `▶2 · 37%`:活跃任务数 + 订阅限额取最大值(Codex 5h / Grok 周 / Claude / Antigravity),
 60% 橙、85% 红,悬停看明细。
+
+**会话** —— 所有助手的历史与进行中会话集中在一处:按标题 / 项目 / id 搜索,按助手与时间范围筛选,按活跃 /
+占用 / 耗时 / 项目排序;打开任一会话可读提问、回复、思考与逐轮工具轨迹,并看费用与上下文占用。既没有提问也没有
+回复的空会话(打开就关掉的)不再列出;只有提问(被打断)或只有回复(子代理)的会话照常显示。Codex 会把关闭的
+会话压缩成 `.jsonl.zst`,应用内直接解码(无需安装 zstd)。Antigravity 的 `agy` CLI 与 IDE 会话都会列出,
+标题取 Antigravity 自己的标题。
 
 **用量账本**(与 `ccusage` 对拍偏差 0.00%)—— 今日 / 本周 / 本月 / 自定义区间,按来源、模型、项目
 (归组到仓库根)、会话拆分;估算费用(缓存分价);日 / 小时趋势图;周×小时活跃热力图;以及一个
 **技能 / 插件** 页,统计 `skill` / `mcp` / `agent` / `command` / `tool` 的调用次数。近 30 天可导出 CSV。
 
-**Skills(技能)** —— 跨全部五种工具浏览、新建、编辑、启用 / 停用技能(启停非破坏:把技能目录移到同级
+**Skills(技能)** —— 跨所有有技能的工具浏览、新建、编辑、启用 / 停用技能(启停非破坏:把技能目录移到同级
 `*.eureka-disabled`)。并新增专用的**使用分析**视图(列表 ↔ 统计分段):
 - 三档排行:**最近使用 / 最常使用 / 最久未使用**,各带最近活跃时间与累计次数。
 - 每个列表行显示**最近活跃**时间。
@@ -124,22 +131,34 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 |---|---|---|---|---|---|
 | **Claude Code** | ✅ | ✅ | ✅(opt‑in) | ✅ | ✅ |
 | **Codex CLI** | ✅ | ✅ | ✅(本地) | ✅ | ✅ |
-| **opencode** | ✅ | ✅ | — | ✅ | ✅ |
-| **Grok** | ✅ | 仅活动量¹ | ✅(本地) | ✅ | ✅ |
-| **Antigravity** | ✅ | 仅活动量¹ | — | ✅ | ✅ |
+| **opencode** | ✅ | ✅ | ✅(OpenCode Go) | ✅ | ✅ |
+| **Grok** | ✅ | ✅(自报费用)¹ | ✅(本地) | ✅ | ✅ |
+| **Antigravity** | ✅ | ✅(实验)¹ | ✅(经 `agy`) | ✅¹ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅(技能) |
+| **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅(技能/记忆) |
+| **Qwen Code** | ✅ | ✅ | — | ✅ | ✅(技能/记忆) |
+| **Hermes Agent** | ✅ | ✅ | — | ✅ | ✅(技能/记忆/计划) |
 | **CodeBuddy** | ✅ | ✅ | — | ✅ | ✅(记忆) |
 | **WorkBuddy** | ✅⁶ | ✅⁶ | ✅(本地,仅免费模型)⁶ | ✅⁶ | ✅(技能/记忆/规则/Agent/计划)⁶ |
 | **Qoder** | ✅ | —² | — | ✅ | ✅(记忆/计划) |
 | **Cursor** | ✅³ | ✅(不计费)³ | — | ✅ | ✅ |
 | **Trae** | 仅 hooks⁴ | —⁴ | — | ✅(来自记忆库)⁴ | ✅(技能/记忆/规则/计划) |
-| **ZCode** | ✅⁵ | ✅(不计费)⁵ | — | ✅⁵ | ✅(技能)⁵ |
+| **ZCode** | ✅⁵ | ✅⁵ | — | ✅⁵ | ✅(技能)⁵ |
 
-¹ Grok 是订阅制、Antigravity 会话是 protobuf,两者本地都不暴露 per‑request token 账,只能给活动量
-(调用 / 会话)。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
+¹ Grok(1.0.4x+)在 `updates.jsonl` 的 `turn_completed` 里记录每轮分模型用量和自报费用(`costUsdTicks`),
+费用直接采用,因为 Grok 的 `*-build` 模型不在公开价目表里。Antigravity 的会话库是未公开的 protobuf,
+用量靠限额页里的实验开关(默认关)从 `agy` 会话库的 `gen_metadata` 表解出;可读正文来自别处:`agy` 为每个会话写
+`brain/<id>/.system_generated/logs/transcript_full.jsonl`(提问、回复、工具调用、错误),`agy` 与 Antigravity IDE
+各有一个 `conversation_summaries.db`,存全部会话的标题和正文搜索索引。IDE 会话(`~/.gemini/antigravity/conversations/*.pb`)
+是加密的、也没有 transcript,所以只显示提问与回复(没有工具轨迹和时间),也没有用量。`~/.gemini/antigravity-ide` 与
+`~/.gemini/antigravity-backup` 是 IDE 目录的旧副本,不读取。Antigravity 的周 / 5 小时额度不落盘,限额卡片靠运行
+`agy` 的 `/usage` 取得。Kimi Code 无本地限额快照、无全局记忆 / 磁盘 agent 定义约定,对应列跳过。
 
 ² Qoder(CN)本地日志中 token 恒为 0,不展示用量账;会话、实时任务、计划与记忆均正常。
-CodeBuddy 的 token 记在 transcript 的 `function_call` 行上,由用量扫描器读取。
+CodeBuddy 的 token 记在 transcript 的 `function_call` 行上,由用量扫描器读取。CodeBuddy 一行指独立的
+CodeBuddy Code CLI(`~/.codebuddy/projects`);WorkBuddy 用同一个引擎、以 `~/.workbuddy` 为 home,所以它的
+对话都记在 WorkBuddy 名下。只用 WorkBuddy 的机器上没有 CodeBuddy 的用量和会话(`~/.codebuddy/logs` 里的
+内存监控日志来自 WorkBuddy 内嵌的引擎)。
 
 ³ Cursor 是 IDE 而非 CLI:没有 hook,也没有 transcript 文件。会话、消息、工具调用、ctx% 与 token
 全在一个 SQLite 库里(`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`),
@@ -195,8 +214,8 @@ salt,`sqlite3` 直接拒绝),而且全机没有任何明文转录。所以**没�
 ⁵ ZCode(Z.ai 的编码助手)以桌面应用分发,CLI 数据都在 `~/.zcode/cli`:会话与消息在单个
 SQLite 库里(`db/db.sqlite`,与 opencode 同源的表结构,只读打开),每个会话另有一条
 append-only 的模型 IO 流水(`rollout/model-io-sess_<id>.jsonl`),逐请求带 token 用量——
-实时卡片与用量账都尾随这条流水(含子代理流)。token 正常计数,但 `glm-` 前缀模型在价格表里
-标 `unknown`(套餐订阅制):**只统计 token,金额恒为 0**。会话在共享库里,与 opencode 同例
+实时卡片与用量账都尾随这条流水(含子代理流)。费用按公开价目表里 GLM 模型的 API 等价价格估算
+(ZCode 本身是套餐制,所以这不是你实际被扣的钱)。会话在共享库里,与 opencode 同例
 跳过单条删除与全文搜索;ctx% 分母取 `~/.zcode/v2/config.json` 里 per-model 的 `limit.context`(ZCode 自己维护的
 模型目录);技能在共享的 `~/.agents/skills`(SKILL.md,与 Claude 同构)。
 备份是严格白名单,只收 `cli/rollout`、`cli/agents` 与 `~/.agents/skills`:
@@ -270,7 +289,7 @@ eureka-relay inject --event stop --session demo   # 注入测试事件
 
 ```bash
 make build      # 调试编译(Command Line Tools 即可,无需完整 Xcode)
-make test       # 跑全部自建单测(300 个;CLT 无 XCTest)
+make test       # 跑全部自建单测(1200+ 个;CLT 无 XCTest)
 make run        # 开发模式直跑 GUI
 make demo       # 注入伪造事件,演示灵动岛全场景
 make app        # 打包 dist/lulu-lumei-dock.app(ad‑hoc 签名)
@@ -297,23 +316,28 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (原子 JSON 写)         ↓         ├─ NSStatusItem + NSPopover
 Codex rollout 监视 ─┘                    SpoolConsumer   │   (历史 / 会话 / 技能 / 用量 / 限额 / …)
 Claude transcript 监视 ────────────────→ TaskStore(状态机)
-用量扫描器(10 个,除 Antigravity/Qoder 外各源) ──────→ SQLite(历史 / 用量 / tool_calls / 审计)
+用量扫描器(12 个,覆盖除 Qoder/Trae 外各源) ──────→ SQLite(历史 / 用量 / tool_calls / 审计)
 ```
 
 - **`eureka-relay`** 是一个极小、完全独立的二进制:永远 `exit 0`、stdout 绝对静默、<50ms 完成、
   先写 `tmp/` 再原子 `rename` 进 spool。hooks/notify 配置只引用稳定路径
-  `~/Library/Application Support/Eureka/bin/eureka-relay`,app 启动按 hash 重新同步,升级不断链。
+  `~/Library/Application Support/Eureka/bin/lululumei-relay`,app 启动按 hash 重新同步,升级不断链
+  (0.36 之前写入的配置引用的 `bin/eureka-relay` 保留为指向它的软链)。
 - **模块依赖图**(SwiftPM target,严格单向):
-  `app → {EurekaIngest, EurekaUsage, EurekaInstall, EurekaSync} → EurekaStore → EurekaKit`;
-  `eureka-relay` 零依赖。
-- **SQLite** 用系统 `libsqlite3`,DB 始终可 `sqlite3` 直查。用量表是*派生表*(schema 升级时从
-  transcript 重建);`task_history` / `audit_events` / 备份表是*事实表*,绝不 DROP。
+  `app → {EurekaIngest, EurekaUsage, EurekaInstall, EurekaSync, EurekaSummary} → EurekaStore → EurekaKit`;
+  `eureka-relay` 与 `eureka-ask` 零依赖。
+- **SQLite** 用系统 `libsqlite3`,DB 始终可 `sqlite3` 直查。用量账本和 `task_history` / `audit_events` /
+  备份表一样是*事实表*:助手会压缩或删除自己的 transcript,所以绝不靠重扫重建。每条记录有唯一身份(唯一键 +
+  近似副本匹配),重读一份 transcript(比如变成 `.jsonl.zst` 的 Codex rollout)也不会重复计数。
 
 完整设计文档见 [docs/design.md](docs/design.md)。
 
 ## 已知边界
 
-- Codex 的「等待审批」状态不展示(rollout 不持久化审批事件)。
+- Codex 的「等待审批」状态需要开启 **Codex hooks** 集成(设置 → 集成);rollout 不持久化审批事件,
+  不装 hooks 时依旧看不到。
+- Antigravity IDE 的会话只有提问与回复(唯一可读的文本是 Antigravity 的搜索索引),没有工具轨迹和用量;
+  Trae 会话库加密,提问库里没有它。
 - Claude 订阅限额依赖非官方接口,可能随官方变更失效(失效即隐藏)。
 - 逐技能调用数据(次数 / token / 趋势)**仅 Claude**;Codex/Grok/opencode/Antigravity 的日志不标记
   技能调用。

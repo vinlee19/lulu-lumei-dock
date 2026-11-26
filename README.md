@@ -62,7 +62,7 @@ Nothing is sent off the machine.
 agents and turns them into a live **Dynamic Island** overlay near the notch, plus a full panel
 with usage analytics, rate limits, and management for sessions, skills, agents and memory.
 
-It works with thirteen agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
+It works with fifteen agents out of the box — **Claude Code, Codex CLI, OpenCode, Grok,
 Antigravity, Kimi Code, Gemini CLI, Qwen Code, Hermes Agent, CodeBuddy, WorkBuddy, Qoder, Cursor, Trae, and ZCode** — and needs **no network** for its core features: everything is
 derived by reading local transcript / rollout / session / database files. The updater checks this repository's GitHub
 Releases feed by default (disable it in Settings → About); the Claude subscription rate-limit gauge is the
@@ -98,7 +98,16 @@ Trae itself gates hooks per account — see the Trae footnote under [Supported a
   opencode terminal, Antigravity chevrons) — one per supported agent.
 
 **Menu bar** — e.g. `▶2 · 37%`: active task count + the max of your subscription limits (Codex 5h /
-Grok weekly / Claude), colored 60% amber / 85% red, with a tooltip breakdown.
+Grok weekly / Claude / Antigravity), colored 60% amber / 85% red, with a tooltip breakdown.
+
+**Sessions** — one browser for every agent's past and running sessions: search by title, project or
+id, filter by agent and time range, sort by activity / size / duration / project, and open any
+session to read its prompts, replies, thinking and per-turn tool activity, with its cost and context
+usage. Sessions where nothing was asked and nothing was answered (opened and closed without a word)
+are left out; prompt-only (interrupted) and reply-only (subagent) sessions stay. Codex compresses a
+closed session's rollout to `.jsonl.zst`, which is decoded in-app (no zstd install needed).
+Antigravity conversations from both the `agy` CLI and the IDE are listed under Antigravity's own
+titles.
 
 **Usage ledger** (0.00% diff vs. `ccusage`) — today / this week / this month / custom range, broken
 down by source, model, project (grouped to repo root) and session; estimated cost (with separate
@@ -155,7 +164,7 @@ browse/preview/edit workflow as Memory, with its own count and global-vs-project
 **Plans** — browse and manage agent plan documents.
 
 **Prompts** — every question you have asked any agent, extracted from the session transcripts of
-the 12 readable sources (Antigravity's protobuf and Trae's encrypted database are out of reach) into
+the 14 readable sources (Trae's encrypted database is out of reach) into
 one browsable, searchable library. Extraction is incremental; favorites, tags, use counts and
 removals are yours and survive re‑extraction. The tab is built around reuse, not logging:
 - **Three sections**: 收藏 (your curated assets) → 高频重复 (clusters of the same ask, with ×N and
@@ -181,6 +190,11 @@ removals are yours and survive re‑extraction. The tab is built around reuse, n
 **Limits** — subscription rate‑limit gauges:
 - **Codex** and **Grok** read a local snapshot (Codex from the newest rollout's `rate_limits`; Grok
   from `~/.grok/logs/unified.jsonl` billing entries) — **zero network**, hidden when unavailable.
+- **Antigravity** shows the weekly / 5-hour quotas per model group by running `agy`'s own `/usage`
+  (~5 s, no model turn; agy fetches them online and never writes them to disk); **OpenCode Go**
+  shows its allowance by asking an already-running opencode service (`opencode api`; the daemon is
+  never started for it). Both run only when the Limits page opens or is refreshed, never on a timer.
+  WorkBuddy shows the per-model quota its server writes into transcripts (free models only).
 - **Claude** is opt‑in (off by default) and uses an unofficial endpoint; any failure hides the whole
   block. Enabling it prompts a one‑time Keychain authorization (choose "Always Allow").
 
@@ -207,9 +221,9 @@ many concurrent sessions, or late‑night runs.
 |---|---|---|---|---|---|
 | **Claude Code** | ✅ | ✅ | ✅ (opt‑in) | ✅ | ✅ |
 | **Codex CLI** | ✅ | ✅ | ✅ (local) | ✅ | ✅ |
-| **opencode** | ✅ | ✅ | — | ✅ | ✅ |
+| **opencode** | ✅ | ✅ | ✅ (OpenCode Go) | ✅ | ✅ |
 | **Grok** | ✅ | ✅ (self‑reported cost)¹ | ✅ (local) | ✅ | ✅ |
-| **Antigravity** | ✅ | ✅ (experimental)¹ | — | ✅ | ✅ |
+| **Antigravity** | ✅ | ✅ (experimental)¹ | ✅ (via `agy`) | ✅¹ | ✅ |
 | **Kimi Code** | ✅ | ✅ | — | ✅ | ✅ (skills) |
 | **Gemini CLI** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
 | **Qwen Code** | ✅ | ✅ | — | ✅ | ✅ (skills/memory) |
@@ -223,10 +237,17 @@ many concurrent sessions, or late‑night runs.
 
 ¹ Grok (1.0.4x+) writes each turn's per-model usage to `updates.jsonl` (`turn_completed`), including
 its own cost in `costUsdTicks`; that self-reported cost is used as-is, because Grok's `*-build` models
-have no entry in the public price catalogs. Antigravity stores conversations as undocumented protobuf; an opt-in
-experimental toggle (Limits panel) decodes per-call token usage from each conversation database's
-`gen_metadata` table. Off by default; anything that fails to decode is simply hidden. Antigravity's weekly /
-5-hour quotas are fetched online by `agy` and never written to disk, so there is no rate-limit card.
+have no entry in the public price catalogs. Antigravity's conversation databases are undocumented
+protobuf; an opt-in experimental toggle (Limits panel) decodes per-call token usage from each `agy`
+conversation database's `gen_metadata` table. Off by default; anything that fails to decode is simply
+hidden. Its readable text comes from elsewhere: `agy` writes a per-step transcript to
+`brain/<id>/.system_generated/logs/transcript_full.jsonl` (prompts, replies, tool calls, errors), and
+both `agy` and the Antigravity IDE keep a `conversation_summaries.db` with every conversation's title
+and a search index of its text. IDE conversations (`~/.gemini/antigravity/conversations/*.pb`) are
+encrypted and get no transcript, so they show prompts and replies only (no tool activity or times)
+and have no usage. `~/.gemini/antigravity-ide` and `~/.gemini/antigravity-backup` are older copies of
+the IDE directory and are not read. Antigravity's weekly / 5-hour quotas are not on disk at all;
+the rate-limit card runs `agy`'s `/usage` to get them.
 Kimi Code has no local rate‑limit snapshot and no global memory / on‑disk agent-definition
 convention, so those columns are skipped for it. Gemini CLI has no local rate-limit snapshot
 or agent-definition convention either; its `~/.gemini/skills` directory is shared with
@@ -247,7 +268,11 @@ is empty for it.
 
 ³ Qoder's CN backend reports zero token usage in its local logs, so no usage ledger is
 surfaced for it — sessions, live tasks, plans and memory work normally. CodeBuddy carries
-per-request tokens on its transcript `function_call` lines, which the usage scanner tails.
+per-request tokens on its transcript `function_call` lines, which the usage scanner tails. The
+CodeBuddy row is the standalone CodeBuddy Code CLI (`~/.codebuddy/projects`); WorkBuddy runs the same
+engine with `~/.workbuddy` as its home, so WorkBuddy's turns are counted under WorkBuddy, and a Mac
+that only uses WorkBuddy has no CodeBuddy usage or sessions (its `~/.codebuddy/logs` memory-watch
+files come from WorkBuddy's embedded engine).
 
 ⁴ Cursor is an IDE, not a CLI: it has no hooks and no transcript files. Everything —
 sessions, messages, tool calls, context% and tokens — lives in one SQLite database
@@ -391,7 +416,9 @@ All data lives in `~/Library/Application Support/Eureka/`:
 **Privacy:** automatic update checks contact this repository's GitHub Releases feed and can be disabled.
 The model price catalogs are fetched once a day from `raw.githubusercontent.com` (jsDelivr as mirror) and
 `models.dev` — plain GETs of public files, no user data — and can be turned off in Settings → Advanced → 模型价格.
-The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. The MCP tab
+The opt-in "Claude subscription limits" feature sends a Keychain OAuth token to Anthropic. The
+Antigravity and OpenCode Go quota cards run `agy` / `opencode` themselves when you open or refresh the
+Limits page; those tools sign in with their own credentials, which Eureka never reads. The MCP tab
 reads what a server offers — its own description plus the *names, descriptions and parameter names* of its
 tools/prompts/resources, never their bodies — when you click "重新检测", or once when you open that
 server's detail page and nothing fresh is cached (never in the background, never for the whole list). A
@@ -421,6 +448,8 @@ eureka --audit-snapshot            # dump the agent tool-call audit trail (--ris
 eureka --render-previews [dir]     # offscreen-render every island state to PNG
 eureka --render-shell [dir]        # offscreen-render the sidebar + audit page (light/dark)
 eureka --render-lineage [dir]      # offscreen-render the turn lineage graph (golden + live)
+eureka --render-pages [dir]        # offscreen-render history / sessions / usage / limits / prompts / settings / ⌘K
+eureka --mcp-inspect <name>        # probe one MCP server (every protocol revision, HTTP or stdio)
 eureka-relay inject --event stop --session demo   # inject a test event into the spool
 ```
 
@@ -428,7 +457,7 @@ eureka-relay inject --event stop --session demo   # inject a test event into the
 
 ```bash
 make build      # debug build (Command Line Tools is enough — no full Xcode)
-make test       # runs the full hand-rolled test suite (573 tests; CLT has no XCTest)
+make test       # runs the full hand-rolled test suite (1,200+ tests; CLT has no XCTest)
 make run        # run the GUI in dev mode
 make demo       # inject fake events to show every island state
 make app        # release build → dist/lulu-lumei-dock.app (ad-hoc signed)
@@ -457,7 +486,7 @@ Codex notify ───────┤→ eureka-relay → events/ spool ──�
                     │   (atomic JSON write)    ↓         ├─ NSStatusItem + NSPopover
 Codex rollout tail ─┘                    SpoolConsumer   │   (history / sessions / skills / usage / limits / …)
 Claude transcript watch ──────────────→ TaskStore (state machine)
-usage scanners (10 in all — every agent except Antigravity/Qoder) ─→ SQLite (history / usage / tool_calls / audit)
+usage scanners (12, covering every agent except Qoder/Trae) ─→ SQLite (history / usage / tool_calls / audit)
 ```
 
 - **`eureka-relay`** is a tiny, fully independent binary: it always `exit 0`, keeps stdout silent,
@@ -468,11 +497,13 @@ usage scanners (10 in all — every agent except Antigravity/Qoder) ─→ SQLit
   refusing — the relay hands the payload to the original command first, then records the event,
   and uninstalling restores the original line.
 - **Module dependency graph** (SwiftPM targets, strictly one‑directional):
-  `app → {EurekaIngest, EurekaUsage, EurekaInstall, EurekaSync} → EurekaStore → EurekaKit`.
-  `eureka-relay` is dependency‑free.
-- **SQLite** uses the system `libsqlite3` so the DB stays `sqlite3`‑inspectable. Usage tables are
-  *derived* (rebuilt from transcripts on a schema‑version bump); `task_history` / `audit_events` /
-  sync tables are *facts* and are never dropped.
+  `app → {EurekaIngest, EurekaUsage, EurekaInstall, EurekaSync, EurekaSummary} → EurekaStore →
+  EurekaKit`. `eureka-relay` and `eureka-ask` are dependency‑free.
+- **SQLite** uses the system `libsqlite3` so the DB stays `sqlite3`‑inspectable. The usage ledger
+  is a *fact* table like `task_history` / `audit_events` / the sync tables: agents compress or delete
+  their transcripts, so it is never rebuilt by rescanning. Every record has one identity (a unique
+  key plus near-copy matching), so re-reading a transcript — say, a Codex rollout that came back as
+  `.jsonl.zst` — never counts it twice.
 
 Full design doc: [docs/design.md](docs/design.md).
 
@@ -491,8 +522,9 @@ Full design doc: [docs/design.md](docs/design.md).
 - Per‑skill invocation data (count / tokens / trend) is **Claude‑only**: no other agent tags skill
   invocations in its logs. Hermes is the partial exception: its own `skills/.usage.json` counters
   feed the all‑time hit count, but carry no tokens or per‑day trend.
-- The Prompts tab has nothing for Antigravity (protobuf transcripts) or Trae (encrypted database),
-  and "launch in Terminal" is offered for Claude and Codex only — the other CLIs were not verified
+- The Prompts tab has nothing for Trae (encrypted database), and Antigravity IDE conversations
+  contribute prompts but no tool trajectory (their only readable text is Antigravity's search
+  index). "Launch in Terminal" is offered for Claude and Codex only — the other CLIs were not verified
   to accept a positional prompt. Prompt evaluation needs the turn's tool trajectory, so it is
   shallower for sources whose transcripts record fewer steps (see the tiers above).
 - `ctx%` for Claude is an estimate (window size from a per‑model table; overridable). Cursor is the
