@@ -1,11 +1,22 @@
 import Foundation
 
-/// Local data paths of the Google Antigravity CLI (`agy`) (`~/.gemini/antigravity-cli`). Each
-/// session is its own SQLite file, `conversations/<uuid>.db`, but bodies/tokens/plans/titles all
-/// sit in binary protobuf blobs (schema not published by Google), and this project has zero
-/// third-party deps, so it cannot decode protobuf. So only what can be read cleanly is used:
-/// workspace path (raw scan of `file://` URIs in the db bytes), activity time (file mtime), skills
-/// (SKILL.md). Overridable via env `EUREKA_ANTIGRAVITY_*` for unit tests.
+/// Local data paths of Google Antigravity: the CLI `agy` (`~/.gemini/antigravity-cli`) and the IDE
+/// (`~/.gemini/antigravity`). Overridable via env `EUREKA_ANTIGRAVITY_*` for unit tests.
+///
+/// Where each piece of a conversation lives (verified 2026-11-26 on 69 local conversations):
+/// - `<app>/conversations/<uuid>.db` (CLI, SQLite + undocumented protobuf; usage is decoded from
+///   it) or `<uuid>.pb` (IDE, **encrypted** — random bytes, unreadable)
+/// - `<app>/brain/<uuid>/.system_generated/logs/transcript_full.jsonl`: the readable transcript,
+///   one JSON object per step (`transcriptURL(conversationFile:)`). The CLI writes one for every
+///   conversation with at least one step; the IDE almost never does. `chunks/` next to it holds
+///   byte-sliced upload copies of the same file and is never read.
+/// - `<app>/conversation_summaries.db`: title / preview / step count / workspace of every
+///   conversation of both apps, plus an FTS index of the user and agent text of that app's own
+///   conversations (`AntigravityConversationCatalog`). WAL mode, so it is read from a copy.
+///
+/// `~/.gemini/antigravity-ide` and `~/.gemini/antigravity-backup` are older copies of the IDE
+/// directory (the same conversation files) and are deliberately never read: they would duplicate
+/// every IDE conversation.
 public enum AntigravityPaths {
     private static func home() -> URL { FileManager.default.homeDirectoryForCurrentUser }
 
@@ -40,6 +51,51 @@ public enum AntigravityPaths {
         }
         return configHome(environment: environment)
             .appendingPathComponent("conversations", isDirectory: true)
+    }
+
+    /// Antigravity IDE data home `~/.gemini/antigravity` (env `EUREKA_ANTIGRAVITY_IDE_HOME`)
+    public static func ideHome(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        if let custom = environment["EUREKA_ANTIGRAVITY_IDE_HOME"], !custom.isEmpty {
+            return URL(fileURLWithPath: custom, isDirectory: true)
+        }
+        return geminiHome(environment: environment)
+            .appendingPathComponent("antigravity", isDirectory: true)
+    }
+
+    /// IDE conversations `~/.gemini/antigravity/conversations` (`<uuid>.pb`, plus the odd `.db`)
+    public static func ideConversationsRoot(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        ideHome(environment: environment)
+            .appendingPathComponent("conversations", isDirectory: true)
+    }
+
+    /// The `conversation_summaries.db` of the CLI and of the IDE, those that exist
+    public static func summaryDatabases(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [URL] {
+        [configHome(environment: environment), ideHome(environment: environment)]
+            .map { $0.appendingPathComponent("conversation_summaries.db") }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// The readable transcript of a conversation file `<app>/conversations/<uuid>.{db,pb}`:
+    /// `<app>/brain/<uuid>/.system_generated/logs/transcript_full.jsonl`, else the
+    /// `transcript.jsonl` beside it (same steps, but tool arguments carry an extra layer of
+    /// quotes), else nil.
+    public static func transcriptURL(conversationFile: URL) -> URL? {
+        let id = conversationFile.deletingPathExtension().lastPathComponent
+        let logs = conversationFile.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("brain", isDirectory: true)
+            .appendingPathComponent(id, isDirectory: true)
+            .appendingPathComponent(".system_generated/logs", isDirectory: true)
+        for name in ["transcript_full.jsonl", "transcript.jsonl"] {
+            let url = logs.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
     }
 
     /// Skill roots: user `~/.gemini/antigravity/skills` + built-in
@@ -152,7 +208,7 @@ public enum AntigravityPaths {
         return s
     }
 
-    private static func uriToPath(_ uri: String) -> String? {
+    static func uriToPath(_ uri: String) -> String? {
         guard uri.hasPrefix("file://") else { return nil }
         let raw = String(uri.dropFirst("file://".count))  // "/Users/…"
         let path = raw.removingPercentEncoding ?? raw

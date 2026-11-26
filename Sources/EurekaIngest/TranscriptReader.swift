@@ -74,7 +74,9 @@ public enum TranscriptReader {
         case .grok:
             return loadGrok(path: session.transcriptPath, maxMessages: maxMessages)
         case .antigravity:
-            return loadAntigravity()
+            return loadAntigravity(
+                conversationFile: session.transcriptPath, conversationId: session.id,
+                maxMessages: maxMessages)
         case .kimi:
             return loadKimi(path: session.transcriptPath, maxMessages: maxMessages)
         case .gemini:
@@ -455,12 +457,128 @@ public enum TranscriptReader {
     /// Antigravity session content lives entirely in protobuf blobs (Google hasn't published the
     /// schema), which this dependency-free project can't decode. Returns one explanatory note so a
     /// blank detail page doesn't mislead.
-    public static func loadAntigravity() -> Result {
-        Result(
+    // MARK: - Antigravity (brain/<id>/.system_generated/logs/transcript_full.jsonl)
+
+    /// An Antigravity conversation: its transcript jsonl when the app wrote one (every CLI
+    /// conversation with a step), else the user / agent text Antigravity indexed for search
+    /// (IDE conversations: their `.pb` is encrypted), else a one-line note.
+    public static func loadAntigravity(
+        conversationFile: String, conversationId: String, maxMessages: Int,
+        catalog: AntigravityConversationCatalog = .shared
+    ) -> Result {
+        if let transcript = AntigravityPaths.transcriptURL(
+            conversationFile: URL(fileURLWithPath: conversationFile)) {
+            let result = loadAntigravityTranscript(path: transcript.path, maxMessages: maxMessages)
+            if !result.messages.isEmpty { return result }
+        }
+        if let segments = catalog.segments(conversationId: conversationId), !segments.isEmpty {
+            let messages = segments.prefix(maxMessages).enumerated().map { index, segment in
+                TranscriptMessage(
+                    id: index, role: segment.isUser ? .user : .assistant, text: segment.text)
+            }
+            return Result(messages: Array(messages), truncated: segments.count > maxMessages)
+        }
+        return Result(
             messages: [TranscriptMessage(
                 id: 0, role: .toolNote,
-                text: L10n.text("🔒 Antigravity conversations use a proprietary binary (protobuf) format; content previews are not supported yet", zhHans: "🔒 Antigravity 对话为私有二进制（protobuf）格式，暂不支持正文预览"))],
+                text: L10n.text("Antigravity kept no readable text for this conversation", zhHans: "Antigravity 没有留下这个会话的可读正文"))],
             truncated: false)
+    }
+
+    /// One JSON object per step: `USER_INPUT` (prompt wrapped in `<USER_REQUEST>`),
+    /// `PLANNER_RESPONSE` (reply text and/or `tool_calls`), then one result step per tool call in
+    /// call order (`GENERIC`, `VIEW_FILE`, `RUN_COMMAND`…; no call id, so results are paired first
+    /// in, first out and only mark failures), `ERROR_MESSAGE`, and bookkeeping steps that are
+    /// skipped (`CHECKPOINT`, `SYSTEM_MESSAGE`, `CONVERSATION_HISTORY`).
+    public static func loadAntigravityTranscript(path: String, maxMessages: Int) -> Result {
+        var messages: [TranscriptMessage] = []
+        var truncated = false
+        var trailIndex: Int?
+        var awaitingResult: [(msg: Int, step: Int)] = []
+        var stepCount = 0
+        var batch = 0
+        forEachJSONLine(path: path) { root in
+            guard messages.count + stepCount < maxMessages else {
+                truncated = true
+                return false
+            }
+            let timestamp = (root["created_at"] as? String).flatMap(parseTimestamp)
+            let failed = root["error"] != nil || root["status"] as? String == "ERROR"
+            switch root["type"] as? String {
+            case "USER_INPUT":
+                trailIndex = nil
+                awaitingResult.removeAll()
+                batch = 0
+                guard let text = antigravityPrompt(root["content"] as? String) else { return true }
+                messages.append(TranscriptMessage(
+                    id: messages.count, role: .user, text: text, timestamp: timestamp))
+            case "PLANNER_RESPONSE":
+                if let text = (root["content"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                    messages.append(TranscriptMessage(
+                        id: messages.count, role: .assistant, text: text, timestamp: timestamp))
+                }
+                if let error = root["error"] as? String, !error.isEmpty {
+                    messages.append(TranscriptMessage(
+                        id: messages.count, role: .error, text: error, timestamp: timestamp))
+                }
+                let calls = root["tool_calls"] as? [[String: Any]] ?? []
+                if !calls.isEmpty { batch += 1 }
+                for call in calls {
+                    var step = ToolStepExtractor.antigravity(
+                        name: call["name"] as? String ?? L10n.text("Tool", zhHans: "工具"),
+                        args: call["args"] as? [String: Any])
+                    step.batch = batch
+                    if trailIndex == nil {
+                        messages.append(TranscriptMessage(
+                            id: messages.count, role: .turnTrail, text: "", timestamp: timestamp))
+                        trailIndex = messages.count - 1
+                    }
+                    messages[trailIndex!].steps.append(step)
+                    awaitingResult.append((trailIndex!, messages[trailIndex!].steps.count - 1))
+                    stepCount += 1
+                }
+            case "ERROR_MESSAGE":
+                let text = (root["content"] as? String) ?? (root["error"] as? String) ?? ""
+                if !text.isEmpty {
+                    messages.append(TranscriptMessage(
+                        id: messages.count, role: .error, text: text, timestamp: timestamp))
+                }
+            case "CHECKPOINT", "SYSTEM_MESSAGE", "CONVERSATION_HISTORY":
+                break
+            default:
+                // A tool result step: pairs with the oldest call still waiting for one
+                guard root["source"] as? String == "MODEL", !awaitingResult.isEmpty else { break }
+                let position = awaitingResult.removeFirst()
+                if failed, position.msg < messages.count,
+                   position.step < messages[position.msg].steps.count {
+                    messages[position.msg].steps[position.step].isError = true
+                }
+            }
+            return true
+        }
+        backfillTrailText(&messages)
+        return Result(messages: messages, truncated: truncated)
+    }
+
+    /// The typed prompt inside `<USER_REQUEST>…</USER_REQUEST>`; the `<ADDITIONAL_METADATA>` /
+    /// `<USER_SETTINGS_CHANGE>` blocks after it are the app's own additions. A prompt that is only
+    /// pasted images has an empty request and "The user has uploaded N image(s)" in the metadata;
+    /// it becomes a placeholder so the turn isn't lost.
+    public static func antigravityPrompt(_ content: String?) -> String? {
+        guard let content else { return nil }
+        var text = content
+        if let open = content.range(of: "<USER_REQUEST>") {
+            let rest = content[open.upperBound...]
+            let close = rest.range(of: "</USER_REQUEST>")?.lowerBound ?? rest.endIndex
+            text = String(rest[..<close])
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        guard let marker = content.range(of: "The user has uploaded ") else { return nil }
+        let count = content[marker.upperBound...].prefix { $0.isNumber }
+        guard !count.isEmpty else { return nil }
+        return L10n.format("🖼 Uploaded %@ image(s)", zhHans: "🖼 上传了 %@ 张图片", String(count))
     }
 
     // MARK: - Claude (~/.claude/projects/<encoded>/<session>.jsonl)

@@ -7,10 +7,11 @@ import Foundation
 /// call the same 8 indexers on their own -- paying twice a minute for nothing. Now the caller
 /// (`UsageService`) discovers once and both consumers share the result.
 ///
-/// Excludes shared-library sources (opencode / hermes / cursor / trae / zcode) and antigravity:
-/// the former key on `transcriptPath` and would overwrite each other wholesale; the latter is
-/// protobuf whose content can't be decoded. Trae has one more layer: its session DB is
-/// SQLCipher-encrypted, so there is no indexable body at all (see `TraeSessionIndexer`).
+/// Excludes shared-library sources (opencode / hermes / cursor / trae / zcode): they key on
+/// `transcriptPath` and would overwrite each other wholesale. Trae has one more layer: its session
+/// DB is SQLCipher-encrypted, so there is no indexable body at all (see `TraeSessionIndexer`).
+/// Antigravity is included: each conversation has its own file, and its text comes from the
+/// transcript jsonl or Antigravity's search index (`TranscriptReader.loadAntigravity`).
 public enum AgentSessionDiscovery {
     public static func forIndexing() -> [AgentSessionInfo] {
         var sessions = ClaudeSessionIndexer.index(
@@ -28,6 +29,10 @@ public enum AgentSessionDiscovery {
             projectsRoot: WorkBuddyPaths.projectsRoot(), dialect: .workbuddy,
             lookup: WorkBuddySessionCatalog.shared.lookup)
         sessions += QoderSessionIndexer.index(projectsRoot: QoderPaths.projectsRoot())
+        sessions += AntigravitySessionIndexer.index(
+            conversationsRoot: AntigravityPaths.conversationsRoot(),
+            ideConversationsRoot: AntigravityPaths.ideConversationsRoot(),
+            catalog: .shared)
         return sessions
     }
 }

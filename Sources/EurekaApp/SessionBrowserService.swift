@@ -205,8 +205,11 @@ final class SessionBrowserService: ObservableObject {
                 dbPath: OpencodePaths.db(), window: window, maxSessions: maxSessions)
             indexed += GrokSessionIndexer.index(
                 sessionsRoot: GrokPaths.sessionsRoot(), window: window, maxSessions: maxSessions)
+            // antigravity: CLI and IDE conversations, titled from Antigravity's summary databases
             indexed += AntigravitySessionIndexer.index(
                 conversationsRoot: AntigravityPaths.conversationsRoot(),
+                ideConversationsRoot: AntigravityPaths.ideConversationsRoot(),
+                catalog: .shared,
                 window: window, maxSessions: maxSessions)
             indexed += KimiSessionIndexer.index(
                 sessionsRoot: KimiPaths.sessionsRoot(), window: window, maxSessions: maxSessions)
