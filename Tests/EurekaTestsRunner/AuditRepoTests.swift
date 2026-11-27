@@ -177,6 +177,21 @@ func auditRepoTests(_ t: TestRunner) {
         try expect(result.alert?.detail.contains("[REDACTED]") == true)
         try expectEqual(try store.audit.recent(limit: 1)[0].detail, command)
 
+        // A secret read is critical: it alerts, says so, and repeats after a minute, not ten
+        var secret = event("op-env-1", session: "s9", detail: "cat .env")
+        secret.timestamp = Date()
+        let first = try pipeline.ingest(secret, isStale: false, now: Date(timeIntervalSince1970: 0))
+        try expectEqual(first.alert?.level, .critical)
+        try expectEqual(first.alert?.ruleId, "read-env-file")
+        secret.opId = "op-env-2"
+        let again = try pipeline.ingest(secret, isStale: false, now: Date(timeIntervalSince1970: 30))
+        try expect(again.alert == nil)
+        secret.opId = "op-env-3"
+        try expectEqual(
+            try pipeline.ingest(secret, isStale: false, now: Date(timeIntervalSince1970: 61)).alert?.level,
+            .critical)
+        try expectEqual(try store.audit.count(.init(riskOnly: true)), 4)
+
         var inside = event("op-in", detail: "rm -rf /Users/me/repo/build")
         inside.cwd = "/Users/me/repo"
         try pipeline.ingest(inside, isStale: false)

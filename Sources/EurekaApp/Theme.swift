@@ -317,7 +317,7 @@ enum Theme {
     /// inconsistently.
     static func riskColor(_ level: RiskLevel) -> Color {
         switch level {
-        case .high: return failureRed
+        case .critical, .high: return failureRed
         case .notice: return goldFg  // thin badge text, so use the text tier
         }
     }

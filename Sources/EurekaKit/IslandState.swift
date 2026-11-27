@@ -59,7 +59,10 @@ extension IslandState.Card {
         // on the pill, and hovering still holds the card open.
         case .waiting: return 0
         case .notice: return 5    // wellbeing copy gets ample reading time
-        case .alert: return 6     // security alerts stay longer (audit page / Notification Center keep a record)
+        // Security alerts stay longer (audit page / Notification Center keep a record); a
+        // critical one much longer. Not sticky: an alert card has no dismiss control, so a card
+        // that never left would pin the island open.
+        case .alert(let alert): return alert.level == .critical ? 25 : 6
         case .question: return nil  // withdrawn only when answered / dismissed / the hook gives up
         }
     }

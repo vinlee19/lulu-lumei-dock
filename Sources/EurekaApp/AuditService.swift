@@ -55,6 +55,8 @@ final class AuditService: ObservableObject {
     private var captureEnabled = true
     private var retentionDays = 90
     private var lastPruneAt = Date.distantPast
+    /// The history re-evaluation in flight, if any
+    private var reevaluation: AuditReevaluator.Progress?
 
     private static let codexHealthName = "审计扫描 Codex"
     private static let codeBuddyHealthName = "审计扫描 CodeBuddy"
@@ -338,12 +340,30 @@ final class AuditService: ObservableObject {
     /// Stored rows carry the risk decided when they were written. When the rules differ from the
     /// ones recorded with the log (an upgrade, an edited rule file), evaluate history again so the
     /// page shows one consistent picture. No alerts come out of this.
+    ///
+    /// One batch per turn on the queue: a pass over 100,000 rows takes about ten seconds, and
+    /// live events (and their alerts) must not wait behind it.
     private func reevaluateIfDue() {
-        guard let store, AuditReevaluator.isDue(store: store) else { return }
+        guard reevaluation == nil, let store, AuditReevaluator.isDue(store: store) else { return }
+        reevaluation = AuditReevaluator.begin()
+        queue.async { [weak self] in self?.continueReevaluation() }
+    }
+
+    private func continueReevaluation() {
+        guard let store, var progress = reevaluation else { return }
         do {
-            let report = try AuditReevaluator.run(store: store)
-            if report.changed > 0 { publish { $0.historyRevision += 1 } }
+            let more = try AuditReevaluator.step(&progress, store: store)
+            if more {
+                reevaluation = progress
+                queue.async { [weak self] in self?.continueReevaluation() }
+                return
+            }
+            reevaluation = nil
+            if progress.report.changed > 0 { publish { $0.historyRevision += 1 } }
+            // The rules may have changed while the pass ran
+            reevaluateIfDue()
         } catch {
+            reevaluation = nil
             publish { $0.lastError = L10n.format("Failed to re-evaluate audit history: %@", zhHans: "审计历史重判失败: %@", String(describing: error)) }
         }
     }

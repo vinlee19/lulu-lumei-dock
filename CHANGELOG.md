@@ -6,6 +6,26 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Reading a secret is a critical audit alert.** A new top level, above high
+  risk, for an agent getting hold of a secret: reading a private key, a `.env`
+  file, cloud credentials (`~/.aws/credentials`, gcloud, kubeconfig, docker), an
+  agent's own stored credentials, a keychain password, or printing the
+  environment or a secret variable. The command has to actually read the file
+  (`cat`, `grep`, `source`, an upload, a file tool); listing it, excluding it
+  from a search or reading `.env.example` raises nothing. A critical alert stays
+  on the island longer and repeats after a minute instead of ten.
+- **Many more operations are recognised.** High risk: a credential written out
+  in a command (a literal bearer token, API key or JWT), an access token printed
+  to the screen, destructive SQL run through a database client, `kubectl delete`,
+  `terraform apply` / `helm upgrade`, publishing a package, force-pushing to
+  main, editing a shell startup file, the crontab or an agent's own
+  configuration, starting an agent with approvals bypassed, and MCP tools that
+  delete. Notices: pushing to main, merging a pull request or cutting a
+  release, other cluster and cloud changes, global installs, uploads, remote
+  copies, tunnels, and MCP tools that send messages, deploy or approve.
+
 ### Fixed
 
 - **High-risk audit alerts are far less noisy.** Rules used to match anywhere in

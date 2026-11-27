@@ -1023,6 +1023,9 @@ struct ExpandedCardView: View {
             if case .waiting(let reason, _) = task.phase { return reason.displayName }
             return L10n.text("Waiting", zhHans: "等待中")
         case .alert(let alert):
+            if alert.level == .critical {
+                return L10n.format("Critical operation · %@", zhHans: "严重操作 · %@", String(alert.ruleTitle))
+            }
             return L10n.format("High-risk operation · %@", zhHans: "高危操作 · %@", String(alert.ruleTitle))
         case .question:
             return L10n.text("Waiting for your answer", zhHans: "等你回答")

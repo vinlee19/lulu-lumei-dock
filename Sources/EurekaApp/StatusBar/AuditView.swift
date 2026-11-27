@@ -158,8 +158,8 @@ struct AuditView: View {
                 .fixedSize(horizontal: false, vertical: true)
             if settings.auditEnabled {
                 Divider()
-                Toggle(L10n.text("Red card on the island for high-risk actions", zhHans: "高危操作岛内红卡告警"), isOn: $settings.auditRiskAlertsEnabled)
-                Toggle(L10n.text("System notification for high-risk actions (visible on the lock screen and other desktops)", zhHans: "高危操作系统通知（锁屏 / 其他桌面可见）"), isOn: $settings.auditSystemNotifyEnabled)
+                Toggle(L10n.text("Red card on the island for high-risk and critical actions", zhHans: "高危及以上操作岛内红卡告警"), isOn: $settings.auditRiskAlertsEnabled)
+                Toggle(L10n.text("System notification for high-risk and critical actions (visible on the lock screen and other desktops)", zhHans: "高危及以上操作系统通知（锁屏 / 其他桌面可见）"), isOn: $settings.auditSystemNotifyEnabled)
                 if let hint = notificationHint, settings.auditSystemNotifyEnabled {
                     Text(hint)
                         .font(Theme.font.caption)
@@ -185,7 +185,7 @@ struct AuditView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(L10n.text("High-risk rules are hints (sudo, rm -rf of an absolute path, piping a downloaded script into a shell, reading or writing secrets, and similar),", zhHans: "高危规则为启发式提示（sudo / rm -rf 绝对路径 / 管道执行下载脚本 / 读写密钥等），")
+                Text(L10n.text("Rules are hints read from the command text (reading a key or .env file is critical; deleting outside the project, running a downloaded script, changing startup items and similar are high risk),", zhHans: "规则是从命令文本得出的启发式提示（读取私钥、.env 等密钥为严重；删除项目之外的路径、执行下载的脚本、改开机自启项等为高危），")
                     + L10n.text(" not a sandbox. Matches are deduped and throttled.", zhHans: "非沙箱拦截；命中会去重节流。"))
                     .font(Theme.font.caption)
                     .foregroundStyle(.tertiary)
