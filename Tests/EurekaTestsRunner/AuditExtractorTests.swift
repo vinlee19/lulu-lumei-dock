@@ -46,4 +46,37 @@ func auditExtractorTests(_ t: TestRunner) {
         try expectEqual(op.kind, .command)
         try expectEqual(op.detail, "sudo rm -rf /tmp/x && echo done")
     }
+    t.test("Claude hook 里出现别家的工具名：按共用词表归类，不落到「其他」") {
+        // Grok fired Claude-compatible hooks with its own names; 949 rows were stored as "other"
+        let run = AuditExtractor.claude(name: "run_terminal_command", input: ["command": "ls -la"])
+        try expectEqual(run.kind, .command)
+        try expectEqual(run.detail, "ls -la")
+        let read = AuditExtractor.claude(name: "read_file", input: ["target_file": "/a/b"])
+        try expectEqual(read.kind, .read)
+        try expectEqual(read.detail, "/a/b")
+        // A tool nobody knows stays "other", and its arguments are not stored
+        let unknown = AuditExtractor.claude(name: "ExitPlanMode", input: ["plan": "long plan text"])
+        try expectEqual(unknown.kind, .other)
+        try expectEqual(unknown.detail, "")
+    }
+
+    t.test("Codex custom tool：cmd 是模板字符串或变量时仍然是命令") {
+        let template = AuditExtractor.codexCustomTool(
+            name: "exec", input: "await tools.exec_command({cmd: `git status && ls`, workdir: \"/w\"})")
+        try expectEqual(template.kind, .command)
+        try expectEqual(template.detail, "git status && ls")
+        let variable = AuditExtractor.codexCustomTool(
+            name: "exec", input: "const c = build(); await tools.exec_command({cmd: c, workdir: \"/w\"})")
+        try expectEqual(variable.kind, .command)
+        try expectEqual(variable.name, "exec_command")
+    }
+
+    t.test("按已存的工具名补分类") {
+        try expectEqual(AuditExtractor.kind(forStoredTool: "exec_command"), .command)
+        try expectEqual(AuditExtractor.kind(forStoredTool: "write_stdin"), .command)
+        try expectEqual(AuditExtractor.kind(forStoredTool: "run_terminal_command"), .command)
+        try expectEqual(AuditExtractor.kind(forStoredTool: "read_file"), .read)
+        try expect(AuditExtractor.kind(forStoredTool: "ToolSearch") == nil)
+        try expect(AuditExtractor.kind(forStoredTool: "update_plan") == nil)
+    }
 }

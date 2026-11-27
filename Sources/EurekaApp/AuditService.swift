@@ -16,6 +16,8 @@ final class AuditService: ObservableObject {
     @Published private(set) var riskTotal = 0
     @Published private(set) var lastError: String?
     @Published private(set) var exportMessage: String?
+    /// Bumped when stored rows were re-evaluated in the background; the page reloads on change
+    @Published private(set) var historyRevision = 0
     /// Counts grouped by source / type (the filter chips and the overview card's distribution). ⚠️
     /// `SourceFilterBar`'s `count:` closure is **called per chip** during rendering, so it may only
     /// read these two dictionaries; it must never hit the database each time.
@@ -109,6 +111,7 @@ final class AuditService: ObservableObject {
                 self.scanGrok()
                 self.scanQwen()
                 self.pruneIfDue()
+                self.reevaluateIfDue()
             } catch {
                 self.publish { $0.lastError = L10n.format("Failed to open audit database: %@", zhHans: "审计库打开失败: %@", String(describing: error)) }
             }
@@ -329,6 +332,19 @@ final class AuditService: ObservableObject {
             if new > 0 { HealthRegistry.shared.event(Self.qwenHealthName) }
         } catch {
             HealthRegistry.shared.failure(Self.qwenHealthName, note: "\(error)")
+        }
+    }
+
+    /// Stored rows carry the risk decided when they were written. When the rules differ from the
+    /// ones recorded with the log (an upgrade, an edited rule file), evaluate history again so the
+    /// page shows one consistent picture. No alerts come out of this.
+    private func reevaluateIfDue() {
+        guard let store, AuditReevaluator.isDue(store: store) else { return }
+        do {
+            let report = try AuditReevaluator.run(store: store)
+            if report.changed > 0 { publish { $0.historyRevision += 1 } }
+        } catch {
+            publish { $0.lastError = L10n.format("Failed to re-evaluate audit history: %@", zhHans: "审计历史重判失败: %@", String(describing: error)) }
         }
     }
 

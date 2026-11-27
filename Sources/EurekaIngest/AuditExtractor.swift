@@ -53,9 +53,30 @@ public enum AuditExtractor {
             if name.hasPrefix("mcp__") {
                 return Operation(kind: .mcp, name: cleanMCPName(name), detail: trim(firstString(in: input)))
             }
+            // Other agents fire Claude-compatible hooks with their own tool names (Grok's
+            // `run_terminal_command` / `read_file` arrived this way: 949 rows stored as "other"
+            // with no detail, so no rule ever saw them). Try the shared snake_case vocabulary
+            // before giving up.
+            let shared = cursor(name: name, input: input)
+            if shared.kind != .other { return shared }
+            // Detail stays empty: an unknown tool's first argument can be a whole plan or message
             return Operation(kind: .other, name: name, detail: "")
         }
     }
+
+    /// Kind of a stored tool name, for rows classified before a name was known. nil when the name
+    /// says nothing (the stored kind stands).
+    public static func kind(forStoredTool tool: String) -> ToolKind? {
+        if commandTools.contains(tool) { return .command }
+        let shared = cursor(name: tool, input: nil).kind
+        return shared == .other ? nil : shared
+    }
+
+    /// Tool names that run a command whatever shape their arguments came in
+    static let commandTools: Set<String> = [
+        "exec_command", "shell", "shell_command", "write_stdin", "run_terminal_cmd",
+        "run_terminal_command",
+    ]
 
     /// `mcp__server__tool` → `server.tool` (drops the claude_ai_ prefix; same rule as
     /// ClaudeTranscriptScanner.extractToolCalls)
@@ -137,6 +158,12 @@ public enum AuditExtractor {
                 return Operation(
                     kind: .mcp, name: cleanMCPName(inner),
                     detail: jsFirstStringArgument(source))
+            }
+            if commandTools.contains(inner) {
+                // `cmd` built from a variable or an expression: still a command (286 such rows
+                // were stored as "other"), with the best summary the source gives
+                return Operation(
+                    kind: .command, name: inner, detail: jsFirstStringArgument(source))
             }
             switch inner {
             case "view_image":
@@ -240,9 +267,10 @@ public enum AuditExtractor {
             }
             cursor += 1
             skipSpace()
-            guard cursor < chars.count, chars[cursor] == "\"" || chars[cursor] == "'" else {
-                continue
-            }
+            // A template literal counts too; `${…}` inside it stays as written
+            guard cursor < chars.count,
+                  chars[cursor] == "\"" || chars[cursor] == "'" || chars[cursor] == "`"
+            else { continue }
             return unescapeJS(chars, from: cursor)
         }
         return nil
@@ -273,6 +301,7 @@ public enum AuditExtractor {
                 case "\\": result.append("\\")
                 case "\"": result.append("\"")
                 case "'": result.append("'")
+                case "`": result.append("`")
                 case let other: result.append(other)
                 }
                 index += 2

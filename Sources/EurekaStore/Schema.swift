@@ -258,6 +258,13 @@ enum Schema {
         CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_events(session_id);
         CREATE INDEX IF NOT EXISTS idx_audit_risk ON audit_events(risk_level) WHERE risk_level > 0;
 
+        -- Small facts about the audit log itself (which rule set its risk columns were last
+        -- evaluated with). Never dropped on upgrade, like the log.
+        CREATE TABLE IF NOT EXISTS audit_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         -- 审计归档台账（每个 UTC 日一行）：哪天写成了 Parquet、指纹多少、是否已上传。
         -- 本地清理只删"已上传且指纹未变"的日期 → 记录的是事实，升级绝不 DROP。
         CREATE TABLE IF NOT EXISTS audit_archive (

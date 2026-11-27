@@ -103,6 +103,12 @@ enum EurekaCLI {
                 limit: args.firstIndex(of: "--limit").flatMap { idx in
                     args.indices.contains(idx + 1) ? Int(args[idx + 1]) : nil
                 } ?? 50)
+        case "--audit-reevaluate":
+            auditReevaluate(
+                dryRun: args.contains("--dry-run"),
+                diffRule: args.firstIndex(of: "--diff").flatMap { idx in
+                    args.indices.contains(idx + 1) ? args[idx + 1] : nil
+                })
         case "--render-previews":
             // --lang zh|en renders that interface language (default: the app's setting)
             var rest = Array(args.dropFirst())
@@ -424,6 +430,53 @@ enum EurekaCLI {
         }
     }
 
+    /// Evaluates the stored audit log with the current rules and prints the hits per rule before
+    /// and after. `--dry-run` writes nothing. Point `EUREKA_DB_PATH` at a copy to try it safely.
+    ///
+    /// `--diff <rule>` also lists up to 40 rows that gained or lost that rule (credentials masked,
+    /// first 160 characters), to check a rule change against real history.
+    private static func auditReevaluate(dryRun: Bool, diffRule: String?) {
+        do {
+            let store = try EurekaStore(path: EurekaStore.defaultURL())
+            let started = Date()
+            let daysBefore = try store.audit.dayFingerprints()
+            var samples: [String] = []
+            let report = try AuditReevaluator.run(store: store, dryRun: dryRun, onChange: { old, new in
+                guard let diffRule, samples.count < 40,
+                      old.riskRule != new.riskRule,
+                      old.riskRule == diffRule || new.riskRule == diffRule
+                else { return }
+                let shown = AuditRedactor.redact(detail: new.detail, tool: new.tool).text
+                    .replacingOccurrences(of: "\n", with: "⏎")
+                samples.append(
+                    "\(old.riskRule ?? "-") → \(new.riskRule ?? "-")\t\(shown.prefix(160))")
+            })
+            if !samples.isEmpty {
+                FileHandle.standardError.write(Data((samples.joined(separator: "\n") + "\n").utf8))
+            }
+            let daysAfter = try store.audit.dayFingerprints()
+            let rules = RiskRuleEngine.current
+            var lines = ["rule\tlevel\tbefore\tafter"]
+            for id in Set(report.before.keys).union(report.after.keys).sorted() {
+                let level = rules.rule(id: id).map { String($0.level.rawValue) } ?? "-"
+                lines.append("\(id)\t\(level)\t\(report.before[id] ?? 0)\t\(report.after[id] ?? 0)")
+            }
+            for (change, count) in report.reclassified.sorted(by: { $0.key < $1.key }) {
+                lines.append("kind \(change)\t\t\t\(count)")
+            }
+            print(lines.joined(separator: "\n"))
+            let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+            FileHandle.standardError.write(Data(
+                ("scanned \(report.scanned), changed \(report.changed), \(seconds)s"
+                    + (dryRun ? " (dry run, nothing written)" : "")
+                    + ", archive day fingerprints "
+                    + (daysBefore == daysAfter ? "unchanged" : "CHANGED") + "\n").utf8))
+        } catch {
+            FileHandle.standardError.write(Data("audit re-evaluation failed: \(error)\n".utf8))
+            exit(1)
+        }
+    }
+
     /// Audit snapshot: runs one Codex audit scan, then prints the recent operation log (for
     /// debugging / script cross-checks)
 
@@ -640,6 +693,7 @@ enum EurekaCLI {
           --uninstall-codex-notify  Uninstall Codex notify
           --hooks-status            Show installation status
           --audit-snapshot          Scan and print agent audit events (--risk-only for risks / --limit N)
+          --audit-reevaluate        Evaluate stored audit events with the current rules (--dry-run writes nothing / --diff <rule> lists changed rows)
           --parquet-inspect <files…> Decode Parquet archives; print rows and columns per file (read-only)
           --pricing-resolve [models…] Print resolved prices and sources (--provider p; all local ledger models if omitted)
           --build-pricing-catalog <litellm> <models.dev> <output>  Generate the bundled pricing catalog snapshot

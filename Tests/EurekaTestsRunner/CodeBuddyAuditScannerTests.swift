@@ -107,7 +107,7 @@ func codeBuddyAuditScannerTests(_ t: TestRunner) {
         defer { try? FileManager.default.removeItem(at: root) }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         try appendLines([
-            #"{"type":"function_call","timestamp":\#(nowMs),"sessionId":"cb-parent-0001","cwd":"/w","callId":"call_9","name":"Bash","arguments":"{\"command\":\"sudo rm -rf /tmp/x\"}"}"#,
+            #"{"type":"function_call","timestamp":\#(nowMs),"sessionId":"cb-parent-0001","cwd":"/w","callId":"call_9","name":"Bash","arguments":"{\"command\":\"sudo rm -rf /srv/x\"}"}"#,
         ], to: file)
 
         var alerts: [RiskAlert] = []
@@ -125,7 +125,7 @@ func codeBuddyAuditScannerTests(_ t: TestRunner) {
         let (root, file) = try makeProjects()
         defer { try? FileManager.default.removeItem(at: root) }
         try appendLines([
-            #"{"type":"function_call","timestamp":1577836800000,"sessionId":"cb-parent-0001","cwd":"/w","callId":"call_old","name":"Bash","arguments":"{\"command\":\"rm -rf /tmp/y\"}"}"#,
+            #"{"type":"function_call","timestamp":1577836800000,"sessionId":"cb-parent-0001","cwd":"/w","callId":"call_old","name":"Bash","arguments":"{\"command\":\"rm -rf /srv/y\"}"}"#,
         ], to: file)
 
         var alerts: [RiskAlert] = []

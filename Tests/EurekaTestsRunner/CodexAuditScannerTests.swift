@@ -104,7 +104,7 @@ func codexAuditScannerTests(_ t: TestRunner) {
         let nowISO = ISO8601DateFormatter().string(from: Date())
         let lines = [
             #"{"type":"session_meta","payload":{"id":"s-fresh","cwd":"/w"}}"#,
-            #"{"type":"response_item","timestamp":"\#(nowISO)","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sudo rm -rf /tmp/x\"}","call_id":"c9"}}"#,
+            #"{"type":"response_item","timestamp":"\#(nowISO)","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"sudo rm -rf /srv/x\"}","call_id":"c9"}}"#,
         ].joined(separator: "\n") + "\n"
         try lines.write(
             to: dayDir.appendingPathComponent("rollout-fresh.jsonl"),

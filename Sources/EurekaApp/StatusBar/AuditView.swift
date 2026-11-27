@@ -67,11 +67,6 @@ struct AuditView: View {
         self._keyword = State(initialValue: initialKeyword)
     }
 
-    /// Rule id → rule title (for badges; only the id is stored, the title is looked up in the
-    /// built-in rules)
-    private static let ruleTitles: [String: String] = Dictionary(
-        RiskRuleEngine.builtinRules.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
-
     private var query: AuditRepo.Query {
         AuditRepo.Query(
             source: sourceFilter, kind: kindFilter, riskOnly: riskOnly,
@@ -102,6 +97,7 @@ struct AuditView: View {
         .onChange(of: kindFilter) { _, _ in resetAndReload() }
         .onChange(of: riskOnly) { _, _ in resetAndReload() }
         .onChange(of: keyword) { _, _ in resetAndReload() }
+        .onChange(of: service.historyRevision) { _, _ in reload() }
         .themedConfirm(
             L10n.text("The exported CSV contains full command text (it may include secrets). Export it to Downloads?", zhHans: "导出的 CSV 含完整命令文本（可能包含敏感信息），确认导出到下载目录？"),
             isPresented: $showExportConfirm,
@@ -491,7 +487,8 @@ struct AuditView: View {
                         SourceBadge(source: event.source, size: 12)
                         if let level = event.riskLevel {
                             TagChip(
-                                event.riskRule.flatMap { Self.ruleTitles[$0] } ?? level.label,
+                                // Only the rule id is stored; the title comes from the rules in force
+                                event.riskRule.flatMap(RiskRuleEngine.title(forRule:)) ?? level.label,
                                 tint: Theme.riskColor(level))
                         }
                         if event.isError {

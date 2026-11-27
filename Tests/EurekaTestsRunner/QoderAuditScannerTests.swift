@@ -108,7 +108,7 @@ func qoderAuditScannerTests(_ t: TestRunner) {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let nowISO = formatter.string(from: Date())
         try appendLines([
-            #"{"type":"assistant","uuid":"a9","timestamp":"\#(nowISO)","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_9","name":"Bash","input":{"command":"sudo rm -rf /tmp/x"}}]},"sessionId":"qd-parent-0001","cwd":"/w"}"#,
+            #"{"type":"assistant","uuid":"a9","timestamp":"\#(nowISO)","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_9","name":"Bash","input":{"command":"sudo rm -rf /srv/x"}}]},"sessionId":"qd-parent-0001","cwd":"/w"}"#,
         ], to: file)
 
         var alerts: [RiskAlert] = []
@@ -126,7 +126,7 @@ func qoderAuditScannerTests(_ t: TestRunner) {
         let (root, file) = try makeProjects()
         defer { try? FileManager.default.removeItem(at: root) }
         try appendLines([
-            #"{"type":"assistant","uuid":"a8","timestamp":"2020-01-01T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_8","name":"Bash","input":{"command":"rm -rf /tmp/y"}}]},"sessionId":"qd-parent-0001","cwd":"/w"}"#,
+            #"{"type":"assistant","uuid":"a8","timestamp":"2020-01-01T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_8","name":"Bash","input":{"command":"rm -rf /srv/y"}}]},"sessionId":"qd-parent-0001","cwd":"/w"}"#,
         ], to: file)
 
         var alerts: [RiskAlert] = []
