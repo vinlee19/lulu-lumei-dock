@@ -54,6 +54,7 @@ struct AuditView: View {
     @State private var pageInput = ""
     @State private var expanded: Set<String> = []
     @State private var showSettings = false
+    @State private var showRules = false
     @State private var showExportConfirm = false
     @State private var showClearConfirm = false
 
@@ -159,6 +160,12 @@ struct AuditView: View {
                     .font(Theme.font.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+            }
+            CardActionButton(icon: "checklist", help: L10n.text("Risk rules: switch rules off, change levels, add your own, allow list", zhHans: "风险规则：开关、等级、自定义规则、白名单")) {
+                showRules = true
+            }
+            .sheet(isPresented: $showRules) {
+                AuditRulesView(service: service) { showRules = false }
             }
             CardActionButton(icon: "gearshape", help: L10n.text("Capture and retention", zhHans: "采集与保留策略")) {
                 showSettings.toggle()

@@ -28,7 +28,8 @@ public final class AuditPipeline {
     public func ingest(_ event: AuditEvent, isStale: Bool, now: Date = Date()) throws -> IngestResult {
         var event = event
         let hit = RiskRuleEngine.evaluate(
-            kind: event.kind, tool: event.tool, detail: event.detail, cwd: event.cwd)
+            kind: event.kind, tool: event.tool, detail: event.detail, cwd: event.cwd,
+            source: event.source)
         event.riskLevel = hit?.level
         event.riskRule = hit?.ruleId
 

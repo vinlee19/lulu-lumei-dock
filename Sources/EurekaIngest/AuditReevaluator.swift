@@ -69,7 +69,7 @@ public enum AuditReevaluator {
             }
             let hit = progress.rules.evaluate(
                 kind: updated.kind, tool: updated.tool, detail: updated.detail,
-                cwd: updated.cwd, home: home)
+                cwd: updated.cwd, source: updated.source, home: home)
             updated.riskLevel = hit?.level
             updated.riskRule = hit?.ruleId
             if let hit { progress.report.after[hit.ruleId, default: 0] += 1 }

@@ -18,6 +18,13 @@ final class AuditService: ObservableObject {
     @Published private(set) var exportMessage: String?
     /// Bumped when stored rows were re-evaluated in the background; the page reloads on change
     @Published private(set) var historyRevision = 0
+    /// The rules file as last read: the user's overrides, own rules and allow entries, plus
+    /// whatever in it could not be used
+    @Published private(set) var rulesState = RiskRuleStore.State()
+    /// Stored hits per rule id (the rules panel's counts)
+    @Published private(set) var ruleHitCounts: [String: Int] = [:]
+    /// Result of the last "how many past operations would this match" request, by rule id
+    @Published private(set) var rulePreview: (ruleId: String, hits: Int)?
     /// The analytics view's data for the last requested filter
     @Published private(set) var analytics: AuditAnalytics?
     @Published private(set) var analyticsLoading = false
@@ -60,6 +67,8 @@ final class AuditService: ObservableObject {
     private var lastPruneAt = Date.distantPast
     /// The history re-evaluation in flight, if any
     private var reevaluation: AuditReevaluator.Progress?
+    private let ruleStore = RiskRuleStore.shared
+    private var lastRuleCheckAt = Date.distantPast
     private var lastAttributionAt = Date.distantPast
     private var attributing = false
     /// What `analytics` was computed for; recomputed only when the filter, the rows or the rules
@@ -85,6 +94,9 @@ final class AuditService: ObservableObject {
         queue.async { [weak self] in
             guard let self else { return }
             do {
+                // The user's rules first: everything scanned below is judged by them
+                let rules = self.ruleStore.load()
+                self.publish { $0.rulesState = rules }
                 let store = try EurekaStore(path: EurekaStore.defaultURL())
                 let pipeline = AuditPipeline(store: store)
                 self.store = store
@@ -141,6 +153,7 @@ final class AuditService: ObservableObject {
             self?.scanQwen()
             self?.pruneIfDue()
             self?.attributeModelsIfDue()
+            self?.reloadRulesIfChanged()
         }
         timer.resume()
         self.timer = timer
@@ -218,6 +231,54 @@ final class AuditService: ObservableObject {
             }
         }
     }
+
+    // MARK: - Rules
+
+    /// Saves the user's rule changes and applies them: new operations at once, stored ones by
+    /// re-evaluating history in the background.
+    func saveRules(_ config: RiskRulesConfig) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let state = try self.ruleStore.save(config)
+                self.publish { $0.rulesState = state }
+                self.reevaluateIfDue()
+            } catch {
+                self.publish { $0.lastError = L10n.format("Failed to save audit rules: %@", zhHans: "审计规则保存失败: %@", String(describing: error)) }
+            }
+        }
+    }
+
+    /// Picks up a hand edit of audit-rules.json (checked every 10 seconds)
+    private func reloadRulesIfChanged() {
+        guard Date().timeIntervalSince(lastRuleCheckAt) > 10 else { return }
+        lastRuleCheckAt = Date()
+        guard let state = ruleStore.reloadIfChanged() else { return }
+        publish { $0.rulesState = state }
+        reevaluateIfDue()
+    }
+
+    /// Stored hits per rule, for the rules panel
+    func loadRuleHitCounts() {
+        queue.async { [weak self] in
+            guard let self, let store = self.store,
+                  let counts = try? store.audit.riskRuleCounts()
+            else { return }
+            self.publish { $0.ruleHitCounts = counts }
+        }
+    }
+
+    /// Counts the stored operations a rule being edited would match, so its effect is visible
+    /// before it is saved. Nothing is written.
+    func previewHits(of rule: RiskRule) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let hits = (try? RiskRuleStore.historicalHits(of: rule, store: store)) ?? 0
+            self.publish { $0.rulePreview = (rule.id, hits) }
+        }
+    }
+
+    var rulesFileURL: URL { ruleStore.url }
 
     /// Computes the analytics view's data for a filter (aggregation plus parsing the newest
     /// commands, about a second on a full log), off the main thread. A repeat request for the same
@@ -403,6 +464,7 @@ final class AuditService: ObservableObject {
             }
             reevaluation = nil
             if progress.report.changed > 0 { publish { $0.historyRevision += 1 } }
+            loadRuleHitCounts()
             // The rules may have changed while the pass ran
             reevaluateIfDue()
         } catch {

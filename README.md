@@ -205,7 +205,9 @@ a private key, a `.env` file, cloud or agent credentials, the keychain or the en
 a command, destructive SQL, changing startup items or an agent's own configuration are **high**
 (both raise an island card and, if enabled, a system notification with credentials masked);
 pushes to main, merges, cluster and cloud changes, uploads and message-sending MCP tools are
-**notices**. An **Analytics** view groups the log by model, source, project or session — the mix
+**notices**. Every rule can be switched off or moved to another level, you can add your own rules
+and an allow list (the rules panel, or `audit-rules.json` by hand), and stored history is
+re-evaluated when the rules change. An **Analytics** view groups the log by model, source, project or session — the mix
 of commands, edits, reads and MCP calls, rule hits and failures per group — with a daily chart and
 rankings of commands, MCP tools, hosts and directories. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
 WorkBuddy, Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).
@@ -418,6 +420,7 @@ All data lives in `~/Library/Application Support/Eureka/`:
 | `events/` | event spool (hooks → relay writes here atomically, app consumes) |
 | `bin/lululumei-relay` | the stable path referenced by hooks/notify (re‑synced by hash on launch); `bin/eureka-relay` is kept as a symlink to it for configs written before 0.36 |
 | `pricing.json` (optional) | highest-priority price overrides (USD / million tokens, prefix match) plus optional `providers` aliases, e.g. `{"providers": {"my-proxy": {"vendor": "openai"}}}` |
+| `audit-rules.json` (optional) | changes to the audit risk rules: `overrides` (switch a built-in rule off or change its level), `rules` (your own) and `allow` (silence a rule for a directory or a pattern); written by the rules panel, editable by hand |
 | `pricing-catalog-cache.json` | last successfully fetched LiteLLM + models.dev price catalog (kept indefinitely) |
 | `context-windows.json` (optional) | override per‑model context window size, e.g. `{"claude-opus": 1000000}` |
 

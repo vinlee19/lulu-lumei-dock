@@ -360,9 +360,10 @@ public enum RiskRuleEngine {
     /// order), or nil if none.
     public static func evaluate(
         kind: ToolKind, tool: String, detail: String, cwd: String? = nil,
-        home: String = NSHomeDirectory()
+        source: AgentSource? = nil, home: String = NSHomeDirectory()
     ) -> RiskHit? {
-        current.evaluate(kind: kind, tool: tool, detail: detail, cwd: cwd, home: home)
+        current.evaluate(
+            kind: kind, tool: tool, detail: detail, cwd: cwd, source: source, home: home)
     }
 }
 
