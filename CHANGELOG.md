@@ -6,6 +6,32 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **High-risk audit alerts are far less noisy.** Rules used to match anywhere in
+  the command text, so `curl … | python3 -c '…'` (parsing a response) raised the
+  same red card as `curl … | sh`, `cat /etc/hosts` counted as writing to `/etc`,
+  and a command that merely excluded `.env` counted as reading it. Rules now
+  look at each command of a pipeline, tell reads from writes, skip heredoc
+  bodies and quoted text, and know where a path lies: a recursive delete inside
+  the session's project is a notice, one in a temporary directory is nothing,
+  one anywhere else is high risk. On a real log of 100,000 operations this took
+  high-risk hits from 488 to 65.
+- **Alerts no longer show credentials.** The command text on the island card, in
+  the system notification (visible on the lock screen) and in the app log is
+  masked first. The audit log itself still keeps the full command.
+- **Commands from tools with unfamiliar names are audited.** About 1,700 stored
+  operations (terminal commands and file reads reported under other agents'
+  tool names, and Codex commands whose text was built from a variable) were
+  filed as "Tool" and skipped by every rule.
+
+### Changed
+
+- **Stored audit history follows the current rules.** When the rules change, the
+  whole log is evaluated again in the background, so an old false alarm goes
+  away and a new rule also covers the past. Loading a launchd job
+  (`launchctl load` / `bootstrap`) is now a rule of its own.
+
 ## [0.46.0] - 2026-11-26
 
 ### Added

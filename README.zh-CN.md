@@ -281,6 +281,7 @@ eureka --hooks-status              # 双侧安装状态
 eureka --usage-snapshot            # 全量扫描并输出今日用量 JSON(对拍脚本用)
 eureka --limits-snapshot [--claude]# 限额快照(Codex + Grok 本地;--claude 同时测非官方接口)
 eureka --audit-snapshot            # 输出 agent 操作审计流水(--risk-only / --limit N)
+eureka --audit-reevaluate          # 用当前风险规则重判已入库的审计流水(--dry-run / --diff <规则>)
 eureka --render-previews [目录]     # 离屏渲染灵动岛各形态 PNG
 eureka-relay inject --event stop --session demo   # 注入测试事件
 ```

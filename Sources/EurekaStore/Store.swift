@@ -1477,6 +1477,79 @@ public final class AuditRepo {
         ])
     }
 
+    // MARK: - Re-evaluation
+
+    /// A stored row's classification: what re-evaluation reads and may change
+    public struct Classification: Equatable, Sendable {
+        public var id: Int64
+        public var kind: ToolKind
+        public var tool: String
+        public var detail: String
+        public var cwd: String?
+        public var riskLevel: RiskLevel?
+        public var riskRule: String?
+    }
+
+    /// Rows with `id > after`, ascending, for walking the whole table in batches
+    public func classifications(after id: Int64, limit: Int) throws -> [Classification] {
+        try db.query("""
+        SELECT id, kind, tool, detail, cwd, risk_level, risk_rule
+        FROM audit_events WHERE id > ? ORDER BY id ASC LIMIT ?
+        """, [.int(id), .int(Int64(limit))]) { row in
+            Classification(
+                id: row.int(0),
+                kind: ToolKind(rawValue: row.text(1) ?? "") ?? .other,
+                tool: row.text(2) ?? "",
+                detail: row.text(3) ?? "",
+                cwd: row.text(4),
+                riskLevel: RiskLevel(rawValue: Int(row.int(5))),
+                riskRule: row.text(6))
+        }
+    }
+
+    /// Rewrites the kind and risk of the given rows in one transaction.
+    ///
+    /// Touches `kind`, `risk_level` and `risk_rule` only. The archive's day fingerprint is
+    /// `count : max(id) : count(exit_code) : sum(is_error)`; none of that moves, so re-evaluating
+    /// never makes a day look changed (which would re-upload it, or stop a day past retention
+    /// from ever being pruned).
+    public func reclassify(_ rows: [Classification]) throws {
+        guard !rows.isEmpty else { return }
+        try db.transaction {
+            for row in rows {
+                try db.run("""
+                UPDATE audit_events SET kind = ?, risk_level = ?, risk_rule = ? WHERE id = ?
+                """, [
+                    .text(row.kind.rawValue),
+                    .int(Int64(row.riskLevel?.rawValue ?? 0)),
+                    .string(row.riskRule),
+                    .int(row.id),
+                ])
+            }
+        }
+    }
+
+    /// Risk hits per rule id (rows without a rule are left out)
+    public func riskRuleCounts() throws -> [String: Int] {
+        let rows = try db.query("""
+        SELECT risk_rule, COUNT(*) FROM audit_events
+        WHERE risk_level > 0 AND risk_rule IS NOT NULL GROUP BY risk_rule
+        """) { row in (row.text(0) ?? "", Int(row.int(1))) }
+        return Dictionary(rows, uniquingKeysWith: +)
+    }
+
+    public func meta(_ key: String) throws -> String? {
+        try db.query("SELECT value FROM audit_meta WHERE key = ?", [.text(key)]) { $0.text(0) }
+            .first ?? nil
+    }
+
+    public func setMeta(_ key: String, _ value: String) throws {
+        try db.run("""
+        INSERT INTO audit_meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """, [.text(key), .text(value)])
+    }
+
     /// Paginated query, newest first (backed by idx_audit_ts)
     public func recent(_ query: Query = Query(), limit: Int, offset: Int = 0) throws -> [AuditEvent] {
         let (whereClause, bindings) = Self.filter(query)

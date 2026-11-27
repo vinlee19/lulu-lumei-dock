@@ -24,7 +24,8 @@ public final class AuditPipeline {
     @discardableResult
     public func ingest(_ event: AuditEvent, isStale: Bool, now: Date = Date()) throws -> IngestResult {
         var event = event
-        let hit = RiskRuleEngine.evaluate(kind: event.kind, tool: event.tool, detail: event.detail)
+        let hit = RiskRuleEngine.evaluate(
+            kind: event.kind, tool: event.tool, detail: event.detail, cwd: event.cwd)
         event.riskLevel = hit?.level
         event.riskRule = hit?.ruleId
 
@@ -33,10 +34,14 @@ public final class AuditPipeline {
               throttle.shouldAlert(sessionId: event.sessionId, ruleId: hit.ruleId, now: now)
         else { return IngestResult(inserted: inserted, alert: nil) }
 
+        // The alert leaves the database: it is shown on the island, in a system notification
+        // (lock screen included) and in the app log, so credentials are masked first. The stored
+        // row keeps the raw text.
+        let shown = AuditRedactor.redact(detail: event.detail, tool: event.tool).text
         return IngestResult(inserted: true, alert: RiskAlert(
             opId: event.opId, source: event.source, sessionId: event.sessionId,
             ruleId: hit.ruleId, ruleTitle: hit.title, tool: event.tool,
-            detail: event.detail, timestamp: event.timestamp))
+            detail: shown, timestamp: event.timestamp))
     }
 
     /// Backfill the execution result (Codex function_call_output finds its row via call_id=op_id)

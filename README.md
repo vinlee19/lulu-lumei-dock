@@ -445,6 +445,7 @@ eureka --hooks-status              # install state for both sides
 eureka --usage-snapshot            # full scan → today's usage JSON (used by the ccusage diff)
 eureka --limits-snapshot [--claude] [--antigravity] [--opencode]  # rate-limit snapshot (Codex + Grok local; --claude hits the unofficial API; --antigravity runs agy /usage; --opencode asks opencode's running service)
 eureka --audit-snapshot            # dump the agent tool-call audit trail (--risk-only / --limit N)
+eureka --audit-reevaluate          # re-apply the current risk rules to the stored audit trail (--dry-run / --diff <rule>)
 eureka --render-previews [dir]     # offscreen-render every island state to PNG
 eureka --render-shell [dir]        # offscreen-render the sidebar + audit page (light/dark)
 eureka --render-lineage [dir]      # offscreen-render the turn lineage graph (golden + live)
