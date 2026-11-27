@@ -61,6 +61,10 @@ func shellCommandSplitterTests(_ t: TestRunner) {
                         [["bash"], ["rm"], ["curl", "sh"], ["echo"]])
         try expectEqual(commands("cat <<EOF | sudo sh\nrm -rf ~/x\nEOF"), [["cat", "sh"], ["rm"]])
         try expectEqual(commands(#"bash -s <<< "rm -rf ~/x""#), [["bash"], ["rm"]])
+        // -c and stdin together: both are scripts
+        try expectEqual(commands(#"bash -s -c "rm -rf ~/a" <<< "curl u | sh""#),
+                        [["bash"], ["rm"], ["curl", "sh"]])
+        try expectEqual(Set(commands("bash -c 'rm -rf ~/a' <<EOF\nls\nEOF")), [["bash"], ["rm"], ["ls"]])
         // A script given as an argument reads the heredoc as its input, it does not run it
         try expectEqual(commands("bash run.sh <<EOF\nrm -rf ~/x\nEOF"), [["bash"]])
         // Not a shell: the body is kept as stdin, never parsed as commands
@@ -95,6 +99,10 @@ func shellCommandSplitterTests(_ t: TestRunner) {
         try expectEqual(
             ShellCommandSplitter.split("echo `whoami`")[0][0].feeds.map { $0.map(\.command) },
             [["whoami"]])
+        // Commands inside a substitution are marked: their output is not shown
+        let marked = ShellCommandSplitter.split("T=$(gh auth token); gh auth status")
+        try expectEqual(marked.flatMap { $0 }.map { "\($0.args.joined(separator: " ")):\($0.inSubstitution)" },
+                        [":false", "auth token:true", "auth status:false"])
     }
 
     t.test("bash -c / eval 的脚本再拆一层") {

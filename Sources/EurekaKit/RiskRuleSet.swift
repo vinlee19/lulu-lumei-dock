@@ -209,6 +209,9 @@ public final class RiskRuleSet: @unchecked Sendable {
         let commands: [String]
         let pipeInto: Set<String>
         let pipeIntoBare: Set<String>
+        let notPipedInto: Set<String>
+        /// Exact command words the rule needs; nil when it names none or uses a `*` prefix
+        let requiredCommands: Set<String>?
     }
 
     public let rules: [RiskRule]
@@ -227,11 +230,15 @@ public final class RiskRuleSet: @unchecked Sendable {
                 let exclude = try rule.exclude.map {
                     try NSRegularExpression(pattern: $0, options: [.caseInsensitive])
                 }
+                let commands = rule.commands.map { $0.lowercased() }
                 compiled.append((index, Compiled(
                     rule: rule, pattern: pattern, exclude: exclude,
-                    commands: rule.commands.map { $0.lowercased() },
+                    commands: commands,
                     pipeInto: Set(rule.pipeInto.map { $0.lowercased() }),
-                    pipeIntoBare: Set(rule.pipeIntoBare.map { $0.lowercased() }))))
+                    pipeIntoBare: Set(rule.pipeIntoBare.map { $0.lowercased() }),
+                    notPipedInto: Set(rule.notPipedInto.map { $0.lowercased() }),
+                    requiredCommands: commands.isEmpty || commands.contains { $0.hasSuffix("*") }
+                        ? nil : Set(commands))))
             } catch {
                 problems.append(Problem(ruleId: rule.id, message: error.localizedDescription))
             }
@@ -268,6 +275,8 @@ public final class RiskRuleSet: @unchecked Sendable {
             mix(rule.targets.map(\.rawValue).sorted().joined(separator: ","))
             mix(rule.exceptTargets.map(\.rawValue).sorted().joined(separator: ","))
             mix(rule.exclude.joined(separator: "\u{1}"))
+            mix(rule.topLevel ? "1" : "0")
+            mix(rule.notPipedInto.joined(separator: ","))
         }
         return String(hash, radix: 16)
     }
@@ -305,17 +314,51 @@ public final class RiskRuleSet: @unchecked Sendable {
         init(kind: ToolKind, tool: String, detail: String, cwd: String?, home: String) {
             self.kind = kind
             self.tool = tool
-            self.detail = detail
+            // Dozens of regexes run over the same text. NSRegularExpression needs UTF-16, and a
+            // native Swift string is transcoded on every call (a third of the time re-evaluating
+            // a real log); an NSString-backed one is handed over as is.
+            self.detail = Self.bridged(detail)
             self.cwd = cwd
             self.home = home
+        }
+
+        static func bridged(_ text: String) -> String {
+            NSString(string: text) as String
         }
 
         var pipelines: [ShellCommandSplitter.Pipeline] {
             mutating get {
                 if let cachedPipelines { return cachedPipelines }
-                let split = kind == .command ? ShellCommandSplitter.split(detail) : []
+                var split = kind == .command ? ShellCommandSplitter.split(detail) : []
+                for at in split.indices {
+                    for position in split[at].indices {
+                        split[at][position].text = Self.bridged(split[at][position].text)
+                        if let stdin = split[at][position].stdin {
+                            split[at][position].stdin = Self.bridged(stdin)
+                        }
+                    }
+                }
                 cachedPipelines = split
                 return split
+            }
+        }
+
+        private var cachedWords: Set<String>?
+
+        /// Every command word and wrapper in the command, to skip rules that name other commands
+        /// without running their regex
+        var commandWords: Set<String> {
+            mutating get {
+                if let cachedWords { return cachedWords }
+                var words: Set<String> = []
+                for pipeline in pipelines {
+                    for segment in pipeline {
+                        words.insert(segment.command)
+                        words.formUnion(segment.wrappers)
+                    }
+                }
+                cachedWords = words
+                return words
             }
         }
 
@@ -331,7 +374,7 @@ public final class RiskRuleSet: @unchecked Sendable {
     }
 
     private static func found(_ regex: NSRegularExpression, in text: String) -> Bool {
-        regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil
+        regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 
     private static func commandMatches(
@@ -368,6 +411,10 @@ public final class RiskRuleSet: @unchecked Sendable {
 
     private func matches(_ entry: Compiled, _ context: inout Context) -> Bool {
         let rule = entry.rule
+        if context.kind == .command, rule.scope != .text, rule.scope != .tool,
+           let required = entry.requiredCommands, required.isDisjoint(with: context.commandWords) {
+            return false
+        }
         switch rule.scope {
         case .text:
             return entry.pattern.map { Self.found($0, in: context.detail) } ?? false
@@ -377,8 +424,15 @@ public final class RiskRuleSet: @unchecked Sendable {
             let pipelines = context.pipelines
             let snapshot = context
             return pipelines.contains { pipeline in
-                pipeline.contains { segment in
-                    Self.commandMatches(segment, entry.commands)
+                pipeline.indices.contains { position in
+                    let segment = pipeline[position]
+                    if rule.topLevel, segment.inSubstitution { return false }
+                    if !entry.notPipedInto.isEmpty, position + 1 < pipeline.count,
+                       entry.notPipedInto.contains("*")
+                        || entry.notPipedInto.contains(pipeline[position + 1].command) {
+                        return false
+                    }
+                    return Self.commandMatches(segment, entry.commands)
                         && (entry.pattern.map { pattern in
                             Self.found(pattern, in: segment.text)
                                 // The SQL of `psql <<SQL`: stdin is that command's input, so only

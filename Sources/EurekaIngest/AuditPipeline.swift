@@ -11,6 +11,9 @@ public final class AuditPipeline {
         public var alert: RiskAlert?   // high-risk alert to show (already throttled / stale-filtered)
     }
 
+    /// A secret being read again a minute later is worth saying again; other rules wait 10 minutes
+    static let criticalCooldown: TimeInterval = 60
+
     private let store: EurekaStore
     private var throttle: RiskAlertThrottle
 
@@ -30,8 +33,10 @@ public final class AuditPipeline {
         event.riskRule = hit?.ruleId
 
         let inserted = try store.audit.insert(event)
-        guard inserted, !isStale, let hit, hit.level == .high,
-              throttle.shouldAlert(sessionId: event.sessionId, ruleId: hit.ruleId, now: now)
+        guard inserted, !isStale, let hit, hit.level >= .high,
+              throttle.shouldAlert(
+                sessionId: event.sessionId, ruleId: hit.ruleId, now: now,
+                cooldown: hit.level == .critical ? Self.criticalCooldown : nil)
         else { return IngestResult(inserted: inserted, alert: nil) }
 
         // The alert leaves the database: it is shown on the island, in a system notification
@@ -41,7 +46,7 @@ public final class AuditPipeline {
         return IngestResult(inserted: true, alert: RiskAlert(
             opId: event.opId, source: event.source, sessionId: event.sessionId,
             ruleId: hit.ruleId, ruleTitle: hit.title, tool: event.tool,
-            detail: shown, timestamp: event.timestamp))
+            detail: shown, timestamp: event.timestamp, level: hit.level))
     }
 
     /// Backfill the execution result (Codex function_call_output finds its row via call_id=op_id)

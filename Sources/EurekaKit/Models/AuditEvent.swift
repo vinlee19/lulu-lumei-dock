@@ -49,10 +49,13 @@ extension ToolKind {
     }
 }
 
-/// Risk level. 0 (no risk) is not modeled; only the notice / high tiers exist.
-public enum RiskLevel: Int, Codable, Sendable, Comparable {
+/// Risk level. 0 (no risk) is not modeled.
+public enum RiskLevel: Int, Codable, Sendable, Comparable, CaseIterable {
     case notice = 1   // notice: only flagged in the DB, no card/notification
     case high = 2     // high: island card + system notification
+    /// The agent got hold of a secret (read a key file, the keychain, the environment). Alerts
+    /// like `high`, repeats sooner and stays on the island longer.
+    case critical = 3
 
     public static func < (lhs: RiskLevel, rhs: RiskLevel) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -62,6 +65,7 @@ public enum RiskLevel: Int, Codable, Sendable, Comparable {
         switch self {
         case .notice: return L10n.text("Notice", zhHans: "提醒")
         case .high: return L10n.text("High risk", zhHans: "高危")
+        case .critical: return L10n.text("Critical", zhHans: "严重")
         }
     }
 }
@@ -119,7 +123,7 @@ public struct RiskHit: Equatable, Sendable {
     }
 }
 
-/// High-risk alert: one event that matched a high rule and must surface on the island / as a system
+/// Risk alert: one event that matched a high or critical rule and must surface on the island / as a system
 /// notification. id is the opId, used by the island card queue for dedup.
 public struct RiskAlert: Equatable, Sendable, Identifiable {
     public var id: String { opId }
@@ -131,11 +135,14 @@ public struct RiskAlert: Equatable, Sendable, Identifiable {
     public var tool: String
     public var detail: String     // command/path summary (island card; the view truncates further)
     public var timestamp: Date
+    public var level: RiskLevel
 
     public init(
         opId: String, source: AgentSource, sessionId: String,
-        ruleId: String, ruleTitle: String, tool: String, detail: String, timestamp: Date
+        ruleId: String, ruleTitle: String, tool: String, detail: String, timestamp: Date,
+        level: RiskLevel = .high
     ) {
+        self.level = level
         self.opId = opId
         self.source = source
         self.sessionId = sessionId

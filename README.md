@@ -199,7 +199,13 @@ removals are yours and survive re‑extraction. The tab is built around reuse, n
   block. Enabling it prompts a one‑time Keychain authorization (choose "Always Allow").
 
 **Audit** — an append‑only trail of agent tool calls (full commands / file paths, no output bodies),
-with risk flagging. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
+with risk flagging in three levels. Rules read the parsed command rather than its raw text: reading
+a private key, a `.env` file, cloud or agent credentials, the keychain or the environment is
+**critical**; deleting outside the project, running a downloaded script, a credential written out in
+a command, destructive SQL, changing startup items or an agent's own configuration are **high**
+(both raise an island card and, if enabled, a system notification with credentials masked);
+pushes to main, merges, cluster and cloud changes, uploads and message-sending MCP tools are
+**notices**. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
 WorkBuddy, Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).

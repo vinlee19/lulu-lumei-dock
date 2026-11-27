@@ -35,6 +35,8 @@ public enum ShellCommandSplitter {
         /// here-string. A rule that names this command also matches against it (the SQL of
         /// `psql <<SQL`), and when the command is a shell it is parsed as a script.
         public var stdin: String?
+        /// Inside `$( )`, backticks or `<( )`: the output goes to another command, not the screen
+        public var inSubstitution = false
         /// Parser bookkeeping: which pending heredoc belongs to this segment (0 = none)
         fileprivate var heredocOwner = 0
 
@@ -79,11 +81,17 @@ public enum ShellCommandSplitter {
 
     /// Commands that run their stdin as a shell script
     fileprivate static func runsStdin(_ segment: Segment) -> Bool {
-        if shells.contains(segment.command) {
-            // `bash script.sh <<EOF` feeds the script its input; `bash -s` / bare `bash` runs it
-            return segment.operands.isEmpty || segment.args.contains("-s")
+        guard shells.contains(segment.command) else { return false }
+        // `bash script.sh <<EOF` feeds the script its input; `bash -s` / bare `bash` runs stdin.
+        // The argument of -c is a script, not a script file.
+        var operands = segment.operands
+        if let flag = segment.args.firstIndex(where: {
+            $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.hasSuffix("c")
+        }), flag + 1 < segment.args.count,
+           let script = operands.firstIndex(of: segment.args[flag + 1]) {
+            operands.remove(at: script)
         }
-        return false
+        return operands.isEmpty || segment.args.contains { $0 == "-s" || $0.hasPrefix("-s") }
     }
 
     private static func isAssignment(_ word: String) -> Bool {
@@ -100,7 +108,7 @@ public enum ShellCommandSplitter {
     /// command is `bash -c '…'` or `eval '…'`.
     fileprivate static func makeSegment(
         words: [String], redirects: [Redirect], feeds: [Pipeline], text: String
-    ) -> (segment: Segment, script: String?) {
+    ) -> (segment: Segment, scripts: [String]) {
         var index = 0
         var found: [String] = []
         var command = ""
@@ -142,20 +150,21 @@ public enum ShellCommandSplitter {
         // A here-string is the command's stdin, known right here (a heredoc body comes later)
         segment.stdin = redirects.last { $0.op == "<<<" }?.target
 
-        var script: String?
-        if let stdin = segment.stdin, runsStdin(segment) {
-            script = stdin
-        } else if shells.contains(command) {
+        // Every script the text hands this command is parsed: a `-c` argument and stdin can both
+        // be present (`bash -s -c '…' <<< '…'`), and picking one would hide the other
+        var scripts: [String] = []
+        if shells.contains(command) {
             // -c, or a flag cluster ending in c (-lc, -ic)
             if let flag = args.firstIndex(where: {
                 $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.hasSuffix("c")
             }), flag + 1 < args.count {
-                script = args[flag + 1]
+                scripts.append(args[flag + 1])
             }
+            if let stdin = segment.stdin, runsStdin(segment) { scripts.append(stdin) }
         } else if command == "eval" {
-            script = args.joined(separator: " ")
+            scripts.append(args.joined(separator: " "))
         }
-        return (segment, script)
+        return (segment, scripts)
     }
 
     // MARK: - Parser
@@ -414,7 +423,13 @@ public enum ShellCommandSplitter {
         private mutating func feed(_ inner: [UInt8]) {
             guard depth < ShellCommandSplitter.maxDepth, !inner.isEmpty else { return }
             var parser = Parser(bytes: inner, depth: depth + 1)
-            feeds.append(contentsOf: parser.run())
+            feeds.append(contentsOf: parser.run().map { pipeline in
+                pipeline.map { segment in
+                    var segment = segment
+                    segment.inSubstitution = true
+                    return segment
+                }
+            })
         }
 
         /// `2>file`: the digits in front of a redirect are a file descriptor, not an argument
@@ -467,9 +482,11 @@ public enum ShellCommandSplitter {
                 openedHere = []
                 pipeline.append(built.segment)
                 nested.append(contentsOf: feeds)
-                if let script = built.script, depth < ShellCommandSplitter.maxDepth {
-                    var parser = Parser(bytes: Array(script.utf8), depth: depth + 1)
-                    nested.append(contentsOf: parser.run())
+                if depth < ShellCommandSplitter.maxDepth {
+                    for script in built.scripts {
+                        var parser = Parser(bytes: Array(script.utf8), depth: depth + 1)
+                        nested.append(contentsOf: parser.run())
+                    }
                 }
                 words = []
                 redirects = []
