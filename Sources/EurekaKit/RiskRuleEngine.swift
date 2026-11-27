@@ -80,6 +80,10 @@ public struct RiskRule: Sendable, Equatable {
     /// e.g. `env | grep proxy` is a filtered look, not a dump
     public var notPipedInto: [String]
     public var enabled: Bool
+    /// A built-in rule the rules file cannot switch off, re-level or allow-list: the rules about
+    /// tampering with the audit itself. Without this, whatever is being audited could silence
+    /// the rule that reports it and have re-evaluation erase the hit.
+    public var isProtected = false
 
     public init(
         id: String, title: RiskRuleTitle, level: RiskLevel, category: Category,
@@ -137,6 +141,12 @@ public enum RiskRuleEngine {
             exclude: exclude, topLevel: topLevel, notPipedInto: notPipedInto, enabled: enabled)
     }
 
+    private static func protected(_ rule: RiskRule) -> RiskRule {
+        var rule = rule
+        rule.isProtected = true
+        return rule
+    }
+
     /// Built-in rules. Order is the priority within a level: more specific rules come first.
     public static var builtinRules: [RiskRule] { [
         // ── critical: an agent got hold of a secret ──────────────────────────
@@ -176,6 +186,12 @@ public enum RiskRuleEngine {
              // The variable is an argument itself, not something tested inside `$( )` or `[ ]`
              pattern: #"^\s*(echo|printf)\b(?:(?!\$\(|\[|`).)*?"# + secretVariable,
              topLevel: true, notPipedInto: ["*"]),
+        protected(rule(
+            "audit-tamper", "Change the audit's own rules or data", "改动审计自身的规则或数据",
+            .critical, .agentConfig, kinds: pathWrite, scope: .path,
+            pattern: #"/Application Support/Eureka/(audit-rules\.json|eureka\.sqlite(-wal|-shm)?|bin/)"#
+                + #"|(^|/)audit-rules\.json$"#,
+            access: .write)),
         // ── high ─────────────────────────────────────────────
         rule("rm-rf", "Recursive deletion outside the project", "递归删除项目之外的路径", .high,
              .destructive, commands: ["rm"], pattern: recursiveFlag, targets: [.home, .system]),
@@ -325,7 +341,7 @@ public enum RiskRuleEngine {
 
     /// Bumped whenever a built-in rule's matching changes, so stored history is evaluated again
     /// even if the rule list hashes the same
-    public static let builtinVersion = 5
+    public static let builtinVersion = 6
 
     private static let lock = NSLock()
     private static var installed: RiskRuleSet?

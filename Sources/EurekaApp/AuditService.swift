@@ -22,6 +22,8 @@ final class AuditService: ObservableObject {
     @Published private(set) var pendingInFilter = 0
     /// Risk hits the user has not marked as dealt with yet, by level (sidebar badge, overview)
     @Published private(set) var unreviewed: [RiskLevel: Int] = [:]
+    /// When audit-rules.json was last changed outside the app (shown on the page until dismissed)
+    @Published var rulesChangedExternallyAt: Date?
     /// The rules file as last read: the user's overrides, own rules and allow entries, plus
     /// whatever in it could not be used
     @Published private(set) var rulesState = RiskRuleStore.State()
@@ -49,6 +51,9 @@ final class AuditService: ObservableObject {
         var latestUploadedDay: String?
     }
 
+    /// Called back (main thread) when audit-rules.json was changed outside the app and the change
+    /// was applied, with a one-line summary of what the file now relaxes
+    var onRulesChangedExternally: ((String) -> Void)?
     /// Called back (main thread) when a high-risk rule matches: AppDelegate turns it into an island
     /// card + system notification
     var onRiskAlert: ((RiskAlert) -> Void)?
@@ -277,7 +282,9 @@ final class AuditService: ObservableObject {
     /// Refused for `/`, the home directory and its parents: an entry there would silence the rule
     /// in every session.
     func ignore(rule: String, inProject cwd: String) {
-        guard RiskRulesConfig.isProjectDirectory(cwd) else { return }
+        guard RiskRulesConfig.isProjectDirectory(cwd),
+              RiskRuleEngine.current.rule(id: rule)?.isProtected != true
+        else { return }
         var config = rulesState.config
         let entry = RiskRulesConfig.Allow(rule: rule, cwd: cwd)
         guard !config.allow.contains(entry) else { return }
@@ -322,7 +329,17 @@ final class AuditService: ObservableObject {
         guard Date().timeIntervalSince(lastRuleCheckAt) > 10 else { return }
         lastRuleCheckAt = Date()
         guard let state = ruleStore.reloadIfChanged() else { return }
-        publish { $0.rulesState = state }
+        // Not written by the app: apply it, and say so. A rules file that changes without the
+        // user knowing is how an audited agent would switch its own alerts off.
+        let relaxed = state.relaxations
+        let summary = L10n.format(
+            "%@ rules switched off, %@ allow entries", zhHans: "关闭了 %@ 条规则，白名单 %@ 条",
+            String(relaxed.rulesOff), String(relaxed.allow))
+        publish {
+            $0.rulesState = state
+            $0.rulesChangedExternallyAt = Date()
+            $0.onRulesChangedExternally?(summary)
+        }
         reevaluateIfDue()
     }
 
