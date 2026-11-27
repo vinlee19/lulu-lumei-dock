@@ -963,6 +963,23 @@ enum PreviewRenderer {
         loadAnalytics(.project, seconds: 8)
         snap("shell-audit-analytics-project", analyticsPage(.project), height: 1500)
 
+        // Rules panel (a sheet in the app): the list, the allow list and the rule editor
+        audit.loadRuleHitCounts()
+        RunLoop.current.run(until: Date().addingTimeInterval(6))
+        var sampleDraft = AuditRuleDraft()
+        sampleDraft.id = "prod-db"
+        sampleDraft.title = "Connect to the production database"
+        sampleDraft.level = .critical
+        sampleDraft.commands = "psql, mysql"
+        sampleDraft.pattern = "prod"
+        sampleDraft.sample = "psql -h prod-db.internal -c 'select 1'"
+        snap("shell-audit-rules", AuditRulesView(service: audit) {}, width: 680, height: 640)
+        snap("shell-audit-rules-dark", AuditRulesView(service: audit) {}, dark: true, width: 680, height: 640)
+        snap("shell-audit-rules-allow", AuditRulesView(service: audit, initialPane: .allow) {},
+             width: 680, height: 640)
+        snap("shell-audit-rule-editor", AuditRulesView(service: audit, initialDraft: sampleDraft) {},
+             width: 680, height: 640)
+
         // Render the gear popover separately: the popover depends on a real window and isn't
         // rasterized when rendering the whole page offscreen. This version holds the 4 toggles
         // moved over from the Settings → Audit card, which must carry their own switch/small/11.5

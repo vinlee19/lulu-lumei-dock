@@ -439,6 +439,7 @@ enum EurekaCLI {
     /// per group with its mix of kinds, then the rankings. `--by model|source|project|session`.
     private static func auditAnalytics(dimension: AuditRepo.Dimension) {
         do {
+            RiskRuleStore.shared.load()
             let store = try EurekaStore(path: EurekaStore.defaultURL())
             let started = Date()
             var settled = 0
@@ -494,6 +495,7 @@ enum EurekaCLI {
     /// first 160 characters), to check a rule change against real history.
     private static func auditReevaluate(dryRun: Bool, diffRule: String?) {
         do {
+            RiskRuleStore.shared.load()
             let store = try EurekaStore(path: EurekaStore.defaultURL())
             let started = Date()
             let daysBefore = try store.audit.dayFingerprints()
@@ -539,6 +541,7 @@ enum EurekaCLI {
 
     private static func auditSnapshot(riskOnly: Bool, limit: Int) {
         do {
+            RiskRuleStore.shared.load()
             let store = try EurekaStore(path: EurekaStore.defaultURL())
             let pipeline = AuditPipeline(store: store)
             let scanner = CodexAuditScanner(

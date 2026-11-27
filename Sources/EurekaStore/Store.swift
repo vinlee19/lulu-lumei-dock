@@ -1643,6 +1643,7 @@ public final class AuditRepo {
     /// A stored row's classification: what re-evaluation reads and may change
     public struct Classification: Equatable, Sendable {
         public var id: Int64
+        public var source: AgentSource?
         public var kind: ToolKind
         public var tool: String
         public var detail: String
@@ -1654,11 +1655,12 @@ public final class AuditRepo {
     /// Rows with `id > after`, ascending, for walking the whole table in batches
     public func classifications(after id: Int64, limit: Int) throws -> [Classification] {
         try db.query("""
-        SELECT id, kind, tool, detail, cwd, risk_level, risk_rule
+        SELECT id, kind, tool, detail, cwd, risk_level, risk_rule, source
         FROM audit_events WHERE id > ? ORDER BY id ASC LIMIT ?
         """, [.int(id), .int(Int64(limit))]) { row in
             Classification(
                 id: row.int(0),
+                source: AgentSource(rawValue: row.text(7) ?? ""),
                 kind: ToolKind(rawValue: row.text(1) ?? "") ?? .other,
                 tool: row.text(2) ?? "",
                 detail: row.text(3) ?? "",

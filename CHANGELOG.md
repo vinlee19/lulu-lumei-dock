@@ -8,6 +8,17 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Audit rules can be configured.** A rules panel on the Audit page lists every
+  rule with a switch, its level and how often it has fired. Switch a rule off,
+  move it between notice, high risk and critical, or write your own: pick what
+  it looks at (each command, the whole text, paths read or written, a tool
+  name), command names, a pattern and an exception, try it on a sample, and
+  count how many past operations it would have matched before saving. An allow
+  list silences a rule for a project directory or for operations matching a
+  pattern. Everything is stored in `audit-rules.json` in the app's data
+  directory, which can also be edited by hand; an entry that cannot be used is
+  skipped and shown, and never takes the other rules down with it. Stored
+  history is evaluated again after every change.
 - **Audit analytics.** The Audit page has a second view next to the log:
   operations grouped by model, source, project or session, each with its mix of
   commands, edits, reads, web and MCP calls, its share of rule hits, high-risk

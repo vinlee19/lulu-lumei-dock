@@ -214,14 +214,68 @@ public final class RiskRuleSet: @unchecked Sendable {
         let requiredCommands: Set<String>?
     }
 
+    private struct CompiledAllow {
+        let entry: RiskRulesConfig.Allow
+        let pattern: NSRegularExpression?
+    }
+
     public let rules: [RiskRule]
+    public let allow: [RiskRulesConfig.Allow]
     public let problems: [Problem]
     private let compiled: [Compiled]
+    private let compiledAllow: [CompiledAllow]
 
-    public init(rules: [RiskRule]) {
+    /// Built-in rules with the user's config applied: overrides change or switch off a built-in
+    /// rule, the user's own rules go in front (within a level theirs win), allow entries silence
+    /// hits. Whatever cannot be used is reported in `problems` and left out; the rest stands.
+    public static func make(
+        builtin: [RiskRule], config: RiskRulesConfig, problems parseProblems: [Problem] = []
+    ) -> RiskRuleSet {
+        var problems = parseProblems
+        var rules = builtin
+        let builtinIds = Set(builtin.map(\.id))
+        for (id, change) in config.overrides {
+            guard let index = rules.firstIndex(where: { $0.id == id }) else {
+                problems.append(Problem(ruleId: id, message: "no built-in rule has this id"))
+                continue
+            }
+            if let enabled = change.enabled { rules[index].enabled = enabled }
+            if let level = change.level { rules[index].level = level }
+        }
+        var custom: [RiskRule] = []
+        for rule in config.rules {
+            if builtinIds.contains(rule.id) {
+                problems.append(Problem(
+                    ruleId: rule.id, message: "a built-in rule already uses this id"))
+            } else if custom.contains(where: { $0.id == rule.id }) {
+                problems.append(Problem(ruleId: rule.id, message: "this id is used twice"))
+            } else {
+                custom.append(rule)
+            }
+        }
+        return RiskRuleSet(rules: custom + rules, allow: config.allow, problems: problems)
+    }
+
+    public init(rules: [RiskRule], allow: [RiskRulesConfig.Allow] = [], problems known: [Problem] = []) {
         self.rules = rules
         var compiled: [(index: Int, entry: Compiled)] = []
-        var problems: [Problem] = []
+        var problems = known
+        var compiledAllow: [CompiledAllow] = []
+        var usableAllow: [RiskRulesConfig.Allow] = []
+        for entry in allow {
+            do {
+                let pattern = try entry.pattern.map {
+                    try NSRegularExpression(pattern: $0, options: [.caseInsensitive])
+                }
+                compiledAllow.append(CompiledAllow(entry: entry, pattern: pattern))
+                usableAllow.append(entry)
+            } catch {
+                problems.append(Problem(
+                    ruleId: "allow:\(entry.rule)", message: error.localizedDescription))
+            }
+        }
+        self.allow = usableAllow
+        self.compiledAllow = compiledAllow
         for (index, rule) in rules.enumerated() where rule.enabled {
             do {
                 let pattern = try rule.pattern.map {
@@ -278,6 +332,13 @@ public final class RiskRuleSet: @unchecked Sendable {
             mix(rule.topLevel ? "1" : "0")
             mix(rule.notPipedInto.joined(separator: ","))
         }
+        for entry in allow {
+            mix("allow")
+            mix(entry.rule)
+            mix(entry.cwd ?? "")
+            mix(entry.source ?? "")
+            mix(entry.pattern ?? "")
+        }
         return String(hash, radix: 16)
     }
 
@@ -290,16 +351,36 @@ public final class RiskRuleSet: @unchecked Sendable {
     /// The first matching rule by descending level, then rule order; nil when nothing matches.
     public func evaluate(
         kind: ToolKind, tool: String, detail: String, cwd: String? = nil,
-        home: String = NSHomeDirectory()
+        source: AgentSource? = nil, home: String = NSHomeDirectory()
     ) -> RiskHit? {
         guard !detail.isEmpty || !tool.isEmpty else { return nil }
         var context = Context(kind: kind, tool: tool, detail: detail, cwd: cwd, home: home)
         for entry in compiled where entry.rule.kinds.contains(kind) {
             guard matches(entry, &context) else { continue }
             if entry.exclude.contains(where: { Self.found($0, in: detail) }) { continue }
+            // An allowed rule steps aside; a lower rule may still speak
+            if isAllowed(ruleId: entry.rule.id, detail: context.detail, cwd: cwd, source: source) {
+                continue
+            }
             return RiskHit(ruleId: entry.rule.id, title: entry.rule.title.text, level: entry.rule.level)
         }
         return nil
+    }
+
+    private func isAllowed(
+        ruleId: String, detail: String, cwd: String?, source: AgentSource?
+    ) -> Bool {
+        compiledAllow.contains { allowed in
+            let entry = allowed.entry
+            guard entry.rule == "*" || entry.rule == ruleId else { return false }
+            if let wanted = entry.cwd {
+                guard let cwd, cwd == wanted || cwd.hasPrefix(wanted.hasSuffix("/") ? wanted : wanted + "/")
+                else { return false }
+            }
+            if let wanted = entry.source, wanted != source?.rawValue { return false }
+            if let pattern = allowed.pattern, !Self.found(pattern, in: detail) { return false }
+            return true
+        }
     }
 
     /// Per-operation work shared by every rule: the command is split once, on first use
