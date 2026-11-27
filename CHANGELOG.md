@@ -16,6 +16,12 @@ this project uses [Semantic Versioning](https://semver.org/).
   (`cat`, `grep`, `source`, an upload, a file tool); listing it, excluding it
   from a search or reading `.env.example` raises nothing. A critical alert stays
   on the island longer and repeats after a minute instead of ten.
+- **Failed Claude tool calls are in the audit log.** Claude reports a failed
+  call through a separate hook that Eureka did not install, so every recorded
+  Claude operation looked successful. The hook is now installed with the others
+  (existing installs pick it up at the next launch), and a failed command,
+  edit or MCP call shows its "Failed" tag. Only the fact that it failed is kept,
+  not the error text.
 - **Many more operations are recognised.** High risk: a credential written out
   in a command (a literal bearer token, API key or JWT), an access token printed
   to the screen, destructive SQL run through a database client, `kubectl delete`,

@@ -36,6 +36,24 @@ func installerTests(_ t: TestRunner) {
         // PostToolUse needs matcher=*; the others carry no matcher
         try expectEqual(hookEntries(root, "PostToolUse")[0]["matcher"] as? String, "*")
         try expect(hookEntries(root, "Stop")[0]["matcher"] == nil)
+        // No matcher = every tool, as for PreToolUse
+        try expect(hookEntries(root, "PostToolUseFailure")[0]["matcher"] == nil)
+    }
+
+    t.test("升级：缺 PostToolUseFailure 的旧安装是 stale，重装后补齐且不动别人的条目") {
+        var root = try parseJSON(try ClaudeHooksInstaller.install(into: "", relayPath: relayPath))
+        var hooks = root["hooks"] as! [String: Any]
+        hooks["PostToolUseFailure"] = [["hooks": [["type": "command", "command": "other-tool notify"]]]]
+        root["hooks"] = hooks
+        let old = String(data: try JSONSerialization.data(withJSONObject: root), encoding: .utf8)!
+        try expectEqual(
+            ClaudeHooksInstaller.diagnose(
+                json: old, expectedRelayPath: relayPath, relayIsExecutable: { _ in true }),
+            .stale(missing: ["PostToolUseFailure"]))
+        let upgraded = try parseJSON(try ClaudeHooksInstaller.install(into: old, relayPath: relayPath))
+        let entries = hookEntries(upgraded, "PostToolUseFailure")
+        try expectEqual(entries.count, 2)
+        try expectEqual(entries.flatMap(commands(in:)), ["other-tool notify", "\"\(relayPath)\" claude-hook"])
     }
 
     t.test("已有 env/plugins 等键全部保留") {

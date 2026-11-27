@@ -75,6 +75,13 @@ func decoderTests(_ t: TestRunner) {
         let end = ClaudeHookDecoder.decode(
             payload: try loadPayload("hook-payloads/session-end.json"), receivedAt: now)
         try expectEqual(end!.kind, .sessionEnded(reason: "prompt_input_exit"))
+
+        // A failed tool call keeps the session active just the same
+        let failed = ClaudeHookDecoder.decode(payload: [
+            "hook_event_name": "PostToolUseFailure", "session_id": "s1", "tool_name": "Bash",
+            "tool_input": ["command": "npm test"], "error": "Exit code 1", "is_interrupt": false,
+        ], receivedAt: now)
+        try expectEqual(failed?.kind, .activity(tool: "Bash"))
     }
 
     t.test("PreToolUse：带出工具与具体对象（等待授权卡靠它说清在请求什么）") {

@@ -25,6 +25,34 @@ func claudeAuditDecoderTests(_ t: TestRunner) {
         try expectEqual(event?.cwd, "/w")
     }
 
+    t.test("PostToolUseFailure → 失败的审计事件，不带错误正文") {
+        let payload: [String: Any] = [
+            "hook_event_name": "PostToolUseFailure",
+            "session_id": "s1",
+            "cwd": "/w",
+            "tool_name": "Bash",
+            "tool_input": ["command": "npm test"],
+            "tool_use_id": "toolu_01ABC",
+            "error": "Exit code 1\nError: Cannot find module 'express'",
+            "is_interrupt": false,
+            "duration_ms": 4187,
+        ]
+        let event = ClaudeAuditDecoder.decode(payload: payload, receivedAt: now)
+        try expectEqual(event?.opId, "toolu_01ABC")
+        try expectEqual(event?.kind, .command)
+        try expectEqual(event?.detail, "npm test")
+        try expectEqual(event?.isError, true)
+        try expect(event?.exitCode == nil, "Claude 不单独给退出码")
+        // An MCP tool that returned an error result arrives the same way
+        let mcp = ClaudeAuditDecoder.decode(payload: [
+            "hook_event_name": "PostToolUseFailure", "session_id": "s1",
+            "tool_name": "mcp__grafana__query_prometheus", "tool_input": ["expr": "up"],
+            "tool_use_id": "toolu_02", "error": "connection refused",
+        ], receivedAt: now)
+        try expectEqual(mcp?.kind, .mcp)
+        try expectEqual(mcp?.isError, true)
+    }
+
     t.test("非 PostToolUse / 缺字段 → nil") {
         try expect(ClaudeAuditDecoder.decode(
             payload: ["hook_event_name": "Stop", "session_id": "s1"], receivedAt: now) == nil)
