@@ -17,6 +17,12 @@ this project uses [Semantic Versioning](https://semver.org/).
   the session's project is a notice, one in a temporary directory is nothing,
   one anywhere else is high risk. On a real log of 100,000 operations this took
   high-risk hits from 488 to 65.
+- **Three ways a risky command could slip past the rules are closed.** A script
+  fed to a shell through a heredoc or here-string (`bash <<EOF`, `cat <<EOF | sh`)
+  is now read as commands, a command of any length is read to the end, and
+  `$TMPDIR/../…` is no longer taken for a temporary path. The text of a heredoc
+  given to another program (the SQL of `psql <<SQL`) is checked by the rules for
+  that program.
 - **Alerts no longer show credentials.** The command text on the island card, in
   the system notification (visible on the lock screen) and in the app log is
   masked first. The audit log itself still keeps the full command.
