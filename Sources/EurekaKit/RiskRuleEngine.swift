@@ -41,9 +41,9 @@ public struct RiskRule: Sendable, Equatable {
             case .credentials: return L10n.text("Credentials", zhHans: "凭据")
             case .destructive: return L10n.text("Destructive", zhHans: "破坏性操作")
             case .versionControl: return L10n.text("Version control", zhHans: "版本控制")
-            case .outbound: return L10n.text("Outbound and hard to undo", zhHans: "对外与难撤销")
-            case .system: return L10n.text("System and persistence", zhHans: "系统与持久化")
-            case .agentConfig: return L10n.text("Agent configuration", zhHans: "Agent 配置")
+            case .outbound: return L10n.text("Outbound", zhHans: "对外操作")
+            case .system: return L10n.text("System", zhHans: "系统")
+            case .agentConfig: return L10n.text("Agent config", zhHans: "Agent 配置")
             case .supplyChain: return L10n.text("Supply chain", zhHans: "供应链")
             case .network: return L10n.text("Network", zhHans: "网络")
             case .mcp: return "MCP"

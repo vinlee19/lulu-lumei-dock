@@ -860,6 +860,12 @@ enum PreviewRenderer {
         // render parameters here
         ThemeStyle.current = style
         let notifications = NotificationService()
+        // A render only reads what is stored. Without these two the service would scan every
+        // agent's sessions first (minutes on a database copy whose scan state is a day old, so
+        // nothing below got an answer in time) and prune with its built-in 90 days instead of
+        // the user's retention. Both are queued ahead of the work `start()` queues.
+        audit.setCaptureEnabled(false)
+        audit.updateRetention(days: 0)
         audit.start()
         installer.refresh()
         // The service reads the DB on its own serial queue and publishes @Published back on main,
@@ -926,6 +932,36 @@ enum PreviewRenderer {
         settings.auditEnabled = false
         snap("shell-audit-capture-off", auditPage(), height: 620)
         settings.auditEnabled = true  // don't leave render side effects in the real preferences
+
+        // Analytics view: the view asks for its data in onAppear, which offscreen rendering never
+        // waits for, so load it first (the view shows whatever the service holds for its
+        // dimension). The first pass also has to attribute models to the whole history.
+        @MainActor func analyticsPage(_ dimension: AuditRepo.Dimension) -> some View {
+            AuditView(
+                service: audit, installer: installer, settings: settings,
+                notificationService: notifications, skillMemory: skillMemory,
+                initialMode: .analytics, initialDimension: dimension)
+        }
+        @MainActor func loadAnalytics(_ dimension: AuditRepo.Dimension, seconds: Double) {
+            let range = UsageDateRange.preset(.last30Days).interval()
+            audit.loadAnalytics(
+                query: AuditRepo.Query(from: range.from, to: range.to), dimension: dimension)
+            RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+            print("审计分析 \(dimension.rawValue)：loaded=\(audit.analytics?.dimension.rawValue ?? "-") "
+                + "groups=\(audit.analytics?.groups.count ?? -1) "
+                + "ops=\(audit.analytics?.totals.total ?? -1) days=\(audit.analytics?.days.count ?? -1) "
+                + "error=\(audit.lastError ?? "-")")
+        }
+        // Model attribution runs on the service's one-minute tick; give the first one time
+        RunLoop.current.run(until: Date().addingTimeInterval(6))
+        loadAnalytics(.model, seconds: 8)
+        snap("shell-audit-analytics", analyticsPage(.model), height: 1560)
+        snap("shell-audit-analytics-dark", analyticsPage(.model), dark: true, height: 1560)
+        snap("shell-audit-analytics-wide", analyticsPage(.model), width: 1270, height: 1500)
+        loadAnalytics(.source, seconds: 8)
+        snap("shell-audit-analytics-source", analyticsPage(.source), height: 1300)
+        loadAnalytics(.project, seconds: 8)
+        snap("shell-audit-analytics-project", analyticsPage(.project), height: 1500)
 
         // Render the gear popover separately: the popover depends on a real window and isn't
         // rasterized when rendering the whole page offscreen. This version holds the 4 toggles

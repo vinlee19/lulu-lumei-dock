@@ -88,13 +88,17 @@ public struct AuditEvent: Equatable, Sendable {
     public var isError: Bool
     public var riskLevel: RiskLevel?
     public var riskRule: String?  // matched rule id (e.g. "sudo" / "rm-rf")
+    /// Model that issued the operation: nil = not looked up yet, "" = looked up and unknown.
+    /// Attributed after the fact from the usage ledger, never set by a scanner.
+    public var model: String?
 
     public init(
         opId: String, source: AgentSource, sessionId: String, timestamp: Date,
         kind: ToolKind, tool: String, detail: String, cwd: String? = nil,
         exitCode: Int? = nil, isError: Bool = false,
-        riskLevel: RiskLevel? = nil, riskRule: String? = nil
+        riskLevel: RiskLevel? = nil, riskRule: String? = nil, model: String? = nil
     ) {
+        self.model = model
         self.opId = opId
         self.source = source
         self.sessionId = sessionId

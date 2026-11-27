@@ -8,6 +8,17 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Audit analytics.** The Audit page has a second view next to the log:
+  operations grouped by model, source, project or session, each with its mix of
+  commands, edits, reads, web and MCP calls, its share of rule hits, high-risk
+  count and failure rate. Below it, a day-by-day chart, the rules that fired,
+  which kind of rule each model trips, and rankings of the most run commands,
+  MCP tools, contacted hosts and edited directories. Pick 7, 30 or 90 days, all
+  time, or your own range; click a row to see those operations in the log.
+- **Each audited operation shows its model.** The model is looked up from the
+  usage ledger (the model call just before the operation in the same session),
+  so it appears a minute or two after the operation. About 96% of a real log is
+  attributed; operations of sessions with no recorded usage stay unattributed.
 - **Reading a secret is a critical audit alert.** A new top level, above high
   risk, for an agent getting hold of a secret: reading a private key, a `.env`
   file, cloud credentials (`~/.aws/credentials`, gcloud, kubeconfig, docker), an

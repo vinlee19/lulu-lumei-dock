@@ -1427,15 +1427,30 @@ public final class AuditRepo {
         public var kind: ToolKind?
         public var riskOnly: Bool
         public var keyword: String?
+        /// `[from, to)`
+        public var from: Date?
+        public var to: Date?
+        /// Working directory: that directory and everything under it
+        public var project: String?
+        /// Attributed model; "" selects the operations no model could be attributed to
+        public var model: String?
+        public var sessionId: String?
 
         public init(
             source: AgentSource? = nil, kind: ToolKind? = nil,
-            riskOnly: Bool = false, keyword: String? = nil
+            riskOnly: Bool = false, keyword: String? = nil,
+            from: Date? = nil, to: Date? = nil, project: String? = nil, model: String? = nil,
+            sessionId: String? = nil
         ) {
+            self.sessionId = sessionId
             self.source = source
             self.kind = kind
             self.riskOnly = riskOnly
             self.keyword = keyword
+            self.from = from
+            self.to = to
+            self.project = project
+            self.model = model
         }
     }
 
@@ -1475,6 +1490,152 @@ public final class AuditRepo {
             .int(isError ? 1 : 0),
             .text(source.rawValue), .text(sessionId), .text(opId),
         ])
+    }
+
+    // MARK: - Analytics
+
+    /// What operations can be grouped by. A closed list of column expressions: nothing from
+    /// outside is ever spliced into the SQL.
+    public enum Dimension: String, CaseIterable, Sendable {
+        case model, source, project, session
+
+        var expression: String {
+            switch self {
+            case .model: return "COALESCE(model, '')"
+            case .source: return "source"
+            case .project: return "COALESCE(cwd, '')"
+            case .session: return "session_id"
+            }
+        }
+    }
+
+    /// Operations of one group and one kind
+    public struct BreakdownRow: Equatable, Sendable {
+        public var key: String
+        public var kind: ToolKind
+        public var count: Int
+        /// Operations a rule matched, and those at high risk or above
+        public var risk: Int
+        public var high: Int
+        public var errors: Int
+    }
+
+    public func breakdown(by dimension: Dimension, _ query: Query = Query()) throws -> [BreakdownRow] {
+        let (whereClause, bindings) = Self.filter(query)
+        return try db.query("""
+        SELECT \(dimension.expression), kind, COUNT(*), SUM(risk_level > 0), SUM(risk_level >= 2),
+               SUM(is_error)
+        FROM audit_events \(whereClause) GROUP BY 1, 2
+        """, bindings) { row in
+            BreakdownRow(
+                key: row.text(0) ?? "",
+                kind: ToolKind(rawValue: row.text(1) ?? "") ?? .other,
+                count: Int(row.int(2)), risk: Int(row.int(3)), high: Int(row.int(4)),
+                errors: Int(row.int(5)))
+        }
+    }
+
+    /// Operations of one local calendar day and one kind
+    public struct DayRow: Equatable, Sendable {
+        public var day: String  // yyyy-MM-dd, local time
+        public var kind: ToolKind
+        public var count: Int
+        public var risk: Int
+    }
+
+    public func dailySeries(_ query: Query = Query()) throws -> [DayRow] {
+        let (whereClause, bindings) = Self.filter(query)
+        return try db.query("""
+        SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime'), kind, COUNT(*),
+               SUM(risk_level > 0)
+        FROM audit_events \(whereClause) GROUP BY 1, 2 ORDER BY 1
+        """, bindings) { row in
+            DayRow(
+                day: row.text(0) ?? "", kind: ToolKind(rawValue: row.text(1) ?? "") ?? .other,
+                count: Int(row.int(2)), risk: Int(row.int(3)))
+        }
+    }
+
+    /// Rule hits per group: (group key, rule id, hits)
+    public func riskHits(
+        by dimension: Dimension, _ query: Query = Query()
+    ) throws -> [(key: String, rule: String, count: Int)] {
+        var risky = query
+        risky.riskOnly = true
+        let (whereClause, bindings) = Self.filter(risky)
+        return try db.query("""
+        SELECT \(dimension.expression), COALESCE(risk_rule, ''), COUNT(*)
+        FROM audit_events \(whereClause) GROUP BY 1, 2
+        """, bindings) { row in (row.text(0) ?? "", row.text(1) ?? "", Int(row.int(2))) }
+    }
+
+    /// The most used tool names of one kind
+    public func topTools(kind: ToolKind, _ query: Query = Query(), limit: Int) throws -> [(tool: String, count: Int)] {
+        var scoped = query
+        scoped.kind = kind
+        let (whereClause, bindings) = Self.filter(scoped)
+        return try db.query("""
+        SELECT tool, COUNT(*) FROM audit_events \(whereClause)
+        GROUP BY tool ORDER BY 2 DESC, 1 LIMIT ?
+        """, bindings + [.int(Int64(limit))]) { row in (row.text(0) ?? "", Int(row.int(1))) }
+    }
+
+    /// Details of the newest operations of one kind, for rankings that need the text parsed
+    public func details(kind: ToolKind, _ query: Query = Query(), limit: Int) throws -> [String] {
+        var scoped = query
+        scoped.kind = kind
+        let (whereClause, bindings) = Self.filter(scoped)
+        return try db.query("""
+        SELECT detail FROM audit_events \(whereClause) ORDER BY ts DESC LIMIT ?
+        """, bindings + [.int(Int64(limit))]) { $0.text(0) ?? "" }
+    }
+
+    /// Changes whenever rows are added: `count:maxId` (cache key for computed analytics)
+    public func revision() throws -> String {
+        try db.query("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM audit_events") {
+            "\($0.int(0)):\($0.int(1))"
+        }.first ?? "0:0"
+    }
+
+    // MARK: - Model attribution
+
+    /// An operation waiting for its model
+    public struct Unattributed: Equatable, Sendable {
+        public var id: Int64
+        public var source: String
+        public var sessionId: String
+        public var ts: Double
+    }
+
+    /// Operations with no model looked up yet and older than `before`, oldest id first
+    public func unattributed(before: Date, limit: Int) throws -> [Unattributed] {
+        try db.query("""
+        SELECT id, source, session_id, ts FROM audit_events
+        WHERE model IS NULL AND ts < ? ORDER BY id ASC LIMIT ?
+        """, [.real(before.timeIntervalSince1970), .int(Int64(limit))]) { row in
+            Unattributed(
+                id: row.int(0), source: row.text(1) ?? "", sessionId: row.text(2) ?? "",
+                ts: row.real(3))
+        }
+    }
+
+    /// Model calls of one session in time order, from the usage ledger (same database)
+    public func modelTimeline(source: String, sessionId: String) throws -> [(ts: Double, model: String)] {
+        try db.query("""
+        SELECT ts, model FROM usage_records WHERE session_id = ? AND source = ? ORDER BY ts ASC
+        """, [.text(sessionId), .text(source)]) { row in (row.real(0), row.text(1) ?? "") }
+    }
+
+    /// Writes the looked-up models. Only the `model` column: archive day fingerprints do not move.
+    public func setModels(_ models: [(id: Int64, model: String)]) throws {
+        guard !models.isEmpty else { return }
+        try db.transaction {
+            for entry in models {
+                try db.run(
+                    "UPDATE audit_events SET model = ? WHERE id = ?",
+                    [.text(entry.model), .int(entry.id)])
+            }
+        }
     }
 
     // MARK: - Re-evaluation
@@ -1555,7 +1716,7 @@ public final class AuditRepo {
         let (whereClause, bindings) = Self.filter(query)
         return try db.query("""
         SELECT op_id, source, session_id, ts, kind, tool, detail, cwd, exit_code,
-               is_error, risk_level, risk_rule
+               is_error, risk_level, risk_rule, model
         FROM audit_events \(whereClause)
         ORDER BY ts DESC LIMIT ? OFFSET ?
         """, bindings + [.int(Int64(limit)), .int(Int64(offset))]) { Self.mapRow($0) }
@@ -1642,7 +1803,7 @@ public final class AuditRepo {
         guard let (start, end) = Self.utcDayRange(day) else { return [] }
         return try db.query("""
         SELECT op_id, source, session_id, ts, kind, tool, detail, cwd, exit_code,
-               is_error, risk_level, risk_rule
+               is_error, risk_level, risk_rule, model
         FROM audit_events WHERE ts >= ? AND ts < ?
         ORDER BY ts ASC, id ASC
         """, [.real(start), .real(end)]) { Self.mapRow($0) }
@@ -1686,6 +1847,31 @@ public final class AuditRepo {
         if query.riskOnly {
             conditions.append("risk_level > 0")
         }
+        if let from = query.from {
+            conditions.append("ts >= ?")
+            bindings.append(.real(from.timeIntervalSince1970))
+        }
+        if let to = query.to {
+            conditions.append("ts < ?")
+            bindings.append(.real(to.timeIntervalSince1970))
+        }
+        if let project = query.project, !project.isEmpty {
+            let escaped = project
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+            conditions.append("(cwd = ? OR cwd LIKE ? ESCAPE '\\')")
+            bindings.append(.text(project))
+            bindings.append(.text(escaped + "/%"))
+        }
+        if let model = query.model {
+            conditions.append("COALESCE(model, '') = ?")
+            bindings.append(.text(model))
+        }
+        if let sessionId = query.sessionId {
+            conditions.append("session_id = ?")
+            bindings.append(.text(sessionId))
+        }
         if let keyword = query.keyword?.trimmingCharacters(in: .whitespaces), !keyword.isEmpty {
             let escaped = keyword
                 .replacingOccurrences(of: "\\", with: "\\\\")
@@ -1712,6 +1898,7 @@ public final class AuditRepo {
             exitCode: row.isNull(8) ? nil : Int(row.int(8)),
             isError: row.int(9) != 0,
             riskLevel: RiskLevel(rawValue: Int(row.int(10))),
-            riskRule: row.text(11))
+            riskRule: row.text(11),
+            model: row.text(12))
     }
 }
