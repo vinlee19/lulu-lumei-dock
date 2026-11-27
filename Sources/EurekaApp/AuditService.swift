@@ -273,7 +273,11 @@ final class AuditService: ObservableObject {
 
     /// Stops a rule from matching in one project from now on: an allow entry for the rule and
     /// that working directory. Stored history follows through the usual re-evaluation.
+    ///
+    /// Refused for `/`, the home directory and its parents: an entry there would silence the rule
+    /// in every session.
     func ignore(rule: String, inProject cwd: String) {
+        guard RiskRulesConfig.isProjectDirectory(cwd) else { return }
         var config = rulesState.config
         let entry = RiskRulesConfig.Allow(rule: rule, cwd: cwd)
         guard !config.allow.contains(entry) else { return }

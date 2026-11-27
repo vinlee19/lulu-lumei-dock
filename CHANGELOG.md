@@ -83,6 +83,11 @@ this project uses [Semantic Versioning](https://semver.org/).
   a variable assigned in the same command is now followed to its value. On a
   real log this removed 232 of 356 such notices and correctly raised 6 deletes
   outside the project to high risk.
+- **"Stop flagging this rule in this project" is only offered for a project.**
+  For a session started in the home directory or `/` the entry would have
+  silenced the rule everywhere; the action is not offered there, the rules
+  panel refuses such a directory, and the menu shows the full path it applies
+  to.
 - **An allow-list pattern only excuses what it matches.** It was tried against
   the whole command, so an entry written for `make clean` also silenced
   whatever was chained after it.

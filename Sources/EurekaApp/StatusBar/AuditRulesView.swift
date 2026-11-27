@@ -423,6 +423,9 @@ struct AuditRulesView: View {
         if !pattern.isEmpty, (try? NSRegularExpression(pattern: pattern)) == nil {
             return L10n.text("Not a valid pattern", zhHans: "正则不合法")
         }
+        if !directory.isEmpty, !RiskRulesConfig.isProjectDirectory(directory) {
+            return L10n.text("That directory covers every session; pick a project directory (or switch the rule off)", zhHans: "这个目录会覆盖所有会话；请填项目目录（或直接关闭规则）")
+        }
         return nil
     }
 

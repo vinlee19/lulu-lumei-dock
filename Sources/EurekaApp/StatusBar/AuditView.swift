@@ -721,8 +721,10 @@ struct AuditView: View {
                 }
                 if let rule = event.riskRule {
                     Button(L10n.text("Only this rule", zhHans: "只看这条规则")) { ruleFilter = rule }
-                    if let cwd = event.cwd, !cwd.isEmpty {
-                        Button(L10n.format("Stop flagging this rule in %@", zhHans: "以后在 %@ 里忽略这条规则", projectName(cwd) ?? cwd)) {
+                    // Not offered for a session started in the home directory or `/`: the entry
+                    // would cover every session. The full path is shown, since it is the scope.
+                    if let cwd = event.cwd, RiskRulesConfig.isProjectDirectory(cwd) {
+                        Button(L10n.format("Stop flagging this rule in %@", zhHans: "以后在 %@ 里忽略这条规则", (cwd as NSString).abbreviatingWithTildeInPath)) {
                             service.ignore(rule: rule, inProject: cwd)
                         }
                     }
