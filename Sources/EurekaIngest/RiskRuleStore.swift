@@ -16,6 +16,12 @@ public final class RiskRuleStore: @unchecked Sendable {
         /// Set when the whole file was unusable; `config` is then the last one that worked
         public var fileError: String?
 
+        /// What the file relaxes, in a line: rules switched off, own rules, allow entries
+        public var relaxations: (rulesOff: Int, allow: Int) {
+            (config.overrides.values.filter { $0.enabled == false }.count
+                + config.rules.filter { !$0.enabled }.count, config.allow.count)
+        }
+
         public init(
             config: RiskRulesConfig = RiskRulesConfig(), problems: [RiskRuleSet.Problem] = [],
             fileError: String? = nil
@@ -83,7 +89,11 @@ public final class RiskRuleStore: @unchecked Sendable {
         return install(next, stamp: stamp)
     }
 
-    /// Reloads when the file changed since it was last read; nil when it did not
+    /// Reloads when the file changed since it was last read; nil when it did not.
+    ///
+    /// A change seen here was not made through `save`, so not through the app: someone edited
+    /// the file by hand, or something else wrote it. It is applied (hand editing is supported),
+    /// and the caller is expected to tell the user, never to apply it silently.
     public func reloadIfChanged() -> State? {
         lock.lock()
         let known = stamp

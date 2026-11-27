@@ -143,9 +143,25 @@ public struct RiskRulesConfig: Equatable, Sendable {
                 problem("allow[\(index)]", "\"*\" needs at least one of cwd, source, pattern")
                 continue
             }
+            // `.*`, `.` or an empty alternative is no condition at all
+            if rule == "*", entry.cwd == nil, entry.source == nil, let pattern = entry.pattern,
+               matchesEverything(pattern) {
+                problem("allow[\(index)]", "the pattern matches every operation; \"*\" needs a real condition")
+                continue
+            }
             config.allow.append(entry)
         }
         return (config, problems)
+    }
+
+    /// A pattern that finds a match in the empty string or in a lone control character says
+    /// nothing about the operation
+    public static func matchesEverything(_ pattern: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        else { return false }
+        return ["", "\u{1}"].contains { probe in
+            regex.firstMatch(in: probe, range: NSRange(location: 0, length: probe.utf16.count)) != nil
+        }
     }
 
     private struct RuleError: Error {

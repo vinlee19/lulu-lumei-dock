@@ -196,6 +196,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Security audit: periodic Codex scan + Claude side-channel events; a high-risk hit -> red
         // island card + system notification (each gated by its toggle)
+        auditService.onRulesChangedExternally = { [weak self] summary in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.logLine("审计规则文件在应用外被修改：\(summary)")
+                if self.settings.auditSystemNotifyEnabled {
+                    self.notificationService.postEvent(SystemEventNotification(
+                        identifier: "eureka-audit-rules-\(Int(Date().timeIntervalSince1970))",
+                        title: L10n.text("Audit rules were changed outside the app", zhHans: "审计规则在应用外被修改"),
+                        body: summary))
+                }
+            }
+        }
         auditService.onRiskAlert = { [weak self] alert in
             MainActor.assumeIsolated {
                 guard let self else { return }

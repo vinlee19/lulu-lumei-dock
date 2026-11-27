@@ -83,6 +83,14 @@ this project uses [Semantic Versioning](https://semver.org/).
   a variable assigned in the same command is now followed to its value. On a
   real log this removed 232 of 356 such notices and correctly raised 6 deletes
   outside the project to high risk.
+- **The audit rules cannot be switched off behind your back.** An agent writing
+  to `audit-rules.json`, the app's database or its relay directory is a critical
+  alert from a rule that the rules file itself cannot disable, re-level or
+  allow-list. A rules file changed outside the app still takes effect (hand
+  editing is supported), but the Audit page now says so, with how many rules it
+  switches off and how many allow entries it holds, and a system notification is
+  sent when audit notifications are on. An allow entry for every rule whose
+  pattern matches everything is rejected.
 - **"Stop flagging this rule in this project" is only offered for a project.**
   For a session started in the home directory or `/` the entry would have
   silenced the rule everywhere; the action is not offered there, the rules

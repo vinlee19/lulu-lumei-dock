@@ -336,6 +336,25 @@ struct AuditView: View {
                 }
                 // A failed DB read used to be published but not rendered — on error the whole page
                 // was silently blank, with no way to tell
+                if let changedAt = service.rulesChangedExternallyAt {
+                    let relaxed = service.rulesState.relaxations
+                    noticeCard(
+                        icon: "exclamationmark.shield.fill", tint: Theme.failureRed,
+                        text: L10n.format(
+                            "audit-rules.json was changed outside the app at %@ and the change is in force: %@ rules switched off, %@ allow entries. If that was not you, open the rules and check.",
+                            zhHans: "audit-rules.json 在 %@ 被应用外的改动修改，并已生效：关闭了 %@ 条规则，白名单 %@ 条。如果不是你改的，请打开规则核对。",
+                            changedAt.formatted(date: .omitted, time: .shortened),
+                            String(relaxed.rulesOff), String(relaxed.allow))
+                    ) {
+                        HStack(spacing: 6) {
+                            Button(L10n.text("Rules", zhHans: "查看规则")) { showRules = true }
+                            Button(L10n.text("Dismiss", zhHans: "知道了")) {
+                                service.rulesChangedExternallyAt = nil
+                            }
+                        }
+                        .controlSize(.small)
+                    }
+                }
                 if let error = service.lastError {
                     noticeCard(
                         icon: "exclamationmark.octagon.fill", tint: Theme.failureRed,
@@ -723,7 +742,8 @@ struct AuditView: View {
                     Button(L10n.text("Only this rule", zhHans: "只看这条规则")) { ruleFilter = rule }
                     // Not offered for a session started in the home directory or `/`: the entry
                     // would cover every session. The full path is shown, since it is the scope.
-                    if let cwd = event.cwd, RiskRulesConfig.isProjectDirectory(cwd) {
+                    if let cwd = event.cwd, RiskRulesConfig.isProjectDirectory(cwd),
+                       RiskRuleEngine.current.rule(id: rule)?.isProtected != true {
                         Button(L10n.format("Stop flagging this rule in %@", zhHans: "以后在 %@ 里忽略这条规则", (cwd as NSString).abbreviatingWithTildeInPath)) {
                             service.ignore(rule: rule, inProject: cwd)
                         }

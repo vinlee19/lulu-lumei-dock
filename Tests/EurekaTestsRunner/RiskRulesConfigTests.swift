@@ -89,6 +89,45 @@ func riskRulesConfigTests(_ t: TestRunner) {
         try expectEqual(hit(set, "sudo rm -rf /Users/me/other", cwd: "/Users/me/scratch"), "sudo")
     }
 
+    t.test("保护审计自身的规则：写规则文件 / 数据库 / relay 是严重，且不能被配置关掉或加白名单") {
+        let rulesFile = "/Users/me/Library/Application Support/Eureka/audit-rules.json"
+        let plain = RiskRuleSet(rules: builtin)
+        func level(_ set: RiskRuleSet, _ kind: ToolKind, _ detail: String, cwd: String? = nil) -> RiskLevel? {
+            let found = set.evaluate(kind: kind, tool: "", detail: detail, cwd: cwd, home: home)
+            return found?.ruleId == "audit-tamper" ? found?.level : nil
+        }
+        try expectEqual(level(plain, .edit, rulesFile), .critical)
+        try expectEqual(level(plain, .command, #"echo '{}' > "$HOME/Library/Application Support/Eureka/audit-rules.json""#), .critical)
+        try expectEqual(level(plain, .command, #"rm ~/Library/Application\ Support/Eureka/eureka.sqlite"#), .critical)
+        try expectEqual(level(plain, .command, #"cp fake "/Users/me/Library/Application Support/Eureka/bin/lululumei-relay""#), .critical)
+        // Reading it is not tampering
+        try expect(level(plain, .command, #"cat "/Users/me/Library/Application Support/Eureka/audit-rules.json""#) == nil)
+        try expect(level(plain, .read, rulesFile) == nil)
+
+        // The file cannot switch the rule off, re-level it, or allow-list it
+        let tampered = try rules(#"""
+        {"overrides": {"audit-tamper": {"enabled": false, "level": "notice"}},
+         "allow": [{"rule": "audit-tamper", "cwd": "/Users/me/repo"},
+                   {"rule": "*", "cwd": "/Users/me/repo"},
+                   {"rule": "*", "pattern": ".*"}, {"rule": "*", "pattern": "x|"}]}
+        """#)
+        try expect(tampered.problems.contains { $0.ruleId == "audit-tamper" })
+        try expectEqual(tampered.problems.filter { $0.ruleId.hasPrefix("allow[") }.map(\.ruleId), ["allow[2]", "allow[3]"])
+        try expectEqual(level(tampered, .edit, rulesFile, cwd: "/Users/me/repo"), .critical)
+        // The same allow entries do silence an ordinary rule there
+        try expect(hit(tampered, "sudo ls", cwd: "/Users/me/repo") == nil)
+        try expect(RiskRulesConfig.matchesEverything(".*"))
+        try expect(RiskRulesConfig.matchesEverything("."))
+        try expect(RiskRulesConfig.matchesEverything("a|"))
+        try expect(!RiskRulesConfig.matchesEverything("^make clean\\b"))
+
+        let state = RiskRuleStore.State(config: RiskRulesConfig(
+            overrides: ["sudo": .init(enabled: false), "git-push-main": .init(level: .high)],
+            allow: [.init(rule: "rm-rf", cwd: "/x")]))
+        try expectEqual(state.relaxations.rulesOff, 1)
+        try expectEqual(state.relaxations.allow, 1)
+    }
+
     t.test("从界面加白名单：目录要是项目目录，/、家目录及其上级不行") {
         func ok(_ path: String) -> Bool { RiskRulesConfig.isProjectDirectory(path, home: "/Users/me") }
         try expect(ok("/Users/me/repo"))

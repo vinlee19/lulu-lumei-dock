@@ -238,6 +238,7 @@ struct AuditRulesView: View {
                     set: { setEnabled($0, rule) }))
                     .labelsHidden()
                     .fixedSize()
+                    .disabled(rule.isProtected)
                 Picker("", selection: Binding(
                     get: { rule.level },
                     set: { setLevel($0, rule) })) {
@@ -246,11 +247,18 @@ struct AuditRulesView: View {
                 .labelsHidden()
                 .fixedSize()
                 .frame(width: 104, alignment: .leading)
+                .disabled(rule.isProtected)
                 HStack(spacing: 6) {
                     Text(rule.title.text)
                         .font(Theme.font.themed(11.5, .medium))
                         .foregroundStyle(rule.enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                         .lineLimit(1)
+                    if rule.isProtected {
+                        Image(systemName: "lock.fill")
+                            .font(Theme.font.themed(9))
+                            .foregroundStyle(.tertiary)
+                            .help(L10n.text("Guards the audit itself: it cannot be switched off, re-leveled or allow-listed", zhHans: "这条规则保护审计自身：不能关闭、改等级或加白名单"))
+                    }
                     if config.overrides[rule.id] != nil {
                         TagChip(L10n.text("Changed", zhHans: "已改"), tint: Theme.brandFg)
                     }
@@ -416,6 +424,12 @@ struct AuditRulesView: View {
         if rule.isEmpty { return L10n.text("Name a rule", zhHans: "填写规则 id") }
         if rule != "*", !effective.contains(where: { $0.id == rule }) {
             return L10n.text("No rule has this id", zhHans: "没有这个 id 的规则")
+        }
+        if effective.first(where: { $0.id == rule })?.isProtected == true {
+            return L10n.text("This rule guards the audit itself and cannot be allow-listed", zhHans: "这条规则保护审计自身，不能加白名单")
+        }
+        if rule == "*", directory.isEmpty, RiskRulesConfig.matchesEverything(pattern) {
+            return L10n.text("That pattern matches every operation", zhHans: "这个正则会匹配所有操作")
         }
         if directory.isEmpty, pattern.isEmpty {
             return L10n.text("Add a directory or a pattern (switch the rule off to silence it everywhere)", zhHans: "至少填目录或正则（想全部忽略请直接关闭规则）")

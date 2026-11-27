@@ -239,6 +239,11 @@ public final class RiskRuleSet: @unchecked Sendable {
                 problems.append(Problem(ruleId: id, message: "no built-in rule has this id"))
                 continue
             }
+            if rules[index].isProtected {
+                problems.append(Problem(
+                    ruleId: id, message: "this rule guards the audit itself and cannot be changed"))
+                continue
+            }
             if let enabled = change.enabled { rules[index].enabled = enabled }
             if let level = change.level { rules[index].level = level }
         }
@@ -363,7 +368,7 @@ public final class RiskRuleSet: @unchecked Sendable {
             // allowed on its own: an allow pattern is tried against the part the rule matched,
             // never the whole text, so `make clean && rm -rf ~/x` is not excused by an entry
             // written for `make clean`.
-            let allAllowed = evidence.allSatisfy {
+            let allAllowed = !entry.rule.isProtected && evidence.allSatisfy {
                 isAllowed(ruleId: entry.rule.id, detail: $0, cwd: cwd, source: source)
             }
             if allAllowed { continue }
