@@ -60,6 +60,16 @@ public struct RiskRulesConfig: Equatable, Sendable {
     public var rules: [RiskRule]
     public var allow: [Allow]
 
+    /// Whether a directory is narrow enough to allow a rule in from the app: a directory below
+    /// the home directory, or one outside it that is not an ancestor of it. `/`, the home
+    /// directory and its parents would cover every session, which is what switching the rule off
+    /// is for. (A hand-written entry is taken as written.)
+    public static func isProjectDirectory(_ path: String, home: String = NSHomeDirectory()) -> Bool {
+        let directory = RiskPath.resolve(path, cwd: nil, home: home)
+        guard directory.hasPrefix("/"), directory != "/" else { return false }
+        return directory != home && !home.hasPrefix(directory.hasSuffix("/") ? directory : directory + "/")
+    }
+
     public init(overrides: [String: Override] = [:], rules: [RiskRule] = [], allow: [Allow] = []) {
         self.overrides = overrides
         self.rules = rules

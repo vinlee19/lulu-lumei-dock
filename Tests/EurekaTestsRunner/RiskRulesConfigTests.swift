@@ -89,6 +89,22 @@ func riskRulesConfigTests(_ t: TestRunner) {
         try expectEqual(hit(set, "sudo rm -rf /Users/me/other", cwd: "/Users/me/scratch"), "sudo")
     }
 
+    t.test("从界面加白名单：目录要是项目目录，/、家目录及其上级不行") {
+        func ok(_ path: String) -> Bool { RiskRulesConfig.isProjectDirectory(path, home: "/Users/me") }
+        try expect(ok("/Users/me/repo"))
+        try expect(ok("~/work/app"))
+        try expect(ok("/srv/project"))
+        try expect(ok("/Users/other/repo"))
+        try expect(!ok("/"))
+        try expect(!ok("/Users/me"))
+        try expect(!ok("/Users/me/"))
+        try expect(!ok("~"))
+        try expect(!ok("/Users"))
+        try expect(!ok("/Users/me/repo/../.."))
+        try expect(!ok("relative/path"))
+        try expect(!ok(""))
+    }
+
     t.test("坏配置不让规则失效：坏条目跳过并报告，其余照常") {
         let parsed = try parse(#"""
         {"overrides": {"no-such-rule": {"enabled": false}, "sudo": {"level": "urgent"}},
