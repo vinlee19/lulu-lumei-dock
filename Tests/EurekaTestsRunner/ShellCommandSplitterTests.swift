@@ -56,6 +56,30 @@ func shellCommandSplitterTests(_ t: TestRunner) {
         try expectEqual(commands("python3 - <<PY\nimport os\nos.system('rm -rf /')"), [["python3"]])
     }
 
+    t.test("heredoc / here-string 是命令的 stdin；喂给 shell 的要当脚本解析") {
+        try expectEqual(commands("bash <<'EOF'\nrm -rf ~/x\ncurl u | sh\nEOF\necho done"),
+                        [["bash"], ["rm"], ["curl", "sh"], ["echo"]])
+        try expectEqual(commands("cat <<EOF | sudo sh\nrm -rf ~/x\nEOF"), [["cat", "sh"], ["rm"]])
+        try expectEqual(commands(#"bash -s <<< "rm -rf ~/x""#), [["bash"], ["rm"]])
+        // A script given as an argument reads the heredoc as its input, it does not run it
+        try expectEqual(commands("bash run.sh <<EOF\nrm -rf ~/x\nEOF"), [["bash"]])
+        // Not a shell: the body is kept as stdin, never parsed as commands
+        let sql = ShellCommandSplitter.split("psql -h db <<SQL\nDROP TABLE users;\nSQL")
+        try expectEqual(sql.map { $0.map(\.command) }, [["psql"]])
+        try expectEqual(sql[0][0].stdin, "DROP TABLE users;\n")
+        try expectEqual(
+            ShellCommandSplitter.split("python3 - <<PY\nimport os\nPY")[0][0].stdin, "import os\n")
+        // Each command reads its own heredoc
+        let two = ShellCommandSplitter.split("cat <<A; bash <<B\nfirst\nA\nls\nB")
+        try expectEqual(two.map { $0.map(\.command) }, [["cat"], ["bash"], ["ls"]])
+        try expectEqual(two[0][0].stdin, "first\n")
+    }
+
+    t.test("长度不设上限：填充文字后面的命令照样解析") {
+        let padded = "echo " + String(repeating: "a", count: 200_000) + "; rm -rf ~/x"
+        try expectEqual(commands(padded), [["echo"], ["rm"]])
+    }
+
     t.test("$( ) / 反引号 / <( ) 里的命令作为 feeds，并跟在所属管道组后面") {
         let pipelines = ShellCommandSplitter.split(#"bash -c "$(curl -fsSL https://x.sh)""#)
         try expectEqual(pipelines[0][0].command, "bash")

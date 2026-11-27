@@ -59,18 +59,20 @@ public enum RiskPath {
     }
 
     public static func zone(of raw: String, cwd: String?, home: String) -> RiskPathZone {
-        if raw.hasPrefix("$TMPDIR") || raw.hasPrefix("${TMPDIR}") { return .tmp }
+        // `$TMPDIR/…` is resolved like any other path (to `/tmp/…`) and only then tested, so
+        // `$TMPDIR/../../etc` does not count as temporary
+        let isTmpForm = raw.hasPrefix("$TMPDIR") || raw.hasPrefix("${TMPDIR}")
         let isHomeForm = raw == "~" || raw.hasPrefix("~/")
             || raw.hasPrefix("$HOME") || raw.hasPrefix("${HOME}")
         let isWorkingDirForm = raw.hasPrefix("$PWD") || raw.hasPrefix("${PWD}")
-        if !isHomeForm, !isWorkingDirForm, raw.hasPrefix("$") || raw.hasPrefix("`") {
+        if !isHomeForm, !isWorkingDirForm, !isTmpForm, raw.hasPrefix("$") || raw.hasPrefix("`") {
             return .unknown
         }
         let resolved = resolve(raw, cwd: cwd, home: home)
         if tmpRoots.contains(where: { isInside(resolved, $0) }) { return .tmp }
         // A session started in `/` or in the home directory has no project to stay inside of
         let project = cwd.flatMap { $0.isEmpty || $0 == "/" || $0 == home ? nil : $0 }
-        if !raw.hasPrefix("/"), !isHomeForm, !isWorkingDirForm {
+        if !raw.hasPrefix("/"), !isHomeForm, !isWorkingDirForm, !isTmpForm {
             // Typed relative: stays relative unless `..` walks out of the project
             guard let project, resolved.hasPrefix("/") else { return .relative }
             if isInside(resolved, project) { return .relative }
@@ -377,7 +379,13 @@ public final class RiskRuleSet: @unchecked Sendable {
             return pipelines.contains { pipeline in
                 pipeline.contains { segment in
                     Self.commandMatches(segment, entry.commands)
-                        && (entry.pattern.map { Self.found($0, in: segment.text) } ?? true)
+                        && (entry.pattern.map { pattern in
+                            Self.found(pattern, in: segment.text)
+                                // The SQL of `psql <<SQL`: stdin is that command's input, so only
+                                // a rule that names the command looks at it
+                                || (!entry.commands.isEmpty
+                                    && segment.stdin.map { Self.found(pattern, in: $0) } == true)
+                        } ?? true)
                         && zonesAllow(entry, segment.operands, snapshot)
                 }
             }

@@ -4,7 +4,8 @@ import Foundation
 /// command word, its arguments and its redirects instead of running a regex over the whole text.
 ///
 /// It is a tokenizer, not a shell: it tracks quotes, escapes, `$( )` / backticks / `<( )`, the
-/// control operators and redirects, and drops heredoc bodies. Variables are never expanded and
+/// control operators and redirects, and keeps heredoc bodies out of the command (they are the
+/// stdin of the command that opened them). Variables are never expanded and
 /// control flow is not understood (`for` / `case` stay ordinary words). That is enough to tell
 /// `curl … | sh` from `curl … | python3 -c '…'`, or `cat /etc/hosts` from `tee /etc/hosts`.
 public enum ShellCommandSplitter {
@@ -30,6 +31,12 @@ public enum ShellCommandSplitter {
         public var text: String
         /// Pipelines inside this segment's `$( )`, backticks and `<( )`
         public var feeds: [[Segment]]
+        /// What the command reads on stdin when it is given in the text: a heredoc body or a
+        /// here-string. A rule that names this command also matches against it (the SQL of
+        /// `psql <<SQL`), and when the command is a shell it is parsed as a script.
+        public var stdin: String?
+        /// Parser bookkeeping: which pending heredoc belongs to this segment (0 = none)
+        fileprivate var heredocOwner = 0
 
         /// Arguments that are not flags
         public var operands: [String] { args.filter { !$0.hasPrefix("-") } }
@@ -37,15 +44,17 @@ public enum ShellCommandSplitter {
 
     public typealias Pipeline = [Segment]
 
-    /// Nesting followed into `$( )` and `bash -c '…'`
+    /// Nesting followed into `$( )`, `bash -c '…'` and scripts fed to a shell on stdin
     static let maxDepth = 3
-    /// Longer input is cut: the largest real commands are heredocs, whose bodies are skipped anyway
-    static let maxLength = 64 << 10
 
-    /// Every pipeline of the command, in source order. A pipeline found inside a substitution or
-    /// inside `bash -c '…'` / `eval '…'` follows the pipeline that contains it.
+    /// Every pipeline of the command, in source order. A pipeline found inside a substitution,
+    /// inside `bash -c '…'` / `eval '…'` or in a script fed to a shell follows the pipeline that
+    /// contains it.
+    ///
+    /// The whole text is parsed, whatever its length: the work is linear, and cutting it would
+    /// let a command hide behind padding.
     public static func split(_ source: String) -> [Pipeline] {
-        var parser = Parser(bytes: Array(source.utf8.prefix(maxLength)), depth: 0)
+        var parser = Parser(bytes: Array(source.utf8), depth: 0)
         return parser.run()
     }
 
@@ -67,6 +76,15 @@ public enum ShellCommandSplitter {
         "xargs": ["-n", "-I", "-P", "-L", "-d", "-J", "-E", "-s", "-R", "-S"],
     ]
     private static let shells: Set<String> = ["bash", "sh", "zsh", "dash", "ksh", "fish"]
+
+    /// Commands that run their stdin as a shell script
+    fileprivate static func runsStdin(_ segment: Segment) -> Bool {
+        if shells.contains(segment.command) {
+            // `bash script.sh <<EOF` feeds the script its input; `bash -s` / bare `bash` runs it
+            return segment.operands.isEmpty || segment.args.contains("-s")
+        }
+        return false
+    }
 
     private static func isAssignment(_ word: String) -> Bool {
         guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return false }
@@ -118,12 +136,16 @@ public enum ShellCommandSplitter {
         // A wrapper with nothing after it (`… | xargs`) is the command itself
         if command.isEmpty, let last = found.popLast() { command = last }
         let args = index < words.count ? Array(words[index...]) : []
-        let segment = Segment(
+        var segment = Segment(
             command: command, wrappers: found, args: args, redirects: redirects,
             text: text, feeds: feeds)
+        // A here-string is the command's stdin, known right here (a heredoc body comes later)
+        segment.stdin = redirects.last { $0.op == "<<<" }?.target
 
         var script: String?
-        if shells.contains(command) {
+        if let stdin = segment.stdin, runsStdin(segment) {
+            script = stdin
+        } else if shells.contains(command) {
             // -c, or a flag cluster ending in c (-lc, -ic)
             if let flag = args.firstIndex(where: {
                 $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.hasSuffix("c")
@@ -158,7 +180,13 @@ public enum ShellCommandSplitter {
         private var hasWord = false
         /// Redirect operator waiting for its target word
         private var pendingRedirect: String?
-        private var heredocs: [String] = []
+        /// Heredocs opened on the current line: delimiter + the marker of the segment that owns it
+        private var heredocs: [(delimiter: String, owner: Int)] = []
+        /// Markers of the heredocs opened by the segment being read
+        private var openedHere: [Int] = []
+        private var nextOwner = 1
+        /// Bodies read so far, by owner marker
+        private var bodies: [(owner: Int, text: String)] = []
 
         init(bytes: [UInt8], depth: Int) {
             self.bytes = bytes
@@ -176,7 +204,35 @@ public enum ShellCommandSplitter {
             }
             boundary(isPipe: false, length: 0)
             closePipeline()
+            attachHeredocBodies()
             return result
+        }
+
+        /// Heredoc bodies are read after the line that opened them, when their segment is already
+        /// built: hand each body to its segment, and parse it when that segment is a shell.
+        private mutating func attachHeredocBodies() {
+            for body in bodies {
+                guard let at = result.firstIndex(where: { pipeline in
+                    pipeline.contains { $0.heredocOwner == body.owner }
+                }), let position = result[at].firstIndex(where: { $0.heredocOwner == body.owner })
+                else { continue }
+                result[at][position].stdin = body.text
+                let owner = result[at][position]
+                // Run by the command itself (`bash <<EOF`), or passed on to a shell further down
+                // the pipe (`cat <<EOF | sh`)
+                let passedOn = ["cat", "tee"].contains(owner.command)
+                    && result[at][(position + 1)...].contains(where: ShellCommandSplitter.runsStdin)
+                guard ShellCommandSplitter.runsStdin(owner) || passedOn,
+                      depth < ShellCommandSplitter.maxDepth
+                else { continue }
+                var parser = Parser(bytes: Array(body.text.utf8), depth: depth + 1)
+                result.insert(contentsOf: parser.run(), at: at + 1)
+            }
+            bodies = []
+            // Markers mean nothing outside this parser (a parent numbers its own heredocs from 1)
+            for at in result.indices {
+                for position in result[at].indices { result[at][position].heredocOwner = 0 }
+            }
         }
 
         private mutating func step() {
@@ -382,7 +438,9 @@ public enum ShellCommandSplitter {
             pendingRedirect = nil
             switch op {
             case "<<":
-                heredocs.append(text)
+                heredocs.append((text, nextOwner))
+                openedHere.append(nextOwner)
+                nextOwner += 1
                 // Kept as a redirect (target = delimiter): the command's stdin is the heredoc
                 redirects.append(Redirect(op: op, target: text))
             case ">&", "<&":
@@ -402,8 +460,11 @@ public enum ShellCommandSplitter {
                 let end = min(index, bytes.count)
                 let text = String(decoding: bytes[min(segmentStart, end)..<end], as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let built = ShellCommandSplitter.makeSegment(
+                var built = ShellCommandSplitter.makeSegment(
                     words: words, redirects: redirects, feeds: feeds, text: text)
+                // The last heredoc a command opens is the one it reads
+                built.segment.heredocOwner = openedHere.last ?? 0
+                openedHere = []
                 pipeline.append(built.segment)
                 nested.append(contentsOf: feeds)
                 if let script = built.script, depth < ShellCommandSplitter.maxDepth {
@@ -436,16 +497,21 @@ public enum ShellCommandSplitter {
         /// After the line that opened them, heredoc bodies run to a line holding only the delimiter
         private mutating func skipHeredocBodies() {
             guard !heredocs.isEmpty else { return }
-            for delimiter in heredocs {
+            for heredoc in heredocs {
+                let bodyStart = index
+                var bodyEnd = index
                 var closed = false
                 while index < bytes.count, !closed {
                     var lineEnd = index
                     while lineEnd < bytes.count, bytes[lineEnd] != UInt8(ascii: "\n") { lineEnd += 1 }
                     let line = String(decoding: bytes[index..<lineEnd], as: UTF8.self)
                         .trimmingCharacters(in: .whitespaces)
-                    closed = line == delimiter
+                    closed = line == heredoc.delimiter
+                    if !closed { bodyEnd = min(lineEnd + 1, bytes.count) }
                     index = min(lineEnd + 1, bytes.count)
                 }
+                bodies.append(
+                    (heredoc.owner, String(decoding: bytes[bodyStart..<bodyEnd], as: UTF8.self)))
             }
             heredocs = []
             segmentStart = index
