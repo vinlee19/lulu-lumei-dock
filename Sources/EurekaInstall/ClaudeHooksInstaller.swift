@@ -26,9 +26,13 @@ public enum ClaudeHooksInstaller {
     /// **Claude reads PreToolUse stdout as an allow/block decision**, so the relay must stay
     /// absolutely silent and exit 0 immediately: we only report, never take part in the decision
     /// (see the hard invariants in CLAUDE.md).
+    ///
+    /// PostToolUseFailure fires instead of PostToolUse when a tool that started running fails, so
+    /// without it the audit log never saw a failed Claude call (0 failures in 77,466 recorded
+    /// operations). Its stdout can add context for the model; the relay prints nothing.
     public static let managedEvents = [
         "UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd",
-        "PreToolUse", "PostToolUse", "PreCompact",
+        "PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact",
     ]
 
     public static func hookCommand(relayPath: String) -> String {

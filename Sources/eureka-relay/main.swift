@@ -222,9 +222,12 @@ func runInject(_ args: [String]) {
             "message": title ?? "Claude is waiting for your input",
             "notification_type": "idle_prompt",
         ])
-    case "post-tool-use":
+    case "post-tool-use", "post-tool-use-failure":
         let tool = options["tool"] ?? "Bash"
-        var extra: [String: Any] = ["hook_event_name": "PostToolUse", "tool_name": tool]
+        var extra: [String: Any] = [
+            "hook_event_name": event == "post-tool-use" ? "PostToolUse" : "PostToolUseFailure",
+            "tool_name": tool,
+        ]
         if let title {
             // Command-style tools go into command, the rest into file_path (so the audit can parse
             // out a detail)

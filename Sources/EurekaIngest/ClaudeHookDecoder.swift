@@ -54,7 +54,8 @@ public enum ClaudeHookDecoder {
             // `.activity` branch already resets isCompacting on any activity, so no new case is
             // needed.
             kind = .activity(tool: nil)
-        case "PostToolUse":
+        case "PostToolUse", "PostToolUseFailure":
+            // A failed tool is activity like any other: the turn goes on and the model reacts
             kind = .activity(tool: payload["tool_name"] as? String)
         case "SessionStart":
             kind = .sessionStarted
