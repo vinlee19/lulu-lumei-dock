@@ -827,6 +827,7 @@ enum PreviewRenderer {
             SidebarView(
                 selected: selected,
                 limitsBadge: ("67%", Theme.gold),
+                auditBadge: ("12", Theme.failureRed),
                 appVersion: "0.15.0",
                 onSelect: { _ in })
         }
@@ -919,6 +920,19 @@ enum PreviewRenderer {
         loadAndSettle(AuditRepo.Query(riskOnly: true))
         print("仅风险：\(audit.events.count) 行 / total=\(audit.total)")
         snap("shell-audit-risk", auditPage(riskOnly: true))
+        // Triage: mark a couple of hits as dealt with (on whatever database the render points at;
+        // reverted below), then the "to look at" filter
+        let reviewedSample = Array(audit.events.prefix(2))
+        for event in reviewedSample { audit.setReviewed(event, reviewed: true) }
+        loadAndSettle(AuditRepo.Query(riskOnly: true))
+        snap("shell-audit-reviewed", auditPage(riskOnly: true))
+        for event in reviewedSample { audit.setReviewed(event, reviewed: false) }
+        loadAndSettle(AuditRepo.Query(minLevel: .high, reviewed: false))
+        print("待处理：\(audit.events.count) 行 / total=\(audit.total) unreviewed=\(audit.unreviewed)")
+        snap("shell-audit-pending", AuditView(
+            service: audit, installer: installer, settings: settings,
+            notificationService: notifications, skillMemory: skillMemory,
+            initialUnreviewedOnly: true))
         // Empty state (nothing matches): confirm it goes through EmptyStateView rather than a blank
         // area
         let nonsense = "zzz-no-such-command-zzz"

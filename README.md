@@ -207,7 +207,8 @@ a command, destructive SQL, changing startup items or an agent's own configurati
 pushes to main, merges, cluster and cloud changes, uploads and message-sending MCP tools are
 **notices**. Every rule can be switched off or moved to another level, you can add your own rules
 and an allow list (the rules panel, or `audit-rules.json` by hand), and stored history is
-re-evaluated when the rules change. An **Analytics** view groups the log by model, source, project or session — the mix
+re-evaluated when the rules change. Hits can be marked as dealt with (the sidebar counts the
+high-risk and critical ones still waiting). An **Analytics** view groups the log by model, source, project or session — the mix
 of commands, edits, reads and MCP calls, rule hits and failures per group — with a daily chart and
 rankings of commands, MCP tools, hosts and directories. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
 WorkBuddy, Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).

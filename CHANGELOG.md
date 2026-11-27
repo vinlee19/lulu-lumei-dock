@@ -8,6 +8,13 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Audit hits can be dealt with.** Mark a risk hit as dealt with from its
+  context menu, or everything in the current filter at once; such rows step
+  back with a check mark. The sidebar shows how many high-risk and critical
+  hits are still waiting, and a "To look at" filter lists them. The log can
+  also be narrowed to one rule, a minimum level or a range of days, a row can
+  open its session, and "stop flagging this rule in this project" adds the
+  allow-list entry for you.
 - **Audit rules can be configured.** A rules panel on the Audit page lists every
   rule with a switch, its level and how often it has fired. Switch a rule off,
   move it between notice, high risk and critical, or write your own: pick what
@@ -71,6 +78,14 @@ this project uses [Semantic Versioning](https://semver.org/).
   `$TMPDIR/../…` is no longer taken for a temporary path. The text of a heredoc
   given to another program (the SQL of `psql <<SQL`) is checked by the rules for
   that program.
+- **A path written through a variable is placed correctly.** `D=/tmp/x; rm -rf
+  "$D"` used to count as a delete of unknown location (a notice every time);
+  a variable assigned in the same command is now followed to its value. On a
+  real log this removed 232 of 356 such notices and correctly raised 6 deletes
+  outside the project to high risk.
+- **An allow-list pattern only excuses what it matches.** It was tried against
+  the whole command, so an entry written for `make clean` also silenced
+  whatever was chained after it.
 - **Alerts no longer show credentials.** The command text on the island card, in
   the system notification (visible on the lock screen) and in the app log is
   masked first. The audit log itself still keeps the full command.
@@ -81,6 +96,10 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The audit CSV export masks credentials.** Commands in the exported file have
+  tokens and keys replaced, as in the archive; the unmasked export is a separate,
+  explicit choice. The file also gains the model, working directory and
+  dealt-with time of each operation.
 - **Stored audit history follows the current rules.** When the rules change, the
   whole log is evaluated again in the background, so an old false alarm goes
   away and a new rule also covers the past. Loading a launchd job

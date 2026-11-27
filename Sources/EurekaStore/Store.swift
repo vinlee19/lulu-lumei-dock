@@ -1435,14 +1435,24 @@ public final class AuditRepo {
         /// Attributed model; "" selects the operations no model could be attributed to
         public var model: String?
         public var sessionId: String?
+        /// Rule id the operation hit
+        public var rule: String?
+        /// Hits at this level or above
+        public var minLevel: RiskLevel?
+        /// Risk hits the user has (true) or has not (false) marked as dealt with
+        public var reviewed: Bool?
 
         public init(
             source: AgentSource? = nil, kind: ToolKind? = nil,
             riskOnly: Bool = false, keyword: String? = nil,
             from: Date? = nil, to: Date? = nil, project: String? = nil, model: String? = nil,
-            sessionId: String? = nil
+            sessionId: String? = nil, rule: String? = nil, minLevel: RiskLevel? = nil,
+            reviewed: Bool? = nil
         ) {
             self.sessionId = sessionId
+            self.rule = rule
+            self.minLevel = minLevel
+            self.reviewed = reviewed
             self.source = source
             self.kind = kind
             self.riskOnly = riskOnly
@@ -1490,6 +1500,47 @@ public final class AuditRepo {
             .int(isError ? 1 : 0),
             .text(source.rawValue), .text(sessionId), .text(opId),
         ])
+    }
+
+    // MARK: - Review
+
+    /// Marks one risk hit as dealt with (or not, with `at: nil`). Only `reviewed_at` is written:
+    /// archive day fingerprints do not move.
+    public func setReviewed(
+        source: AgentSource, sessionId: String, opId: String, at date: Date?
+    ) throws {
+        try db.run("""
+        UPDATE audit_events SET reviewed_at = ?
+        WHERE source = ? AND session_id = ? AND op_id = ? AND risk_level > 0
+        """, [
+            date.map { .real($0.timeIntervalSince1970) } ?? .null,
+            .text(source.rawValue), .text(sessionId), .text(opId),
+        ])
+    }
+
+    /// Marks every unreviewed risk hit the filter selects as dealt with; returns how many
+    @discardableResult
+    public func markReviewed(_ query: Query, at date: Date) throws -> Int {
+        var pending = query
+        pending.reviewed = false
+        let (whereClause, bindings) = Self.filter(pending)
+        try db.run(
+            "UPDATE audit_events SET reviewed_at = ? \(whereClause)",
+            [.real(date.timeIntervalSince1970)] + bindings)
+        return db.changes
+    }
+
+    /// Risk hits not dealt with yet, by level
+    public func unreviewedCounts() throws -> [RiskLevel: Int] {
+        let rows = try db.query("""
+        SELECT risk_level, COUNT(*) FROM audit_events
+        WHERE risk_level > 0 AND reviewed_at IS NULL GROUP BY risk_level
+        """) { row in (Int(row.int(0)), Int(row.int(1))) }
+        var counts: [RiskLevel: Int] = [:]
+        for (level, count) in rows {
+            if let level = RiskLevel(rawValue: level) { counts[level] = count }
+        }
+        return counts
     }
 
     // MARK: - Analytics
@@ -1672,7 +1723,8 @@ public final class AuditRepo {
 
     /// Rewrites the kind and risk of the given rows in one transaction.
     ///
-    /// Touches `kind`, `risk_level` and `risk_rule` only. The archive's day fingerprint is
+    /// Touches `kind`, `risk_level` and `risk_rule` only, plus `reviewed_at`, which is cleared
+    /// when the row now hits a different rule (the user dealt with the old finding, not this one). The archive's day fingerprint is
     /// `count : max(id) : count(exit_code) : sum(is_error)`; none of that moves, so re-evaluating
     /// never makes a day look changed (which would re-upload it, or stop a day past retention
     /// from ever being pruned).
@@ -1681,10 +1733,15 @@ public final class AuditRepo {
         try db.transaction {
             for row in rows {
                 try db.run("""
-                UPDATE audit_events SET kind = ?, risk_level = ?, risk_rule = ? WHERE id = ?
+                UPDATE audit_events SET kind = ?, risk_level = ?,
+                    reviewed_at = CASE WHEN COALESCE(risk_rule, '') = COALESCE(?, '')
+                                       THEN reviewed_at ELSE NULL END,
+                    risk_rule = ?
+                WHERE id = ?
                 """, [
                     .text(row.kind.rawValue),
                     .int(Int64(row.riskLevel?.rawValue ?? 0)),
+                    .string(row.riskRule),
                     .string(row.riskRule),
                     .int(row.id),
                 ])
@@ -1718,7 +1775,7 @@ public final class AuditRepo {
         let (whereClause, bindings) = Self.filter(query)
         return try db.query("""
         SELECT op_id, source, session_id, ts, kind, tool, detail, cwd, exit_code,
-               is_error, risk_level, risk_rule, model
+               is_error, risk_level, risk_rule, model, reviewed_at
         FROM audit_events \(whereClause)
         ORDER BY ts DESC LIMIT ? OFFSET ?
         """, bindings + [.int(Int64(limit)), .int(Int64(offset))]) { Self.mapRow($0) }
@@ -1805,7 +1862,7 @@ public final class AuditRepo {
         guard let (start, end) = Self.utcDayRange(day) else { return [] }
         return try db.query("""
         SELECT op_id, source, session_id, ts, kind, tool, detail, cwd, exit_code,
-               is_error, risk_level, risk_rule, model
+               is_error, risk_level, risk_rule, model, reviewed_at
         FROM audit_events WHERE ts >= ? AND ts < ?
         ORDER BY ts ASC, id ASC
         """, [.real(start), .real(end)]) { Self.mapRow($0) }
@@ -1874,6 +1931,20 @@ public final class AuditRepo {
             conditions.append("session_id = ?")
             bindings.append(.text(sessionId))
         }
+        if let rule = query.rule {
+            conditions.append("risk_rule = ? AND risk_level > 0")
+            bindings.append(.text(rule))
+        }
+        if let level = query.minLevel {
+            conditions.append("risk_level >= ?")
+            bindings.append(.int(Int64(level.rawValue)))
+        }
+        if let reviewed = query.reviewed {
+            // Only a risk hit can be dealt with
+            conditions.append(reviewed
+                ? "risk_level > 0 AND reviewed_at IS NOT NULL"
+                : "risk_level > 0 AND reviewed_at IS NULL")
+        }
         if let keyword = query.keyword?.trimmingCharacters(in: .whitespaces), !keyword.isEmpty {
             let escaped = keyword
                 .replacingOccurrences(of: "\\", with: "\\\\")
@@ -1888,6 +1959,12 @@ public final class AuditRepo {
     }
 
     private static func mapRow(_ row: SQLiteRow) -> AuditEvent {
+        var event = mapBase(row)
+        event.reviewedAt = row.isNull(13) ? nil : Date(timeIntervalSince1970: row.real(13))
+        return event
+    }
+
+    private static func mapBase(_ row: SQLiteRow) -> AuditEvent {
         AuditEvent(
             opId: row.text(0) ?? "",
             source: AgentSource(rawValue: row.text(1) ?? "") ?? .claude,

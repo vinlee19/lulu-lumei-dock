@@ -91,6 +91,8 @@ public struct AuditEvent: Equatable, Sendable {
     /// Model that issued the operation: nil = not looked up yet, "" = looked up and unknown.
     /// Attributed after the fact from the usage ledger, never set by a scanner.
     public var model: String?
+    /// When the user marked this risk hit as dealt with; nil = not yet
+    public var reviewedAt: Date?
 
     public init(
         opId: String, source: AgentSource, sessionId: String, timestamp: Date,

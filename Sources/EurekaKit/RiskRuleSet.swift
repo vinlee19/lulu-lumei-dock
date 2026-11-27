@@ -356,12 +356,17 @@ public final class RiskRuleSet: @unchecked Sendable {
         guard !detail.isEmpty || !tool.isEmpty else { return nil }
         var context = Context(kind: kind, tool: tool, detail: detail, cwd: cwd, home: home)
         for entry in compiled where entry.rule.kinds.contains(kind) {
-            guard matches(entry, &context) else { continue }
+            let evidence = matches(entry, &context)
+            guard !evidence.isEmpty else { continue }
             if entry.exclude.contains(where: { Self.found($0, in: detail) }) { continue }
-            // An allowed rule steps aside; a lower rule may still speak
-            if isAllowed(ruleId: entry.rule.id, detail: context.detail, cwd: cwd, source: source) {
-                continue
+            // An allowed rule steps aside; a lower rule may still speak. Every match has to be
+            // allowed on its own: an allow pattern is tried against the part the rule matched,
+            // never the whole text, so `make clean && rm -rf ~/x` is not excused by an entry
+            // written for `make clean`.
+            let allAllowed = evidence.allSatisfy {
+                isAllowed(ruleId: entry.rule.id, detail: $0, cwd: cwd, source: source)
             }
+            if allAllowed { continue }
             return RiskHit(ruleId: entry.rule.id, title: entry.rule.title.text, level: entry.rule.level)
         }
         return nil
@@ -425,6 +430,48 @@ public final class RiskRuleSet: @unchecked Sendable {
         }
 
         private var cachedWords: Set<String>?
+        private var cachedVariables: [String: String]?
+
+        /// Variables the command itself assigns (`D=/tmp/x; rm -rf "$D"`), so a path written
+        /// through one can still be placed. Later assignments win; a value that needs expanding
+        /// itself is left out.
+        var variables: [String: String] {
+            mutating get {
+                if let cachedVariables { return cachedVariables }
+                var variables: [String: String] = [:]
+                for pipeline in pipelines {
+                    for segment in pipeline {
+                        for assignment in segment.assignments {
+                            let value = assignment.value
+                            variables[assignment.name] =
+                                value.contains("$(") || value.contains("`") ? nil : value
+                        }
+                    }
+                }
+                cachedVariables = variables
+                return variables
+            }
+        }
+
+        /// `$NAME/rest` / `${NAME}/rest` with a variable assigned in the same command replaced
+        /// by its value (one level, plus one more for a value that starts with another)
+        func expanded(_ raw: String, with variables: [String: String]) -> String {
+            var path = raw
+            for _ in 0..<2 {
+                guard path.hasPrefix("$") else { break }
+                let braced = path.hasPrefix("${")
+                let start = path.index(path.startIndex, offsetBy: braced ? 2 : 1)
+                let name = path[start...].prefix { $0 == "_" || $0.isLetter || $0.isNumber }
+                guard !name.isEmpty, let value = variables[String(name)] else { break }
+                var rest = path[path.index(start, offsetBy: name.count)...]
+                if braced {
+                    guard rest.hasPrefix("}") else { break }
+                    rest = rest.dropFirst()
+                }
+                path = value + rest
+            }
+            return path
+        }
 
         /// Every command word and wrapper in the command, to skip rules that name other commands
         /// without running their regex
@@ -470,10 +517,14 @@ public final class RiskRuleSet: @unchecked Sendable {
         }
     }
 
-    private func zonesAllow(_ entry: Compiled, _ paths: [String], _ context: Context) -> Bool {
+    private func zonesAllow(
+        _ entry: Compiled, _ paths: [String], _ context: Context,
+        variables: [String: String] = [:]
+    ) -> Bool {
         let rule = entry.rule
         guard !rule.targets.isEmpty || !rule.exceptTargets.isEmpty else { return true }
-        return paths.contains { path in
+        return paths.contains { raw in
+            let path = context.expanded(raw, with: variables)
             let zone = RiskPath.zone(of: path, cwd: context.cwd, home: context.home)
             return (rule.targets.isEmpty || rule.targets.contains(zone))
                 && !rule.exceptTargets.contains(zone)
@@ -482,7 +533,10 @@ public final class RiskRuleSet: @unchecked Sendable {
 
     /// A path matches when it is in an allowed zone and the pattern finds it, as written or
     /// resolved
-    private func pathMatches(_ entry: Compiled, _ path: String, _ context: Context) -> Bool {
+    private func pathMatches(
+        _ entry: Compiled, _ raw: String, _ context: Context, variables: [String: String] = [:]
+    ) -> Bool {
+        let path = context.expanded(raw, with: variables)
         guard zonesAllow(entry, [path], context) else { return false }
         guard let pattern = entry.pattern else { return true }
         if Self.found(pattern, in: path) { return true }
@@ -490,30 +544,36 @@ public final class RiskRuleSet: @unchecked Sendable {
         return resolved != path && Self.found(pattern, in: resolved)
     }
 
-    private func matches(_ entry: Compiled, _ context: inout Context) -> Bool {
+    /// What the rule matched, one text per match: the command segment, the pipeline, the path, or
+    /// the whole detail / tool name for the scopes that look at those. Empty = no match.
+    private func matches(_ entry: Compiled, _ context: inout Context) -> [String] {
         let rule = entry.rule
         if context.kind == .command, rule.scope != .text, rule.scope != .tool,
            let required = entry.requiredCommands, required.isDisjoint(with: context.commandWords) {
-            return false
+            return []
         }
         switch rule.scope {
         case .text:
-            return entry.pattern.map { Self.found($0, in: context.detail) } ?? false
+            return entry.pattern.map { Self.found($0, in: context.detail) } == true
+                ? [context.detail] : []
         case .tool:
-            return entry.pattern.map { Self.found($0, in: context.tool) } ?? false
+            return entry.pattern.map { Self.found($0, in: context.tool) } == true
+                ? [context.tool] : []
         case .segment:
             let pipelines = context.pipelines
+            let variables = context.variables
             let snapshot = context
-            return pipelines.contains { pipeline in
-                pipeline.indices.contains { position in
+            var evidence: [String] = []
+            for pipeline in pipelines {
+                for position in pipeline.indices {
                     let segment = pipeline[position]
-                    if rule.topLevel, segment.inSubstitution { return false }
+                    if rule.topLevel, segment.inSubstitution { continue }
                     if !entry.notPipedInto.isEmpty, position + 1 < pipeline.count,
                        entry.notPipedInto.contains("*")
                         || entry.notPipedInto.contains(pipeline[position + 1].command) {
-                        return false
+                        continue
                     }
-                    return Self.commandMatches(segment, entry.commands)
+                    let matched = Self.commandMatches(segment, entry.commands)
                         && (entry.pattern.map { pattern in
                             Self.found(pattern, in: segment.text)
                                 // The SQL of `psql <<SQL`: stdin is that command's input, so only
@@ -521,33 +581,41 @@ public final class RiskRuleSet: @unchecked Sendable {
                                 || (!entry.commands.isEmpty
                                     && segment.stdin.map { Self.found(pattern, in: $0) } == true)
                         } ?? true)
-                        && zonesAllow(entry, segment.operands, snapshot)
+                        && zonesAllow(entry, segment.operands, snapshot, variables: variables)
+                    if matched { evidence.append(segment.text) }
                 }
             }
+            return evidence
         case .pipeline:
-            let pipelines = context.pipelines
-            return pipelines.contains { pipelineMatches(entry, $0) }
+            return context.pipelines.filter { pipelineMatches(entry, $0) }
+                .map { $0.map(\.text).joined(separator: " | ") }
         case .path:
             let pipelines = context.pipelines
+            let variables = context.variables
             let snapshot = context
             if context.kind == .command {
-                return pipelines.contains { pipeline in
-                    pipeline.contains { segment in
-                        guard Self.commandMatches(segment, entry.commands) else { return false }
+                var evidence: [String] = []
+                for pipeline in pipelines {
+                    for segment in pipeline where Self.commandMatches(segment, entry.commands) {
                         let paths: [String]
                         switch rule.access {
                         case .read: paths = ShellAccess.reads(segment)
                         case .write: paths = ShellAccess.writes(segment)
                         case .any: paths = ShellAccess.all(segment)
                         }
-                        return paths.contains { pathMatches(entry, $0, snapshot) }
+                        if paths.contains(where: {
+                            pathMatches(entry, $0, snapshot, variables: variables)
+                        }) {
+                            evidence.append(segment.text)
+                        }
                     }
                 }
+                return evidence
             }
             // A file tool reads (read / search) or writes (edit) the path it names
             let toolAccess: RiskRule.Access = context.kind == .edit ? .write : .read
-            guard rule.access == .any || rule.access == toolAccess else { return false }
-            return context.toolPaths.contains { pathMatches(entry, $0, snapshot) }
+            guard rule.access == .any || rule.access == toolAccess else { return [] }
+            return context.toolPaths.filter { pathMatches(entry, $0, snapshot) }
         }
     }
 

@@ -238,4 +238,56 @@ func auditRepoTests(_ t: TestRunner) {
         try expect(!AuditReevaluator.isDue(store: store))
         try expectEqual(try AuditReevaluator.run(store: store, home: "/Users/me").changed, 0)
     }
+    t.test("处置：单条 / 批量标为已处理，未处理计数，按规则 / 等级 / 处理状态筛选；归档指纹不动") {
+        let path = tempStorePath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let store = try EurekaStore(path: path)
+        let pipeline = AuditPipeline(store: store)
+        try pipeline.ingest(event("env", detail: "cat .env"), isStale: true)                    // critical
+        try pipeline.ingest(event("rm1", detail: "rm -rf /srv/a"), isStale: true)               // high
+        try pipeline.ingest(event("rm2", session: "s2", detail: "rm -rf /srv/b"), isStale: true) // high
+        try pipeline.ingest(event("push", detail: "git push origin main"), isStale: true)       // notice
+        try pipeline.ingest(event("ls", detail: "ls"), isStale: true)
+        let days = try store.audit.dayFingerprints()
+        try expectEqual(try store.audit.unreviewedCounts(), [.critical: 1, .high: 2, .notice: 1])
+
+        try expectEqual(try store.audit.count(.init(rule: "rm-rf")), 2)
+        try expectEqual(try store.audit.count(.init(minLevel: .high)), 3)
+        try expectEqual(try store.audit.count(.init(minLevel: .critical)), 1)
+        try expectEqual(try store.audit.count(.init(reviewed: false)), 4)
+        try expectEqual(try store.audit.count(.init(reviewed: true)), 0)
+
+        let at = Date(timeIntervalSince1970: 5_000)
+        try store.audit.setReviewed(source: .codex, sessionId: "s1", opId: "env", at: at)
+        // An operation without a risk hit has nothing to deal with
+        try store.audit.setReviewed(source: .codex, sessionId: "s1", opId: "ls", at: at)
+        try expectEqual(try store.audit.count(.init(reviewed: true)), 1)
+        try expectEqual(try store.audit.recent(.init(reviewed: true), limit: 5).first?.reviewedAt, at)
+        try expectEqual(try store.audit.unreviewedCounts(), [.high: 2, .notice: 1])
+
+        // Mark all: only what the filter selects
+        try expectEqual(try store.audit.markReviewed(.init(sessionId: "s1", minLevel: .high), at: at), 1)
+        try expectEqual(try store.audit.unreviewedCounts(), [.high: 1, .notice: 1])
+        try store.audit.setReviewed(source: .codex, sessionId: "s1", opId: "env", at: nil)
+        try expectEqual(try store.audit.unreviewedCounts(), [.critical: 1, .high: 1, .notice: 1])
+        try expectEqual(try store.audit.dayFingerprints(), days)
+    }
+
+    t.test("重判：命中的规则没变就保留已处理，换了规则就要重新看") {
+        let path = tempStorePath()
+        defer { try? FileManager.default.removeItem(at: path) }
+        let store = try EurekaStore(path: path)
+        // Stored by an older version under rule ids that mean something else now
+        try store.audit.insert(event("same", detail: "rm -rf /srv/a", risk: .high, rule: "rm-rf"))
+        try store.audit.insert(event("moved", detail: "cat .env", risk: .notice, rule: "read-secret"))
+        let at = Date(timeIntervalSince1970: 5_000)
+        try store.audit.markReviewed(.init(), at: at)
+        try expectEqual(try store.audit.count(.init(reviewed: true)), 2)
+
+        try AuditReevaluator.run(store: store, home: "/Users/me")
+        let rows = Dictionary(uniqueKeysWithValues: try store.audit.recent(limit: 5).map { ($0.opId, $0) })
+        try expectEqual(rows["same"]?.reviewedAt, at)
+        try expectEqual(rows["moved"]?.riskRule, "read-env-file")
+        try expect(rows["moved"]?.reviewedAt == nil, "换了规则（还升到严重）要重新处理")
+    }
 }

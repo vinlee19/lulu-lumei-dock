@@ -18,6 +18,8 @@ struct SidebarView: View {
     let limitsBadge: (text: String, color: Color)?
     /// History count badge (nil at 0; wired the same way as the rate-limit badge)
     var historyBadge: String? = nil
+    /// High-risk and critical audit hits not dealt with yet (nil at 0)
+    var auditBadge: (text: String, color: Color)? = nil
     let appVersion: String
     let onSelect: (PopoverRootView.Tab) -> Void
     /// Click on the bottom brand area (jumps to "Settings → About"); renderers may omit it
@@ -61,8 +63,10 @@ struct SidebarView: View {
                             SidebarNavButton(
                                 title: tab.sidebarTitle, icon: tab.sidebarIcon, tileColor: tab.tileColor,
                                 badge: tab == .limits ? limitsBadge?.text
-                                    : (tab == .history ? historyBadge : nil),
-                                badgeColor: (tab == .limits ? limitsBadge?.color : nil)
+                                    : tab == .history ? historyBadge
+                                    : tab == .audit ? auditBadge?.text : nil,
+                                badgeColor: (tab == .limits ? limitsBadge?.color
+                                    : tab == .audit ? auditBadge?.color : nil)
                                     ?? .secondary,
                                 isSelected: selected.sidebarAnchor == tab
                             ) {

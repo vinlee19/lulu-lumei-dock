@@ -400,6 +400,14 @@ enum Schema {
         // usage ledger (the hook payload and most transcripts' tool lines carry none). A fact
         // table: idempotent ALTER, no version bump.
         try addColumnIfMissing(db, table: "audit_events", column: "model", type: "TEXT")
+        // When the user marked a risk hit as dealt with (NULL = not yet). Written by the user, so
+        // a fact like the rest of the row: idempotent ALTER, no version bump. The index can only
+        // be created once the column exists.
+        try addColumnIfMissing(db, table: "audit_events", column: "reviewed_at", type: "REAL")
+        try db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_audit_unreviewed ON audit_events(risk_level)
+            WHERE risk_level > 0 AND reviewed_at IS NULL;
+        """)
         // usage_records gains the billing provider (tells subscription vs pay-as-you-go apart for
         // same-named models). No version bump: bumping rescans the whole table, and usage from
         // already-deleted transcripts would be lost forever. Old rows are NULL → price resolution

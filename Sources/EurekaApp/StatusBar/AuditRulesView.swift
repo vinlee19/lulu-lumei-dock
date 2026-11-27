@@ -397,7 +397,7 @@ struct AuditRulesView: View {
                 Text(L10n.text("Add an entry", zhHans: "新增一条")).font(Theme.font.themed(12, .semibold))
                 field(L10n.text("Rule id, or * for every rule", zhHans: "规则 id，或 * 表示所有规则"), $allowRule)
                 field(L10n.text("Working directory (optional): the session's directory or one above it", zhHans: "工作目录（可选）：会话所在目录或它的上级"), $allowDirectory)
-                field(L10n.text("Pattern over the operation (optional)", zhHans: "匹配操作文本的正则（可选）"), $allowPattern)
+                field(L10n.text("Pattern over the command the rule matched (optional)", zhHans: "匹配规则命中的那条命令的正则（可选）"), $allowPattern)
                 HStack {
                     PrimaryButton(title: L10n.text("Add", zhHans: "添加"), icon: "plus") { addAllow() }
                         .disabled(allowProblem != nil)

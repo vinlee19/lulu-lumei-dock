@@ -46,6 +46,14 @@ struct AuditView: View {
     @State private var modelFilter: String?
     @State private var projectFilter: String?
     @State private var sessionFilter: String?
+    /// Triage filters: one rule, a minimum level, hits not dealt with yet, a date range
+    @State private var ruleFilter: String?
+    @State private var minLevel: RiskLevel?
+    @State private var unreviewedOnly: Bool
+    @State private var dateRange: UsageRangeSelection?
+    @State private var showsRangePicker = false
+    @State private var showMarkAllConfirm = false
+    @State private var showRawExportConfirm = false
     @State private var sourceFilter: AgentSource?
     @State private var kindFilter: ToolKind?
     @State private var riskOnly = false
@@ -68,8 +76,10 @@ struct AuditView: View {
         notificationService: NotificationService, skillMemory: SkillMemoryService,
         mcpServers: [MCPServerEntry] = [],
         initialRiskOnly: Bool = false, initialKeyword: String = "",
-        initialMode: Mode = .log, initialDimension: AuditRepo.Dimension = .model
+        initialMode: Mode = .log, initialDimension: AuditRepo.Dimension = .model,
+        initialUnreviewedOnly: Bool = false
     ) {
+        self._unreviewedOnly = State(initialValue: initialUnreviewedOnly)
         self._mode = State(initialValue: initialMode)
         self.initialDimension = initialDimension
         self._service = ObservedObject(wrappedValue: service)
@@ -85,10 +95,15 @@ struct AuditView: View {
     private var query: AuditRepo.Query {
         // Model, project and session are exact filters set from an analytics row or a row's
         // context menu; the keyword box only searches command text and tool names
-        AuditRepo.Query(
+        let interval = dateRange?.resolve().interval()
+        // "Not dealt with" means the hits that raised an alert: high risk and above
+        return AuditRepo.Query(
             source: sourceFilter, kind: kindFilter, riskOnly: riskOnly,
             keyword: keyword.trimmingCharacters(in: .whitespaces).isEmpty ? nil : keyword,
-            project: projectFilter, model: modelFilter, sessionId: sessionFilter)
+            from: interval?.from, to: interval?.to,
+            project: projectFilter, model: modelFilter, sessionId: sessionFilter,
+            rule: ruleFilter, minLevel: unreviewedOnly ? max(minLevel ?? .high, .high) : minLevel,
+            reviewed: unreviewedOnly ? false : nil)
     }
 
     private var totalPages: Int {
@@ -98,6 +113,7 @@ struct AuditView: View {
     private var filtering: Bool {
         sourceFilter != nil || kindFilter != nil || riskOnly
             || modelFilter != nil || projectFilter != nil || sessionFilter != nil
+            || ruleFilter != nil || minLevel != nil || unreviewedOnly || dateRange != nil
             || !keyword.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -127,12 +143,26 @@ struct AuditView: View {
         .onChange(of: modelFilter) { _, _ in resetAndReload() }
         .onChange(of: projectFilter) { _, _ in resetAndReload() }
         .onChange(of: sessionFilter) { _, _ in resetAndReload() }
+        .onChange(of: ruleFilter) { _, _ in resetAndReload() }
+        .onChange(of: minLevel) { _, _ in resetAndReload() }
+        .onChange(of: unreviewedOnly) { _, _ in resetAndReload() }
+        .onChange(of: dateRange) { _, _ in resetAndReload() }
         .onChange(of: service.historyRevision) { _, _ in reload() }
         .themedConfirm(
-            L10n.text("The exported CSV contains full command text (it may include secrets). Export it to Downloads?", zhHans: "导出的 CSV 含完整命令文本（可能包含敏感信息），确认导出到下载目录？"),
+            L10n.text("Export the current filter to Downloads as CSV? Credentials in commands are masked.", zhHans: "把当前筛选结果导出为 CSV 到下载目录？命令里的凭据会打码。"),
             isPresented: $showExportConfirm,
             confirm: L10n.text("Export", zhHans: "导出")
         ) { service.exportCSV(query: query) }
+        .themedConfirm(
+            L10n.text("Export with the full command text? The file will contain every credential that appears in a command.", zhHans: "导出完整命令原文？文件里会包含命令中出现的所有凭据。"),
+            isPresented: $showRawExportConfirm,
+            confirm: L10n.text("Export unmasked", zhHans: "导出原文"), destructive: true
+        ) { service.exportCSV(query: query, redacted: false) }
+        .themedConfirm(
+            L10n.format("Mark the %@ risk hits in this filter as dealt with?", zhHans: "把当前筛选里的 %@ 条风险命中标为已处理？", String(service.pendingInFilter)),
+            isPresented: $showMarkAllConfirm,
+            confirm: L10n.text("Mark all", zhHans: "全部标记")
+        ) { service.markAllReviewed(query: query) }
         .themedConfirm(
             L10n.text("Clear all audit data? This cannot be undone.", zhHans: "确认清空全部审计数据？此操作不可撤销。"),
             isPresented: $showClearConfirm,
@@ -172,6 +202,18 @@ struct AuditView: View {
             }
             .popover(isPresented: $showSettings, arrowEdge: .bottom) { settingsPopover }
             if mode == .log {
+                CardActionButton(icon: "calendar", help: L10n.text("Limit the log to a range of days", zhHans: "按日期范围筛选")) {
+                    showsRangePicker = true
+                }
+                .popover(isPresented: $showsRangePicker, arrowEdge: .bottom) {
+                    UsageRangePicker(
+                        selection: dateRange ?? .default,
+                        onApply: { selection in
+                            dateRange = selection
+                            showsRangePicker = false
+                        },
+                        onCancel: { showsRangePicker = false })
+                }
                 CardActionButton(icon: "square.and.arrow.up", help: L10n.text("Export the current filter as CSV", zhHans: "导出当前筛选结果为 CSV")) {
                     showExportConfirm = true
                 }
@@ -223,6 +265,11 @@ struct AuditView: View {
                     .labelsHidden()
                     .frame(maxWidth: 110)
                 }
+                Button(L10n.text("Export the current filter unmasked…", zhHans: "导出当前筛选的原文 CSV…")) {
+                    showSettings = false
+                    showRawExportConfirm = true
+                }
+                .buttonStyle(.link)
                 if settings.auditArchiveEnabled {
                     Text(archiveLine)
                         .font(Theme.font.caption)
@@ -343,7 +390,12 @@ struct AuditView: View {
         // risky out of 0" → when filtering show only the retention policy and leave the risk count
         // to the risk-only chip.
         guard service.riskTotal > 0, !filtering else { return retention }
-        return L10n.format("Risk %@ · %@", zhHans: "风险 %@ · %@", String(service.riskTotal), String(retention))
+        let critical = service.unreviewed[.critical] ?? 0
+        let high = service.unreviewed[.high] ?? 0
+        guard critical + high > 0 else {
+            return L10n.format("Risk %@ · nothing to look at · %@", zhHans: "风险 %@ · 没有待处理 · %@", String(service.riskTotal), String(retention))
+        }
+        return L10n.format("To look at: %@ critical, %@ high risk · %@", zhHans: "待处理：严重 %@ · 高危 %@ · %@", String(critical), String(high), String(retention))
     }
 
     /// Kind distribution: top 4 + "other", same approach and color ramp as
@@ -402,6 +454,34 @@ struct AuditView: View {
                          count: entry.value)
             }
             riskChip
+            pendingChip
+            if let rule = ruleFilter {
+                scopeChip(
+                    icon: "exclamationmark.shield",
+                    label: RiskRuleEngine.title(forRule: rule) ?? rule
+                ) { ruleFilter = nil }
+            }
+            if let level = minLevel, !unreviewedOnly {
+                scopeChip(
+                    icon: "arrow.up.to.line",
+                    label: L10n.format("%@ and above", zhHans: "%@及以上", level.label)
+                ) { minLevel = nil }
+            }
+            if let dateRange {
+                scopeChip(icon: "calendar", label: UsageRangeText.button(dateRange)) {
+                    self.dateRange = nil
+                }
+            }
+            if service.pendingInFilter > 0, riskOnly || unreviewedOnly || ruleFilter != nil || minLevel != nil {
+                Button { showMarkAllConfirm = true } label: {
+                    Label(L10n.format("Mark %@ as dealt with", zhHans: "把 %@ 条标为已处理", String(service.pendingInFilter)), systemImage: "checkmark.circle")
+                        .font(Theme.font.themed(11, .medium))
+                        .foregroundStyle(Theme.brandFg)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 5)
+                }
+                .buttonStyle(.plain)
+            }
             if let model = modelFilter {
                 scopeChip(
                     icon: "cpu",
@@ -475,6 +555,17 @@ struct AuditView: View {
         }
         .buttonStyle(.plain)
         .help(L10n.text("Show only actions that hit a high-risk or warning rule", zhHans: "只看命中高危 / 提醒规则的操作"))
+    }
+
+    /// High-risk and critical hits nobody has looked at yet
+    private var pendingChip: some View {
+        Button { unreviewedOnly.toggle() } label: {
+            chipLabel(
+                icon: "tray.full.fill", label: L10n.text("To look at", zhHans: "待处理"),
+                count: service.unreviewedAlerts, isSelected: unreviewedOnly, tint: Theme.failureRed)
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("High-risk and critical hits not marked as dealt with", zhHans: "还没标为已处理的高危和严重命中"))
     }
 
     private func chipLabel(
@@ -568,6 +659,7 @@ struct AuditView: View {
     @ViewBuilder
     private func row(_ event: AuditEvent) -> some View {
         let isExpanded = expanded.contains(event.opId)
+        let isReviewed = event.riskLevel != nil && event.reviewedAt != nil
         KnowledgeRow(onOpen: { toggle(event.opId) }) {
             HStack(alignment: .top, spacing: 10) {
                 kindTile(event.kind)
@@ -582,6 +674,12 @@ struct AuditView: View {
                                 // Only the rule id is stored; the title comes from the rules in force
                                 event.riskRule.flatMap(RiskRuleEngine.title(forRule:)) ?? level.label,
                                 tint: Theme.riskColor(level))
+                        }
+                        if isReviewed {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(Theme.font.themed(10))
+                                .foregroundStyle(Theme.enabledGreen)
+                                .help(L10n.text("Dealt with", zhHans: "已处理"))
                         }
                         if event.isError {
                             TagChip(
@@ -614,7 +712,29 @@ struct AuditView: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize()
             }
+            // A hit that was dealt with steps back
+            .opacity(isReviewed ? 0.55 : 1)
         } menu: {
+            if event.riskLevel != nil {
+                Button(isReviewed ? L10n.text("Mark as not dealt with", zhHans: "标为未处理") : L10n.text("Mark as dealt with", zhHans: "标为已处理")) {
+                    service.setReviewed(event, reviewed: !isReviewed)
+                }
+                if let rule = event.riskRule {
+                    Button(L10n.text("Only this rule", zhHans: "只看这条规则")) { ruleFilter = rule }
+                    if let cwd = event.cwd, !cwd.isEmpty {
+                        Button(L10n.format("Stop flagging this rule in %@", zhHans: "以后在 %@ 里忽略这条规则", projectName(cwd) ?? cwd)) {
+                            service.ignore(rule: rule, inProject: cwd)
+                        }
+                    }
+                }
+                if let level = event.riskLevel {
+                    Button(L10n.format("Only %@ and above", zhHans: "只看%@及以上", level.label)) { minLevel = level }
+                }
+                Divider()
+            }
+            Button(L10n.text("Open the session", zhHans: "打开会话")) {
+                NotificationCenter.default.post(name: .eurekaRevealSession, object: event.sessionId)
+            }
             Button(isExpanded ? L10n.text("Collapse", zhHans: "收起") : L10n.text("Expand", zhHans: "展开全文")) { toggle(event.opId) }
             Button(L10n.text("Copy full arguments", zhHans: "复制参数全文")) { copy(event.detail) }
             if let cwd = event.cwd, !cwd.isEmpty {
