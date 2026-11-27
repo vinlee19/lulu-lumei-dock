@@ -325,7 +325,7 @@ public enum RiskRuleEngine {
 
     /// Bumped whenever a built-in rule's matching changes, so stored history is evaluated again
     /// even if the rule list hashes the same
-    public static let builtinVersion = 4
+    public static let builtinVersion = 5
 
     private static let lock = NSLock()
     private static var installed: RiskRuleSet?

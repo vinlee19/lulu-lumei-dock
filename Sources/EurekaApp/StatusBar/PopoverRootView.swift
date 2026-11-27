@@ -274,11 +274,18 @@ struct PopoverRootView: View {
         return count == 0 ? nil : "\(count)"
     }
 
+    /// High-risk and critical audit hits the user has not marked as dealt with; hidden at zero
+    private var auditBadge: (text: String, color: Color)? {
+        let count = auditService.unreviewedAlerts
+        return count == 0 ? nil : (count > 999 ? "999+" : "\(count)", Theme.failureRed)
+    }
+
     private var sidebar: some View {
         SidebarView(
             selected: navigation.tab,
             limitsBadge: limitsBadge,
             historyBadge: historyBadgeText,
+            auditBadge: auditBadge,
             appVersion: appVersion,
             onSelect: { tab in
                 // Manual navigation abandons any unconsumed cross-page reveal, confining leftovers

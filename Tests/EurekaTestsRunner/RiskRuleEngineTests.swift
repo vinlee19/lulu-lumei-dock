@@ -57,6 +57,13 @@ func riskRuleEngineTests(_ t: TestRunner) {
         try expect(rule("rm -rf /tmp/x", cwd: cwd) == nil)
         try expect(rule("rm -rf /private/tmp/claude-501/scratchpad/ch; echo cleaned", cwd: cwd) == nil)
         try expect(rule("rm -rf $TMPDIR/build") == nil)
+        // A variable assigned in the same command is followed to its value
+        try expect(rule("SP=/private/tmp/claude-501/scratch; rm -rf $SP; mkdir -p $SP", cwd: cwd) == nil)
+        try expect(rule(#"D=/tmp/build && rm -rf "${D}/out""#, cwd: cwd) == nil)
+        try expectEqual(rule("T=/Users/me/other; rm -rf $T/x", cwd: cwd), "rm-rf")
+        try expectEqual(rule("A=/Users/me; B=$A/other; rm -rf $B", cwd: cwd), "rm-rf")
+        try expectEqual(rule("W=$(mktemp -d); rm -rf $W", cwd: cwd), "rm-rf-rel")
+        try expectEqual(rule("K=~/.ssh/id_rsa; cat $K", cwd: cwd), "read-private-key")
         // A session started in the home directory has no project: everything under it is outside
         try expectEqual(rule("rm -rf /Users/me/x", cwd: home), "rm-rf")
         // Mixed targets: the worst one decides

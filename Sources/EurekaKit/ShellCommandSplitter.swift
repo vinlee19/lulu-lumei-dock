@@ -18,7 +18,7 @@ public enum ShellCommandSplitter {
         public var isWrite: Bool { op.contains(">") }
     }
 
-    public struct Segment: Equatable, Sendable {
+    public struct Segment: Sendable {
         /// Lowercased basename of the command word, after leading `VAR=value` assignments, shell
         /// keywords and wrappers are stripped; empty when the segment is only redirects
         public var command: String
@@ -35,6 +35,8 @@ public enum ShellCommandSplitter {
         /// here-string. A rule that names this command also matches against it (the SQL of
         /// `psql <<SQL`), and when the command is a shell it is parsed as a script.
         public var stdin: String?
+        /// `NAME=value` words in front of the command (or standing alone), in order
+        public var assignments: [(name: String, value: String)] = []
         /// Inside `$( )`, backticks or `<( )`: the output goes to another command, not the screen
         public var inSubstitution = false
         /// Parser bookkeeping: which pending heredoc belongs to this segment (0 = none)
@@ -112,9 +114,16 @@ public enum ShellCommandSplitter {
         var index = 0
         var found: [String] = []
         var command = ""
+        var assignments: [(name: String, value: String)] = []
         while index < words.count {
             let word = words[index]
-            if isAssignment(word) || keywords.contains(word) {
+            if isAssignment(word), let equals = word.firstIndex(of: "=") {
+                assignments.append(
+                    (String(word[..<equals]), String(word[word.index(after: equals)...])))
+                index += 1
+                continue
+            }
+            if keywords.contains(word) {
                 index += 1
                 continue
             }
@@ -147,6 +156,7 @@ public enum ShellCommandSplitter {
         var segment = Segment(
             command: command, wrappers: found, args: args, redirects: redirects,
             text: text, feeds: feeds)
+        segment.assignments = assignments
         // A here-string is the command's stdin, known right here (a heredoc body comes later)
         segment.stdin = redirects.last { $0.op == "<<<" }?.target
 

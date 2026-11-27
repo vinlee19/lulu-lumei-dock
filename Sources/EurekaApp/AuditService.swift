@@ -18,6 +18,10 @@ final class AuditService: ObservableObject {
     @Published private(set) var exportMessage: String?
     /// Bumped when stored rows were re-evaluated in the background; the page reloads on change
     @Published private(set) var historyRevision = 0
+    /// Unreviewed risk hits within the page's current filter (what "mark all" would touch)
+    @Published private(set) var pendingInFilter = 0
+    /// Risk hits the user has not marked as dealt with yet, by level (sidebar badge, overview)
+    @Published private(set) var unreviewed: [RiskLevel: Int] = [:]
     /// The rules file as last read: the user's overrides, own rules and allow entries, plus
     /// whatever in it could not be used
     @Published private(set) var rulesState = RiskRuleStore.State()
@@ -67,6 +71,7 @@ final class AuditService: ObservableObject {
     private var lastPruneAt = Date.distantPast
     /// The history re-evaluation in flight, if any
     private var reevaluation: AuditReevaluator.Progress?
+    private var lastUnreviewedAt = Date.distantPast
     private let ruleStore = RiskRuleStore.shared
     private var lastRuleCheckAt = Date.distantPast
     private var lastAttributionAt = Date.distantPast
@@ -154,6 +159,7 @@ final class AuditService: ObservableObject {
             self?.pruneIfDue()
             self?.attributeModelsIfDue()
             self?.reloadRulesIfChanged()
+            self?.refreshUnreviewedIfDue()
         }
         timer.resume()
         self.timer = timer
@@ -200,6 +206,9 @@ final class AuditService: ObservableObject {
                 let rows = try store.audit.recent(
                     query, limit: pageSize, offset: (max(1, page) - 1) * pageSize)
                 let riskTotal = try store.audit.count(.init(riskOnly: true))
+                var pendingQuery = query
+                pendingQuery.reviewed = false
+                let pending = try store.audit.count(pendingQuery)
                 // Each distribution count drops its own dimension: otherwise selecting a source
                 // turns every other chip to 0, and the user can't see "how many there would be if I
                 // switched".
@@ -211,11 +220,13 @@ final class AuditService: ObservableObject {
                 let byKind = try store.audit.counts(by: .kind, kindQuery)
                 let archive = AuditArchiveSettings.isActive
                     ? Self.archiveStatus(store: store) : nil
+                self.publishUnreviewed(store)
                 self.publish {
                     $0.archiveStatus = archive
                     $0.events = rows
                     $0.total = total
                     $0.riskTotal = riskTotal
+                    $0.pendingInFilter = pending
                     $0.lastError = nil
                     $0.sourceCounts = Dictionary(
                         uniqueKeysWithValues: bySource.compactMap { key, value in
@@ -230,6 +241,59 @@ final class AuditService: ObservableObject {
                 self.publish { $0.lastError = L10n.format("Failed to read audit log: %@", zhHans: "读取审计流水失败: %@", String(describing: error)) }
             }
         }
+    }
+
+    // MARK: - Review
+
+    /// High-risk and critical hits waiting to be looked at
+    var unreviewedAlerts: Int {
+        (unreviewed[.high] ?? 0) + (unreviewed[.critical] ?? 0)
+    }
+
+    /// Marks one risk hit as dealt with, or puts it back
+    func setReviewed(_ event: AuditEvent, reviewed: Bool) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            try? store.audit.setReviewed(
+                source: event.source, sessionId: event.sessionId, opId: event.opId,
+                at: reviewed ? Date() : nil)
+            self.publishUnreviewed(store, reload: true)
+        }
+    }
+
+    /// Marks every unreviewed risk hit the filter selects as dealt with
+    func markAllReviewed(query: AuditRepo.Query) {
+        queue.async { [weak self] in
+            guard let self, let store = self.store else { return }
+            let count = (try? store.audit.markReviewed(query, at: Date())) ?? 0
+            self.publish { $0.exportMessage = L10n.format("%@ marked as dealt with", zhHans: "已将 %@ 条标为已处理", String(count)) }
+            self.publishUnreviewed(store, reload: true)
+        }
+    }
+
+    /// Stops a rule from matching in one project from now on: an allow entry for the rule and
+    /// that working directory. Stored history follows through the usual re-evaluation.
+    func ignore(rule: String, inProject cwd: String) {
+        var config = rulesState.config
+        let entry = RiskRulesConfig.Allow(rule: rule, cwd: cwd)
+        guard !config.allow.contains(entry) else { return }
+        config.allow.append(entry)
+        saveRules(config)
+    }
+
+    private func publishUnreviewed(_ store: EurekaStore, reload: Bool = false) {
+        lastUnreviewedAt = Date()
+        guard let counts = try? store.audit.unreviewedCounts() else { return }
+        publish {
+            if $0.unreviewed != counts { $0.unreviewed = counts }
+            if reload { $0.historyRevision += 1 }
+        }
+    }
+
+    /// New hits arrive from hooks and scanners at any time; recount every 15 seconds
+    private func refreshUnreviewedIfDue() {
+        guard let store, Date().timeIntervalSince(lastUnreviewedAt) > 15 else { return }
+        publishUnreviewed(store)
     }
 
     // MARK: - Rules
@@ -313,24 +377,30 @@ final class AuditService: ObservableObject {
         }
     }
 
-    /// Exports the current filtered results as CSV to ~/Downloads and reveals it in Finder
-    /// (contains sensitive commands; the caller must warn)
-    func exportCSV(query: AuditRepo.Query) {
+    /// Exports the current filtered results as CSV to ~/Downloads and reveals it in Finder.
+    /// Credentials in commands are masked unless `redacted` is false (the caller must warn then).
+    func exportCSV(query: AuditRepo.Query, redacted: Bool = true) {
         queue.async { [weak self] in
             guard let self, let store = self.store else { return }
             do {
                 let rows = try store.audit.recent(query, limit: 100_000)
                 let isoFormatter = ISO8601DateFormatter()
-                var csv = "timestamp,source,session,kind,tool,detail,exit_code,is_error,risk_level,risk_rule,model\n"
+                var csv = "timestamp,source,session,kind,tool,detail,exit_code,is_error,risk_level,risk_rule,model,cwd,reviewed_at\n"
                 for row in rows {
+                    // Masked unless asked otherwise: the file leaves the app and commands carry
+                    // tokens (92 of them in one real log)
+                    let detail = redacted
+                        ? AuditRedactor.redact(detail: row.detail, tool: row.tool).text : row.detail
                     csv += [
                         isoFormatter.string(from: row.timestamp),
                         row.source.rawValue, row.sessionId, row.kind.rawValue,
-                        Self.csvField(row.tool), Self.csvField(row.detail),
+                        Self.csvField(row.tool), Self.csvField(detail),
                         row.exitCode.map(String.init) ?? "",
                         row.isError ? "1" : "0",
                         row.riskLevel?.label ?? "", row.riskRule ?? "",
                         Self.csvField(row.model ?? ""),
+                        Self.csvField(row.cwd ?? ""),
+                        row.reviewedAt.map(isoFormatter.string(from:)) ?? "",
                     ].joined(separator: ",") + "\n"
                 }
                 let formatter = DateFormatter()
@@ -465,6 +535,7 @@ final class AuditService: ObservableObject {
             reevaluation = nil
             if progress.report.changed > 0 { publish { $0.historyRevision += 1 } }
             loadRuleHitCounts()
+            publishUnreviewed(store)
             // The rules may have changed while the pass ran
             reevaluateIfDue()
         } catch {
