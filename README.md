@@ -205,7 +205,9 @@ a private key, a `.env` file, cloud or agent credentials, the keychain or the en
 a command, destructive SQL, changing startup items or an agent's own configuration are **high**
 (both raise an island card and, if enabled, a system notification with credentials masked);
 pushes to main, merges, cluster and cloud changes, uploads and message-sending MCP tools are
-**notices**. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
+**notices**. An **Analytics** view groups the log by model, source, project or session — the mix
+of commands, edits, reads and MCP calls, rule hits and failures per group — with a daily chart and
+rankings of commands, MCP tools, hosts and directories. Covers Claude Code and Trae (hook channel), Codex (rollout scanner), CodeBuddy,
 WorkBuddy, Qoder, Grok and Qwen (transcript scanners) and Cursor (SQLite scanner).
 
 **Backup** — optional cloud backup of your local data to an S3‑compatible bucket (SigV4 signed).
@@ -451,6 +453,7 @@ eureka --hooks-status              # install state for both sides
 eureka --usage-snapshot            # full scan → today's usage JSON (used by the ccusage diff)
 eureka --limits-snapshot [--claude] [--antigravity] [--opencode]  # rate-limit snapshot (Codex + Grok local; --claude hits the unofficial API; --antigravity runs agy /usage; --opencode asks opencode's running service)
 eureka --audit-snapshot            # dump the agent tool-call audit trail (--risk-only / --limit N)
+eureka --audit-analytics           # audit operations grouped by model / source / project / session (--by <dimension>)
 eureka --audit-reevaluate          # re-apply the current risk rules to the stored audit trail (--dry-run / --diff <rule>)
 eureka --render-previews [dir]     # offscreen-render every island state to PNG
 eureka --render-shell [dir]        # offscreen-render the sidebar + audit page (light/dark)

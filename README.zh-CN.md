@@ -114,7 +114,7 @@ markdown 预览 + 编辑(原子写入,写前留时间戳备份)。
 - **Claude** 为 opt‑in(默认关),走非官方接口,任何失败即整块隐藏。首次启用会弹一次钥匙串授权
   (选「始终允许」)。
 
-**审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带三级风险标记。规则看的是解析后的命令而不是原始文本:读取私钥、`.env`、云凭据或 agent 凭据、钥匙串、环境变量为**严重**;删除项目之外的路径、执行下载的脚本、命令里写着明文凭据、破坏性 SQL、改开机自启项或 agent 自身配置为**高危**(这两级会弹岛卡,开启后还会发系统通知,正文里的凭据会先打码);推送到主干、合并、集群与云资源变更、上传文件、发消息类 MCP 工具为**提醒**。
+**审计** —— agent 工具调用的追加式流水(完整命令 / 文件路径,不含输出正文),带三级风险标记。规则看的是解析后的命令而不是原始文本:读取私钥、`.env`、云凭据或 agent 凭据、钥匙串、环境变量为**严重**;删除项目之外的路径、执行下载的脚本、命令里写着明文凭据、破坏性 SQL、改开机自启项或 agent 自身配置为**高危**(这两级会弹岛卡,开启后还会发系统通知,正文里的凭据会先打码);推送到主干、合并、集群与云资源变更、上传文件、发消息类 MCP 工具为**提醒**。**分析**视图按模型、来源、项目或会话分组,给出每组的操作构成(命令 / 编辑 / 读取 / MCP)、规则命中和失败率,并附按天趋势以及命令、MCP 工具、域名、目录的排行。
 覆盖 Claude Code 与 Codex(hook/notify 通道)、Trae(hook 通道),以及 CodeBuddy、WorkBuddy、Qoder(transcript 扫描)与 Cursor(SQLite 扫描)。
 
 **备份** —— 可选:把本地数据备份到 S3 兼容的云存储(SigV4 签名)。
@@ -281,6 +281,7 @@ eureka --hooks-status              # 双侧安装状态
 eureka --usage-snapshot            # 全量扫描并输出今日用量 JSON(对拍脚本用)
 eureka --limits-snapshot [--claude]# 限额快照(Codex + Grok 本地;--claude 同时测非官方接口)
 eureka --audit-snapshot            # 输出 agent 操作审计流水(--risk-only / --limit N)
+eureka --audit-analytics           # 按模型 / 来源 / 项目 / 会话统计审计操作(--by <维度>)
 eureka --audit-reevaluate          # 用当前风险规则重判已入库的审计流水(--dry-run / --diff <规则>)
 eureka --render-previews [目录]     # 离屏渲染灵动岛各形态 PNG
 eureka-relay inject --event stop --session demo   # 注入测试事件

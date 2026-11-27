@@ -35,6 +35,17 @@ struct AuditView: View {
     /// latest value on every render, and the empty default doesn't affect offscreen rendering)
     var mcpServers: [MCPServerEntry] = []
 
+    /// The log, or the analytics over it
+    enum Mode: Hashable {
+        case log, analytics
+    }
+
+    @State private var mode: Mode
+    private let initialDimension: AuditRepo.Dimension
+    /// Set by clicking a group in the analytics view (model: "" = unattributed)
+    @State private var modelFilter: String?
+    @State private var projectFilter: String?
+    @State private var sessionFilter: String?
     @State private var sourceFilter: AgentSource?
     @State private var kindFilter: ToolKind?
     @State private var riskOnly = false
@@ -55,8 +66,11 @@ struct AuditView: View {
         service: AuditService, installer: InstallerService, settings: AppSettings,
         notificationService: NotificationService, skillMemory: SkillMemoryService,
         mcpServers: [MCPServerEntry] = [],
-        initialRiskOnly: Bool = false, initialKeyword: String = ""
+        initialRiskOnly: Bool = false, initialKeyword: String = "",
+        initialMode: Mode = .log, initialDimension: AuditRepo.Dimension = .model
     ) {
+        self._mode = State(initialValue: initialMode)
+        self.initialDimension = initialDimension
         self._service = ObservedObject(wrappedValue: service)
         self._installer = ObservedObject(wrappedValue: installer)
         self._settings = ObservedObject(wrappedValue: settings)
@@ -68,9 +82,12 @@ struct AuditView: View {
     }
 
     private var query: AuditRepo.Query {
+        // Model, project and session are exact filters set from an analytics row or a row's
+        // context menu; the keyword box only searches command text and tool names
         AuditRepo.Query(
             source: sourceFilter, kind: kindFilter, riskOnly: riskOnly,
-            keyword: keyword.trimmingCharacters(in: .whitespaces).isEmpty ? nil : keyword)
+            keyword: keyword.trimmingCharacters(in: .whitespaces).isEmpty ? nil : keyword,
+            project: projectFilter, model: modelFilter, sessionId: sessionFilter)
     }
 
     private var totalPages: Int {
@@ -79,6 +96,7 @@ struct AuditView: View {
 
     private var filtering: Bool {
         sourceFilter != nil || kindFilter != nil || riskOnly
+            || modelFilter != nil || projectFilter != nil || sessionFilter != nil
             || !keyword.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -86,7 +104,15 @@ struct AuditView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            content
+            switch mode {
+            case .log:
+                content
+            case .analytics:
+                AuditAnalyticsView(service: service, initialDimension: initialDimension) {
+                    dimension, key in
+                    show(dimension, key)
+                }
+            }
         }
         .onAppear {
             installer.refresh()
@@ -97,6 +123,9 @@ struct AuditView: View {
         .onChange(of: kindFilter) { _, _ in resetAndReload() }
         .onChange(of: riskOnly) { _, _ in resetAndReload() }
         .onChange(of: keyword) { _, _ in resetAndReload() }
+        .onChange(of: modelFilter) { _, _ in resetAndReload() }
+        .onChange(of: projectFilter) { _, _ in resetAndReload() }
+        .onChange(of: sessionFilter) { _, _ in resetAndReload() }
         .onChange(of: service.historyRevision) { _, _ in reload() }
         .themedConfirm(
             L10n.text("The exported CSV contains full command text (it may include secrets). Export it to Downloads?", zhHans: "导出的 CSV 含完整命令文本（可能包含敏感信息），确认导出到下载目录？"),
@@ -115,9 +144,15 @@ struct AuditView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Text(L10n.text("Audit", zhHans: "审计")).font(Theme.font.themed(15, .bold))
-            SearchField(
-                placeholder: L10n.text("Search commands / paths / tool names", zhHans: "搜索命令 / 文件路径 / 工具名"),
-                text: $keyword, resultCount: service.total)
+            ThemedSegmentedPicker(
+                selection: $mode, options: [.log, .analytics],
+                label: { $0 == .log ? L10n.text("Log", zhHans: "流水") : L10n.text("Analytics", zhHans: "分析") },
+                classicWidth: 130)
+            if mode == .log {
+                SearchField(
+                    placeholder: L10n.text("Search commands / paths / tool names", zhHans: "搜索命令 / 文件路径 / 工具名"),
+                    text: $keyword, resultCount: service.total)
+            }
             Spacer(minLength: 12)
             if let message = service.exportMessage {
                 Text(message)
@@ -129,11 +164,13 @@ struct AuditView: View {
                 showSettings.toggle()
             }
             .popover(isPresented: $showSettings, arrowEdge: .bottom) { settingsPopover }
-            CardActionButton(icon: "square.and.arrow.up", help: L10n.text("Export the current filter as CSV", zhHans: "导出当前筛选结果为 CSV")) {
-                showExportConfirm = true
-            }
-            CardActionButton(icon: "trash", color: Theme.failureRed, help: L10n.text("Clear all audit data", zhHans: "清空全部审计数据")) {
-                showClearConfirm = true
+            if mode == .log {
+                CardActionButton(icon: "square.and.arrow.up", help: L10n.text("Export the current filter as CSV", zhHans: "导出当前筛选结果为 CSV")) {
+                    showExportConfirm = true
+                }
+                CardActionButton(icon: "trash", color: Theme.failureRed, help: L10n.text("Clear all audit data", zhHans: "清空全部审计数据")) {
+                    showClearConfirm = true
+                }
             }
             RefreshButton(help: L10n.text("Reload the audit log", zhHans: "重新读取审计流水")) { reload() }
         }
@@ -358,7 +395,55 @@ struct AuditView: View {
                          count: entry.value)
             }
             riskChip
+            if let model = modelFilter {
+                scopeChip(
+                    icon: "cpu",
+                    label: AuditAnalyticsView.displayName(model, dimension: .model)
+                ) { modelFilter = nil }
+            }
+            if let project = projectFilter {
+                scopeChip(
+                    icon: "folder",
+                    label: AuditAnalyticsView.displayName(project, dimension: .project)
+                ) { projectFilter = nil }
+            }
+            if let session = sessionFilter {
+                scopeChip(
+                    icon: "bubble.left.and.bubble.right",
+                    label: AuditAnalyticsView.displayName(session, dimension: .session)
+                ) { sessionFilter = nil }
+            }
         }
+    }
+
+    /// A filter set from elsewhere (an analytics row, a row's context menu): shown selected, and
+    /// clicking it removes it
+    private func scopeChip(icon: String, label: String, clear: @escaping () -> Void) -> some View {
+        Button(action: clear) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(Theme.font.themed(10, .medium))
+                Text(label).font(Theme.font.themed(11, .semibold)).lineLimit(1)
+                Image(systemName: "xmark").font(Theme.font.themed(8, .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Theme.brand))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.text("Remove this filter", zhHans: "取消这个筛选"))
+    }
+
+    /// Switches to the log filtered to one analytics group
+    private func show(_ dimension: AuditRepo.Dimension, _ key: String) {
+        switch dimension {
+        case .model: modelFilter = key
+        case .source: sourceFilter = AgentSource(rawValue: key)
+        case .project: projectFilter = key.isEmpty ? nil : key
+        case .session: sessionFilter = key
+        }
+        mode = .log
     }
 
     private func kindChip(
@@ -500,6 +585,9 @@ struct AuditView: View {
                         if let project = projectName(event.cwd) {
                             TagChip(project, neutral: true)
                         }
+                        if let model = event.model, !model.isEmpty {
+                            TagChip(model, neutral: true)
+                        }
                         Spacer(minLength: 0)
                     }
                     Text(isExpanded ? event.detail : firstLine(event.detail))
@@ -526,6 +614,13 @@ struct AuditView: View {
                 Button(L10n.text("Copy working directory", zhHans: "复制工作目录")) { copy(cwd) }
             }
             Divider()
+            Button(L10n.text("Only this session", zhHans: "只看这个会话")) { sessionFilter = event.sessionId }
+            if let cwd = event.cwd, !cwd.isEmpty {
+                Button(L10n.text("Only this project", zhHans: "只看这个项目")) { projectFilter = cwd }
+            }
+            if let model = event.model, !model.isEmpty {
+                Button(L10n.format("Only %@", zhHans: "只看 %@", model)) { modelFilter = model }
+            }
             Button(L10n.format("Only %@", zhHans: "只看 %@", String(event.source.displayName))) { sourceFilter = event.source }
             Button(L10n.format("Only “%@”", zhHans: "只看「%@」", String(event.kind.label))) { kindFilter = event.kind }
         }

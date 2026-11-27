@@ -396,6 +396,10 @@ enum Schema {
         // prompts is a fact table too (favorites/tags/removal are user-written); v24 DBs gain the
         // soft-delete column, no rebuild.
         try addColumnIfMissing(db, table: "prompts", column: "hidden_at", type: "REAL")
+        // audit_events gains the model that issued each operation, filled in afterwards from the
+        // usage ledger (the hook payload and most transcripts' tool lines carry none). A fact
+        // table: idempotent ALTER, no version bump.
+        try addColumnIfMissing(db, table: "audit_events", column: "model", type: "TEXT")
         // usage_records gains the billing provider (tells subscription vs pay-as-you-go apart for
         // same-named models). No version bump: bumping rescans the whole table, and usage from
         // already-deleted transcripts would be lost forever. Old rows are NULL → price resolution

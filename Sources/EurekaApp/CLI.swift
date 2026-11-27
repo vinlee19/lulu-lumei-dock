@@ -103,6 +103,11 @@ enum EurekaCLI {
                 limit: args.firstIndex(of: "--limit").flatMap { idx in
                     args.indices.contains(idx + 1) ? Int(args[idx + 1]) : nil
                 } ?? 50)
+        case "--audit-analytics":
+            auditAnalytics(
+                dimension: args.firstIndex(of: "--by").flatMap { idx in
+                    args.indices.contains(idx + 1) ? AuditRepo.Dimension(rawValue: args[idx + 1]) : nil
+                } ?? .model)
         case "--audit-reevaluate":
             auditReevaluate(
                 dryRun: args.contains("--dry-run"),
@@ -430,6 +435,58 @@ enum EurekaCLI {
         }
     }
 
+    /// Attributes models to stored operations, then prints the analytics view's numbers: one line
+    /// per group with its mix of kinds, then the rankings. `--by model|source|project|session`.
+    private static func auditAnalytics(dimension: AuditRepo.Dimension) {
+        do {
+            let store = try EurekaStore(path: EurekaStore.defaultURL())
+            let started = Date()
+            var settled = 0
+            while true {
+                let step = try AuditModelAttributor.step(store: store)
+                settled += step.settled
+                if step.examined < AuditModelAttributor.batchSize || step.settled == 0 { break }
+            }
+            let attributionSeconds = Date().timeIntervalSince(started)
+            let built = Date()
+            let analytics = try AuditAnalyticsBuilder.build(
+                store: store, query: AuditRepo.Query(), dimension: dimension)
+            let kinds = ToolKind.allCases
+            var lines = [(["group", "ops"] + kinds.map(\.rawValue) + ["risk%", "high", "fail%"])
+                .joined(separator: "\t")]
+            func line(_ group: AuditAnalytics.Group, name: String) -> String {
+                let shares = kinds.map { kind -> String in
+                    guard group.total > 0 else { return "-" }
+                    return String(format: "%.0f%%", Double(group.byKind[kind] ?? 0) * 100 / Double(group.total))
+                }
+                return ([name, String(group.total)] + shares + [
+                    String(format: "%.1f%%", group.riskRate * 100), String(group.high),
+                    String(format: "%.1f%%", group.errorRate * 100),
+                ]).joined(separator: "\t")
+            }
+            for group in analytics.groups.prefix(20) {
+                lines.append(line(group, name: group.key.isEmpty ? "(unattributed)" : group.key))
+            }
+            lines.append(line(analytics.totals, name: "TOTAL"))
+            for (title, ranking) in [
+                ("commands", analytics.commands), ("mcp tools", analytics.mcpTools),
+                ("domains", analytics.domains), ("directories", analytics.directories),
+                ("rules", analytics.rules),
+            ] {
+                lines.append("-- \(title): " + ranking.map { "\($0.label) \($0.count)" }
+                    .joined(separator: ", "))
+            }
+            print(lines.joined(separator: "\n"))
+            FileHandle.standardError.write(Data(String(
+                format: "attributed %d rows in %.1fs, analytics in %.1fs, %d days, %d commands parsed\n",
+                settled, attributionSeconds, Date().timeIntervalSince(built), analytics.days.count,
+                analytics.commandsParsed).utf8))
+        } catch {
+            FileHandle.standardError.write(Data("audit analytics failed: \(error)\n".utf8))
+            exit(1)
+        }
+    }
+
     /// Evaluates the stored audit log with the current rules and prints the hits per rule before
     /// and after. `--dry-run` writes nothing. Point `EUREKA_DB_PATH` at a copy to try it safely.
     ///
@@ -693,6 +750,7 @@ enum EurekaCLI {
           --uninstall-codex-notify  Uninstall Codex notify
           --hooks-status            Show installation status
           --audit-snapshot          Scan and print agent audit events (--risk-only for risks / --limit N)
+          --audit-analytics         Print audit operations grouped by model / source / project / session (--by <dimension>)
           --audit-reevaluate        Evaluate stored audit events with the current rules (--dry-run writes nothing / --diff <rule> lists changed rows)
           --parquet-inspect <files…> Decode Parquet archives; print rows and columns per file (read-only)
           --pricing-resolve [models…] Print resolved prices and sources (--provider p; all local ledger models if omitted)

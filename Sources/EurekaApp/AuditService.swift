@@ -18,6 +18,9 @@ final class AuditService: ObservableObject {
     @Published private(set) var exportMessage: String?
     /// Bumped when stored rows were re-evaluated in the background; the page reloads on change
     @Published private(set) var historyRevision = 0
+    /// The analytics view's data for the last requested filter
+    @Published private(set) var analytics: AuditAnalytics?
+    @Published private(set) var analyticsLoading = false
     /// Counts grouped by source / type (the filter chips and the overview card's distribution). ⚠️
     /// `SourceFilterBar`'s `count:` closure is **called per chip** during rendering, so it may only
     /// read these two dictionaries; it must never hit the database each time.
@@ -57,6 +60,11 @@ final class AuditService: ObservableObject {
     private var lastPruneAt = Date.distantPast
     /// The history re-evaluation in flight, if any
     private var reevaluation: AuditReevaluator.Progress?
+    private var lastAttributionAt = Date.distantPast
+    private var attributing = false
+    /// What `analytics` was computed for; recomputed only when the filter, the rows or the rules
+    /// change
+    private var analyticsKey: String?
 
     private static let codexHealthName = "审计扫描 Codex"
     private static let codeBuddyHealthName = "审计扫描 CodeBuddy"
@@ -132,6 +140,7 @@ final class AuditService: ObservableObject {
             self?.scanGrok()
             self?.scanQwen()
             self?.pruneIfDue()
+            self?.attributeModelsIfDue()
         }
         timer.resume()
         self.timer = timer
@@ -210,6 +219,39 @@ final class AuditService: ObservableObject {
         }
     }
 
+    /// Computes the analytics view's data for a filter (aggregation plus parsing the newest
+    /// commands, about a second on a full log), off the main thread. A repeat request for the same
+    /// filter over unchanged rows is answered from the last result.
+    func loadAnalytics(query: AuditRepo.Query, dimension: AuditRepo.Dimension) {
+        analyticsLoading = true
+        queue.async { [weak self] in
+            guard let self, let store = self.store else {
+                self?.publish { $0.analyticsLoading = false }
+                return
+            }
+            do {
+                let key = "\(query)|\(dimension.rawValue)|\(try store.audit.revision())|"
+                    + "\(RiskRuleEngine.fingerprint)|\(self.attributedRevision)"
+                if key == self.analyticsKey {
+                    self.publish { $0.analyticsLoading = false }
+                    return
+                }
+                let result = try AuditAnalyticsBuilder.build(
+                    store: store, query: query, dimension: dimension)
+                self.analyticsKey = key
+                self.publish {
+                    $0.analytics = result
+                    $0.analyticsLoading = false
+                }
+            } catch {
+                self.publish {
+                    $0.analyticsLoading = false
+                    $0.lastError = L10n.format("Failed to compute audit analytics: %@", zhHans: "审计统计计算失败: %@", String(describing: error))
+                }
+            }
+        }
+    }
+
     /// Exports the current filtered results as CSV to ~/Downloads and reveals it in Finder
     /// (contains sensitive commands; the caller must warn)
     func exportCSV(query: AuditRepo.Query) {
@@ -218,7 +260,7 @@ final class AuditService: ObservableObject {
             do {
                 let rows = try store.audit.recent(query, limit: 100_000)
                 let isoFormatter = ISO8601DateFormatter()
-                var csv = "timestamp,source,session,kind,tool,detail,exit_code,is_error,risk_level,risk_rule\n"
+                var csv = "timestamp,source,session,kind,tool,detail,exit_code,is_error,risk_level,risk_rule,model\n"
                 for row in rows {
                     csv += [
                         isoFormatter.string(from: row.timestamp),
@@ -227,6 +269,7 @@ final class AuditService: ObservableObject {
                         row.exitCode.map(String.init) ?? "",
                         row.isError ? "1" : "0",
                         row.riskLevel?.label ?? "", row.riskRule ?? "",
+                        Self.csvField(row.model ?? ""),
                     ].joined(separator: ",") + "\n"
                 }
                 let formatter = DateFormatter()
@@ -365,6 +408,41 @@ final class AuditService: ObservableObject {
         } catch {
             reevaluation = nil
             publish { $0.lastError = L10n.format("Failed to re-evaluate audit history: %@", zhHans: "审计历史重判失败: %@", String(describing: error)) }
+        }
+    }
+
+    /// Counts attribution passes that settled something, so cached analytics are recomputed
+    private var attributedRevision = 0
+
+    /// Once a minute, look up the model of operations that have none yet (see
+    /// `AuditModelAttributor`). One batch per turn on the queue, like re-evaluation; the first run
+    /// after an upgrade works through the whole history this way.
+    private func attributeModelsIfDue() {
+        guard !attributing, store != nil, Date().timeIntervalSince(lastAttributionAt) > 60 else {
+            return
+        }
+        lastAttributionAt = Date()
+        attributing = true
+        queue.async { [weak self] in self?.continueAttribution(settledSoFar: 0) }
+    }
+
+    private func continueAttribution(settledSoFar: Int) {
+        guard let store else {
+            attributing = false
+            return
+        }
+        let step = (try? AuditModelAttributor.step(store: store)) ?? (examined: 0, settled: 0)
+        let settled = settledSoFar + step.settled
+        // A full batch that settled something means more is waiting; one that settled nothing is
+        // all recent rows whose usage has not been recorded yet, which the next minute retries
+        if step.examined == AuditModelAttributor.batchSize, step.settled > 0 {
+            queue.async { [weak self] in self?.continueAttribution(settledSoFar: settled) }
+            return
+        }
+        attributing = false
+        if settled > 0 {
+            attributedRevision += 1
+            publish { $0.historyRevision += 1 }
         }
     }
 
